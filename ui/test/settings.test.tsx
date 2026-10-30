@@ -21,7 +21,7 @@ const BIN = process.platform === "win32" ? "Recycle Bin" : "Trash" // what dashb
 setDefaultTimeout(30_000)
 let open: Headless | null = null
 
-async function window(size: [number, number] = [150, 72]): Promise<Headless> {
+async function window(size: [number, number] = [150, 76]): Promise<Headless> {
   open = await headless("dashboard", { demo: true, only_demos: true, tab: "settings" }, size[0], size[1], PRELOAD)
   await open.settle(3000)
   return open
@@ -339,7 +339,7 @@ describe("the danger zone on a channel that's set up", () => {
 
   async function settings(): Promise<Headless> {
     tmp = mkdtempSync(join(tmpdir(), "reelforge-settings-"))
-    open = await headless("dashboard", { tab: "settings" }, 150, 64, {
+    open = await headless("dashboard", { tab: "settings" }, 150, 68, {
       REELFORGE_BRIDGE_PRELOAD: join(ROOT, "ui", "test", "settings_preload.py"),
       REELFORGE_TEST_ROOT: tmp,
     })
@@ -417,6 +417,28 @@ describe("the danger zone on a channel that's set up", () => {
     await closed(h)
     expect(asked()).toMatchObject({ do: "uninstall", keep: false })
     expect(h.exits.map((e) => e.code)).toEqual([75])
+  })
+
+  test("Move puts ReelForge in a folder of its own: the dialog says from where to where, then the launcher does it", async () => {
+    const h = await settings()
+    expect(frame(h)).toContain("ReelForge's folder")
+    await clickText(h, "Move…")
+    await until(h, "MOVE REELFORGE")
+    const f = frame(h)
+    for (const text of ["Moves ReelForge into a folder of its own", "  from  ", "  to    ", "-home", "nothing is copied"])
+      expect(f).toContain(text)
+    await clickText(h, "Cancel")
+    await h.settle(500)
+    expect(frame(h)).not.toContain("MOVE REELFORGE")
+    expect(asked()).toBeNull()
+    await clickText(h, "Move…")
+    await until(h, "MOVE REELFORGE")
+    await clickText(h, "Move ReelForge")
+    await closed(h)
+    expect(asked()?.do).toBe("move")
+    expect(asked()?.to).toMatch(/-home[\\/]ReelForge$/)
+    expect(h.exits.map((e) => e.code)).toEqual([75]) // the launcher starts the move as it starts ReelForge again
+    expect(existsSync(join(tmp, "my-studio", "answers.json"))).toBe(true) // nothing moved by the window itself
   })
 })
 

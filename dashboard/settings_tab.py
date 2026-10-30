@@ -1,6 +1,7 @@
 """The Settings tab: this channel's answers from first-time setup, an FAQ (dashboard/faq.py), the order of the tabs
 along the top (dashboard/tabs.py keeps it), what ReelForge set up on this computer (background refresh, which is the
-hourly stats read, with its switch; the reelforge command; the icon) and Restart, your profiles (deleting one and
+hourly stats read, with its switch; the reelforge command; the icon; ReelForge's own folder, with Move when it isn't
+in it: studio/move.py) and Restart, your profiles (deleting one and
 restoring it: dashboard/service.py profiles_settings), and the danger zone: factory reset and uninstall
 (studio/reset.py does both, and neither deletes anything for good).
 
@@ -11,13 +12,17 @@ a tab): the Settings tab moves the tabs there, and set_tab_order keeps the new o
 
 from __future__ import annotations
 
+import sys
+
 from studio.bridge import rpc
 
 from . import config, desktop, faq, tabs
 from .view import MUTED, Text
 
-RESTART = 75  # the launcher starts ReelForge again, doing a reset or an uninstall first if one was asked for
-              # (studio/reset.py)
+RESTART = 75  # the launcher starts ReelForge again, doing a reset, an uninstall or a move first if one was asked
+              # for (studio/reset.py, studio/move.py)
+DEMO_FOLDER = (r"C:\Users\you\ReelForge" if sys.platform == "win32" else "/Users/you/ReelForge"
+               if sys.platform == "darwin" else "/home/you/ReelForge")   # where the demo says ReelForge is
 
 
 def _channel_rows(s: dict) -> list[list[str]]:
@@ -50,6 +55,19 @@ def _channel_rows(s: dict) -> list[list[str]]:
         ["Platforms", ", ".join(S.PLATFORM_NAMES.get(p, p) for p in s["platforms"]["enabled"])],
         ["Your AI", who],
     ]
+
+
+def _folder_row(demo: bool) -> dict:
+    """Where ReelForge is: in its own folder (green), or somewhere else, with Move... when it can go there
+    (studio/move.py). The demo's is made up."""
+    from studio import move
+    from studio import paths as P
+
+    if demo:
+        return {"key": "folder", "label": "ReelForge's folder", "on": True, "button": "", "value": DEMO_FOLDER}
+    home = move.at_home()
+    return {"key": "folder", "label": "ReelForge's folder", "on": home, "value": str(P.ROOT),
+            "button": "Move…" if not home and not move.problem() else ""}
 
 
 class SettingsTab:
@@ -147,7 +165,8 @@ class SettingsTab:
                     {"key": "command", "label": "The reelforge command", "on": True, "button": "Turn off",
                      "value": "on: type reelforge in any terminal"},
                     {"key": "icon", "label": "ReelForge's icon", "on": True, "button": f"Move to the {desktop.BIN}",
-                     "value": "there: open ReelForge without typing a command"}]
+                     "value": "there: open ReelForge without typing a command"},
+                    _folder_row(True)]
         left = "left alone in a test copy" if P.test_copy() else "left alone (STUDIO_DRY_SYSTEM)" if P.dry_system() else ""
         out = []
         try:
@@ -182,6 +201,7 @@ class SettingsTab:
         out.append({"key": "icon", "label": name, "on": made,
                     "value": left or (f"there: {what}" if made else "not made"),
                     "button": "" if left else f"Move to the {desktop.BIN}" if made else "Make it"})
+        out.append(_folder_row(False))
         return out
 
     @rpc
@@ -303,5 +323,57 @@ class SettingsTab:
             return False
         reset.request("uninstall", keep)
         self.notify("Uninstalling… ReelForge closes now.", title="Uninstall", timeout=5)
+        self.loop.set_timer(0.8, lambda: self.exit(RESTART))
+        return True
+
+    # ---------------------------------------------------------------- moving ReelForge into its own folder
+
+    @rpc
+    def move_info(self) -> dict | None:
+        """The Move dialog (studio/move.py): from where to where, what goes along and follows, the Publish tab's
+        folders that stay, and why it can't move, if it can't ("problem")."""
+        if self.demo:
+            self.notify("Demo mode: nothing is moved.", timeout=4)
+            return None
+        from studio import move
+
+        p = move.plan()
+        problem = move.problem(p.target) or ("Another ReelForge window is open: close it first."
+                                             if move.others_open(self.window_lock.path if self.window_lock else None)
+                                             else "")
+        note = Text()
+        note.append("Moves ReelForge into a folder of its own", "bold")
+        note.append(", the one the install line puts it in:\n", MUTED)
+        note.append("  from  ", MUTED)
+        note.append(f"{p.source}\n", "bold")
+        note.append("  to    ", MUTED)
+        note.append(f"{p.target}\n", "bold")
+        note.append("\nEverything in it goes along in one step, on the same drive (nothing is copied): your channels, "
+                    "stats, log-ins, settings and videos, Blender and the rest.", MUTED)
+        follows = move.follows(p.system)
+        if follows:
+            them = move._and(follows)
+            note.append(f" {them[0].upper()}{them[1:]} follow it.", MUTED)
+        if p.outside:
+            note.append("\n\nThe Publish tab's folders outside ReelForge stay where they are:", MUTED)
+            for f in p.outside:
+                note.append(f"\n  {f}", MUTED)
+        note.append("\n\nReelForge closes, the folder moves" + (" (a small window does it, and waits while anything "
+                    "still has a file in it open)" if desktop.WINDOWS else "") + ", and ReelForge opens again from its "
+                    "new folder. If you open it in Claude Code or Codex, open the new folder from now on.", MUTED)
+        return {"note": note.json(), "to": str(p.target), "problem": problem}
+
+    @rpc
+    def move_folder(self, to: str) -> bool:
+        """Move ReelForge (asked for in the Move dialog): ReelForge quits, and the launcher starts the move as it
+        starts again."""
+        from pathlib import Path
+
+        from studio import move
+
+        if self.demo or move.problem(Path(to)):
+            return False
+        move.request(Path(to))
+        self.notify("Moving ReelForge… it opens again from its new folder.", title="Move", timeout=5)
         self.loop.set_timer(0.8, lambda: self.exit(RESTART))
         return True

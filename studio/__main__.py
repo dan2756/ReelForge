@@ -37,6 +37,10 @@
   reelforge uninstall [--yes] [--remove-videos]
                                remove ReelForge from this computer: the folder goes to the Recycle Bin (Trash), and
                                your videos and channels are kept in a folder beside it unless you say otherwise
+  reelforge move [FOLDER] [--yes]
+                               move ReelForge into a folder of its own (C:\\Users\\<you>\\ReelForge on Windows,
+                               ~/ReelForge on a Mac or Linux), or into FOLDER on the same drive: everything in it goes
+                               along, and the reelforge command, the icon and the hourly stats read follow it
 """
 
 from __future__ import annotations
@@ -455,8 +459,10 @@ def main(argv: list[str] | None = None) -> int:
     profiles_json = argv[:1] == ["profiles"] and "--json" in argv[1:]
     if not profiles_json:
         P.keep_runnable()
-        from . import reset
-        done = reset.finish_pending()   # a factory reset or an uninstall the window just asked for (it quit for this)
+        from . import move, reset
+        if argv[:1] != ["move"]:
+            move.finish_leftover()      # a move whose last step never ran finishes here, at the new place
+        done = reset.finish_pending()   # a factory reset, uninstall or move the window just asked for (it quit for it)
         if isinstance(done, list):
             return open_app(done)       # first-time setup after a reset; the Settings tab again if nothing changed
         if done is not None:
@@ -511,6 +517,9 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == "uninstall":
         from . import reset
         return reset.uninstall_main(rest)
+    if cmd == "move":
+        from . import move
+        return move.main(rest)
     if cmd == "new-episode":
         return new_episode(rest)
     if cmd == "publish-check":

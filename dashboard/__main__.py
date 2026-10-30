@@ -67,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         threading.Thread(target=_terminal_profile, daemon=True).start()
     # No tab asked for: the Overview, or Accounts while nothing is connected (Dashboard.open).
     code, asked = ui.run("dashboard", {"tab": tab_for(word), "drawer": word in DRAWER_WORDS, "demo": args.demo})
-    if code == 75 and not (config.APP_DIR.parent / ".reelforge-pending.json").exists():  # not a reset or uninstall
+    if code == 75 and not (config.APP_DIR.parent / ".reelforge-pending.json").exists():  # no reset, uninstall, move
         restart = isinstance(asked, dict) and asked.get("restart")  # Restart on the Settings tab
         print("Restarting ReelForge…" if restart else "ReelForge updated itself; starting it again…")
     return code

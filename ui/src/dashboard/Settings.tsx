@@ -1,11 +1,11 @@
 // The Settings tab: this channel's answers from first-time setup and the FAQ side by side (one under the other in a
 // narrow window), the order of the tabs along the top, what ReelForge set up on this computer (with the Background
-// refresh switch) and Restart, your profiles (Delete beside each one this window can delete, Restore beside each one
-// deleted), and the danger zone across the bottom: factory reset and uninstall, each behind a dialog where you type
-// the channel's name. None of them deletes anything: what they clear goes to a backup or the Recycle Bin (Trash).
-// dashboard/settings_tab.py sends the "settings" view and does the work (with studio/reset.py, and
-// dashboard/service.py and studio/profiles.py for the profiles); dashboard/faq.py writes the FAQ, and dashboard/tabs.py
-// keeps the tab order.
+// refresh switch, and ReelForge's own folder with Move…) and Restart, your profiles (Delete beside each one this
+// window can delete, Restore beside each one deleted), and the danger zone across the bottom: factory reset and
+// uninstall, each behind a dialog where you type the channel's name. None of them deletes anything: what they clear
+// goes to a backup or the Recycle Bin (Trash). dashboard/settings_tab.py sends the "settings" view and does the work
+// (with studio/reset.py and studio/move.py, and dashboard/service.py and studio/profiles.py for the profiles);
+// dashboard/faq.py writes the FAQ, and dashboard/tabs.py keeps the tab order.
 
 import { TextAttributes, type KeyEvent, type Renderable } from "@opentui/core"
 import { useEffect, useRef, useState, type ReactNode } from "react"
@@ -75,6 +75,13 @@ export interface UninstallData {
   videos: number
   videos_size: string
   channels: string[]
+}
+
+/** The Move dialog (dashboard/settings_tab.py move_info): from where to where and what follows, or why it can't. */
+export interface MoveData {
+  note: Segs
+  to: string
+  problem: string // why it can't move ("" when it can)
 }
 
 const DANGER = DASH.bad
@@ -331,7 +338,9 @@ const SWITCH_WIDTH = 10 // "━━━▐█▌ Off", its widest
 
 /** What ReelForge set up on this computer, each with its button (all as wide as the widest, lined up on the right).
  * Background refresh (the hourly stats read) has a switch instead: it flips at once and says it's turning on or off
- * until the computer says how it went. Under them, Restart closes the window, and the launcher opens ReelForge again. */
+ * until the computer says how it went. The last row is ReelForge's own folder, green when it's in a folder of its own,
+ * with Move… (its dialog: MoveFolder) when it isn't and can go there. Under them, Restart closes the window, and the
+ * launcher opens ReelForge again. */
 function Computer({ v }: { v: SettingsView }) {
   const s = useDash()
   const shown = useRef<ComputerRow[] | null>(null)
@@ -365,7 +374,13 @@ function Computer({ v }: { v: SettingsView }) {
         <Switch id={`settings-${row.key}`} value={on} labels={["On", "Off"]} onChange={(want) => flip(row, want)} />
       </box>
     ) : row.button ? (
-      <Button id={`settings-${row.key}`} label={row.button} minWidth={width} flexShrink={0} onPress={() => s.bridge.send("settings_toggle", row.key)} />
+      <Button
+        id={`settings-${row.key}`}
+        label={row.button}
+        minWidth={width}
+        flexShrink={0}
+        onPress={() => (row.key === "folder" ? void s.openDialog("move_folder", s.bridge.call("move_info")) : s.bridge.send("settings_toggle", row.key))}
+      />
     ) : null
   return (
     <Panel title="ON THIS COMPUTER" flexShrink={0}>
@@ -557,6 +572,32 @@ export function FactoryReset({ data, close }: { data: ResetData; close: () => vo
       <box flexDirection="row" justifyContent="flex-end" height={1} marginTop={2} flexShrink={0} gap={1}>
         <Button id="reset-cancel" label="Cancel" onPress={close} />
         <Button id="reset-go" label="Reset ReelForge" variant="error" disabled={!ok} onPress={go} />
+      </box>
+    </Modal>
+  )
+}
+
+/** Moving ReelForge into a folder of its own: nothing to type, since nothing is lost (studio/move.py). */
+export function MoveFolder({ data, close }: { data: MoveData; close: () => void }) {
+  const s = useDash()
+  const go = () => {
+    if (data.problem) return
+    close()
+    void s.bridge.call<boolean>("move_folder", data.to)
+  }
+  return (
+    <Modal name="move-folder" title="MOVE REELFORGE" width={90}>
+      {lines(data.note).map((l, i) => (
+        <Wrapped key={i} segs={l.length ? l : [[" ", ""]]} flexGrow={0} />
+      ))}
+      {data.problem ? (
+        <text marginTop={1} fg={DASH.warn} wrapMode="word" flexShrink={0}>
+          {data.problem}
+        </text>
+      ) : null}
+      <box flexDirection="row" justifyContent="flex-end" height={1} marginTop={2} flexShrink={0} gap={1}>
+        <Button id="move-cancel" label={data.problem ? "Close" : "Cancel"} onPress={close} />
+        {data.problem ? null : <Button id="move-go" label="Move ReelForge" variant="primary" onPress={go} />}
       </box>
     </Modal>
   )

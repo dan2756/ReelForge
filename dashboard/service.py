@@ -614,6 +614,7 @@ class Dashboard(StatsTab, SettingsTab, Service):
         self.update_notes()
         if self.tab == "settings":
             self.update_settings()
+        self.say_moved()
         self.start_updates()
         self.run_refresh(manual=False)
         self.loop.run_worker(self.compact_db, group="maintenance")
@@ -2278,6 +2279,24 @@ class Dashboard(StatsTab, SettingsTab, Service):
     def update_video_badges(self, post: dict | None) -> None:
         found = badges.video_badges(post, self.posts, self.first_day, self.platforms) if post else []
         self.emit("video_badges", {"line": parts([(badges.badge_text(b), i) for i, b in enumerate(found)])})
+
+    def say_moved(self) -> None:
+        """After a move into ReelForge's own folder (studio/move.py), once: where it is now."""
+        if self.demo or kit_update is None:
+            return
+        try:
+            from studio import move
+        except ImportError:
+            return
+        done = move.take_marker()
+        if not done:
+            return
+        self.notify(f"ReelForge is in {done.get('to')} now. If you open it in Claude Code or Codex, open this folder "
+                    "from now on." + (" Some things couldn't follow it: run setup there." if done.get("problems")
+                                      else ""), title="Moved", timeout=20)
+        self._safe(lambda: notify.add("move", "ReelForge moved into its own folder",
+                                      f"From {done.get('from')} to {done.get('to')}.", key=f"moved:{done.get('ts')}",
+                                      tab="settings", read=True), False)
 
     # --- updates ------------------------------------------------------------------------------
 

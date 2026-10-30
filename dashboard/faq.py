@@ -63,9 +63,15 @@ def items(*, assistant: str, root: Path, episodes: Path, completed: Path, channe
     claude, codex = assistant in ("claude", "both", ""), assistant in ("codex", "both", "")
     if demo:
         here = "`C:\\Users\\you\\ReelForge`" if desktop.WINDOWS else "`~/ReelForge`"
-        episodes_at, completed_at = "`episodes`", "`completed videos`"
+        episodes_at, completed_at, own = "`episodes`", "`completed videos`", here
     else:
         here, episodes_at, completed_at = f"`{root}`", folder(episodes, root), folder(completed, root)
+        try:
+            from studio import move
+
+            own = f"`{move.home()}`"
+        except ImportError:   # the dashboard run on its own, outside a ReelForge folder
+            own = "`C:\\Users\\<you>\\ReelForge`" if desktop.WINDOWS else "`~/ReelForge`"
     name = md(channel)
     first = "make my first video" if main else f"make my first {name} video"
     brief = "here's my channel" if main else f"here's {name}"
@@ -118,6 +124,11 @@ def items(*, assistant: str, root: Path, episodes: Path, completed: Path, channe
          "a": "**Updates** checks for a new version every few hours while ReelForge is open, and the bell tells "
               "you when one is out. **Update and restart** installs it, and your channel, videos, stats and settings "
               "stay as they are."},
+        {"q": "Can I move the ReelForge folder?",
+         "a": f"Yes. ReelForge belongs in a folder of its own, {own}: when it's somewhere else, **Move…** beside "
+              "**ReelForge's folder** on this tab puts it there (or `reelforge move FOLDER` in a terminal, for another "
+              "folder on the same drive). Everything in it goes along, and the reelforge command, the icon and "
+              "Background refresh follow it. Moved it by hand? Run `reelforge setup` in its new place."},
         {"q": "Something isn't working.",
          "a": "Try **Restart** on this tab first: ReelForge closes and opens again. If that doesn't fix it, run "
               "`reelforge doctor` in a terminal: it checks everything ReelForge needs and says how to fix anything "

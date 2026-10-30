@@ -45,12 +45,31 @@ class RowsTest(unittest.TestCase):
 
     def test_background_refresh_is_a_switch_for_the_hourly_stats_read(self):
         on = self.rows("on")
-        self.assertEqual([r["label"] for r in on], ["Background refresh", "The reelforge command", "ReelForge's icon"])
+        self.assertEqual([r["label"] for r in on], ["Background refresh", "The reelforge command", "ReelForge's icon",
+                                                    "ReelForge's folder"])
         self.assertEqual({k: on[0][k] for k in ("key", "on", "switch", "button", "value")},
                          {"key": "stats", "on": True, "switch": True, "button": "", "value": ON})
         off = self.rows("off")[0]
         self.assertEqual((off["on"], off["switch"], off["value"]), (False, True, OFF))
-        self.assertEqual([r["button"] for r in on[1:]], ["Turn off", f"Move to the {desktop.BIN}"])  # unchanged
+        self.assertEqual([r["button"] for r in on[1:3]], ["Turn off", f"Move to the {desktop.BIN}"])  # unchanged
+
+    def test_the_folder_is_green_in_its_own_folder_and_has_move_where_it_can_go_there(self):
+        from studio import move
+
+        with mock.patch.object(move, "home", lambda: P.ROOT):
+            row = self.rows("on")[-1]
+        self.assertEqual({k: row[k] for k in ("key", "on", "button", "value")},
+                         {"key": "folder", "on": True, "button": "", "value": str(P.ROOT)})
+        with mock.patch.object(move, "home", lambda: Path(tempfile.gettempdir()) / "ReelForge"):
+            with mock.patch.object(move, "problem", lambda *a, **k: ""):   # somewhere else, and it can go there
+                row = self.rows("on")[-1]
+            self.assertEqual((row["on"], row["button"], row["value"]), (False, "Move…", str(P.ROOT)))
+            with mock.patch.object(move, "problem", lambda *a, **k: "a test copy stays where it is"):
+                row = self.rows("on")[-1]
+            self.assertEqual((row["on"], row["button"], row["value"]), (False, "", str(P.ROOT)))
+        demo = SettingsTab.computer_rows(SimpleNamespace(demo=True))[-1]
+        self.assertEqual((demo["key"], demo["on"], demo["button"]), ("folder", True, ""))
+        self.assertIn("you", demo["value"])   # made up, like the rest of the demo
 
     def test_no_switch_where_this_window_cant_change_it(self):
         for state, said in (("other", "on, for another ReelForge folder"),
