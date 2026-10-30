@@ -1,3 +1,12 @@
+## What's new in 2.1.1
+
+- **Copy the prompt for your AI: nothing to drag in.** Setup's last screen shows it, with a **Copy the prompt** button.
+  - It has your ReelForge folder's path in it. Paste it into Claude Code, Codex or any AI that works with your files.
+  - Your AI gets to know your channel, then makes your first video.
+  - **Copy prompt for your AI** on the Settings tab copies it again any time.
+- **Claude Code or Codex: you pick which AI makes your videos.** Setup recommends neither, and Both is gone.
+  - An earlier Both answer now counts as Claude Code. **Change your answers** on the Settings tab switches it.
+
 ## What's new in 2.1.0
 
 - **ReelForge can move into a folder of its own.** The Settings tab says where it is, under On this computer.
@@ -6,20 +15,6 @@
   - In a terminal it's `reelforge move`, or `reelforge move FOLDER` for another folder on the same drive.
 - **The install line finds a ReelForge you already have** somewhere else, and points you to Move, not a second copy.
 - **Uninstall puts Windows Terminal's ReelForge profile in the Recycle Bin** too, as it says it does.
-
-## What's new in 2.0.0
-
-- **Bigger version numbers.** This is 2.0.0, and the updates after it go 2.1.0, 2.2.0 and so on.
-- **Each channel keeps to its own settings** and delivery folder, even when another profile is picked in the terminal.
-- **Refresh every 0 minutes means only when you press ↻ Refresh,** for browser-read and new accounts too.
-  - The hourly background job is unchanged.
-- **Your marks survive a move.** Posted marks, upload matches and hidden videos keep working on a new computer.
-  - That's a Windows stats database moved to a Mac or Linux PC.
-- **Folders named like videos** (clip.mp4) are left off the Publish tab.
-- **Any channel name works on Windows.** CON, PRN, AUX, NUL, COM1-9 and LPT1-9 get a folder Windows can make.
-- **0 hashtags works everywhere:** new episodes, captions, caption checks, the publish check and the window's hints.
-- **JSON for scripts and support:** `reelforge doctor --json` writes the health check as JSON.
-  - `reelforge profiles --json` lists your profiles as JSON. Both only read.
 
 Already have ReelForge? Open the **Updates** tab and click **Update and restart**.
 
@@ -45,9 +40,10 @@ Mac works too, more slowly), and about 15 GB of free disk space.
 
 ## Then
 
-1. Open the ReelForge folder in Claude Code (the Claude desktop app's **Code** tab, then **Open folder…**), or run
-   `codex` in it.
-2. Say **"make my first video"**.
+1. Setup's last screen has the prompt for your AI: click **Copy the prompt** and paste it into Claude Code (the Claude
+   desktop app's **Code** tab), Codex or any AI that can work with files on your computer. It has the ReelForge
+   folder's path in it, so there's nothing to drag in or open first.
+2. Your AI gets to know your channel, then makes your first video.
 3. Type `reelforge publish` in a terminal (or open ReelForge's icon and click the green **Publish** button) to post it.
 
 Already have ReelForge? Its **Updates** tab (`reelforge updates`) installs this version in one click.
