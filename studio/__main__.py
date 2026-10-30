@@ -237,7 +237,7 @@ def list_profiles(argv: list[str], chosen: profiles.Profile | None = None) -> in
             {"key": p.key, "name": p.name, "folder": str(p.folder), "main": p.main,
              "onboarded": p.onboarded, "platforms": S.load(p.settings)["platforms"]["enabled"]}
             for p in profiles.every()
-        ]}, ensure_ascii=False))
+        ]}))  # ASCII (\u escapes), so it prints under any Windows code page, not only in UTF-8 mode
         return 0
     print("Your profiles (one for each channel):")
     for i, p in enumerate(profiles.every(), 1):
