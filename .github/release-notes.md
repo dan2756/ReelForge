@@ -1,3 +1,12 @@
+## What's new in 2.1.0
+
+- **ReelForge can move into a folder of its own.** The Settings tab says where it is, under On this computer.
+  - Kept somewhere else, like the Desktop? **Move…** puts it where the install line does: your user folder's ReelForge.
+  - Everything in it goes along in one step. The reelforge command, the icon and Background refresh follow it.
+  - In a terminal it's `reelforge move`, or `reelforge move FOLDER` for another folder on the same drive.
+- **The install line finds a ReelForge you already have** somewhere else, and points you to Move, not a second copy.
+- **Uninstall puts Windows Terminal's ReelForge profile in the Recycle Bin** too, as it says it does.
+
 ## What's new in 2.0.0
 
 - **Bigger version numbers.** This is 2.0.0, and the updates after it go 2.1.0, 2.2.0 and so on.
@@ -11,13 +20,6 @@
 - **0 hashtags works everywhere:** new episodes, captions, caption checks, the publish check and the window's hints.
 - **JSON for scripts and support:** `reelforge doctor --json` writes the health check as JSON.
   - `reelforge profiles --json` lists your profiles as JSON. Both only read.
-
-## What's new in 1.0.10
-
-- **Background refresh has an On/Off switch** on the Settings tab, under On this computer.
-  - Off stops the hourly stats read that runs while ReelForge is closed, and On starts it again.
-  - An open ReelForge still reads your stats every 30 minutes, and ↻ Refresh always works.
-- **Restart on the Settings tab** closes ReelForge and opens it again straight away, on the same profile.
 
 Already have ReelForge? Open the **Updates** tab and click **Update and restart**.
 
