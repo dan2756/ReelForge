@@ -453,7 +453,7 @@ class Setup(Service):
         # The prompt names the ReelForge folder in full, so there's nothing to open or drag in first, and any AI can
         # take it. Setup only asks a few questions: the AI's notes have it ask for the rest (the channel's brief).
         channel = s["channel"]["name"]
-        first = self.preview or not ai_prompt.has_videos(here)  # the preview's is a new channel's last screen
+        first = not ai_prompt.has_videos(here)
         self.prompt = ai_prompt.text(channel, here, first)
         path = ("your ReelForge folder's path" if here.main else
                 "the ReelForge folder's path (the same for every channel)")

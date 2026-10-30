@@ -78,7 +78,7 @@ ACCOUNTS_ANSWERS = {"creator": "Sam", "channel_name": "Night Physics", "handle_t
 
 
 def _first_run() -> None:
-    from studio import command, setup_flow, setup_service, sounds, stats_schedule, tools
+    from studio import ai_prompt, command, setup_flow, setup_service, sounds, stats_schedule, tools
     from studio import paths as P
     from studio import settings as S
 
@@ -107,6 +107,7 @@ def _first_run() -> None:
     if os.environ.get("REELFORGE_SHOT") == "setup-accounts":
         answers = ACCOUNTS_ANSWERS
     setup_service.saved_answers = lambda profile=None: dict(answers)
+    ai_prompt.has_videos = lambda profile: False  # the Publish tab's demos aren't this new channel's: its first video
 
 
 def _list_modules() -> None:
