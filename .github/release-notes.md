@@ -1,3 +1,10 @@
+## What's new in 1.0.10
+
+- **Background refresh has an On/Off switch** on the Settings tab, under On this computer.
+  - Off stops the hourly stats read that runs while ReelForge is closed, and On starts it again.
+  - An open ReelForge still reads your stats every 30 minutes, and ↻ Refresh always works.
+- **Restart on the Settings tab** closes ReelForge and opens it again straight away, on the same profile.
+
 ## What's new in 1.0.9
 
 - **Publish is a green button at the top right.** It's no longer a tab: click it from any tab, or press **u**.
@@ -10,11 +17,6 @@
   - That's on the Overview, the Stats tab and the Accounts tab's charts. Pointing at one says it's estimated.
   - An estimate is never your best day, hour or bar, and badges still count only what was read.
 - **A views chart on the Stats tab** above followers and likes: your views added up across your platforms, with its own breakdown.
-
-## What's new in 1.0.8
-
-- **Your stats come first** in the tabs' default order, and **Reset to default** on the Settings tab puts them back in it.
-- **The badges' pop-up shows whole.** Pointing at the badges on the Overview or Videos tab no longer leaves a stray box under them.
 
 Already have ReelForge? Open the **Updates** tab and click **Update and restart**.
 
