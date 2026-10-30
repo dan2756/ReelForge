@@ -1453,9 +1453,9 @@ class Dashboard(StatsTab, SettingsTab, Service):
             self._safe(lambda: notify.check_videos(self.cfg), 0)
             self.show_new_notes()
         hidden = db.get_meta("hidden_videos", [])
-        hidden_names = {Path(h).name.lower() for h in hidden}
+        hidden_names = {db.video_file(h).name.lower() for h in hidden}
         every = videos.find(self.cfg)
-        files = [f for f in every if f.name.lower() not in hidden_names]
+        files = [f for f in every if db.video_file(f.name).name.lower() not in hidden_names]
         posted = self.posted_platforms()
         items = []
         for f in files:
@@ -1463,7 +1463,7 @@ class Dashboard(StatsTab, SettingsTab, Service):
                 st = f.stat()
             except OSError:
                 continue  # moved or deleted since the folder was listed
-            on = posted.get(f.name.lower(), set())
+            on = posted.get(db.video_file(f.name).name.lower(), set())
             label = Text("✓ " if on else "  ", GOOD)
             label.append(f.name)
             source = "pipeline" if videos.from_pipeline(f) else _short(f.parent.name, 22)
@@ -1500,7 +1500,7 @@ class Dashboard(StatsTab, SettingsTab, Service):
         out: dict[str, set[str]] = {}
         for e in self.episodes:
             if e["video"]:
-                out.setdefault(Path(e["video"]).name.lower(), set()).update(by_episode.get(e["id"], set()))
+                out.setdefault(db.video_file(e["video"]).name.lower(), set()).update(by_episode.get(e["id"], set()))
         return out
 
     @rpc
@@ -1581,7 +1581,7 @@ class Dashboard(StatsTab, SettingsTab, Service):
         label = Text("Hashtags  ")
         label.append(f"{n}/{videos.MAX_TAGS}", BAD if n > videos.MAX_TAGS else MUTED)
         hint = f"  (only the first {videos.MAX_TAGS} are used)" if n > videos.MAX_TAGS else \
-            (f"  (TikTok always gets #{videos.FIRST_TAG} first)" if videos.FIRST_TAG else "")
+            (f"  (TikTok always gets #{videos.FIRST_TAG} first)" if videos.MAX_TAGS > 0 and videos.FIRST_TAG else "")
         label.append(hint, MUTED)
         cap = Text("Caption  ")
         cap.append(f"{caption_len}/100", BAD if caption_len > 100 else MUTED)
@@ -1723,7 +1723,7 @@ class Dashboard(StatsTab, SettingsTab, Service):
 
     def update_uploads(self) -> None:
         """Upload pages you opened, and whether the post has turned up since."""
-        episodes = {Path(e["video"]).name.lower(): e["id"] for e in self.episodes if e["video"]}
+        episodes = {db.video_file(e["video"]).name.lower(): e["id"] for e in self.episodes if e["video"]}
         found = {}
         for q in self.posts:
             if q["episode_id"]:
@@ -2240,7 +2240,8 @@ class Dashboard(StatsTab, SettingsTab, Service):
         if path is None:
             self.notify(f"{name} isn't in your video folders any more.", severity="warning")
             return
-        if path.name.lower() in {Path(h).name.lower() for h in db.get_meta("hidden_videos", [])}:
+        if db.video_file(path.name).name.lower() in {db.video_file(h).name.lower()
+                                                    for h in db.get_meta("hidden_videos", [])}:
             self.notify(f"{path.name} is hidden. Show hidden (top of the list) brings it back.", severity="warning")
             return
         self.pick(path)
