@@ -81,7 +81,7 @@ class CaptionRules(unittest.TestCase):
     def test_zero_hashtag_guides_and_settings_do_not_require_a_first_tag(self):
         from dashboard.settings_tab import _channel_rows
 
-        answers, problems = questions.validate({"channel_name": "Test Channel", "about": "Science videos",
+        answers, problems = questions.validate({"channel_name": "Test Channel", "about": "Science videos", "assistant": "codex",
                                                 "max_hashtags": 0})
         self.assertEqual(problems, [])
         s = generate.settings_from(answers)

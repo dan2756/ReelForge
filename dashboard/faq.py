@@ -31,8 +31,8 @@ def folder(path: Path, root: Path) -> str:
 
 def model_answer(assistant: str) -> str:
     """Which model your AI uses and how hard it thinks: up to your AI app, never ReelForge. assistant: claude, codex,
-    both, or "" while the channel isn't set up (then both)."""
-    claude, codex = assistant in ("claude", "both", ""), assistant in ("codex", "both", "")
+    or "" while the channel isn't set up (then both)."""
+    claude, codex = assistant in ("claude", ""), assistant in ("codex", "")
     lead = "Your AI app decides that, not ReelForge."
     blocks = []
     if claude:
@@ -57,10 +57,11 @@ def model_answer(assistant: str) -> str:
 
 def items(*, assistant: str, root: Path, episodes: Path, completed: Path, channel: str, main: bool,
           several: bool, refresh_minutes: float, demo: bool = False) -> list[dict]:
-    """The questions and their answers ({"q": ..., "a": Markdown}), for the channel the window is on. root: the
-    ReelForge folder. channel: its name; main: it's the first channel (the ReelForge folder's own); several: there
-    are others. In the demo, nothing on this computer is named."""
-    claude, codex = assistant in ("claude", "both", ""), assistant in ("codex", "both", "")
+    """The questions and their answers ({"q": ..., "a": Markdown}), for the channel the window is on. assistant: the
+    AI it was set up with (claude or codex; "" while it isn't set up). root: the ReelForge folder. channel: its name;
+    main: it's the first channel (the ReelForge folder's own); several: there are others. In the demo, nothing on
+    this computer is named."""
+    claude, codex = assistant in ("claude", ""), assistant in ("codex", "")
     if demo:
         here = "`C:\\Users\\you\\ReelForge`" if desktop.WINDOWS else "`~/ReelForge`"
         episodes_at, completed_at, own = "`episodes`", "`completed videos`", here
@@ -73,16 +74,23 @@ def items(*, assistant: str, root: Path, episodes: Path, completed: Path, channe
         except ImportError:   # the dashboard run on its own, outside a ReelForge folder
             own = "`C:\\Users\\<you>\\ReelForge`" if desktop.WINDOWS else "`~/ReelForge`"
     name = md(channel)
-    first = "make my first video" if main else f"make my first {name} video"
-    brief = "here's my channel" if main else f"here's {name}"
-    open_it = []
-    if claude:
-        open_it.append(f"In the Claude desktop app, go to **Code**, click **Open folder…** and pick {here} (or run "
-                       "`claude` in a terminal there).")
-    if codex:
-        open_it.append(f"For Codex, run `codex` in a terminal in {here}." if claude else
-                       f"Run `codex` in a terminal in {here}.")
-    notes = "`CLAUDE.md`" if not codex else "`AGENTS.md`" if not claude else "`CLAUDE.md` (or `AGENTS.md` for Codex)"
+    # Your AI starts on a channel from the prompt that Copy prompt for your AI copies (studio/ai_prompt.py): it names
+    # the ReelForge folder, so nothing is dragged in or opened first. A channel not set up yet has no prompt yet.
+    app = ("Codex (`codex` in a terminal)" if assistant == "codex" else
+           "Claude Code (the **Code** tab in the Claude desktop app, or `claude` in a terminal)")
+    video = "your next video" if main else f"the next {name} video"
+    start = (f"Press **Copy prompt for your AI** on this tab, under the channel's answers, and paste it into {app} or "
+             "any other AI that can work with files on this computer. It names the ReelForge folder "
+             f"({here}), so there's nothing to drag in or open first, and asks your AI for {video} (the first one, on "
+             "a new channel)." if assistant else
+             "Set this channel up first (**Set it up** on this tab). First-time setup's last screen gives you the "
+             "prompt for your AI, with a button that copies it, and **Copy prompt for your AI** on this tab copies it "
+             "again any time.")
+    notes = ("Start it with the prompt from **Copy prompt for your AI** on this tab: it tells your AI where the "
+             f"ReelForge folder is ({here}) and to read its notes there (`CLAUDE.md` for Claude, `AGENTS.md` for any "
+             "other AI)." if assistant else
+             "Set this channel up first (**Set it up** on this tab): first-time setup writes your AI's notes about it "
+             "(`CLAUDE.md` for Claude, `AGENTS.md` for any other AI).")
     plan = ("your own Claude Code plan" if not codex else "your own Codex plan" if not claude else
             "your own Claude Code or Codex plan")
     minutes = round(refresh_minutes)
@@ -91,15 +99,13 @@ def items(*, assistant: str, root: Path, episodes: Path, completed: Path, channe
     return [
         {"q": "Which model does my AI use, and how hard does it think?", "a": model_answer(assistant)},
         {"q": "How do I make a video?",
-         "a": "Open the ReelForge folder in your AI. " + " ".join(open_it) + "\n\n"
-              f"Then say **{first}**. After that, **make today's videos** makes the next ones"
+         "a": start + "\n\nAfter that, **make today's videos** makes the next ones"
               + (" for every channel that posts regularly" if several else "")
               + ". Each finished video waits on **Publish**."},
         {"q": "My AI doesn't know about my channel.",
-         "a": f"Make sure you opened the ReelForge folder itself ({here}), not the folder it's in: your AI reads its "
-              f"notes, {notes}, from there. First-time setup only asks a few questions, so give it the full picture "
-              f"too: drag a file about your channel into the chat (or paste a description) and say **{brief}**. It "
-              "keeps your words as the channel's brief and plans every video from it."},
+         "a": notes + " First-time setup only asks a few questions, so give it the full picture too: describe "
+              f"{'your channel' if main else name} in the chat, or give it the path of a file about it (your notes, "
+              "a doc, examples you like). It keeps your words as the channel's brief and plans every video from it."},
         {"q": "Does ReelForge post for me?",
          "a": "No. ReelForge never posts, uploads or sends anything. Finished videos wait on **Publish**: each "
               "platform's button opens its upload page, copies exactly the text it needs and shows the video in "

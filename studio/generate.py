@@ -40,7 +40,7 @@ def write_claude_settings(s: dict) -> Path | None:
     never shared): Opus at high effort, for whichever of the two the file doesn't name already. Other keys already in
     the file (permissions and the like) are kept. An effort is the effortLevel key or the CLAUDE_CODE_EFFORT_LEVEL
     variable (max effort needs that: effortLevel only goes up to xhigh). None when there's nothing to add."""
-    if s["ai"]["assistant"] not in ("claude", "both"):
+    if s["ai"]["assistant"] != "claude":
         return None
     path = P.ROOT / ".claude" / "settings.local.json"
     data: dict = {}

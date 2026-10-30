@@ -76,10 +76,10 @@ QUESTIONS: list[Q] = [
     # ---- you
     Q("creator", "you", "What should your AI call you?", help="Your first name or nickname. Optional.",
       placeholder="Sam"),
-    Q("assistant", "you", "Which AI will make your videos?", "choice", default="claude",
+    Q("assistant", "you", "Which AI will make your videos?", "choice", required=True,  # no default: neither is favoured
       help="It needs to run commands on this computer: Claude Code (the Claude desktop app's Code tab, or the "
            "claude command) or OpenAI's Codex CLI.",
-      options=[("claude", "Claude Code (recommended)"), ("codex", "Codex"), ("both", "Both")]),
+      options=[("claude", "Claude Code"), ("codex", "Codex")]),
 
     # ---- channel
     Q("channel_name", "channel", "What's your channel called?", required=True, placeholder="Night Physics",
@@ -161,13 +161,20 @@ QUESTIONS: list[Q] = [
 # Answers older versions saved that nothing reads now: saving the answers drops them. ("quality" was how hard your AI
 # should work: that's your AI app's to decide, as the Settings tab's FAQ says.)
 RETIRED = ("ultracode", "quality")
+# Choices older versions offered that are gone, and the answer each one is now: "Both" AIs (until 2.1.1) is Claude
+# Code, the first of the two (CLAUDE.md and AGENTS.md are both written for every channel anyway).
+RENAMED = {"assistant": {"both": "claude"}}
 
 BY_KEY = {q.key: q for q in QUESTIONS}
 
 
 def defaults_for(answers: dict) -> dict:
-    """Fill every visible question that has no answer with its default."""
+    """Fill every visible question that has no answer with its default (an answer a newer version renamed becomes the
+    new one first)."""
     out = dict(answers)
+    for key, renamed in RENAMED.items():
+        if isinstance(out.get(key), str) and out[key] in renamed:
+            out[key] = renamed[out[key]]
     for q in QUESTIONS:
         if q.key not in out and q.visible(out):
             d = q.default_for(out)

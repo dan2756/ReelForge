@@ -1,4 +1,5 @@
-"""The Settings tab: this channel's answers from first-time setup, an FAQ (dashboard/faq.py), the order of the tabs
+"""The Settings tab: this channel's answers from first-time setup (and Copy prompt for your AI, the prompt that starts
+your AI on the channel: studio/ai_prompt.py), an FAQ (dashboard/faq.py), the order of the tabs
 along the top (dashboard/tabs.py keeps it), what ReelForge set up on this computer (background refresh, which is the
 hourly stats read, with its switch; the reelforge command; the icon; ReelForge's own folder, with Move when it isn't
 in it: studio/move.py) and Restart, your profiles (deleting one and
@@ -16,7 +17,7 @@ import sys
 
 from studio.bridge import rpc
 
-from . import config, desktop, faq, tabs
+from . import config, desktop, faq, tabs, videos
 from .view import MUTED, Text
 
 RESTART = 75  # the launcher starts ReelForge again, doing a reset, an uninstall or a move first if one was asked
@@ -44,7 +45,7 @@ def _channel_rows(s: dict) -> list[list[str]]:
         if not c["hashtags_on_x"]:
             tags += ", none on X"
     per = f"{sched['per_day']} a day" if sched["per_day"] else f"{sched['per_week']} a week"
-    who = {"claude": "Claude", "codex": "Codex", "both": "Claude and Codex"}.get(s["ai"]["assistant"], s["ai"]["assistant"])
+    who = {"claude": "Claude", "codex": "Codex"}.get(s["ai"]["assistant"], s["ai"]["assistant"])
     return [
         ["Channel", s["channel"]["name"]],
         ["Format", f"{fmt}: {s['format']['series']}" if s["format"]["series"] != fmt else fmt],
@@ -119,6 +120,22 @@ class SettingsTab:
         from studio import profiles
 
         return profiles.several()
+
+    @rpc
+    def copy_ai_prompt(self) -> None:
+        """Copy prompt for your AI, under this channel's answers: the prompt that starts your AI on this channel
+        (studio/ai_prompt.py), the one first-time setup's last screen copies, asking for its next video (its first
+        while the Publish tab has none)."""
+        if self.demo:
+            self.notify("In your own ReelForge, this copies the prompt that starts your AI on your channel.",
+                        title="Demo mode", timeout=6)
+            return
+        from studio import ai_prompt
+        from studio import settings as S
+
+        self.copy_text(ai_prompt.text(S.load()["channel"]["name"], self.profile, first=not videos.find(self.cfg)))
+        self.notify("Paste it into Claude Code, Codex or any AI that can work with files on this computer.",
+                    title="Prompt copied", timeout=8)
 
     # ---------------------------------------------------------------- the tab order
 

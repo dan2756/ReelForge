@@ -26,7 +26,7 @@ move.ROOT = root
 move.home = lambda: root.parent / f"{root.name}-home" / "ReelForge"
 if not profiles.main().onboarded:
     with redirect_stdout(io.StringIO()):
-        generate.write_all({"creator": "Sam", "channel_name": "Night Physics", "about": "What-if videos with real science.",
+        generate.write_all({"creator": "Sam", "assistant": "claude", "channel_name": "Night Physics", "about": "What-if videos with real science.",
                             "platforms": ["tiktok", "youtube"]})
 video = root / "episodes" / "ep01_duck" / "final" / "ep01_duck.mp4"
 video.parent.mkdir(parents=True, exist_ok=True)

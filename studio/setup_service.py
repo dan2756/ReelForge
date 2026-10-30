@@ -19,7 +19,8 @@ import subprocess
 import traceback
 from pathlib import Path
 
-from . import KIT_NAME, command, doctor, generate, logo, profiles, setup_flow, signup, stats_schedule, tools, tui
+from . import KIT_NAME, ai_prompt, command, doctor, generate, logo, profiles, setup_flow, signup, stats_schedule
+from . import tools, tui
 from . import paths as P
 from . import settings as S
 from .bridge import Loop, Service, rpc
@@ -83,6 +84,7 @@ class Setup(Service):
         self.made: profiles.Profile | None = None
         self.embedded = False              # inside the ReelForge window, which it goes back to
         self.create_label = "Create my studio"
+        self.prompt = ""                   # the last screen's prompt for your AI, which its Copy button copies
 
     def start(self, options: dict) -> dict:
         """options: start ("tools", "onboard" or "done"), preview (tests: Create writes nothing), new (onboarding
@@ -436,7 +438,9 @@ class Setup(Service):
 
     @rpc
     def done_info(self) -> dict:
-        """The last screen: what was made, what to do next; the background stats follow as "system"."""
+        """The last screen: what was made, then what to do next: copy the prompt that starts your AI on the channel
+        (prompt, between steps and then, with its Copy button: copy_prompt), paste it into your AI, find the video on
+        Publish. The background stats follow as "system"."""
         self.loop.run_worker(self._apply_system, group="system", exclusive=True)
         here = self.target()
         s = S.load(here.settings)
@@ -446,30 +450,25 @@ class Setup(Service):
         written = ""
         if self.written:
             written = ", ".join(sorted({_top(p, here) for p in self.written}))
-        video = "my first video" if here.main else f"my first {s['channel']['name']} video"
-        first = f"make {video}"
-        steps = []
-        folder = "this folder" if here.main else "the ReelForge folder (the same one for every channel)"
-        there = "here" if here.main else "there"
-        if s["ai"]["assistant"] in ("claude", "both"):
-            steps.append(seg_line(("  1. ", "bold"), (f"Open {folder} in Claude Code: the Claude desktop app → Code "
-                                                      f"→ Open folder… (or run claude in a terminal {there}).", "")))
-        if s["ai"]["assistant"] in ("codex", "both"):
-            steps.append(seg_line(("  1. " if s["ai"]["assistant"] == "codex" else "     ", "bold"),
-                                  (f"Codex: run codex in a terminal in {folder}.", "")))
-        # Setup only asks a few questions: the channel's brief (a file or a description, in the person's words) is
-        # what the AI plans from. Its notes say where it goes and what to do with it.
+        # The prompt names the ReelForge folder in full, so there's nothing to open or drag in first, and any AI can
+        # take it. Setup only asks a few questions: the AI's notes have it ask for the rest (the channel's brief).
         channel = s["channel"]["name"]
-        say, kept = ("here's my channel", "your channel's brief") if here.main else \
-            (f"here's {channel}", f"the brief for {channel}")
-        steps.append(seg_line(("  2. ", "bold"), ("Say ", ""), (f'"{say}"', "bold #ffffff"),
-                              (" and drag a file about it into the chat, or paste a description.", "")))
-        steps.append(seg_line(("     ", ""), (f"Your notes, a doc, examples you like: it keeps it as {kept} and plans "
-                                              "every video from it.", "")))
-        steps.append(seg_line(("  3. ", "bold"), ("Say: ", ""), (f'"{first}"', "bold #ffffff")))
-        steps.append(seg_line(("  4. ", "bold"),
-                              ("When it's done, it's waiting in ReelForge → Publish, ready for you to post.",
-                               "")))
+        first = self.preview or not ai_prompt.has_videos(here)  # the preview's is a new channel's last screen
+        self.prompt = ai_prompt.text(channel, here, first)
+        path = ("your ReelForge folder's path" if here.main else
+                "the ReelForge folder's path (the same for every channel)")
+        app = ("Codex (run codex in a terminal)" if s["ai"]["assistant"] == "codex" else
+               "Claude Code (the Code tab in the Claude desktop app, or claude in a terminal)")
+        video = f"{'your' if here.main else 'its'} {'first' if first else 'next'} video"
+        steps = [seg_line(("  1. ", "bold"), (f"Copy this prompt for your AI. It has {path} in it, so there's nothing "
+                                              "to drag in.", ""))]
+        then = [seg_line(("  2. ", "bold"), (f"Paste it into {app}, or any other AI that can work with files on this "
+                                             f"computer. It gets to know {'your channel' if here.main else channel}, "
+                                             f"then makes {video}.", "")),
+                seg_line(("  3. ", "bold"), ("When it's done, it's waiting in ReelForge → Publish, ready for you to "
+                                             "post.", "")),
+                seg_line(("     ", ""), ("Copy prompt for your AI, on ReelForge's Settings tab, copies it again any "
+                                         "time.", MUTED))]
         logins, missing = self.needs_login(), self.to_connect()
         login = []
         if logins:
@@ -482,7 +481,8 @@ class Setup(Service):
                          f"{'it' if one else 'them'} on ReelForge's Accounts tab: until then ReelForge leaves "
                          f"{'it' if one else 'them'} out.")
         name = s["channel"]["name"] if self.new else "ReelForge"
-        return {"head": lines, "written": written, "steps": steps, "login": "\n".join(login),
+        return {"head": lines, "written": written, "steps": steps, "prompt": self.prompt, "then": then,
+                "login": "\n".join(login),
                 "open": f"Open {name} to log in" if logins else f"Open {name}",
                 "tab": "accounts" if logins or missing else "overview",
                 "profile": here.key if self.new else "",  # the window opens the new profile next
@@ -532,6 +532,15 @@ class Setup(Service):
                 subprocess.Popen(["open" if P.MAC else "xdg-open", str(folder)])
         except OSError:
             self.notify(str(folder))
+
+    @rpc
+    def copy_prompt(self) -> None:
+        """The last screen's Copy button: its prompt on the clipboard (or, when the system's can't be reached, the
+        terminal's own: the window copies it with OSC 52)."""
+        from dashboard import desktop
+
+        if not desktop.copy(self.prompt):
+            self.emit("clipboard", {"text": self.prompt})
 
 
 def _top(path, profile) -> str:

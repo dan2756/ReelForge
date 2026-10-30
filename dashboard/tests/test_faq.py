@@ -43,15 +43,14 @@ class FaqTest(unittest.TestCase):
         self.assertTrue(a.startswith("Your AI app decides that, not ReelForge. ReelForge's `.codex/config.toml`"))
         self.assertNotIn("Claude", a)
         made = answer("How do I make a video?", assistant="codex")
-        self.assertIn("Run `codex` in a terminal in", made)
+        self.assertIn("paste it into Codex (`codex` in a terminal) or any other AI", made)
         self.assertNotIn("Claude desktop app", made)
-        self.assertIn("`AGENTS.md`", answer("My AI doesn't know", assistant="codex"))
-        both = answer("Which model", assistant="both")
-        self.assertIn("With Codex: ReelForge's `.codex/config.toml`", both)
-        self.assertIn("`CLAUDE.md` (or `AGENTS.md` for Codex)", answer("My AI doesn't know", assistant="both"))
+        self.assertIn("`AGENTS.md` for any other AI", answer("My AI doesn't know", assistant="codex"))
+        unset = answer("Which model", assistant="")  # a channel not set up yet: both
+        self.assertIn("With Codex: ReelForge's `.codex/config.toml`", unset)
 
     def test_no_answer_offers_a_setting_for_it(self):
-        for assistant in ("claude", "codex", "both", ""):
+        for assistant in ("claude", "codex", ""):
             text = "\n".join(f"{i['q']}\n{i['a']}" for i in items(assistant=assistant))
             for gone in ("Advanced settings", "**Max**", "**High**", "**Fast**", "Max, High", "the standard",
                          "ultracode", "onboarding", "Settings tab (7) picks"):
@@ -71,16 +70,35 @@ class FaqTest(unittest.TestCase):
         self.assertIn("in `episodes`", a)
         self.assertIn("goes to `completed videos`", a)
         elsewhere = ROOT.parent / "my videos" / "episodes"
-        self.assertIn(f"in `{elsewhere}`", answer("Where are my videos?", episodes=elsewhere))
-        self.assertIn(f"pick `{ROOT}`", answer("How do I make a video?"))
+        self.assertIn(f"It names the ReelForge folder (`{ROOT}`)", answer("How do I make a video?"))
+        self.assertIn(f"where the ReelForge folder is (`{ROOT}`)", answer("My AI doesn't know"))
 
-    def test_another_channel_asks_for_its_own_first_video_and_brief(self):
+    def test_your_ai_starts_from_the_prompt_this_tab_copies_with_nothing_to_drag_in(self):
+        made = answer("How do I make a video?")
+        self.assertTrue(made.startswith("Press **Copy prompt for your AI** on this tab, under the channel's answers, "
+                                        "and paste it into Claude Code (the **Code** tab in the Claude desktop app, "
+                                        "or `claude` in a terminal) or any other AI that can work with files on this "
+                                        "computer."))
+        self.assertIn("so there's nothing to drag in or open first, and asks your AI for your next video", made)
+        self.assertIn("**make today's videos** makes the next ones. Each finished video waits on **Publish**.", made)
+        unknown = answer("My AI doesn't know")
+        self.assertTrue(unknown.startswith("Start it with the prompt from **Copy prompt for your AI** on this tab"))
+        self.assertIn("(`CLAUDE.md` for Claude, `AGENTS.md` for any other AI)", unknown)
+        self.assertIn("describe your channel in the chat, or give it the path of a file about it", unknown)
+        for a in (made, unknown):
+            self.assertNotIn("drag a file", a)
+            self.assertNotIn("here's my channel", a)
+        # a channel not set up yet has no prompt: setting it up comes first
+        self.assertTrue(answer("How do I make a video?", assistant="").startswith(
+            "Set this channel up first (**Set it up** on this tab)."))
+
+    def test_another_channel_asks_for_its_own_next_video_and_brief(self):
         name = "Cool *Epic* Facts"
         made = answer("How do I make a video?", channel=name, main=False, several=True)
-        self.assertIn(r"**make my first Cool \*Epic\* Facts video**", made)
+        self.assertIn(r"asks your AI for the next Cool \*Epic\* Facts video (the first one, on a new channel)", made)
         self.assertIn("for every channel that posts regularly", made)
-        self.assertIn(r"**here's Cool \*Epic\* Facts**", answer("My AI doesn't know", channel=name, main=False))
-        self.assertIn("**make my first video**", answer("How do I make a video?"))
+        self.assertIn(r"describe Cool \*Epic\* Facts in the chat", answer("My AI doesn't know", channel=name,
+                                                                          main=False))
 
     def test_how_often_an_open_reelforge_reads_the_stats(self):
         self.assertIn("every 30 minutes", answer("Do my stats update"))

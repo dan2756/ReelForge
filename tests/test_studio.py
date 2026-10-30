@@ -5,6 +5,7 @@
 
 import json
 import os
+import tempfile
 import tomllib
 import unittest
 from pathlib import Path
@@ -18,7 +19,8 @@ NO_MARKER = Path(__file__).with_name("no-such-marker.txt")         # a normal co
 
 
 def answers(**over):
-    a = {"channel_name": "Test Channel", "about": "What-if videos with real science.", "creator": "Sam"}
+    a = {"channel_name": "Test Channel", "about": "What-if videos with real science.", "creator": "Sam",
+         "assistant": "claude"}
     a.update(over)
     return a
 
@@ -38,6 +40,28 @@ class Questions(unittest.TestCase):
         self.assertTrue(any(p.startswith("custom_format") for p in problems))
         _, problems = questions.validate(answers(length="custom", length_custom="banana"))
         self.assertTrue(any(p.startswith("length_custom") for p in problems))
+
+    def test_your_ai_is_claude_code_or_codex_and_you_pick_it(self):
+        # neither is recommended or picked for you, and "Both" is gone: an older version's Both is Claude Code now
+        q = questions.BY_KEY["assistant"]
+        self.assertEqual((q.options, q.default, q.required), ([("claude", "Claude Code"), ("codex", "Codex")], None,
+                                                              True))
+        item = next(i for i in questions.describe() if i["key"] == "assistant")
+        self.assertEqual((item["options"], item.get("default"), item["required"]),
+                         ({"claude": "Claude Code", "codex": "Codex"}, None, True))
+        _, problems = questions.validate({k: v for k, v in answers().items() if k != "assistant"})
+        self.assertEqual(problems, ["assistant: Which AI will make your videos? (required)"])
+        a, problems = questions.validate(answers(assistant="both"))
+        self.assertEqual((problems, a["assistant"]), ([], "claude"))
+        with self.assertRaises(ValueError):
+            questions.coerce(q, "both")
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        studio = Path(tmp.name) / "studio.toml"
+        studio.write_text('[ai]\nassistant = "both"\n', encoding="utf-8")
+        self.assertEqual(settings.load(studio)["ai"], {"assistant": "claude"})
+        studio.write_text('[ai]\nassistant = "codex"\n', encoding="utf-8")
+        self.assertEqual(settings.load(studio)["ai"], {"assistant": "codex"})
 
     def test_coerce(self):
         q = questions.BY_KEY

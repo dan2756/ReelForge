@@ -1,11 +1,13 @@
 // ReelForge's first run, under the logo, in the window's own calm colours: the tools it needs (one list, one yes),
-// the downloads with their progress, a health check, the channel's questions, then what to do next, with the mascot
-// beside each screen when the window has room for him. The Python side is studio/setup_service.py.
+// the downloads with their progress, a health check, the channel's questions, then what to do next (the prompt for
+// your AI, with a button that copies it), with the mascot beside each screen when the window has room for him. The
+// Python side is studio/setup_service.py.
 
 import { TextAttributes, type KeyEvent } from "@opentui/core"
-import { useKeyboard, useTerminalDimensions } from "@opentui/react"
+import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react"
 import { useEffect, useMemo, useState } from "react"
 import { useView, type Bridge } from "../bridge"
+import { wrap } from "../dashboard/Drawer"
 import { FocusContext, FocusManager, ThemeContext, useFocus, useTheme } from "../lib/focus"
 import { cellLen, type Segs } from "../lib/styled"
 import { SETUP } from "../theme"
@@ -13,7 +15,7 @@ import { Button } from "../ui/Button"
 import { ProgressBar } from "../ui/Graphics"
 import { Line } from "../ui/Line"
 import { Mascot } from "../ui/Mascot"
-import { Scroll, ToastStack, toasts, useTick, Wrapped } from "../ui/Panels"
+import { Scroll, ToastStack, toasts, useTick, useWidth, Wrapped } from "../ui/Panels"
 import { Frame, frameLayout } from "./Frame"
 import { Onboard } from "./Onboard"
 
@@ -54,7 +56,10 @@ export function SetupApp(props: SetupProps) {
     props.init.start === "onboard" ? "onboard" : props.init.start === "done" ? "done" : "tools",
   )
   const [chosen, setChosen] = useState<string[]>([])
+  const renderer = useRenderer()
   useEffect(() => props.bridge.on("toast", (t) => toasts.add(t)), [props.bridge])
+  // The Copy button's fallback when the system clipboard can't be reached: the terminal's own (OSC 52).
+  useEffect(() => props.bridge.on("clipboard", (d) => void renderer.copyToClipboardOSC52(d.text)), [props.bridge, renderer])
   const go = (next: Screen) => {
     focus.blur()
     setScreen(next)
@@ -364,13 +369,50 @@ function Work({ bridge, init, keys, onNext, onAgain }: SetupProps & { keys: stri
   )
 }
 
-/** Step 3: what was made, what runs in the background, and what to do next. */
+/** The prompt for your AI as it will be pasted, and the button that copies it (it says so for a moment once it has).
+ * It wraps at spaces only, so a file name like AGENTS.md stays whole. */
+function PromptBox({ bridge, text, check }: { bridge: Bridge; text: string; check: string }) {
+  const theme = useTheme()
+  const [width, measure] = useWidth()
+  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    if (!copied) return
+    const t = setTimeout(() => setCopied(false), 3000)
+    return () => clearTimeout(t)
+  }, [copied])
+  return (
+    <box flexDirection="column" marginLeft={5} marginTop={1} marginBottom={1} flexShrink={0}>
+      <box backgroundColor={theme.panel} paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} flexShrink={0} onSizeChange={measure}>
+        <text fg={theme.text} wrapMode={width ? "none" : "word"}>
+          {width ? wrap(text, Math.max(width - 4, 10)).join("\n") : text}
+        </text>
+      </box>
+      <box flexDirection="row" height={1} marginTop={1} flexShrink={0}>
+        <Button
+          id="copy"
+          label={copied ? `${check} Copied` : "Copy the prompt"}
+          variant="primary"
+          minWidth={20}
+          onPress={() => {
+            bridge.send("copy_prompt")
+            setCopied(true)
+          }}
+        />
+      </box>
+    </box>
+  )
+}
+
+/** Step 3: what was made, what runs in the background, and what to do next: copy the prompt for your AI (it has the
+ * ReelForge folder's path in it, so nothing needs dragging in), paste it, and the video turns up on Publish. */
 function Done({ bridge, init, quit }: SetupProps) {
   const theme = useTheme()
   const [info, setInfo] = useState<{
     head: Segs[]
     written: string
     steps: Segs[]
+    prompt: string
+    then: Segs[]
     login: string
     open: string
     tab: string
@@ -403,6 +445,10 @@ function Done({ bridge, init, quit }: SetupProps) {
                 What's next
               </text>
               {info.steps.map((l, i) => (
+                <Hanging key={i} segs={l} />
+              ))}
+              {info.prompt ? <PromptBox bridge={bridge} text={info.prompt} check={init.check} /> : null}
+              {info.then.map((l, i) => (
                 <Hanging key={i} segs={l} />
               ))}
               {info.login ? (

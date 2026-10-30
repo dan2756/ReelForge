@@ -1,8 +1,11 @@
 // The first-run screens, drawn without a terminal with their real Python side and a fresh computer's tools list
 // (scripts/shots_preload.py): ticking what to set up, the channel's questions and their Leave dialog, the frame at any
-// size, and the last screen's buttons. (The Python side's steps are tested in tests/test_setup_service.py.)
+// size, and the last screen's prompt for your AI with its Copy button, and its other buttons. (The Python side's
+// steps are tested in tests/test_setup_service.py.)
 
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { headless, type Headless } from "../scripts/headless"
 import { clickText, find } from "../scripts/shots"
@@ -191,6 +194,40 @@ describe("the frame", () => {
 })
 
 describe("ready", () => {
+  test("the prompt for your AI is on the last screen, with the folder in it, and Copy copies it", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "reelforge-copied-"))
+    const copied = join(tmp, "copied.txt")
+    try {
+      open = await headless("setup", { start: "done", preview: true }, 130, 50, { ...PRELOAD, REELFORGE_COPIED: copied })
+      const h = open
+      await h.settle(2000)
+      if (process.env.SHOW) console.log(frame(h))
+      // the screen's words in order, without the mascot, the scrollbar and the buttons' ends, as one line
+      const text = frame(h).replace(/[█▀▄▌▐]/g, " ").replace(/\s+/g, " ")
+      expect(text).toContain("1. Copy this prompt for your AI. It has your ReelForge folder's path in it, so there's nothing to drag in.")
+      expect(text).toContain(
+        "I make videos for my channel, Night Physics, with ReelForge. My ReelForge folder is: C:\\Users\\you\\ReelForge " +
+          "Work in that folder from now on. First read the notes it has for you, and follow them: CLAUDE.md if you're " +
+          "Claude, AGENTS.md if you're another AI. Then make my first video. Copy the prompt 2. Paste it into Claude Code",
+      )
+      expect(text).not.toContain("drag a file")
+      expect(text).not.toContain("here's my channel")
+      await clickText(h, "Copy the prompt", 2)
+      for (let i = 0; i < 25 && !existsSync(copied); i++) await h.settle(200)
+      expect(readFileSync(copied, "utf-8")).toBe(
+        "I make videos for my channel, Night Physics, with ReelForge. My ReelForge folder is:\nC:\\Users\\you\\ReelForge\n\n" +
+          "Work in that folder from now on. First read the notes it has for you, and follow them: CLAUDE.md if you're " +
+          "Claude, AGENTS.md if you're another AI. Then make my first video.\n-- copied --\n",
+      )
+      expect(frame(h)).toContain("Copied")
+      expect(h.exits).toEqual([]) // copying leaves the screen open
+    } finally {
+      await open?.close()
+      open = null
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
   test("Open ReelForge opens it on the Accounts tab when Instagram or X needs a log-in", async () => {
     const h = await screen("done", [130, 32])
     expect(frame(h)).toContain("You're all set!")

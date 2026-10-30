@@ -116,7 +116,9 @@ HELP = [
                  "Type in stats lets you enter the numbers by hand for one ReelForge can't read yet.", "accounts"),
     ("Updates", "Your version, what's new in the next one, and Update and restart: one click downloads it, puts it in "
                 "place (your channel, videos and stats stay as they are) and opens ReelForge again.", "updates"),
-    ("Settings", "This channel's answers from first-time setup (Change your answers asks the questions again), an FAQ "
+    ("Settings", "This channel's answers from first-time setup (Change your answers asks the questions again, and Copy "
+                 "prompt for your AI copies the prompt that starts your AI on the channel: paste it into Claude Code, "
+                 "Codex or any AI that can work with files on this computer), an FAQ "
                  "(click a question for its answer), the order of the tabs along the top (drag a tab, or click one "
                  "and move it with the arrows; 1-7 follow it, in every profile), what ReelForge set up on this "
                  "computer (Background refresh, the hourly stats read, with its switch; the reelforge command and the "

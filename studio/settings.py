@@ -99,6 +99,8 @@ def load(path: Path | None = None) -> dict:
     s["platforms"]["enabled"] = [p for p in s["platforms"]["enabled"] if p in PLATFORMS] or list(PLATFORMS)
     s["captions"]["max_hashtags"] = max(0, int(s["captions"]["max_hashtags"]))
     s["captions"]["tiktok_first_tag"] = str(s["captions"]["tiktok_first_tag"]).lstrip("#").strip()
+    if s["ai"]["assistant"] != "codex":  # "both", which versions before 2.1.1 offered, is Claude Code now
+        s["ai"]["assistant"] = "claude"
     return s
 
 

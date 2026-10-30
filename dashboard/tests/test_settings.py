@@ -2,7 +2,8 @@
 a switch wherever this window can turn it on and off, and the switch says which it wants (pressing it twice the same
 way leaves it as asked, not flipped back); the other rows keep their buttons. Restart closes the window with exit code
 75, which the launchers take to start ReelForge again, and the window's launcher says it's restarting, not updating.
-Pressing them on screen is tested in ui/test/settings.test.tsx."""
+Copy prompt for your AI, under the channel's answers, copies the prompt that starts your AI on the channel. Pressing
+them on screen is tested in ui/test/settings.test.tsx."""
 
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ from typing import Callable
 from unittest import mock
 
 from dashboard import __main__ as launcher
-from dashboard import config, db, demo, desktop
+from dashboard import config, db, demo, desktop, videos
 from dashboard.settings_tab import RESTART, SettingsTab
 from dashboard.tests.window import Window
 from studio import command, shortcut, stats_schedule, tui, ui
@@ -145,6 +146,28 @@ class WindowTest(unittest.TestCase):
             self.assertTrue(w.until(lambda: (self.stats_row() or {}).get("on") is True, 10), w.sent("settings"))
             self.assertTrue(job["on"])
             self.assertEqual(self.stats_row()["value"], ON)
+
+    def test_copy_prompt_for_your_ai_copies_the_prompt_first_time_setup_gave_you(self):
+        with mock.patch.object(desktop, "copy", return_value=True) as copy:
+            self.w.call("copy_ai_prompt")
+            copy.assert_not_called()  # the demo's channel is made up: nothing to copy
+            self.assertIn("In your own ReelForge, this copies the prompt that starts your AI on your channel.",
+                          self.w.toasts())
+            self.w.svc.demo = False  # as on a channel that's set up
+            with mock.patch("studio.settings.load", lambda path=None: {"channel": {"name": "Night Physics"}}), \
+                    mock.patch.object(videos, "find", lambda cfg: []):
+                self.w.call("copy_ai_prompt")
+            first = copy.call_args.args[0]
+            with mock.patch("studio.settings.load", lambda path=None: {"channel": {"name": "Night Physics"}}), \
+                    mock.patch.object(videos, "find", lambda cfg: [Path("ep01.mp4")]):
+                self.w.call("copy_ai_prompt")
+            next_ = copy.call_args.args[0]
+        self.assertTrue(first.startswith("I make videos for my channel, Night Physics, with ReelForge. My ReelForge "
+                                         f"folder is:\n{P.ROOT}\n\nWork in that folder from now on."))
+        self.assertTrue(first.endswith("Then make my first video."))
+        self.assertTrue(next_.endswith("Then make my next video."))  # it has made one already
+        self.assertIn("Paste it into Claude Code, Codex or any AI that can work with files on this computer.",
+                      self.w.toasts())
 
     def test_restart_closes_the_window_for_the_launcher_to_open_again(self):
         self.w.call("restart")

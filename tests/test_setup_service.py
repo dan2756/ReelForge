@@ -97,7 +97,22 @@ class OnboardTest(unittest.TestCase):
         first = self.svc.onboard_step(0)
         self.assertEqual(first["title"], f"1/{len(self.start['steps'])}  You")
         self.assertEqual(list(self.fields(first)), ["creator", "assistant"])
-        self.assertEqual(self.fields(first)["assistant"]["value"], "claude")  # the default, picked
+
+    def test_you_pick_your_ai_yourself(self):
+        # Claude Code or Codex, neither of them recommended or picked for you (and no "Both" any more)
+        ai = self.fields(self.svc.onboard_step(0))["assistant"]
+        self.assertEqual(ai["options"], [["claude", "Claude Code"], ["codex", "Codex"]])
+        self.assertEqual((ai["value"], ai["required"]), (None, True))
+        res = self.svc.onboard_next({"creator": "Sam"})
+        self.assertEqual((res["ok"], res["errors"], res["first"]), (False, {"assistant": "Please answer this one."},
+                                                                    "assistant"))
+        self.assertTrue(self.svc.onboard_next({"creator": "Sam", "assistant": "codex"})["ok"])
+        self.assertEqual(self.svc.answers["assistant"], "codex")
+
+    def test_an_older_answer_of_both_ais_is_claude_code_now(self):
+        with mock.patch("studio.setup_service.saved_answers", lambda: {"creator": "Sam", "assistant": "both"}):
+            self.svc.onboard_start()
+        self.assertEqual(self.fields(self.svc.onboard_step(0))["assistant"]["value"], "claude")
 
     def test_a_required_answer_holds_the_step(self):
         self.svc.onboard_step(1)

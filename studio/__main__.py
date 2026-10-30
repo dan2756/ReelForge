@@ -63,29 +63,25 @@ def _print_written(paths: list[Path]) -> None:
 
 
 def next_steps(profile=None) -> str:
-    """What to do once onboarding has written a profile's files (the one this process works on, by default)."""
+    """What to do once first-time setup has written a profile's files (the one this process works on, by default):
+    paste the prompt that starts your AI on the channel (studio/ai_prompt.py), then post the video."""
+    from . import ai_prompt
     from . import settings as S
     profile = profile or profiles.current()
     s = S.load(profile.settings)
-    who = s["ai"]["assistant"]
-    lines = ["", "Your studio is ready. Next:" if profile.main else f"{s['channel']['name']} is ready. Next:"]
-    if who in ("claude", "both"):
-        lines.append("  1. Open this folder in Claude Code: in the Claude desktop app, open Code and choose this "
-                     "folder (or run `claude` in a terminal here). It reads CLAUDE.md by itself." if profile.main else
-                     "  1. Open the ReelForge folder in Claude Code, as for every channel: its CLAUDE.md lists this "
-                     "one, and this channel's own notes are in its folder.")
-    if who in ("codex", "both"):
-        lines.append(("  1. " if who == "codex" else "     ") + "Codex: run `codex` in a terminal in "
-                     f"{'this' if profile.main else 'the ReelForge'} folder. It reads AGENTS.md by itself.")
-    video = "my first video" if profile.main else f"my first {s['channel']['name']} video"
-    say, kept = ("here's my channel", "your channel's brief") if profile.main else \
-        (f"here's {s['channel']['name']}", f"the brief for {s['channel']['name']}")
-    lines.append(f'  2. Say "{say}" and drag a file about it into the chat, or paste a description (your notes, a '
-                 f"doc, examples you like). It keeps it as {kept} and plans every video from it.")
-    lines.append(f'  3. Say: "make {video}"')
+    name = s["channel"]["name"]
+    first = not ai_prompt.has_videos(profile)
+    app = "Codex" if s["ai"]["assistant"] == "codex" else "Claude Code"
+    lines = ["", "Your studio is ready. Next:" if profile.main else f"{name} is ready. Next:",
+             f"  1. Paste this prompt into {app}, or any other AI that can work with files on this computer. It has the "
+             "ReelForge folder's path in it, so there's nothing to drag in or open first:", ""]
+    lines += [f"     {line}" if line else "" for line in ai_prompt.text(name, profile, first).splitlines()]
+    video = f"{'your' if profile.main else 'its'} {'first' if first else 'next'} video"
+    lines.append(f"\n  2. It gets to know {'your channel' if profile.main else name}, then makes {video}.")
     icon = ("double-click ReelForge.bat" if P.WINDOWS else "open ReelForge from Applications" if P.MAC else
             "open ReelForge from your app menu")
-    lines.append(f"  4. When it's done, open ReelForge (type reelforge, or {icon}) and go to Publish to post it.")
+    lines.append(f"  3. When it's done, open ReelForge (type reelforge, or {icon}) and go to Publish to post it.")
+    lines.append("  Copy prompt for your AI, on ReelForge's Settings tab, copies this prompt again any time.")
     return "\n".join(lines)
 
 

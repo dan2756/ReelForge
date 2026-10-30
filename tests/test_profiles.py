@@ -26,8 +26,9 @@ from studio.bridge import Loop
 from studio.setup_service import Setup
 
 KIT = Path(__file__).resolve().parent.parent
-ANSWERS = {"creator": "Sam", "channel_name": "Night Physics", "about": "What-if videos with real science.",
-           "platforms": ["tiktok", "youtube"], "handle_tiktok": "@nightphysics"}
+ANSWERS = {"creator": "Sam", "assistant": "claude", "channel_name": "Night Physics",
+           "about": "What-if videos with real science.", "platforms": ["tiktok", "youtube"],
+           "handle_tiktok": "@nightphysics"}
 
 
 class Scratch(unittest.TestCase):
@@ -188,13 +189,13 @@ class Onboarding(Scratch):
         self.assertEqual((self.root / "CLAUDE.md").read_text(encoding="utf-8"), before)
 
     def test_the_interview_makes_a_new_profile_from_your_answers_about_you(self):
-        self.onboard_main(assistant="both")
+        self.onboard_main(assistant="codex")
         svc = Setup(Loop(out=io.StringIO()))
         init = svc.start({"start": "onboard", "new": True, "embedded": True})
         self.assertTrue(init["new"])
         start = svc.onboard_start()
         self.assertEqual((start["side"], start["create"]), ("Set up a new channel", "Create the profile"))
-        self.assertEqual((svc.answers["creator"], svc.answers["assistant"]), ("Sam", "both"))  # about you: carried
+        self.assertEqual((svc.answers["creator"], svc.answers["assistant"]), ("Sam", "codex"))  # about you: carried
         self.assertNotIn("channel_name", svc.answers)                                         # the channel: not
         svc.onboard_step(1)
         bad = svc.onboard_next({"channel_name": "night physics", "about": "Facts."})
@@ -211,7 +212,8 @@ class Onboarding(Scratch):
         self.assertEqual(done["profile"], "profiles/cool-epic-facts")
         self.assertEqual(done["open"], "Open Cool Epic Facts")
         self.assertEqual(done["back"], "Back to Night Physics")
-        self.assertIn('make my first Cool Epic Facts video', json.dumps(done["steps"]))
+        self.assertTrue(done["prompt"].endswith("Then make my first Cool Epic Facts video."))
+        self.assertIn("Paste it into Codex (run codex in a terminal)", json.dumps(done["then"]))
 
     def test_first_time_setup_asks_claude_code_for_opus_at_high_effort_and_never_changes_it_after(self):
         self.onboard_main(ultracode=True, quality="max")  # an older channel's answers: neither is asked any more

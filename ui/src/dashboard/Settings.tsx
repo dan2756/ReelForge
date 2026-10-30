@@ -130,8 +130,9 @@ export function Settings() {
   )
 }
 
-/** This channel's answers, and the button that asks first-time setup's questions again. grow: half the row (beside
- * the FAQ), else as tall as its rows (over it). */
+/** This channel's answers, the button that asks first-time setup's questions again, and (once it's set up) the one
+ * that copies the prompt that starts your AI on it. grow: half the row (beside the FAQ), else as tall as its rows
+ * (over it). */
 function Channel({ v, grow }: { v: SettingsView; grow: boolean }) {
   const s = useDash()
   const width = Math.max(...v.rows.map(([label]) => label.length), 8) + 3
@@ -153,8 +154,9 @@ function Channel({ v, grow }: { v: SettingsView; grow: boolean }) {
           This channel isn't set up yet: first-time setup asks a few questions about it and writes your AI's notes.
         </text>
       )}
-      <box flexDirection="row" height={1} marginTop={1} flexShrink={0}>
+      <box flexDirection="row" flexWrap="wrap" rowGap={1} marginTop={1} flexShrink={0}>
         <Button id="settings-change" label={v.onboarded ? "Change your answers" : "Set it up"} variant="primary" marginRight={1} onPress={change} />
+        {v.onboarded ? <Button id="settings-prompt" label="Copy prompt for your AI" marginRight={1} onPress={() => s.bridge.send("copy_ai_prompt")} /> : null}
       </box>
     </Panel>
   )

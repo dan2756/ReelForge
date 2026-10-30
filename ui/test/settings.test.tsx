@@ -1,5 +1,6 @@
 // The Settings tab, drawn without a terminal with its real Python side, on demo data and on a channel set up in a
-// scratch folder: what it shows, the tab order (moved with a click and the arrows, a drag or the keyboard, and kept for
+// scratch folder: what it shows (Copy prompt for your AI by the channel's answers), the tab order (moved with a click
+// and the arrows, a drag or the keyboard, and kept for
 // the next window), the Background refresh switch (it flips at once, then shows what the computer did) and Restart
 // (exit code 75, for the launcher), and the danger zone's dialogs, which do nothing until the channel's name is typed
 // (and nothing at all in the demo).
@@ -63,9 +64,23 @@ describe("the Settings tab", () => {
     const h = await window()
     const f = frame(h)
     if (process.env.SHOW) console.log(f)
-    for (const text of ["THIS CHANNEL", "FAQ", "▸ Which model does my AI use, and how hard does it think?", "▸ Something isn't working.", "ON THIS COMPUTER", "DANGER ZONE", "Factory reset…", "Uninstall…", "Change your answers"])
+    for (const text of ["THIS CHANNEL", "FAQ", "▸ Which model does my AI use, and how hard does it think?", "▸ Something isn't working.", "ON THIS COMPUTER", "DANGER ZONE", "Factory reset…", "Uninstall…", "Change your answers", "Copy prompt for your AI"])
       expect(f).toContain(text)
     for (const gone of ["REASONING", "Max", "High", "Fast", "the standard"]) expect(f).not.toContain(gone)
+  })
+
+  test("Copy prompt for your AI sits by Change your answers, and copies nothing in the demo", async () => {
+    for (const size of [[150, 76], [100, 40]] as [number, number][]) {
+      const h = await window(size)
+      const change = find(h, "Change your answers")!
+      const copy = find(h, "Copy prompt for your AI")!
+      expect(copy[1] - change[1]).toBeLessThanOrEqual(2) // beside it, or on the row under it in a narrow window
+      await clickText(h, "Copy prompt for your AI", 2)
+      expect(frame(h).replace(/\s+/g, " ")).toContain("In your own ReelForge, this copies the prompt")
+      await open?.close()
+      open = null
+      toasts.clear()
+    }
   })
 
   test("Settings and Updates are the last two tabs, so 6 opens it and 7 Updates", async () => {
@@ -99,14 +114,14 @@ describe("the Settings tab", () => {
     await clickText(h, "How do I make a video?", 3)
     let f = frame(h)
     expect(f).toContain("▾ How do I make a video?")
-    expect(f).toContain("Then say make my first video")
+    expect(f).toContain("After that, make today's videos")
     const lines = f.split("\n")
     const at = (text: string) => lines.findIndex((l) => l.includes(text))
-    expect(at("Then say make my first video")).toBeGreaterThan(at("How do I make a video?"))
-    expect(at("Then say make my first video")).toBeLessThan(at("My AI doesn't know about my channel."))
+    expect(at("After that, make today's videos")).toBeGreaterThan(at("How do I make a video?"))
+    expect(at("After that, make today's videos")).toBeLessThan(at("My AI doesn't know about my channel."))
     await clickText(h, "Does ReelForge post for me?", 3)
     f = frame(h)
-    expect(f).not.toContain("Then say make my first video")
+    expect(f).not.toContain("After that, make today's videos")
     expect(f).toContain("▾ Does ReelForge post for me?")
     expect(f).toContain("ReelForge never posts, uploads or sends anything")
     await clickText(h, "Does ReelForge post for me?", 3)
