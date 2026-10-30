@@ -1,7 +1,8 @@
 // The Settings tab, drawn without a terminal with its real Python side, on demo data and on a channel set up in a
 // scratch folder: what it shows, the tab order (moved with a click and the arrows, a drag or the keyboard, and kept for
-// the next window), and the danger zone's dialogs, which do nothing until the channel's name is typed (and nothing at
-// all in the demo).
+// the next window), the Background refresh switch (it flips at once, then shows what the computer did) and Restart
+// (exit code 75, for the launcher), and the danger zone's dialogs, which do nothing until the channel's name is typed
+// (and nothing at all in the demo).
 
 import { TextAttributes } from "@opentui/core"
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
@@ -150,6 +151,37 @@ describe("the Settings tab", () => {
       expect(frame(h)).toContain("THIS CHANNEL")
     }
     expect(frame(h)).toContain("FAQ  click a question for its answer")
+  })
+
+  test("on this computer: Background refresh has an On/Off switch, and Restart a button under the rest", async () => {
+    const h = await window()
+    const lines = frame(h).split("\n")
+    const at = (text: string) => lines.findIndex((l) => l.includes(text))
+    expect(lines[at("Background refresh")]).toContain("━━━▐█▌ On")
+    expect(lines[at("Background refresh") + 1]).toContain("on: your stats update every hour, even with ReelForge closed")
+    expect(frame(h)).not.toContain("Hourly stats read")
+    expect(at("Background refresh")).toBeGreaterThan(at("ON THIS COMPUTER"))
+    expect(at("Restart ReelForge")).toBeGreaterThan(at("ReelForge's icon"))
+    expect(at("Restart ReelForge")).toBeLessThan(at("PROFILES"))
+    expect(lines[at("Restart ReelForge")]).toMatch(/Restart ReelForge +┃? *▐ +Restart +▌/)
+    expect(lines[at("Restart ReelForge") + 1]).toContain("closes ReelForge and opens it again")
+    // the demo changes nothing: a click on the switch says so, and it stays on
+    const [x, y] = find(h, "━━━▐█▌ On")!
+    await h.t.mockMouse.click(x + 4, y)
+    await h.settle(500)
+    expect(frame(h)).toContain("Demo mode: nothing is changed.")
+    expect(frame(h)).toContain("━━━▐█▌ On")
+    expect(h.exits).toEqual([])
+  })
+
+  test("Restart closes the window and asks the launcher to open ReelForge again", async () => {
+    const h = await window()
+    const [, y] = find(h, "Restart ReelForge")!
+    const row = frame(h).split("\n")[y]!
+    const x = [...row.slice(0, row.lastIndexOf("Restart"))].length // the button, at the right of the row
+    await h.t.mockMouse.click(x + 2, y)
+    for (let i = 0; i < 25 && !h.exits.length; i++) await h.settle(200)
+    expect(h.exits).toEqual([{ code: 75, result: { restart: true } }]) // the launcher starts ReelForge again on 75
   })
 
   test("the demo resets and uninstalls nothing: no dialog opens", async () => {
@@ -385,6 +417,51 @@ describe("the danger zone on a channel that's set up", () => {
     await closed(h)
     expect(asked()).toMatchObject({ do: "uninstall", keep: false })
     expect(h.exits.map((e) => e.code)).toEqual([75])
+  })
+})
+
+describe("Background refresh on a channel that's set up", () => {
+  let tmp = ""
+  afterEach(async () => {
+    await open?.close()
+    open = null
+    toasts.clear()
+    if (tmp) rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 })
+    tmp = ""
+  })
+
+  const job = () => readFileSync(join(tmp, "job.txt"), "utf-8") // the made-up hourly job (ui/test/job_preload.py)
+
+  async function until(h: Headless, text: string) {
+    for (let i = 0; i < 25 && !frame(h).includes(text); i++) await h.settle(200)
+    expect(frame(h)).toContain(text)
+  }
+
+  test("the switch flips at once, says it's turning off until the hourly read is off, then turns it on again", async () => {
+    tmp = mkdtempSync(join(tmpdir(), "reelforge-job-"))
+    const h = (open = await headless("dashboard", { tab: "settings" }, 150, 64, {
+      REELFORGE_BRIDGE_PRELOAD: join(ROOT, "ui", "test", "job_preload.py"),
+      REELFORGE_TEST_ROOT: tmp,
+    }))
+    await until(h, "━━━▐█▌ On")
+    expect(frame(h)).toContain("on: your stats update every hour, even with ReelForge closed")
+    const [x, y] = find(h, "━━━▐█▌ On")!
+    await h.t.mockMouse.click(x + 4, y)
+    await h.settle(150)
+    expect(frame(h)).toContain("▐█▌━━━ Off") // at once, while the computer is still turning it off
+    expect(frame(h)).toContain("turning it off…")
+    await until(h, "off: your stats update only while ReelForge is open")
+    expect(job()).toBe("off")
+    expect(frame(h)).toContain("▐█▌━━━ Off")
+    expect(frame(h)).toContain("Background stats are off.")
+    toasts.clear()
+    h.t.mockInput.pressKey("RETURN") // the switch has the keyboard since the click
+    await h.settle(150)
+    expect(frame(h)).toContain("━━━▐█▌ On")
+    expect(frame(h)).toContain("turning it on…")
+    await until(h, "on: your stats update every hour, even with ReelForge closed")
+    expect(job()).toBe("on")
+    expect(frame(h)).not.toContain("turning it")
   })
 })
 

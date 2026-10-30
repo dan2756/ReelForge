@@ -87,6 +87,11 @@ class FaqTest(unittest.TestCase):
         self.assertIn("every 5 minutes", answer("Do my stats update", refresh_minutes=5))
         self.assertNotIn("every 0 minutes", answer("Do my stats update", refresh_minutes=0))
 
+    def test_the_answers_name_this_tabs_background_refresh_switch_and_restart(self):
+        self.assertTrue(answer("Do my stats update").startswith("Yes, while **Background refresh** on this tab is on"))
+        self.assertTrue(answer("Something isn't working.").startswith("Try **Restart** on this tab first"))
+        self.assertIn("`reelforge doctor`", answer("Something isn't working."))
+
     def test_the_demo_names_nothing_on_this_computer(self):
         text = "\n".join(i["a"] for i in items(demo=True))
         self.assertNotIn(str(ROOT), text)

@@ -119,7 +119,8 @@ HELP = [
     ("Settings", "This channel's answers from first-time setup (Change your answers asks the questions again), an FAQ "
                  "(click a question for its answer), the order of the tabs along the top (drag a tab, or click one "
                  "and move it with the arrows; 1-7 follow it, in every profile), what ReelForge set up on this "
-                 "computer (the hourly stats read, the reelforge command and the icon) and your profiles: Delete "
+                 "computer (Background refresh, the hourly stats read, with its switch; the reelforge command and the "
+                 "icon), Restart (ReelForge closes and opens again) and your profiles: Delete "
                  "beside one, and Restore beside one you deleted. At the bottom, Factory reset "
                  "puts every channel's settings, log-ins and stats in a backup and starts first-time setup again "
                  "(your videos stay), and Uninstall removes ReelForge, keeping your videos in a folder beside it. "
@@ -271,6 +272,7 @@ class Dashboard(StatsTab, SettingsTab, Service):
         self.elsewhere_unread = 0  # unread notifications in the other profiles (the dot on the profile button)
         self.window_lock = None  # held while this window shows its profile (see hold_profile)
         self.deleted_sizes: dict[str, str] = {}  # each deleted profile's backup: how big it is (measure_deleted)
+        self.toggling = threading.Lock()  # the Settings tab's On this computer panel changes one thing at a time
 
     # --- starting ---------------------------------------------------------------------------
 

@@ -220,13 +220,16 @@ folder itself.
 ### Settings
 
 This channel's answers from first-time setup (**Change your answers** asks the questions again), an FAQ beside them
-(click a question and its answer opens under it), and what ReelForge set up on your computer: the hourly stats read,
-the `reelforge` command and the icon, each with a button to turn it on or off. Under them, **Profiles** lists your
-channels, with **Delete…** beside each one you can delete and **New profile**, then the ones you've deleted, each with
-**Restore** and **Move to the Recycle Bin** (to free its space for good). Across the bottom, the danger zone: **Factory reset** puts every channel's settings, logins and stats in a backup and starts first-time
-setup again, and **Uninstall** removes ReelForge. Both ask you to type your channel's name first, and neither deletes
-anything: what they clear goes to a backup or the Recycle Bin (the Trash on a Mac). Neither stops half-way either:
-if something can't be moved (another ReelForge window has it open, say), nothing changes.
+(click a question and its answer opens under it), and what ReelForge set up on your computer: **Background refresh**,
+the hourly stats read that keeps your stats updating while ReelForge is closed, with a switch to turn it on or off,
+then the `reelforge` command and the icon, each with a button. **Restart** under them closes ReelForge and opens it
+again straight away. Then **Profiles** lists your channels, with **Delete…** beside each one you can delete and
+**New profile**, then the ones you've deleted, each with **Restore** and **Move to the Recycle Bin** (to free its space
+for good). Across the bottom, the danger zone: **Factory reset** puts every channel's settings, logins and stats in a
+backup and starts first-time setup again, and **Uninstall** removes ReelForge. Both ask you to type your channel's
+name first, and neither deletes anything: what they clear goes to a backup or the Recycle Bin (the Trash on a Mac).
+Neither stops half-way either: if something can't be moved (another ReelForge window has it open, say), nothing
+changes.
 
 **Tab order**, under the FAQ, puts the tabs along the top in the order you like: drag a tab where you want it, or
 click one and move it with **← Move left** and **Move right →** (or Shift and the arrow keys). The number keys follow
@@ -234,7 +237,7 @@ the new order, and so does `reelforge 1` to `reelforge 7`. It's kept for every c
 them back as they started, with Settings and Updates at the far right. Publish isn't one of them: it keeps its own
 green button at the top right.
 
-![The Settings tab: the channel's answers, the FAQ with its first answer open, the tab order, what ReelForge set up on this computer, the profiles with one deleted, and the danger zone](docs/screenshots/app-settings.png)
+![The Settings tab: the channel's answers, the FAQ with its first answer open, the tab order, what ReelForge set up on this computer with the Background refresh switch and Restart, the profiles with one deleted, and the danger zone](docs/screenshots/app-settings.png)
 
 ## Updates
 
@@ -316,7 +319,8 @@ folder in `episodes`, and a copy of each finished one goes to `completed videos`
 <br>
 
 Yes, if you said yes during first-time setup. Once an hour, while your computer is on, a small background job reads your
-stats for about a minute, then stops. Turn it off or back on with `reelforge stats off` or `reelforge stats on`.
+stats for about a minute, then stops. Turn it off or back on with the **Background refresh** switch on the Settings
+tab, or with `reelforge stats off` and `reelforge stats on`.
 
 </details>
 
@@ -433,8 +437,9 @@ command, the hourly stats job or ReelForge's icon, which stay with your real Ree
 
 <br>
 
-Run `reelforge doctor`. It checks everything ReelForge needs and says how to fix anything that fails. `reelforge
-setup` repairs the setup.
+Try **Restart** on the Settings tab first: ReelForge closes and opens again. If that doesn't fix it, run
+`reelforge doctor`. It checks everything ReelForge needs and says how to fix anything that fails. `reelforge setup`
+repairs the setup.
 
 </details>
 

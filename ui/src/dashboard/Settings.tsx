@@ -1,13 +1,14 @@
 // The Settings tab: this channel's answers from first-time setup and the FAQ side by side (one under the other in a
-// narrow window), the order of the tabs along the top, what ReelForge set up on this computer, your profiles (Delete
-// beside each one this window can delete, Restore beside each one deleted), and the danger zone across the bottom:
-// factory reset and uninstall, each behind a dialog where you type the channel's name. None of them deletes anything:
-// what they clear goes to a backup or the Recycle Bin (Trash). dashboard/settings_tab.py sends the "settings" view and
-// does the work (with studio/reset.py, and dashboard/service.py and studio/profiles.py for the profiles);
-// dashboard/faq.py writes the FAQ, and dashboard/tabs.py keeps the tab order.
+// narrow window), the order of the tabs along the top, what ReelForge set up on this computer (with the Background
+// refresh switch) and Restart, your profiles (Delete beside each one this window can delete, Restore beside each one
+// deleted), and the danger zone across the bottom: factory reset and uninstall, each behind a dialog where you type
+// the channel's name. None of them deletes anything: what they clear goes to a backup or the Recycle Bin (Trash).
+// dashboard/settings_tab.py sends the "settings" view and does the work (with studio/reset.py, and
+// dashboard/service.py and studio/profiles.py for the profiles); dashboard/faq.py writes the FAQ, and dashboard/tabs.py
+// keeps the tab order.
 
 import { TextAttributes, type KeyEvent, type Renderable } from "@opentui/core"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useView } from "../bridge"
 import { useFocus } from "../lib/focus"
 import { lines, type Segs } from "../lib/styled"
@@ -23,6 +24,7 @@ export interface ComputerRow {
   on: boolean
   value: string
   button: string
+  switch?: boolean // a switch in place of the button: Background refresh, where this window can change it
 }
 
 /** A question and its answer (a little Markdown). */
@@ -324,30 +326,66 @@ function TabOrder() {
   )
 }
 
-/** What ReelForge set up on this computer, each with its button (all as wide as the widest, lined up on the right). */
+const RESTART = "Restart"
+const SWITCH_WIDTH = 10 // "━━━▐█▌ Off", its widest
+
+/** What ReelForge set up on this computer, each with its button (all as wide as the widest, lined up on the right).
+ * Background refresh (the hourly stats read) has a switch instead: it flips at once and says it's turning on or off
+ * until the computer says how it went. Under them, Restart closes the window, and the launcher opens ReelForge again. */
 function Computer({ v }: { v: SettingsView }) {
   const s = useDash()
-  const width = Math.max(0, ...(v.computer ?? []).map((row) => row.button.length)) + 4
+  const shown = useRef<ComputerRow[] | null>(null)
+  if (v.computer) shown.current = v.computer
+  const rows = shown.current // while they're looked up again (after a change), the rows as they were
+  const [flipped, setFlipped] = useState<Record<string, boolean>>({}) // switches just pressed, until the rows say
+  useEffect(() => {
+    if (v.computer) setFlipped({})
+  }, [v.computer])
+  const width = Math.max(RESTART.length, ...(rows ?? []).map((row) => row.button.length)) + 4
+  const item = (key: string, label: string, value: string, good: boolean, control: ReactNode) => (
+    <box key={key} flexDirection="row" height={3} flexShrink={0} alignItems="center" gap={1}>
+      <box flexDirection="column" flexGrow={1} flexShrink={1} justifyContent="center">
+        <text attributes={TextAttributes.BOLD} wrapMode="none">
+          {label}
+        </text>
+        <text fg={good ? DASH.good : DASH.muted} wrapMode="none">
+          {value}
+        </text>
+      </box>
+      {control}
+    </box>
+  )
+  const flip = (row: ComputerRow, on: boolean) => {
+    if (!v.demo) setFlipped((f) => ({ ...f, [row.key]: on })) // the demo changes nothing, so it stays as it is
+    s.bridge.send("settings_toggle", row.key, on)
+  }
+  const control = (row: ComputerRow, on: boolean) =>
+    row.switch ? (
+      <box width={width} flexShrink={0} flexDirection="row" paddingLeft={Math.max(Math.floor((width - SWITCH_WIDTH) / 2), 0)}>
+        <Switch id={`settings-${row.key}`} value={on} labels={["On", "Off"]} onChange={(want) => flip(row, want)} />
+      </box>
+    ) : row.button ? (
+      <Button id={`settings-${row.key}`} label={row.button} minWidth={width} flexShrink={0} onPress={() => s.bridge.send("settings_toggle", row.key)} />
+    ) : null
   return (
     <Panel title="ON THIS COMPUTER" flexShrink={0}>
-      {v.computer === null ? (
+      {rows === null ? (
         <text fg={DASH.muted} flexShrink={0}>
           Looking…
         </text>
       ) : (
-        v.computer.map((row) => (
-          <box key={row.key} flexDirection="row" height={3} flexShrink={0} alignItems="center" gap={1}>
-            <box flexDirection="column" flexGrow={1} flexShrink={1} justifyContent="center">
-              <text attributes={TextAttributes.BOLD} wrapMode="none">
-                {row.label}
-              </text>
-              <text fg={row.on ? DASH.good : DASH.muted} wrapMode="none">
-                {row.value}
-              </text>
-            </box>
-            {row.button ? <Button id={`settings-${row.key}`} label={row.button} minWidth={width} flexShrink={0} onPress={() => s.bridge.send("settings_toggle", row.key)} /> : null}
-          </box>
-        ))
+        rows.map((row) => {
+          const on = flipped[row.key] ?? row.on
+          const value = row.key in flipped ? (on ? "turning it on…" : "turning it off…") : row.value
+          return item(row.key, row.label, value, on && !(row.key in flipped), control(row, on))
+        })
+      )}
+      {item(
+        "restart",
+        "Restart ReelForge",
+        "closes ReelForge and opens it again",
+        false,
+        <Button id="settings-restart" label={RESTART} minWidth={width} flexShrink={0} onPress={() => s.bridge.send("restart")} />,
       )}
     </Panel>
   )

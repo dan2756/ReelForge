@@ -1,7 +1,8 @@
 """The Settings tab: this channel's answers from first-time setup, an FAQ (dashboard/faq.py), the order of the tabs
-along the top (dashboard/tabs.py keeps it), what ReelForge set up on this computer (the hourly stats read, the
-reelforge command, the icon), your profiles (deleting one and restoring it: dashboard/service.py profiles_settings),
-and the danger zone: factory reset and uninstall (studio/reset.py does both, and neither deletes anything for good).
+along the top (dashboard/tabs.py keeps it), what ReelForge set up on this computer (background refresh, which is the
+hourly stats read, with its switch; the reelforge command; the icon) and Restart, your profiles (deleting one and
+restoring it: dashboard/service.py profiles_settings), and the danger zone: factory reset and uninstall
+(studio/reset.py does both, and neither deletes anything for good).
 
 A mixin of the window's service (dashboard/service.py): the tab calls these, and "settings" is the view it draws. The
 tab order is the window's own (it's in what the window starts with, and in an "order" event when another window moves
@@ -15,7 +16,8 @@ from studio.bridge import rpc
 from . import config, desktop, faq, tabs
 from .view import MUTED, Text
 
-RESTART = 75  # the launcher starts ReelForge again, and does the reset or the uninstall first (studio/reset.py)
+RESTART = 75  # the launcher starts ReelForge again, doing a reset or an uninstall first if one was asked for
+              # (studio/reset.py)
 
 
 def _channel_rows(s: dict) -> list[list[str]]:
@@ -131,11 +133,12 @@ class SettingsTab:
             self.emit("order", {"order": list(kept)})
 
     def computer_rows(self) -> list[dict]:
-        """What ReelForge set up on this computer, each with the button that changes it."""
+        """What ReelForge set up on this computer, each with the button that changes it. Background refresh (the
+        hourly stats read) has a switch instead, where this window can turn it on and off."""
         from studio import paths as P
 
         if self.demo:   # made up, like the rest of the demo: everything on
-            return [{"key": "stats", "label": "Hourly stats read", "on": True, "button": "Turn off",
+            return [{"key": "stats", "label": "Background refresh", "on": True, "switch": True, "button": "",
                      "value": "on: your stats update every hour, even with ReelForge closed"},
                     {"key": "command", "label": "The reelforge command", "on": True, "button": "Turn off",
                      "value": "on: type reelforge in any terminal"},
@@ -149,11 +152,13 @@ class SettingsTab:
             state = "off" if left else stats_schedule.status()
         except Exception:
             state = "unsupported"
-        out.append({"key": "stats", "label": "Hourly stats read", "on": state == "on",
+        out.append({"key": "stats", "label": "Background refresh", "on": state == "on",
+                    "switch": not left and state in ("on", "off"),
                     "value": left or {"on": "on: your stats update every hour, even with ReelForge closed",
-                                      "off": "off", "other": "on, for another ReelForge folder",
+                                      "off": "off: your stats update only while ReelForge is open",
+                                      "other": "on, for another ReelForge folder",
                                       "unsupported": "not available on this computer"}.get(state, state),
-                    "button": "" if left or state in ("other", "unsupported") else "Turn off" if state == "on" else "Turn on"})
+                    "button": ""})
         try:
             from studio import command
 
@@ -176,27 +181,31 @@ class SettingsTab:
         return out
 
     @rpc
-    def settings_toggle(self, key: str) -> None:
-        """A button on the On this computer panel: turn that thing on or off."""
+    def settings_toggle(self, key: str, on: bool | None = None) -> None:
+        """A button or the switch on the On this computer panel: turn that thing on or off (on: which, from the
+        switch; None: whichever it isn't). One change at a time, in the order they were asked for."""
         if self.demo:
             self.notify("Demo mode: nothing is changed.", timeout=4)
             return
 
         def work() -> None:
-            try:
-                msg = self._toggle(key)
-            except Exception as e:
-                msg = f"Couldn't change it: {e}"
+            with self.toggling:
+                try:
+                    msg = self._toggle(key, on)
+                except Exception as e:
+                    msg = f"Couldn't change it: {e}"
             self.loop.call_soon(lambda: (self.notify(msg, timeout=8), self.update_settings()))
 
         self.loop.run_worker(work, group="settings-toggle")
 
     @staticmethod
-    def _toggle(key: str) -> str:
-        if key == "stats":
+    def _toggle(key: str, on: bool | None = None) -> str:
+        if key == "stats":  # background refresh
             from studio import stats_schedule
 
-            return stats_schedule.disable() if stats_schedule.status() == "on" else stats_schedule.enable()
+            if on is None:
+                on = stats_schedule.status() != "on"
+            return stats_schedule.enable() if on else stats_schedule.disable()
         if key == "command":
             from studio import command
 
@@ -210,6 +219,13 @@ class SettingsTab:
                 return f"ReelForge's icon is in the {desktop.BIN}." if ok else f"Couldn't move {icon} to the {desktop.BIN}."
             return f"ReelForge's icon is at {shortcut.make()}."
         return f"Nothing called {key!r} to change."
+
+    @rpc
+    def restart(self) -> None:
+        """Restart, at the bottom of the On this computer panel: the window closes, and the launcher opens ReelForge
+        again straight away (on the profile it was on, as after an update). A stats read under way finishes first."""
+        self.notify("Restarting ReelForge…", timeout=5)
+        self.loop.set_timer(0.5, lambda: self.exit(RESTART, {"restart": True}))
 
     # ---------------------------------------------------------------- the danger zone
 

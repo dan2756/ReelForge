@@ -102,7 +102,7 @@ def items(*, assistant: str, root: Path, episodes: Path, completed: Path, channe
          "a": f"On **Publish**, and as files: every video has its own folder in {episodes_at}, and a copy of "
               f"each finished one goes to {completed_at}."},
         {"q": "Do my stats update while ReelForge is closed?",
-         "a": "Yes, while the **Hourly stats read** on this tab is on: once an hour, while your computer is on, it "
+         "a": "Yes, while **Background refresh** on this tab is on: once an hour, while your computer is on, it "
               f"reads your stats for about a minute, then stops. {open_now}"},
         {"q": "The bottom left says a platform's last refresh failed.",
          "a": "Its last read failed. Click it to open **Accounts**, where that platform says what went wrong. "
@@ -119,7 +119,8 @@ def items(*, assistant: str, root: Path, episodes: Path, completed: Path, channe
               "you when one is out. **Update and restart** installs it, and your channel, videos, stats and settings "
               "stay as they are."},
         {"q": "Something isn't working.",
-         "a": "Run `reelforge doctor` in a terminal: it checks everything ReelForge needs and says how to fix anything "
+         "a": "Try **Restart** on this tab first: ReelForge closes and opens again. If that doesn't fix it, run "
+              "`reelforge doctor` in a terminal: it checks everything ReelForge needs and says how to fix anything "
               "that fails. `reelforge setup` repairs the setup."},
         {"q": "Does ReelForge cost anything?",
          "a": f"No: ReelForge is free and open source. Making videos uses {plan}, and more effort uses more of it."},
