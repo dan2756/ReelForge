@@ -1,22 +1,23 @@
+## What's new in 2.0.0
+
+- **Bigger version numbers.** This is 2.0.0, and the updates after it go 2.1.0, 2.2.0 and so on.
+- **Each channel keeps to its own settings** and delivery folder, even when another profile is picked in the terminal.
+- **Refresh every 0 minutes means only when you press ↻ Refresh,** for browser-read and new accounts too.
+  - The hourly background job is unchanged.
+- **Your marks survive a move.** Posted marks, upload matches and hidden videos keep working on a new computer.
+  - That's a Windows stats database moved to a Mac or Linux PC.
+- **Folders named like videos** (clip.mp4) are left off the Publish tab.
+- **Any channel name works on Windows.** CON, PRN, AUX, NUL, COM1-9 and LPT1-9 get a folder Windows can make.
+- **0 hashtags works everywhere:** new episodes, captions, caption checks, the publish check and the window's hints.
+- **JSON for scripts and support:** `reelforge doctor --json` writes the health check as JSON.
+  - `reelforge profiles --json` lists your profiles as JSON. Both only read.
+
 ## What's new in 1.0.10
 
 - **Background refresh has an On/Off switch** on the Settings tab, under On this computer.
   - Off stops the hourly stats read that runs while ReelForge is closed, and On starts it again.
   - An open ReelForge still reads your stats every 30 minutes, and ↻ Refresh always works.
 - **Restart on the Settings tab** closes ReelForge and opens it again straight away, on the same profile.
-
-## What's new in 1.0.9
-
-- **Publish is a green button at the top right.** It's no longer a tab: click it from any tab, or press **u**.
-  - It turns solid green while you're on Publish, and `reelforge publish` still opens it.
-  - The other seven tabs keep your order: **1**-**7** and `reelforge 1` to `reelforge 7` open them.
-- **When your stats were last read is under ↻ Refresh** at the top, in amber while they're being read.
-  - The bar along the bottom no longer lists your platforms: it names one only when its last refresh failed.
-  - Click it for the Accounts tab, which says why.
-- **Gaps in the charts are filled in.** The hours your computer was off are estimated and drawn hatched.
-  - That's on the Overview, the Stats tab and the Accounts tab's charts. Pointing at one says it's estimated.
-  - An estimate is never your best day, hour or bar, and badges still count only what was read.
-- **A views chart on the Stats tab** above followers and likes: your views added up across your platforms, with its own breakdown.
 
 Already have ReelForge? Open the **Updates** tab and click **Update and restart**.
 
