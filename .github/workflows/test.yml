@@ -232,6 +232,9 @@ jobs:
       - name: A ReelForge kept somewhere else is found, and the install line makes no second copy
         shell: powershell
         run: |
+          # Not the old installer's copy from the step before: the install line would update that one in place
+          Remove-Item -Force "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{39D29FF3-A243-4140-8CD2-E69CC877A496}_is1"
+          $env:REELFORGE_NO_SETUP = "1"   # if it did install, setup would wait for answers
           $there = Join-Path $env:RUNNER_TEMP "fresh\ReelForge"
           $path = [Environment]::GetEnvironmentVariable("Path", "User")
           [Environment]::SetEnvironmentVariable("Path", "$path;$there\bin", "User")
