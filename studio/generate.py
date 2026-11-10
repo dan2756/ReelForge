@@ -1,7 +1,7 @@
 """Turn onboarding answers into your studio: settings, channel bible, CLAUDE.md, AGENTS.md and the dashboard's config.
 
   python -m studio onboard --answers my-studio/answers.json     (what the AI-led interview runs)
-  python -m studio onboard --regenerate                         (rebuild everything from the saved answers)
+  python -m studio channel --regenerate                         (rebuild everything from the saved answers)
 
 Each profile (each channel, see studio/profiles.py) gets its own: the first profile's go where they always have, a
 new profile's into its folder in profiles/. The first profile's CLAUDE.md and AGENTS.md also list the other channels,
@@ -108,6 +108,7 @@ def settings_from(a: dict) -> dict:
             "episode_label": "Ep. {n}",
         },
         "video": {
+            "backend": a.get("backend", "blender"),
             "fps": 30,
             "min_seconds": lo,
             "max_seconds": hi,
@@ -140,6 +141,7 @@ def settings_from(a: dict) -> dict:
 SETTINGS_COMMENTS = {
     "channel": "Written by first-time setup. Run reelforge channel to change these, or edit them here.",
     "video": "Every video is 9:16, 1080x1920. QA fails a video outside min_seconds..max_seconds.",
+    "video.backend": "blender or agentcut; new-episode --backend overrides this for one video",
     "video.min_seconds": "TikTok's Creator Rewards only pays for videos over a minute",
     "sound": "Ask before changing: every mix is mastered to target_lufs and QA fails anything 2 LU louder.",
     "captions.tiktok_first_tag": "empty = none",
@@ -368,9 +370,10 @@ def write_all(answers: dict, profile=None) -> list[Path]:
     return written
 
 
-def write_guides(profile=None) -> list[Path]:
+def write_guides(profile=None, *, saved_settings: bool = False) -> list[Path]:
     """A profile's CLAUDE.md and AGENTS.md again from its saved answers, nothing else: the first profile's list the
-    other channels, so they follow when a channel is added or removed. Nothing for a profile not set up yet."""
+    other channels, so they follow when a channel is added or removed. Updates use saved_settings to honor manual
+    settings and account edits. Nothing for a profile not set up yet."""
     w = _where(profile)
     try:
         a, problems = validate(json.loads(w.answers.read_text(encoding="utf-8")))
@@ -384,7 +387,15 @@ def write_guides(profile=None) -> list[Path]:
         path.write_text(text, encoding="utf-8", newline="\n")
         written.append(path)
 
-    _guides(a, settings_from(a), w, out)
+    s = S.load(w.settings) if saved_settings and w.settings.is_file() else settings_from(a)
+    if saved_settings:
+        # Settings are documented as editable. An update refreshes instructions
+        # from the effective settings without rewriting them from older answers.
+        from . import dashboard_config
+        handles = dashboard_config.handles(w.profile)
+        if handles is not None:
+            s["platforms"]["handles"] = handles
+    _guides(a, s, w, out)
     return written
 
 

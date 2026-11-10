@@ -27,7 +27,21 @@ ReelForge folder.
 GPU (an RTX 3090 does a 67 s video in 10-25 minutes); slower GPUs take longer. On a Mac, Blender renders with Metal:
 Apple Silicon is quick, an Intel Mac much slower.
 
+For a machine without a usable GPU, explicitly set `STUDIO_BLENDER_CPU=1` before
+the `build` step to use Cycles on the CPU. For example, on macOS/Linux:
+`STUDIO_BLENDER_CPU=1 python -m studio doctor --render-test`. This renders the same
+scene at 1080×1920 using the episode's sample count; it can be much slower and the
+lighting can differ from Eevee. The renderer is saved in `build/scene.blend`, so
+rebuild the scene and remove old frames when switching modes. Ordinary builds
+continue to use Eevee. AgentCut does not use this option.
+
 ## Make an episode
+
+For headless edits from local footage and images, choose the optional **AgentCut** backend:
+`python -m studio new-episode <slug> --backend agentcut`. Follow [AGENTCUT.md](AGENTCUT.md)
+for installation and timeline authoring. The same `build,stills,render`, `post` and `ship`
+steps use the episode's `backend`; an absent key means Blender. AgentCut supplies edited
+frames and audio to the existing text, loudness, captions, QA and delivery steps.
 
 From the kit folder:
 
@@ -48,7 +62,7 @@ From the kit folder:
 | `post` | `audio` + `video` + `cover` + `caption` + `qa` | `final/<id>.mp4`, `final/cover.jpg`, `final/caption*.txt`, `build/qa/` |
 | `qa` | `pipeline/qa.py` checks the **final mp4** (see below). Fails the run on any FAIL | `build/qa/report.md`, `qa.json`, `sheet_*.jpg` |
 | `ship` | `deliver` + `clean` + `check` | |
-| `deliver` | copies the video, cover and captions to `completed videos/<id> - <title>/`, **only if QA passed on this exact file and `build/qa/review.md` says APPROVED** | `completed videos/...` |
+| `deliver` | copies the video, cover and captions to `completed videos/<id> - <title>/`, **only if QA and `build/qa/review.md` cover these exact artifacts and inputs** | `completed videos/...` |
 | `clean` | deletes `build/frames`, `stills`, `preview` (about 0.6 GB a video) once delivered | |
 | `check` | confirms ReelForge's Publish tab lists the video with the right caption and hashtags, and prints each platform's post (same as `python -m studio publish-check episodes\<id>`) | |
 

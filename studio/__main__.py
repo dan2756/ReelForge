@@ -30,6 +30,9 @@
   reelforge command [on|off]   the reelforge command itself (on your PATH)
   reelforge sounds             download the Mixkit sound effects
   reelforge new-episode SLUG [--from EXAMPLE]   start episodes/epNN_<slug>/ from an example
+      --backend blender|agentcut               choose a renderer for this video
+  reelforge agentcut [help|install|status|schema|new|inspect|validate|render|doctor|tool]
+                               optional headless HyperFrames editing (alias: hyperframes; docs/AGENTCUT.md)
   reelforge publish-check episodes/<id>         is this video ready in the Publish tab?
 
   reelforge reset [--yes]      factory reset: every channel's settings, log-ins and stats back to brand-new (into a
@@ -115,11 +118,13 @@ def _interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def onboard(argv: list[str]) -> int:
+def onboard(argv: list[str], *, preserve_settings: bool = False) -> int:
     ap = argparse.ArgumentParser(prog="reelforge channel")
     ap.add_argument("--plain", action="store_true")
     ap.add_argument("--answers", type=Path)
     ap.add_argument("--regenerate", action="store_true")
+    ap.add_argument("--preserve-settings", action="store_true",
+                    help="refresh agent instructions without replacing saved settings or accounts")
     ap.add_argument("--questions", action="store_true")
     ap.add_argument("--new", action="store_true")
     args = ap.parse_args(argv)
@@ -130,7 +135,7 @@ def onboard(argv: list[str]) -> int:
         print(json.dumps(questions.describe(), indent=2, ensure_ascii=False))
         return 0
     if args.regenerate and not args.answers:
-        return regenerate()
+        return regenerate(preserve_settings=preserve_settings or args.preserve_settings)
     if args.answers or args.regenerate:
         src = args.answers or P.ANSWERS
         if not src.exists():
@@ -187,9 +192,10 @@ def onboard(argv: list[str]) -> int:
     return first_run("onboard", new=args.new)
 
 
-def regenerate() -> int:
+def regenerate(*, preserve_settings: bool = False) -> int:
     """Every profile's files again from its saved answers (after an update, so they get the new version's
-    instructions): the first one last, so its notes list the others as they are now."""
+    instructions): the first one last, so its notes list the others as they are now. Updates preserve settings
+    and refresh only instructions; an explicit channel regeneration can apply edited answers."""
     from . import generate
 
     done = 0
@@ -198,7 +204,8 @@ def regenerate() -> int:
             continue
         try:
             answers = json.loads(p.answers.read_text(encoding="utf-8-sig"))
-            written = generate.write_all(answers, p)
+            written = (generate.write_guides(p, saved_settings=True) if preserve_settings
+                       else generate.write_all(answers, p))
         except (ValueError, OSError) as e:
             print(f"{p.name}: {e}")
             continue
@@ -363,6 +370,8 @@ def new_episode(argv: list[str]) -> int:
     ap.add_argument("slug", help="a short name, e.g. snowball_doubling")
     ap.add_argument("--from", dest="source", default="",
                     help="an example in examples/ or an episode id to copy (default: the example for your format)")
+    ap.add_argument("--backend", choices=("blender", "agentcut"))
+    ap.add_argument("--topic", default="", help="save the AgentCut topic for the calling agent")
     args = ap.parse_args(argv)
     from . import settings as S
     s = S.load()
@@ -373,6 +382,19 @@ def new_episode(argv: list[str]) -> int:
     P.EPISODES.mkdir(exist_ok=True)
     nums = [int(m.group(1)) for d in P.EPISODES.iterdir() if (m := re.match(r"ep(\d+)_", d.name))]
     ep_id = f"ep{(max(nums) + 1) if nums else 1:02d}_{slug}"
+    backend = args.backend or s["video"]["backend"]
+    if backend == "agentcut":
+        if args.source:
+            ap.error("--from is for Blender examples; AgentCut starts with an empty timeline")
+        from . import agentcut
+        dest = P.EPISODES / ep_id
+        agentcut.starter(dest, ep_id, s)
+        if args.topic:
+            (dest / "agentcut-task.md").write_text(args.topic + "\n", encoding="utf-8")
+        print(f"Started {P.rel(dest)} with AgentCut (headless).")
+        print("Next: read docs/AGENTCUT.md; author edit/index.html, episode.json and facts.md with licensed media.")
+        print(f"  {P.venv_python()} -m studio agentcut validate \"{P.rel(dest)}\"")
+        return 0
     starters = {"doubling": "demo_doubling_duck", "disaster_pov": "demo_disaster_pov",
                 "everyone": "demo_everyone_jumps", "reality_bug": "demo_disaster_pov"}
     source = args.source or starters.get(s["format"]["template"], "")
@@ -386,6 +408,7 @@ def new_episode(argv: list[str]) -> int:
         return 1
     spec = json.loads(src.read_text(encoding="utf-8"))
     spec["id"] = ep_id
+    spec["backend"] = "blender"
     spec["title"] = "WRITE THE HOOK LINE HERE (one question, at most 80 characters)"
     spec["series"] = s["format"]["series"]
     spec.pop("episode_label", None)
@@ -497,7 +520,11 @@ def main(argv: list[str] | None = None) -> int:
     if cmd in ("--demo", "refresh") or tab_for(cmd):
         return dashboard(argv)
     if cmd in ("channel", "onboard"):
-        return onboard(rest)
+        # Published updaters (including 2.2.1) call the legacy name with --regenerate
+        # after copying new files. They must not replay old answers over hand-edited
+        # settings/accounts. `channel --regenerate` still explicitly applies edited
+        # answers; future updaters also pass --preserve-settings for clarity.
+        return onboard(rest, preserve_settings=cmd == "onboard" and "--regenerate" in rest)
     if cmd == "profiles":
         return list_profiles(rest, chosen)
     if cmd == "setup":
@@ -532,6 +559,9 @@ def main(argv: list[str] | None = None) -> int:
         return move.main(rest)
     if cmd == "new-episode":
         return new_episode(rest)
+    if cmd in ("agentcut", "hyperframes"):
+        from . import agentcut
+        return agentcut.main(rest)
     if cmd == "publish-check":
         from . import publish_check
         return publish_check.main(rest)

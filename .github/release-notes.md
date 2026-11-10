@@ -1,3 +1,27 @@
+## What's new in 2.3.0
+
+- **Optional AgentCut edits local footage.** Choose pinned HyperFrames 0.8.214 per channel or episode.
+  - Existing channels and episodes keep using Blender unless you choose AgentCut.
+- **Opening and updating the app needs no optional tools.** Node, npm, AgentCut and an upload extension are not required.
+  - Installing AgentCut separately needs stable Node.js 22.12.0 or newer and npm.
+  - Failed or cancelled installs leave the app usable; retries preserve a working editor until its replacement is ready.
+- **Approval identifies what you reviewed.** It covers the video, cover, captions, settings, facts and local media.
+  - Changed content needs fresh QA and a new review with the current Review-SHA256 receipt.
+  - Completed videos stay available. Older reviews need refreshing only before another delivery.
+- **Local media and rendered files are verified.** Checks follow linked media and verify the MP4 and every expected frame.
+  - Remote assets and unsupported playlists must be downloaded or exported to self-contained local files.
+- **Updates preserve your data.** Profiles, accounts, statistics, source footage, completed videos and channel notes stay in place.
+  - Hand-edited settings and connected-account handles are preserved when agent instructions are refreshed.
+- **Native Mac tests cover both architectures.** Apple Silicon and Intel install the editor and render 62-second edits.
+  - Tests cover trims, audio sync, fonts, spaced paths, overlays, captions, timing, loudness, QA, approval and delivery.
+  - Upgrade tests use the actual published v2.2.1 Mac package with disposable user data.
+  - Blender's normal GPU path is tested on Apple Silicon; Intel runners without a usable GPU use full-resolution CPU rendering.
+- **Blender's default renderer is unchanged.** An explicit CPU option supports machines without a usable GPU.
+  - Set STUDIO_BLENDER_CPU=1, then rebuild the scene. Cycles CPU lighting differs from Eevee; review the result.
+- **Posting remains manual.** No upload extension is included or required.
+  - Any future extension must be optional and recommended with a Skip option, while keeping manual posting available.
+  - Installing an extension or approving an edit never authorizes automatic publishing.
+
 ## What's new in 2.2.1
 
 - **A big Copy prompt button on setup's last screen,** right under step 1, so it's the first thing you see.

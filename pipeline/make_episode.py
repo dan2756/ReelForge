@@ -15,6 +15,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -56,6 +57,9 @@ def main():
     if not (ep / "episode.json").exists():
         raise SystemExit(f"{ep / 'episode.json'} not found")
     spec = json.loads((ep / "episode.json").read_text(encoding="utf-8"))
+    backend = spec.get("backend", "blender")
+    if backend not in ("blender", "agentcut"):
+        raise SystemExit(f"unknown episode backend {backend!r}; choose blender or agentcut")
     build = ep / "build"
     final = ep / "final"
     build.mkdir(exist_ok=True)
@@ -68,16 +72,32 @@ def main():
         if s not in ALIASES and s not in ALL_STEPS:
             raise SystemExit(f"unknown step {s!r}; steps: {', '.join(ALL_STEPS)} (or post, ship, all)")
         steps += ALIASES.get(s, [s])
-    if NEEDS_BLENDER & set(steps):
+    if backend == "blender" and NEEDS_BLENDER & set(steps):
         config.require_blender()
-    if NEEDS_FFMPEG & set(steps):
+    if NEEDS_FFMPEG & set(steps) or backend == "agentcut" and {"stills", "render"} & set(steps):
         config.require_ffmpeg()
 
-    if "build" in steps:
+    if backend == "agentcut":
+        from agentcut import Edit
+        edit = Edit(ep, spec)
+        if "build" in steps:
+            edit.validate()
+        if "stills" in steps:
+            secs = [float(s) for s in args.stills.split(",") if s] or spec.get("preview_times") or [
+                round(spec["render_until"] * i / 10, 3) for i in range(10)]
+            edit.stills(secs)
+        if "render" in steps:
+            edit.frames()
+        if {"audio", "video", "cover"} & set(steps):
+            edit.require_render()
+        if "deliver" in steps:
+            edit.require_source()
+
+    if backend == "blender" and "build" in steps:
         run([config.BLENDER, "-b", "--factory-startup", "--python-exit-code", "1",
              "-P", config.PIPELINE / "blender" / "build_scene.py", "--", ep], log=build / "build.log")
 
-    if "stills" in steps:
+    if backend == "blender" and "stills" in steps:
         secs = [float(s) for s in args.stills.split(",") if s] or spec.get("preview_times") or \
             [1, 15, 20, 26, 31, 38, 47, 55, 63, 67]
         frames = ",".join(str(int(round(s * fps)) + 1) for s in secs)
@@ -85,14 +105,17 @@ def main():
         run([config.BLENDER, "-b", build / "scene.blend", "-o", build / "stills" / "s_####", "-F", "JPEG",
              "-f", frames], log=build / "stills.log")
 
-    if "render" in steps:
+    if backend == "blender" and "render" in steps:
         run([config.BLENDER, "-b", build / "scene.blend", "-a"], log=build / "render.log")
 
     post = config.PIPELINE / "post"
     if "audio" in steps:
-        mixer = "audio_mix.py" if spec.get("audio", {}).get("mixer") == "samples" else "audio.py"
+        mixer_type = spec.get("audio", {}).get("mixer")
+        mixer = {"samples": "audio_mix.py", "agentcut": "agentcut_audio.py"}.get(mixer_type, "audio.py")
         run([sys.executable, "-I", post / mixer, ep])
     if "video" in steps:
+        if backend == "agentcut" and not (build / "audio.wav").is_file():
+            raise ValueError("AgentCut audio is missing after rendering; run --steps audio,video or --steps post")
         run([sys.executable, post / "compose.py", ep, "--video"])
     if "cover" in steps:
         run([sys.executable, post / "compose.py", ep, "--cover"])
@@ -115,7 +138,7 @@ def completed_dir(spec):
 
 def deliver(spec, final, build):
     """Copy the finished video, cover and captions to 'completed videos/<id> - <title>/', only if QA passed on
-    this exact video file."""
+    these exact artifacts and their reviewed inputs. Delivery is a manual posting handoff, never an upload."""
     if spec.get("demo"):
         raise SystemExit("deliver: this is one of ReelForge's demos, so it can't ship: start your own episode with "
                          "reelforge new-episode and make the subject yours")
@@ -126,20 +149,36 @@ def deliver(spec, final, build):
     if not qa_file.exists():
         raise SystemExit("deliver: no QA report, run --steps qa first")
     qa = json.loads(qa_file.read_text(encoding="utf-8"))
-    st = video.stat()
-    if not qa.get("pass") or qa.get("fingerprint") != f"{st.st_size}:{int(st.st_mtime)}":
-        raise SystemExit("deliver: QA failed or is out of date for this video; fix it and rerun --steps qa")
+    from studio import review
+    current = review.snapshot(final.parent, spec, config.SETTINGS)
+    if not review.qa_matches(qa, current):
+        raise SystemExit("deliver: QA failed or is out of date for the video, cover, captions or inputs; "
+                         "rerun --steps qa and write a fresh review")
     from studio.publish_check import review_approved
-    if not review_approved(build / "qa" / "review.md"):
+    if not review_approved(build / "qa" / "review.md", qa["review_fingerprint"]):
         raise SystemExit("deliver: write your own review first: build/qa/review.md (picture, sound, facts) "
-                         "ending with the verdict APPROVED (or REJECTED: why)")
+                         "including Review-SHA256 from the current QA report and ending with the verdict "
+                         "APPROVED (or REJECTED: why)")
     dst = completed_dir(spec)
-    dst.mkdir(parents=True, exist_ok=True)
-    files = [video, final / "cover.jpg", final / "caption.txt", *sorted(final.glob("caption_*.txt"))]
-    for f in files:
-        if f.exists():
-            shutil.copy2(f, dst / f.name)
-    print(f"  delivered {sum(f.exists() for f in files)} files to {dst}")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    # Stage and verify the copied bytes before touching an existing completed video. A concurrent replacement
+    # cannot slip an unreviewed artifact through the time between the gate above and the file copy.
+    outputs = {name: digest for name, digest in current["outputs"].items() if digest is not None}
+    with tempfile.TemporaryDirectory(prefix=".delivery-", dir=dst.parent) as tmp:
+        staged = Path(tmp)
+        for name, digest in outputs.items():
+            shutil.copy2(final / name, staged / name)
+            if review.file_digest(staged / name) != digest:
+                raise SystemExit("deliver: an artifact changed during delivery; rerun QA and review")
+        if review.snapshot(final.parent) != current:
+            raise SystemExit("deliver: inputs changed during delivery; rerun QA and review")
+        dst.mkdir(exist_ok=True)
+        for name in outputs:
+            (staged / name).replace(dst / name)
+        for old in dst.glob("caption_*.txt"):
+            if old.name not in outputs:
+                old.unlink()
+    print(f"  delivered {len(outputs)} files to {dst}")
 
 
 def clean(spec, build):
@@ -199,4 +238,7 @@ def write_captions(spec, final):
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except ValueError as error:
+        raise SystemExit(str(error)) from None
