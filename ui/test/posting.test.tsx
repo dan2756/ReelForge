@@ -101,6 +101,13 @@ async function clickBelow(h: Headless, text: string, from: number, dx = 2) {
   await h.settle(500)
 }
 
+/** For the batch whose page ReelForge opened (its address, from opened.txt): platform -> whether the extension may
+ * press Post there, as the page in the browser is told it. */
+async function pressFor(page: string): Promise<Record<string, boolean>> {
+  const batch = await (await fetch(page.replace("/post/", "/v1/page/batch/"))).json()
+  return Object.fromEntries(batch.jobs.map((j: { platform: string; press: boolean }) => [j.platform, j.press]))
+}
+
 /** Click a button on a platform's row of the Publish tab (the same words can be on another platform's row). */
 async function clickOnRow(h: Headless, name: string, text: string) {
   const at = frame(h).split("\n").findIndex((r) => new RegExp(`┃ ${name} +[○●✓×?]`).test(r))
@@ -185,6 +192,8 @@ describe("Post…", () => {
     const page = await fetch(url!)
     expect(page.status).toBe(200)
     expect(await page.text()).toContain('data-rf-page="post"')
+    // What that page is told about the three posts: Post is pressed for none of them. It stops before, as asked.
+    expect(await pressFor(url!)).toEqual({ tiktok: false, youtube: false, instagram: false })
     await until(h, () => state(h, "instagram") === "queued")
     for (const name of ["TikTok", "YouTube", "Instagram"]) expect(row(h, name)).toContain("● waiting for the extension to pick it up")
     expect(row(h, "X")).toBe("X          ○ not posted")
@@ -320,8 +329,20 @@ describe("Post…", () => {
     await clickText(h, "Start 2 posts", 2)
     await until(h, () => listed("opened.txt").length > 0 && !frame(h).includes("POST THIS VIDEO"))
     // What the page in the browser is told about the two posts: the press is allowed on TikTok, and never on X.
-    const batch = await (await fetch(listed("opened.txt")[0]!.replace("/post/", "/v1/page/batch/"))).json()
-    expect(Object.fromEntries(batch.jobs.map((j: { platform: string; press: boolean }) => [j.platform, j.press]))).toEqual({ tiktok: true, x: false })
+    expect(await pressFor(listed("opened.txt")[0]!)).toEqual({ tiktok: true, x: false })
+  })
+
+  test("with that switch left alone, Post is pressed for you nowhere, also where Press Post for me is unlocked", async () => {
+    const h = await kit({ extension: "on", jobs: { tiktok: ["ready", "posted"] } })
+    await clickText(h, "clip.mp4", 2)
+    await until(h, () => posting(h).video?.name === "clip.mp4")
+    await clickText(h, "▐ Post… ▌", 3)
+    await until(h, () => frame(h).includes("POST THIS VIDEO"))
+    expect(dialog(h)).toContain("Stop before the Post button") // on offer: TikTok is unlocked
+    expect(dialog(h)).toContain("You check it and press Post.")
+    await clickText(h, "Start 4 posts", 2)
+    await until(h, () => listed("opened.txt").length > 0 && !frame(h).includes("POST THIS VIDEO"))
+    expect(await pressFor(listed("opened.txt")[0]!)).toEqual({ tiktok: false, youtube: false, instagram: false, x: false })
   })
 
   test("the demo shows the question and starts nothing", async () => {
