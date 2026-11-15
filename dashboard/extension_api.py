@@ -367,6 +367,8 @@ def page_job(job: dict, name: str, handles: dict[str, str]) -> dict:
         words = "Uploading"
     elif stands == "filling":
         words = "Filling in the text"
+    elif stands == "ready" and posting.pressed(job["id"]):  # the extension saw your own press in the tab
+        words = f"You pressed it in the {name} tab: waiting for {name} to say it's up"
     elif stands == "ready":
         words, tone = f"Ready: check it and press {BUTTONS.get(job['platform'], 'Post')} in the {name} tab", "ready"
         note = "ReelForge stops here. Nothing is posted until you press it."

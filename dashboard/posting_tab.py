@@ -70,6 +70,10 @@ ACTIONS = {
     "filling": ("cancel",), "ready": ("mark_posted", "cancel"), "posting": ("mark_posted", "not_posted"),
     "unknown": ("mark_posted", "not_posted"), "failed": ("retry",), "cancelled": ("retry",), "expired": ("retry",),
 }
+# A job the extension saw you press Post for, in the tab, before it had any word from the platform: a press can't
+# be cancelled (posting.advance refuses it), so its row asks what a row that is posting asks.
+PRESSED = ("mark_posted", "not_posted")
+PRESSABLE = ("uploading", "filling", "ready")  # the states the platform's own button can be pressed in by you
 # What each platform's text is called in its own boxes, for the question before a post.
 FIELDS = {"title": "Title", "description": "Description", "caption": "Caption", "text": "Post"}
 # What the button for each of a row's actions says. Short: a row that is posted keeps its two beside its numbers.
@@ -137,11 +141,15 @@ def flag_style(color: str, state: str) -> str:
     return f"bold {BAD}" if state == "failed" else "#3a4049"
 
 
-def state_line(job: dict | None, post: dict | None, name: str, opened: str | None = None) -> Text:
+def state_line(job: dict | None, post: dict | None, name: str, opened: str | None = None,
+               pressed: bool = False) -> Text:
     """A platform's row on the posting view: its state in words, with what the extension last said. opened: when
     its upload page was last opened by hand for this video, which is all ReelForge knows of a post made that way
-    until a stats read finds it."""
+    until a stats read finds it. pressed: the extension saw you press the platform's own Post button, and is
+    waiting for the platform's word."""
     state = standing(job, post)
+    if pressed and job and state == job["state"] and state in PRESSABLE:
+        return Text(f"● you pressed Post there: waiting for {name} to say it's up", f"bold {AMBER}")
     if state == "none":
         out = Text("○ not posted", FAINT)
         return out.append(f"  upload page opened {fmt_ago(opened)}, not spotted yet", MUTED) if opened else out
@@ -334,13 +342,16 @@ class PostingTab:
             job, post = jobs.get(p.key), posts.get(p.key)
             state = standing(job, post)
             url = (job["url"] if job and state == job["state"] else None) or (post["url"] if post else None)
+            pressed = bool(job and state == job["state"] and state in PRESSABLE and job["via"] == "extension"
+                           and self._safe(lambda: posting.pressed(job["id"]), False))
             rows.append({"key": p.key, "name": p.name, "color": p.color, "state": state,
-                         "line": state_line(job, post, p.name, opened.get(p.key)).json(), "busy": state in BUSY,
-                         "url": url,
+                         "line": state_line(job, post, p.name, opened.get(p.key), pressed).json(),
+                         "busy": state in BUSY, "url": url,
                          "job": job["id"] if job and state == job["state"] else None,
                          # How that job goes: "extension" or "api". The window asks it before Try again.
                          "via": job["via"] if job and state == job["state"] else None,
-                         "actions": [a for a in ACTIONS[state] if a != "open_post" or url]})
+                         "actions": [a for a in (PRESSED if pressed else ACTIONS[state])
+                                     if a != "open_post" or url]})
         self.api_rows(rows, jobs, posts)  # what posting through YouTube's own API adds (youtube_api_tab.py)
         style = {"approved": GOOD, "none": MUTED, "demo": MUTED}.get(review["state"], f"bold {AMBER}")
         mark = {"approved": "✓ ", "none": "", "demo": ""}.get(review["state"], "! ")

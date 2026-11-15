@@ -12,7 +12,9 @@ the platform's own Post button is waiting for you; posting means the extension w
 anywhere before posting a job can end as failed or cancelled; a queued one nobody picked up in 10 minutes expires
 (nothing happened). The state that matters most is unknown: Post was pressed, or may have been, and no confirmation
 came. Nothing ever retries such a job. Only you ("It's posted" / "It didn't post") or a stats read that finds the
-post settle it. Once the extension was allowed to press, it can only end the job as posted or unknown.
+post settle it. Once the extension was allowed to press, or saw you press Post in the tab yourself, it can only end
+the job as posted or unknown, and a Cancel in the window is refused: a press can't be taken back, so the job ends
+on your answer to "did it post?". If the browser then still reports the post as up, the job is unknown again.
 
 A video is the SHA-256 of its bytes, never its file name, and it can have one live job per platform: while a job is
 queued, under way, posted or unknown, a second one for the same video and platform is refused (the unique index
@@ -490,11 +492,12 @@ def allowed(old: str, new: str, by: str) -> bool:
 def advance(job_id: str, state: str, *, by: str = "extension", install: str | None = None, step: str | None = None,
             progress: float | None = None, detail: str | None = None, error_code: str | None = None,
             error_message: str | None = None, post_id: str | None = None, url: str | None = None,
-            strategy: str | None = None) -> dict:
+            strategy: str | None = None, answered: bool = False) -> dict:
     """Move a job to a state (or say again where it is, with its step and progress). Returns the job as it is now.
     strategy: how the extension found what it was looking for on the page ("caption=role"), kept in the job's log
-    only. Refused: no such job ("not_found"), not this browser's ("not_yours", with install: only the browser that
-    claimed a job reports on it), or not a move a job can make ("bad_transition")."""
+    only. answered: this is your answer to "did it post?" (resolve), not a plain Cancel. Refused: no such job
+    ("not_found"), not this browser's ("not_yours", with install: only the browser that claimed a job reports on
+    it), a Cancel after Post was pressed ("pressed"), or not a move a job can make ("bad_transition")."""
     with db.connect() as c:
         c.execute("BEGIN IMMEDIATE")
         old = _locked(c, job_id)
@@ -502,20 +505,65 @@ def advance(job_id: str, state: str, *, by: str = "extension", install: str | No
         # for the posts it asked about.)
         if install is not None and old["claimed_by"] != install and (old["state"], state) != ("queued", "cancelled"):
             raise Refused("not_yours", "Another browser took this post.", old)
-        if by == "extension" and old["state"] == "posting" and state in ("failed", "cancelled"):
-            # The press was granted, so the click may have landed whatever the page showed afterwards. A browser
-            # that gives up from here leaves a job nobody is sure of, with its own word on why: free again only
-            # on your "It didn't post", or settled by a stats read. Never free for a retry that would press twice.
+        under_way = old["state"] in IN_FLIGHT and state in ("failed", "cancelled", "posted")
+        pressed = under_way and (old["state"] == "posting" or _pressed(c, old["id"]))
+        if by == "extension" and pressed and state != "posted":
+            # Post was pressed (for you, once the press was granted, or by you in the tab), so the click may have
+            # landed whatever the page showed afterwards. A browser that gives up from here leaves a job nobody
+            # is sure of, with its own word on why: free again only on your "It didn't post", or settled by a
+            # stats read. Never free for a retry that would press twice.
             state = "unknown"
-        if not allowed(old["state"], state, by):
-            raise Refused("bad_transition", f"A post that is {old['state']} can't become {state}.", old)
+        if by == "person" and pressed and state == "cancelled" and not (answered and old["via"] == "extension"):
+            # A Cancel can't take a press back. It would free the video for another try while the post that the
+            # press made is on its way up, and that post's own news would then find a job that is over. So after
+            # a press only your answer ends a job: "It didn't post". (An upload through an API has nobody who
+            # could know yet: its last piece is on its way, and its answer is YouTube's to give.)
+            raise Refused("pressed", "The last piece of the video is already on its way, so this can't be called "
+                          "off any more. Its row says how it ended." if old["via"] != "extension" else
+                          "Post was already pressed for this one. Check your profile there, then say whether it "
+                          "posted.", old)
         if post_id and by != "reconcile" and _anothers(c, old, str(post_id)):
             post_id = url = None  # the page showed some other post: a stats read finds this job's own (reconcile)
-        new = _write(c, old, state, by, step=step, progress=progress, detail=detail, error_code=error_code,
-                     error_message=error_message, post_id=post_id, url=url)
+        if by == "extension" and state == "posted" and old["state"] == "cancelled" and _pressed(c, old["id"]):
+            new = _back(c, old, post_id, url)
+        else:
+            if by == "person" and pressed and state == "posted" and old["state"] in ON_THE_PAGE:
+                pass  # you pressed Post in the tab while the video was going up: "It's posted" is yours to say
+            elif not allowed(old["state"], state, by):
+                raise Refused("bad_transition", f"A post that is {old['state']} can't become {state}.", old)
+            new = _write(c, old, state, by, step=step, progress=progress, detail=detail, error_code=error_code,
+                         error_message=error_message, post_id=post_id, url=url)
         if strategy:  # when a platform changes its page, this is where it shows first
             _event(c, old["id"], new["updated_at"], new["state"], new["step"], f"found by {strategy}")
     return _settled(old, new, by)
+
+
+def pressed(job_id: str) -> bool:
+    """Whether a platform's own Post button was pressed for a job, as far as ReelForge was told: it let the
+    extension press (grant_press), or the extension saw you press it in the tab."""
+    with db.connect() as c:
+        return _pressed(c, job_id)
+
+
+def _pressed(c: sqlite3.Connection, job_id: str) -> bool:
+    # (The job's log keeps each state and step once: "posting" is the granted press, and the step "press" under
+    # any other state is the extension's word that it saw yours.)
+    return c.execute("SELECT 1 FROM post_events WHERE job = ? AND (state = 'posting' OR step = 'press') LIMIT 1",
+                     (job_id,)).fetchone() is not None
+
+
+def _back(c: sqlite3.Connection, old: dict, post_id: str | None, url: str | None) -> dict:
+    """The browser says a post went up, for a job you ended with "It didn't post" after Post was pressed. That is
+    news about a real post, and it isn't dropped: the job is "not sure" again, with the post's id and link if the
+    page showed them, so nothing posts this video there once more until you have looked. Where another try stands
+    for the video by now, this one is kept behind it and stands again if that try ends without a post."""
+    other = c.execute(f"SELECT 1 FROM post_jobs WHERE video_sha256 = ? AND platform = ? AND superseded = 0 "
+                      f"AND id != ? AND state IN ({','.join('?' * len(LIVE))})",
+                      (old["video_sha256"], old["platform"], old["id"], *LIVE)).fetchone()
+    c.execute("UPDATE post_jobs SET superseded = ? WHERE id = ?", (int(other is not None), old["id"]))
+    old = {**old, "superseded": int(other is not None)}
+    return _write(c, old, "unknown", "app", post_id=post_id, url=url,
+                  detail="the browser saw it posted after you said it didn't")
 
 
 def _anothers(c: sqlite3.Connection, job: dict, post_id: str) -> bool:
@@ -583,7 +631,7 @@ def cancel(job_id: str, detail: str = "", by: str = "person") -> dict:
 def resolve(job_id: str, posted: bool) -> dict:
     """Your word on a job ReelForge lost track of: "It's posted", or "It didn't post" (which frees the video for
     another try)."""
-    return advance(job_id, "posted" if posted else "cancelled", by="person",
+    return advance(job_id, "posted" if posted else "cancelled", by="person", answered=True,
                    detail="you said it's posted" if posted else "you said it didn't post")
 
 

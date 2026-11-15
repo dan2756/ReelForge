@@ -478,6 +478,48 @@ class Posting(PostingTest):
         self.assertEqual(posting.get(job["id"])["state"], "cancelled")
         self.assertIn("cancelled can't become posted", w.toasts()[-1])
 
+    def test_a_cancel_that_arrives_after_post_was_pressed_ends_nothing(self):
+        # The row was drawn with Cancel a moment before the extension was let to press: the click on it lands late.
+        w = self.window()
+        earlier = posting.create_batch(self.video, ["tiktok"], "The one before", TAGS, w.svc.cfg)["jobs"][0]
+        self.work(earlier["id"], "ready", "posted")  # one post you pressed yourself: the press is unlocked
+        self.video.write_bytes(b"the next video")
+        w.svc.scan_files()
+        (job,) = self.post(w, stop_before=False)["jobs"]
+        self.work(job["id"], "ready")
+        self.assertTrue(w.until(lambda: self.rows(w)["tiktok"]["actions"] == ["mark_posted", "cancel"]))
+        posting.grant_press(job["id"], CHROME)
+        w.call("post_action", job["id"], "cancel")
+        self.assertEqual(posting.get(job["id"])["state"], "posting")
+        self.assertEqual(w.toasts()[-1], "Post was already pressed for this one. Check your profile there, then say "
+                                         "whether it posted.")
+        row = self.rows(w)["tiktok"]
+        self.assertEqual((row["state"], row["actions"]), ("posting", ["mark_posted", "not_posted"]))
+        posting.advance(job["id"], "posted", install=CHROME)
+        self.assertTrue(w.until(lambda: self.rows(w)["tiktok"]["state"] == "posted"))
+
+    def test_a_post_you_pressed_yourself_in_the_tab_asks_whether_it_posted(self):
+        w = self.window()
+        (job,) = self.post(w)["jobs"]
+        self.work(job["id"], "ready")
+        self.assertTrue(w.until(lambda: self.rows(w)["tiktok"]["actions"] == ["mark_posted", "cancel"]))
+        posting.advance(job["id"], "ready", install=CHROME, step="press")  # the extension saw your press
+        self.assertTrue(w.until(lambda: self.rows(w)["tiktok"]["actions"] == ["mark_posted", "not_posted"]))
+        row = self.rows(w)["tiktok"]
+        self.assertEqual((plain(row["line"]), row["state"], row["busy"]),
+                         ("● you pressed Post there: waiting for TikTok to say it's up", "ready", False))
+        w.call("post_action", job["id"], "cancel")  # a Cancel from the row as it was
+        self.assertEqual(posting.get(job["id"])["state"], "ready")
+        self.assertIn("Post was already pressed for this one", w.toasts()[-1])
+        w.call("post_action", job["id"], "not_posted")  # your answer does end it
+        self.assertEqual(posting.get(job["id"])["state"], "cancelled")
+        # ... and the browser's news that it went up after all brings the question back.
+        posting.advance(job["id"], "posted", install=CHROME)
+        self.assertTrue(w.until(lambda: self.rows(w)["tiktok"]["state"] == "unknown"))
+        self.assertEqual(self.rows(w)["tiktok"]["actions"], ["mark_posted", "not_posted"])
+        asked = {q["key"]: q for q in w.call("post_info", CAPTION, TAGS)["platforms"]}["tiktok"]
+        self.assertEqual((asked["blocked"]["reason"], asked["again"]), ("unknown", True))
+
     def test_a_job_reelforge_lost_track_of_takes_your_word(self):
         w = self.window()
         made = self.post(w, "tiktok", "youtube")

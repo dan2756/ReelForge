@@ -654,6 +654,44 @@ class Posting(ApiPosting):
         row = self.rows(w)["youtube"]
         self.assertEqual((row["state"], row["via"], row["actions"]), ("posted", "api", ["post_again"]))  # no link
 
+    def test_a_cancel_that_arrives_with_the_last_piece_on_its_way_ends_nothing(self):
+        """The row still showed Cancel (the window redraws once a second) when the last piece went out. A job that
+        click freed would be offered again as if nothing had been sent, with the video maybe up: a second one."""
+        w = self.window()
+        w.call("tab_opened", "publish")
+        w.call("pick_file", str(self.video))
+        at_google, let_go = threading.Event(), threading.Event()
+        self.addCleanup(let_go.set)
+
+        def last_piece(before: int) -> None:
+            if before == 3:  # the fourth of four pieces: YouTube makes the video with it
+                at_google.set()
+                let_go.wait(10)
+
+        self.google.script, self.google.then, self.google.on_put = [None, None, None, "lost"], "drop", last_piece
+        job_id = self.api_post(w)["jobs"][0]["id"]
+        self.assertTrue(at_google.wait(10))
+        self.assertEqual(posting.get(job_id)["state"], "posting")
+        w.forget()
+        w.call("post_action", job_id, "cancel")
+        self.assertEqual(posting.get(job_id)["state"], "posting")
+        self.assertEqual(w.toasts()[-1], "The last piece of the video is already on its way, so this can't be "
+                                         "called off any more. Its row says how it ended.")
+        w.call("post_action", job_id, "not_posted")  # nor is "It didn't post" anyone's to say yet
+        self.assertEqual(posting.get(job_id)["state"], "posting")
+        let_go.set()
+        self.google.on_put = None
+        self.assertEqual(self.over(w, job_id)["state"], "unknown")  # the answer was lost: nobody knows
+        self.assertEqual(len(self.google.videos), 1)
+        row = self.rows(w)["youtube"]
+        self.assertEqual((row["state"], row["actions"]), ("unknown", ["mark_posted", "not_posted"]))
+        info = w.call("youtube_api_info", CAPTION, TAGS)
+        self.assertEqual((info["blocked"]["reason"], info["force"]), ("unknown", True))  # only as a post again
+        self.google.script, self.google.then = [], None
+        again = w.call("post_with_api", CAPTION, TAGS, "", False, self.yes_to(info))
+        self.assertEqual((again["started"], [b["reason"] for b in again["blocked"]]), (False, ["unknown"]))
+        self.assertEqual(len(self.google.videos), 1)
+
     def test_on_the_publish_tab_the_row_says_how_it_ended_and_no_pop_up_covers_it(self):
         """A pop-up with the row's own words sat on the row's buttons for twenty seconds. With the Publish tab
         open on that video, the row says it. Anywhere else the pop-up is how you hear of it."""
@@ -1251,6 +1289,11 @@ class AfterAQuit(ApiPosting):
             youtube_api_tab.run(job["id"])
         return posting.get(job["id"])
 
+    def refused_as_pressed(self, job: dict) -> None:
+        with self.assertRaises(posting.Refused) as caught:
+            posting.resolve(job["id"], False)
+        self.assertEqual(caught.exception.code, "pressed")
+
     def test_before_the_last_piece_the_job_is_left_uploading_with_its_session_on_file(self):
         job = self.quit_before_the_last_piece()
         self.assertEqual((job["state"], round(job["progress"], 2)), ("uploading", round(2000 / SIZE, 2)))
@@ -1397,6 +1440,11 @@ class AfterAQuit(ApiPosting):
 
     def test_a_post_that_finished_after_its_job_was_called_off_still_counts_as_up(self):
         job = self.quit_on_the_last_piece()
+        # While the last piece is on its way nobody can call the job off (posting.advance). The clock can stop
+        # waiting for it, and from then on the answer is yours.
+        self.refused_as_pressed(job)
+        self.age(job, 16)
+        self.assertEqual(posting.expire_stale(), 1)
         posting.resolve(job["id"], False)  # "It didn't post", said too soon
         made = {"id": "vid00000001", "privacy": "private", "made_for_kids": False, "upload_status": "uploaded",
                 "reason": "", "channel_id": CHANNEL["id"], "channel_title": CHANNEL["title"]}

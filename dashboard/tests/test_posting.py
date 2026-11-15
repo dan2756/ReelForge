@@ -678,6 +678,101 @@ class Pressing(LedgerTest):
         posting.grant_press(job["id"], CHROME)
         self.assertEqual(posting.advance(job["id"], "failed", by="app", error_code="timeout")["state"], "failed")
 
+    def posts_on_file(self) -> list[str]:
+        with db.connect() as c:
+            return [r[0] for r in c.execute("SELECT post_id FROM posts ORDER BY post_id")]
+
+    def test_a_cancel_cannot_take_a_press_back(self):
+        # The window's Cancel on a row drawn a second ago, arriving after the extension was let to press. The click
+        # is on its way to the platform: a job that Cancel freed would be tried again, and the post's own news
+        # would find a job that is over and be dropped.
+        self.earlier_post()
+        job = self.walk(self.job(press=True), *STEPS)
+        posting.grant_press(job["id"], CHROME)
+        said = self.refused("pressed", posting.cancel, job["id"], "you cancelled it")
+        self.assertEqual(said.message, "Post was already pressed for this one. Check your profile there, then say "
+                                       "whether it posted.")
+        self.assertEqual(self.state(job), "posting")
+        self.refused("bad_transition", posting.retry, job["id"], self.cfg)
+        link = "https://www.tiktok.com/@me/video/7300000000000000009"
+        done = posting.advance(job["id"], "posted", install=CHROME, post_id="7300000000000000009", url=link)
+        self.assertEqual((done["state"], done["url"]), ("posted", link))
+        self.assertEqual(self.posts_on_file(), ["7300000000000000009"])
+
+    def test_news_of_the_post_after_you_said_it_did_not_post_is_not_dropped(self):
+        # "It didn't post" while the browser is still waiting for the platform's sign, and then the sign comes.
+        self.earlier_post()
+        job = self.walk(self.job(press=True), *STEPS)
+        posting.grant_press(job["id"], CHROME)
+        self.assertEqual(posting.resolve(job["id"], False)["state"], "cancelled")
+        self.refused("not_yours", posting.advance, job["id"], "posted", install=EDGE)
+        link = "https://www.tiktok.com/@me/video/7300000000000000009"
+        back = posting.advance(job["id"], "posted", install=CHROME, step="confirm", post_id="7300000000000000009",
+                               url=link)
+        self.assertEqual((back["state"], back["post_id"], back["url"], back["detail"], back["superseded"]),
+                         ("unknown", "7300000000000000009", link,
+                          "the browser saw it posted after you said it didn't", 0))
+        (block,) = self.batch(press=True)["blocked"]  # nothing posts it there again until you have looked
+        self.assertEqual((block["reason"], block["job"]), ("unknown", job["id"]))
+        self.assertEqual(self.posts_on_file(), [])
+        self.assertEqual(posting.resolve(job["id"], True)["state"], "posted")
+        self.assertEqual(self.posts_on_file(), ["7300000000000000009"])
+
+    def test_news_of_the_post_after_another_try_was_started_waits_behind_that_try(self):
+        self.earlier_post()
+        job = self.walk(self.job(press=True), *STEPS)
+        posting.grant_press(job["id"], CHROME)
+        posting.resolve(job["id"], False)
+        (again,) = posting.retry(job["id"], self.cfg)["jobs"]  # Try again, pressed before the browser's news came
+        back = posting.advance(job["id"], "posted", install=CHROME)
+        self.assertEqual((back["state"], back["superseded"]), ("unknown", 1))
+        self.assertEqual(posting.current(posting.recent())["tiktok"]["id"], again["id"])
+        posting.cancel(again["id"], "you cancelled it")  # that try ends without a post: the question stands again
+        now = posting.get(job["id"])
+        self.assertEqual((now["state"], now["superseded"]), ("unknown", 0))
+        (block,) = self.batch()["blocked"]
+        self.assertEqual((block["reason"], block["job"]), ("unknown", job["id"]))
+
+    def test_a_job_nobody_pressed_post_for_stays_over(self):
+        job = self.walk(self.job(), *STEPS)
+        self.assertFalse(posting.pressed(job["id"]))
+        self.assertEqual(posting.cancel(job["id"], "you cancelled it")["state"], "cancelled")
+        self.refused("bad_transition", posting.advance, job["id"], "posted", install=CHROME)
+        self.assertEqual(self.state(job), "cancelled")
+
+    def test_your_own_press_in_the_tab_is_a_press_too(self):
+        # The extension saw you press the platform's own button and says so: the step "press" under the state the
+        # job is in. From then on the job is treated as one that was pressed for you.
+        for at in ("uploading", "filling", "ready"):  # (YouTube takes a press while the video is still going up)
+            self.video.write_bytes(f"pressed while {at}".encode())
+            job = self.walk(self.job("youtube"), *STEPS[:STEPS.index(at) + 1])
+            self.assertFalse(posting.pressed(job["id"]))
+            told = posting.advance(job["id"], at, install=CHROME, step="press")
+            self.assertEqual((told["state"], told["step"]), (at, "press"))
+            self.assertTrue(posting.pressed(job["id"]))
+            self.refused("pressed", posting.cancel, job["id"], "you cancelled it")
+            self.assertEqual(self.state(job), at)
+            if at == "uploading":  # the browser gives up: nobody is sure, and nothing is free for a second try
+                said = posting.advance(job["id"], "failed", install=CHROME, error_code="hook_not_found")
+                self.assertEqual(said["state"], "unknown")
+            elif at == "filling":  # yours to say either way, though the post was never called ready
+                self.assertEqual(posting.resolve(job["id"], True)["state"], "posted")
+            else:
+                self.assertEqual(posting.resolve(job["id"], False)["state"], "cancelled")
+                self.assertEqual(posting.advance(job["id"], "posted", install=CHROME)["state"], "unknown")
+
+    def test_an_upload_through_an_api_cannot_be_called_off_once_its_last_piece_is_on_its_way(self):
+        job = self.job("youtube", via={"youtube": "api"}, options={"youtube": {"privacy": "private"}})
+        posting.advance(job["id"], "uploading", by="app")
+        posting.advance(job["id"], "posting", by="app")
+        for call in (lambda: posting.cancel(job["id"], "you cancelled it"), lambda: posting.resolve(job["id"], False)):
+            said = self.refused("pressed", call)
+            self.assertEqual(said.message, "The last piece of the video is already on its way, so this can't be "
+                                           "called off any more. Its row says how it ended.")
+        self.assertEqual(self.state(job), "posting")
+        self.assertEqual(posting.advance(job["id"], "unknown", by="app")["state"], "unknown")
+        self.assertEqual(posting.resolve(job["id"], False)["state"], "cancelled")  # once nobody is sending it
+
     def test_two_asks_at_once_get_one_grant(self):
         self.earlier_post()
         job = self.walk(self.job(press=True), *STEPS)

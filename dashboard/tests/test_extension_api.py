@@ -903,6 +903,37 @@ class Jobs(ApiTest):
         self.event(x, "ready")
         self.assertEqual(self.post(f"/v1/jobs/{x['id']}/press").json["error"], "press_not_allowed")  # never on X
 
+    def test_news_that_a_pressed_post_is_up_is_taken_after_the_window_ended_its_job(self):
+        first = self.job()
+        self.post(f"/v1/jobs/{first['id']}/claim")
+        self.event(first, "ready")
+        self.event(first, "posted")
+        video = self.root / "videos" / "ep02.mp4"
+        video.write_bytes(b"the second video")
+        job = self.job(video=video, press=True)
+        self.post(f"/v1/jobs/{job['id']}/claim")
+        self.event(job, "ready")
+        self.assertEqual(self.post(f"/v1/jobs/{job['id']}/press").status, 200)
+        with self.assertRaises(posting.Refused):  # the window's Cancel, arriving after the grant
+            posting.cancel(job["id"], "you cancelled it")
+        posting.resolve(job["id"], False)  # "It didn't post", while the browser still waits for TikTok's sign
+        up = self.event(job, "posted", step="confirm", post_id="7300000000000000009", url=TIKTOK_URL)
+        self.assertEqual((up.status, up.json["state"], up.json["post_id"], up.json["url"]),
+                         (200, "unknown", "7300000000000000009", TIKTOK_URL))  # not a 409 the extension drops
+        page = extension_api.page_job(posting.get(job["id"]), "TikTok", {})
+        self.assertEqual((page["line"], page["tone"]), ("ReelForge can't tell whether this posted", "ask"))
+        # The extension's word that you pressed the platform's own button goes the same way.
+        own = self.job("youtube", video=video)
+        self.post(f"/v1/jobs/{own['id']}/claim")
+        self.event(own, "ready", step="ready")
+        told = self.event(own, "ready", step="press")
+        self.assertEqual((told.status, told.json["state"], told.json["step"]), (200, "ready", "press"))
+        page = extension_api.page_job(posting.get(own["id"]), "YouTube", {})
+        self.assertEqual((page["line"], page["note"], page["tone"]),
+                         ("You pressed it in the YouTube tab: waiting for YouTube to say it's up", "", "busy"))
+        gone = self.event(own, "failed", error_code="tab_closed")
+        self.assertEqual((gone.status, gone.json["state"]), (200, "unknown"))
+
     def test_the_selectors_are_served_as_data(self):
         self.assertEqual(self.get("/v1/selectors").json, {"version": 7, "platforms": {}})
         (self.folder / "selectors.json").write_text("[1]", "utf-8")

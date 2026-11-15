@@ -126,6 +126,10 @@ each platform, and a video that is up somewhere is not posted there again unless
 again…** on its row. A video is known by its content, not its file name, so a renamed copy counts as the same
 video.
 
+Once the platform's button was pressed, by you in the tab or for you, the row has no **Cancel** any more: a press
+can't be taken back. It says that it is waiting for the platform, and asks **It's posted** or **It didn't post**.
+If you say it didn't post and the extension then sees the post go up, the row asks "did it post?" again.
+
 If the extension is not in the browser that opened the page, the page says so, shows the set-up steps, and has a
 **Post by hand** button for each platform. That button does what the buttons under **BY HAND** on the Publish tab
 do: it copies the text, shows the file and opens the upload page.
