@@ -20,8 +20,9 @@ post_jobs_one_live holds that even between two windows). Posting again takes say
 row aside as superseded.
 
 Everything here is a plain function on the database dashboard.db has open, so the window, the local server for the
-extension and the tests all drive the same code. Each change is one transaction, leaves a row in post_events and
-counts as a change every open window shows (db.bump).
+extension and the tests all drive the same code. Each change of state is one transaction, leaves a row in post_events
+and counts as a change every open window shows (db.bump). The percent of an upload going by is lighter: it is kept
+on the job's row and moves only the count a window watches for its posting view (signature).
 """
 
 from __future__ import annotations
@@ -481,6 +482,7 @@ def expire_stale(now: datetime | None = None) -> int:
     rules = (("queued", "created_at", QUEUED_FOR, "expired", "not picked up in time"),
              ("ready", "updated_at", READY_FOR, "unknown", "no word since it was ready to post"),
              ("posting", "updated_at", POSTING_FOR, "unknown", "no confirmation after Post was pressed"))
+
     def stale(c: sqlite3.Connection) -> list[tuple[dict, str, str]]:
         found = []
         for state, column, limit, to, detail in rules:
