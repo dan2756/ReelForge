@@ -55,21 +55,6 @@ def _note(env: str, text: str) -> None:
             f.write(text + "\n")
 
 
-if ASKED.get("job_problem"):
-    # A job that is off says nothing about its last read (settings_tab.py kept_note), so this one is on: made up, as
-    # in job_preload.py, with the reelforge command and the icon made up beside it. Nothing here can change them.
-    from studio import command, shortcut, stats_schedule
-    from studio import paths as P
-
-    def _never(*args, **kwargs):
-        raise RuntimeError("the tests never change this computer")
-
-    P.test_copy = P.dry_system = lambda: False
-    stats_schedule.status = command.status = lambda: "on"
-    stats_schedule.enable = stats_schedule.disable = command.enable = command.disable = shortcut.make = _never
-    shortcut.label = lambda: ("Desktop shortcut", "a ReelForge icon on your desktop", "double-click to open ReelForge")
-    shortcut.ours = lambda: True
-
 desktop.open_url = lambda url: _note("REELFORGE_OPENED", url) or True  # as a browser that opened would answer
 desktop.copy = lambda text: _note("REELFORGE_COPIED", text + "\n-- copied --") or True
 desktop.reveal = lambda path: _note("REELFORGE_OPENED", f"reveal {Path(path).name}")

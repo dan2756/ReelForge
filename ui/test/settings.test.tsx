@@ -562,15 +562,16 @@ describe("Background refresh on a channel that's set up", () => {
   })
 
   test("a problem with the hourly job's last read is drawn as a warning, and can be read to its end", async () => {
-    // (ui/test/posting_preload.py: the same channel, with the hourly job on and its last read marked as having had
-    // a problem. A job that is off says nothing about its last read.)
+    // (ui/test/job_preload.py: the made-up job, which is on, with its last read marked as having had a problem. A
+    // window that leaves the computer alone, as the other tests' windows do, has no job that is on, and nothing is
+    // said about the last read of a job that's off.)
     tmp = mkdtempSync(join(tmpdir(), "reelforge-job-"))
-    const h = (open = await headless("dashboard", { tab: "settings" }, 84, 70, {
-      REELFORGE_BRIDGE_PRELOAD: join(ROOT, "ui", "test", "posting_preload.py"),
+    const h = (open = await headless("dashboard", { tab: "settings" }, 100, 72, {
+      REELFORGE_BRIDGE_PRELOAD: join(ROOT, "ui", "test", "job_preload.py"),
       REELFORGE_TEST_ROOT: tmp,
-      REELFORGE_TEST_POSTING: JSON.stringify({ job_problem: true }),
+      REELFORGE_TEST_JOB: "problem",
     }))
-    await until(h, "its last read, 0m ago, had a problem")
+    await until(h, "had a problem (see data/refresh.log)")
     const hex = (c: { toInts(): [number, number, number, number] }) => "#" + c.toInts().slice(0, 3).map((v) => v.toString(16).padStart(2, "0")).join("")
     /** The colour of the text on the row that has these words. */
     const colour = (words: string) => {
@@ -581,11 +582,17 @@ describe("Background refresh on a channel that's set up", () => {
     expect(colour("closes ReelForge and opens it again")).toBe(DASH.muted) // a row with nothing wrong
     // In a window too narrow for it, the warning goes on under itself instead of being cut at the panel's edge.
     const rows = frame(h).split("\n")
-    const y = find(h, "its last read, 0m ago, had a problem")![1]
+    const y = find(h, "its last read, 0m ago, had a problem (see data/refresh.log)")![1]
     expect(rows[y - 1]).toContain("Background refresh")
-    const said = rows.slice(y, y + 3).map((r) => r.replace("┃", "").trim()).join(" ")
-    expect(said.replace("data/ refresh", "data/refresh")).toContain("its last read, 0m ago, had a problem (see data/refresh.log) · on: your stats update every hour, even with ReelForge closed")
-    expect(colour("even with ReelForge closed")).toBe(DASH.warn) // its end, two rows on
+    expect(rows[y + 1]).toContain("ReelForge closed") // the end of "on: your stats update …", on the next row
+    expect(colour("ReelForge closed")).toBe(DASH.warn)
+    // Switched off, the row says it's off and nothing about what the job last did.
+    const [sx, sy] = find(h, "━━━▐█▌ On")!
+    await h.t.mockMouse.click(sx + 4, sy)
+    await until(h, "off: your stats update only while ReelForge is open")
+    expect(job()).toBe("off")
+    expect(frame(h)).not.toContain("had a problem")
+    expect(colour("off: your stats update only")).toBe(DASH.muted)
   })
 })
 

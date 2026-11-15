@@ -1,14 +1,16 @@
-"""For the Settings tab's Background refresh switch test (ui/test/settings.test.tsx): settings_preload.py's channel in a
+"""For the Settings tab's Background refresh tests (ui/test/settings.test.tsx): settings_preload.py's channel in a
 scratch folder (REELFORGE_TEST_ROOT), on a computer ReelForge may change, with the hourly job made up: whether it's on
 is kept in job.txt in that folder, so the test can see it, and turning it on or off takes a moment, as Windows' task
-scheduler does. Nothing here touches this computer: the reelforge command and the icon are made up too, and changing
-either of them fails."""
+scheduler does. With REELFORGE_TEST_JOB=problem its last read of the channel's stats had a problem, just now. Nothing
+here touches this computer: the reelforge command and the icon are made up too, and changing either of them fails."""
 
 import os
 import runpy
 import time
 from pathlib import Path
 
+from dashboard import __main__ as entry
+from dashboard import db
 from studio import command, shortcut, stats_schedule
 from studio import paths as P
 
@@ -35,3 +37,13 @@ command.status = lambda: "on"
 command.enable = command.disable = shortcut.make = never
 shortcut.label = lambda: ("Desktop shortcut", "a ReelForge icon on your desktop", "double-click to open ReelForge")
 shortcut.ours = lambda: True
+
+if os.environ.get("REELFORGE_TEST_JOB") == "problem":
+    opened = entry.load_platforms
+
+    def load_platforms(*args, **kwargs):
+        out = opened(*args, **kwargs)  # (the channel's stats are open from here on)
+        db.set_meta("job", {"at": db.now_iso(), "read": "nothing due", "problems": 1})  # as the job itself notes it
+        return out
+
+    entry.load_platforms = load_platforms
