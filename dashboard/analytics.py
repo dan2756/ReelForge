@@ -207,16 +207,6 @@ def post_curve(post: dict, parsed: Series) -> tuple[list[float], list[float]]:
     return xs, ys
 
 
-def interp(xs: list[float], ys: list[float], x: float) -> float:
-    i = bisect_left(xs, x)
-    if i <= 0:
-        return ys[0]
-    if i >= len(xs):
-        return ys[-1]
-    x0, x1 = xs[i - 1], xs[i]
-    return ys[i - 1] + (ys[i] - ys[i - 1]) * ((x - x0) / (x1 - x0) if x1 > x0 else 1)
-
-
 # --- matching the same video across platforms -------------------------------------------
 
 # Titles in a series read alike ("What if your <X> doubled every <N> second(s)?"), so whole captions are mostly the

@@ -208,7 +208,8 @@ def _record(db: sqlite3.Connection, platform: str, account, posts: list, ts: str
           ts, p.views, p.likes, p.comments, p.shares, p.saves) for p in posts],
     )
     db.executemany(
-        "INSERT INTO post_stats VALUES (?,?,?,?,?,?,?,?)",
+        """INSERT INTO post_stats (platform, post_id, ts, views, likes, comments, shares, saves)
+           VALUES (?,?,?,?,?,?,?,?)""",
         [(platform, p.post_id, ts, p.views, p.likes, p.comments, p.shares, p.saves) for p in posts],
     )
     # Typed-in numbers (manual-<episode> posts) and the platform's own posts are never added together.
@@ -236,7 +237,7 @@ def _record(db: sqlite3.Connection, platform: str, account, posts: list, ts: str
                     ORDER BY ts DESC LIMIT 1""", (platform, ts)).fetchone() or [None])[0]
         counts.append(given)
     db.execute(
-        "INSERT INTO account_stats VALUES (?,?,?,?,?,?,?)",
+        "INSERT INTO account_stats (platform, ts, handle, followers, views, likes, posts) VALUES (?,?,?,?,?,?,?)",
         (platform, ts, account.handle, counts[0], *totals, counts[1]),
     )
 
@@ -260,14 +261,6 @@ def latest_accounts() -> dict[str, sqlite3.Row]:
                WHERE ts = (SELECT MAX(ts) FROM account_stats WHERE platform = a.platform)"""
         ).fetchall()
     return {r["platform"]: r for r in rows}
-
-
-def account_before(platform: str, ts: str) -> sqlite3.Row | None:
-    with connect() as db:
-        return db.execute(
-            "SELECT * FROM account_stats WHERE platform = ? AND ts <= ? ORDER BY ts DESC LIMIT 1",
-            (platform, ts),
-        ).fetchone()
 
 
 def account_series(platform: str, since: str) -> list[sqlite3.Row]:
@@ -322,14 +315,14 @@ def get_meta(key: str, default=None, conn: sqlite3.Connection | None = None):
 
 def set_meta(key: str, value) -> None:
     with connect() as db:
-        db.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", (key, json.dumps(value)))
+        db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, json.dumps(value)))
 
 
 def bump() -> int:
     """Count a change every ReelForge window shows (new stats, an episode, an upload, a hidden video): a window that
     sees the count go up reloads (app.ReelForge.keep_in_step). Returns the new count."""
     with connect() as db:
-        db.execute("""INSERT INTO meta VALUES ('changes', '1')
+        db.execute("""INSERT INTO meta (key, value) VALUES ('changes', '1')
                       ON CONFLICT (key) DO UPDATE SET value = CAST(value AS INTEGER) + 1""")
         return int(db.execute("SELECT value FROM meta WHERE key = 'changes'").fetchone()[0])
 
