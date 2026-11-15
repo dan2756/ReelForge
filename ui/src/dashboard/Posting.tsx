@@ -65,7 +65,9 @@ export function PostBlock() {
   const stuck = v && picked && !demo && !v.can_post && !v.setup && v.rows.length && !plain(v.review.line).includes(v.why) ? v.why : ""
   const nameWidth = Math.max(0, ...(v?.rows ?? []).map((r) => cellLen(r.name))) + 2
   const [width, measure] = useWidth()
-  // The extension's line folds to its first words beside the button; where even those don't fit, it wraps instead.
+  // The extension's line folds to its first words beside the button. Where even those don't fit, they wrap, and only
+  // they: the browser's name and when it was last seen are in the extension's dialog, and wrapped here in a column
+  // 18 wide they took six rows and pushed BY HAND off a window 100 columns by 30.
   const line = v?.extension.line ?? []
   const browsers = Boolean(v && v.extension.state !== "off" && !problem)
   const fits = segsLen(line.slice(0, 1)) <= width - POST_BUTTON - (browsers ? BROWSERS_BUTTON : 0)
@@ -88,7 +90,7 @@ export function PostBlock() {
       ) : null}
       <box flexDirection="row" marginTop={1} flexShrink={0} gap={2}>
         <Button id="post-go" label="Post…" variant="primary" disabled={!enabled} onPress={press} />
-        {stuck || problem || !fits ? <Wrapped segs={stuck || problem ? [[stuck || problem, DASH.warn]] : line} /> : <Fitted parts={foldable(line)} flexGrow={1} />}
+        {stuck || problem || !fits ? <Wrapped segs={stuck || problem ? [[stuck || problem, DASH.warn]] : line.slice(0, 1)} /> : <Fitted parts={foldable(line)} flexGrow={1} />}
         {/* the extension's dialog, for the keyboard too (its line is a click away already) */}
         {browsers ? <Button id="ext-browsers" label="Browsers…" variant="ghost" onPress={() => s.set({ dialog: { kind: "extension" } })} /> : null}
       </box>

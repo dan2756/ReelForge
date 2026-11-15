@@ -160,6 +160,25 @@ describe("where each post stands", () => {
     for (const text of ["POST  ✓ QA passed", "TikTok     ○ not posted", "X          ○ not posted", "▐ Post… ▌", "○ Browser extension not connected", "BY HAND", "▐ Open all 4 → ▌", "Show file", "TikTok →", "YouTube →", "Instagram →", "X →", "Copy TikTok text", "Copy YouTube hashtags", "Copy Instagram text"])
       expect(f).toContain(text)
   })
+
+  test("in a window 100 columns by 30 rows a connected extension's line keeps to its first words, and BY HAND stays in view", async () => {
+    // Between 96 and about 106 columns the words don't fit beside Post… and Browsers… in one row. Wrapped whole, with
+    // the browser's name and when it was last seen, they took six rows there and left only BY HAND's heading in view.
+    for (const how of ["on", "waiting"]) {
+      const h = await kit({ extension: how }, [100, 30])
+      const rows = frame(h).split("\n")
+      const post = rows.findIndex((r) => r.includes("▐ Post… ▌"))
+      expect(rows[post]).toMatch(/▐ Post… ▌ +● Browser extension +Browsers…/)
+      expect(rows[post + 1]).toMatch(/┃ +connected +$/)
+      expect(rows.findIndex((r) => r.includes("BY HAND"))).toBe(post + 3) // the words' two rows, and the space under them
+      for (const text of ["Chrome on this PC", "v0.1.0", "seen ", "wakes up"]) expect(frame(h)).not.toContain(text) // in its dialog
+      for (const text of ["▐ Open all 4 → ▌", "Show file", "TikTok →", "YouTube →", "Instagram →", "Copy TikTok text", "Copy YouTube hashtags", "Copy Instagram text"])
+        expect(frame(h)).toContain(text)
+      await open?.close()
+      open = null
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
 })
 
 describe("Post…", () => {
