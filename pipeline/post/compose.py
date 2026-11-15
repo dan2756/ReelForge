@@ -17,6 +17,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config  # noqa: E402
+import framecache  # noqa: E402
 import overlay  # noqa: E402
 
 W, H = config.WIDTH, config.HEIGHT
@@ -163,6 +164,27 @@ class Episode:
         ok = [y for y in cands if lo <= y <= hi and overlap(y) == 0]
         return ok[0] if ok else min((y for y in cands if lo <= y <= hi), key=overlap, default=y0)
 
+    def need_frames(self, step, numbers):
+        """Stop, before anything is written, unless these frames (numbered from 1) are on disk, whole, and rendered
+        from the scene build/scene.blend holds now. Frames of an older scene look like any others, and a video made
+        from them would carry the new counter and sound over the old picture."""
+        state, what = framecache.frames_state(self.dir / "build")
+        if state == "unbuilt":
+            raise SystemExit(f"{step}: the last build did not finish, so the frames and build/series.json may not "
+                             "belong together. Run --steps build, then --steps render.")
+        if state in ("changed", "unstamped"):
+            raise SystemExit(f"{step}: the frames in build/frames {framecache.why(state, what)}.\n"
+                             "  Render first: --steps render --rerender all, or --rerender SECONDS for the shots "
+                             "that changed,\n  or --keep-frames if the picture is the same.")
+        swept = framecache.sweep_empty(self.frames_dir)
+        if swept:
+            print(f"  removed {len(swept)} empty or cut-off frames that a stopped render left behind", flush=True)
+        gone = framecache.ranges(set(numbers) - framecache.present(self.frames_dir))
+        if gone:
+            verb = "is" if framecache.count(gone) == 1 else "are"
+            raise SystemExit(f"{step}: {framecache.describe(gone, self.fps)} {verb} not rendered. "
+                             "Run --steps render (it carries on with what is missing).")
+
     def world(self, idx):
         """Rendered frame (0-based index) as an RGB array, or black past the render range."""
         if idx >= self.rendered:
@@ -274,6 +296,7 @@ def make_video(ep):
     final.mkdir(exist_ok=True)
     out = final / f"{ep.spec['id']}.mp4"
     audio = ep.dir / "build" / "audio.wav"
+    ep.need_frames("video", range(1, ep.rendered + 1))
     cmd = [config.FFMPEG, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
            "-r", str(ep.fps), "-i", "-"]
     if audio.exists():
@@ -294,6 +317,7 @@ def make_video(ep):
 def make_cover(ep):
     c = ep.spec["cover"]
     idx = int(round(c["time"] * ep.fps))
+    ep.need_frames("cover", [idx + 1] if idx < ep.rendered else [])
     base = Image.fromarray(ep.world(idx))
     img = overlay.draw_cover(base, c["kicker"], c["keyword"], c.get("tail", ""), ep.brand if c.get("brand") else None)
     if ep.spec.get("demo"):
