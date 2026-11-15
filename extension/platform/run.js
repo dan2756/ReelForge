@@ -29,7 +29,7 @@ void (async () => {
       rf.stopped = true
       clearInterval(alive)
       rf.unoutline()
-      rf.say("Stopped", "bad", message.message || "")
+      rf.say(message.posted ? "Posted" : "Stopped", message.posted ? "good" : "bad", message.message || "")
       resume?.()
     }
   })

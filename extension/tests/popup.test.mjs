@@ -225,7 +225,7 @@ export const tests = {
     await until("the row to go", async () => (await popup.locator("[data-job]").count()) === 0)
   },
 
-  async "a post nobody could confirm says so, and where to answer"({ app, site, browser, video }) {
+  async "a post nobody could confirm says so and where to answer, and stops asking once ReelForge has the answer"({ app, site, browser, video }) {
     site.mode.tiktok = "mute"
     const { job, tab } = await toReady({ app, browser }, "tiktok", video())
     await tab.locator("[data-e2e=post_video_button]").click()
@@ -239,6 +239,10 @@ export const tests = {
     ok(words.includes("no confirmation was seen"), `what happened (${words})`)
     ok(words.includes("Check your TikTok profile. Then tell ReelForge whether it posted, on its Publish tab."), `what to do (${words})`)
     equal(await row.locator(".chip").textContent(), "not sure", "the state chip")
+    // The answer is given in ReelForge ("It didn't post"). The popup takes it and stops asking.
+    Object.assign(job, { state: "cancelled", detail: "you said it didn't post" })
+    await until("the popup to take ReelForge's word", async () => (await row.locator(".chip").textContent()) === "cancelled", 20000)
+    ok(!(await text(row)).includes("tell ReelForge whether it posted"), `what the row says now (${await text(row)})`)
   },
 
   async "two channels open: the popup offers both and follows the choice"({ app, browser, video }) {

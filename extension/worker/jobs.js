@@ -219,10 +219,11 @@ function unsure(job) {
     `Post was pressed on ${platformName(job.platform)} and no confirmation was seen. Check your profile before you post again.`)
 }
 
-async function stopTab(job, message) {
+// `posted`: the job is over because ReelForge has the post as up, which the note says in place of "Stopped".
+async function stopTab(job, message, posted = false) {
   if (job.tabId == null) return
   try {
-    await chrome.tabs.sendMessage(job.tabId, { t: "stop", message })
+    await chrome.tabs.sendMessage(job.tabId, { t: "stop", message, posted })
   } catch {
     // No script is listening there: the tab is closed or showing another page.
   }
@@ -596,6 +597,8 @@ export async function nudge() {
   for (const job of await allJobs()) {
     if (isLive(job)) await sync(job)
     else if (job.outbox.length) await resend(job.id)
+    // "Not sure" is settled in ReelForge. Once it is, the popup must not go on asking for the answer.
+    else if (job.state === "unknown") await sync(job)
   }
 }
 
@@ -636,11 +639,12 @@ async function watch(job, now) {
 }
 
 // Sends what is waiting and takes the app's word when it has already ended the job (cancelled in the window,
-// expired, answered by the person there).
+// expired, answered by the person there, found by a stats read). A job nobody was sure of ends here as "not
+// sure" and is settled only in ReelForge, so for that one the app's later word is taken too.
 async function sync(job) {
   await locked(job.id, async () => {
     const fresh = await getJob(job.id)
-    if (!fresh || isFinal(fresh.state)) return
+    if (!fresh || (isFinal(fresh.state) && fresh.state !== "unknown")) return
     await flush(fresh)
     let theirs = null
     try {
@@ -649,7 +653,7 @@ async function sync(job) {
     } catch {
       fresh.offline = true
     }
-    if (theirs && isFinal(theirs.state)) {
+    if (theirs && isFinal(theirs.state) && theirs.state !== fresh.state) {
       Object.assign(fresh, {
         state: theirs.state, detail: theirs.detail ?? fresh.detail, error_code: theirs.error_code ?? null,
         error_message: theirs.error_message ?? null, post_id: theirs.post_id ?? fresh.post_id, url: theirs.url ?? fresh.url,
@@ -657,7 +661,9 @@ async function sync(job) {
       })
       await save(fresh)
       await remember(fresh)
-      await stopTab(fresh, "This post was ended in ReelForge.")
+      // Ended there can also mean it is up: the person said so in ReelForge, or a stats read found the post.
+      const up = theirs.state === "posted"
+      await stopTab(fresh, up ? "ReelForge has this post as posted." : "This post was ended in ReelForge.", up)
       return
     }
     await save(fresh)

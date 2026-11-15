@@ -429,6 +429,12 @@ export const tests = {
     const job = await t.app.job(jobs.youtube)
     equal([job.state, job.error_code], ["unknown", "unknown_outcome"], "the job at ReelForge")
     equal((await t.browser.jobRecord(jobs.youtube)).outbox, [], "nothing is left unsaid in the browser")
+    // "It's posted", said in ReelForge, is the popup's answer too: it stops asking.
+    const popup = await t.browser.popup()
+    const card = popup.locator(`[data-job="${jobs.youtube}"]`)
+    await until("the popup to show the post nobody is sure of", async () => (await card.locator(".chip").textContent().catch(() => "")) === "not sure")
+    equal(await t.app.ask("resolve", { id: jobs.youtube, posted: true }), "posted", "the person's \"It's posted\"")
+    await until("the popup to take ReelForge's word", async () => (await card.locator(".chip").textContent()) === "posted", 20000)
   },
 
   async "a video replaced after Post was pressed is not attached"(t) {

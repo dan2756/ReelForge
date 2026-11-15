@@ -272,4 +272,15 @@ export const tests = {
     ok((await tab.locator(FINAL).evaluate(el => getComputedStyle(el).outlineStyle)) === "none", "the outline is gone")
     await popup.close()
   },
+
+  async "a post ReelForge has as posted says so in its tab, not that it was stopped"(t) {
+    const { job, tab } = await toReady(t, "tiktok", t.video())
+    // The person says "It's posted" in ReelForge, or a stats read finds the post.
+    Object.assign(job, { state: "posted", detail: "you said it's posted" })
+    const popup = await t.browser.popup()
+    await until("the browser to take the app's word", async () => (await t.browser.jobRecord(job.id)).state === "posted")
+    await until("the note to say so", async () => (await note(tab)).line === "Posted")
+    equal(await note(tab), { tone: "good", line: "Posted", more: "ReelForge has this post as posted." }, "the note")
+    await popup.close()
+  },
 }
