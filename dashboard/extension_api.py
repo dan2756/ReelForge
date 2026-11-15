@@ -89,6 +89,9 @@ POST_HOSTS = {"tiktok": ("tiktok.com",), "youtube": ("youtube.com", "youtu.be"),
 # What each platform calls its own last button.
 BUTTONS = {"tiktok": "Post", "youtube": "Publish (or Save)", "instagram": "Share", "x": "Post"}
 BY_HAND = ("queued", "expired", "failed", "cancelled")  # the states the local page's by-hand button is for
+# The failures after which there may be no tab to finish in (it was closed, never opened, or has no video on it).
+# The page then says to start again, and whether a tab is still open is left to the extension's own sentence.
+NO_TAB = ("tab_closed", "timeout", "extension_outdated", "app_unreachable", "changed")
 
 clock = time.monotonic  # (the tests move it on)
 _store_lock = threading.Lock()
@@ -378,7 +381,8 @@ def page_job(job: dict, name: str, handles: dict[str, str]) -> dict:
         why = posting.failure(job, name)
         if why:  # the extension's own sentence, or ours for its code: one sentence either way
             why = why[:1].upper() + why[1:] + ("" if why[-1] in ".!?" else ".") + " "
-        note = why + "You can finish in the tab that is open, or press Post by hand."
+        note = why + ("Start it again from ReelForge, or press Post by hand." if job["error_code"] in NO_TAB
+                      else "You can finish in the tab that is open, or press Post by hand.")
     elif stands == "unknown":
         words, tone = "ReelForge can't tell whether this posted", "ask"
         note = (f"Check {name} before trying again. Then say on ReelForge's Publish tab whether it posted. "
@@ -976,7 +980,9 @@ class Handler(BaseHTTPRequestHandler):
             if job is None:
                 raise posting.Refused("not_found", "ReelForge has no such post.")
             if to not in posting.EXTENSION_STATES:
-                raise posting.Refused("bad_transition", f"The extension can't make a post {line(str(to), 40)}.", job)
+                named = line(to, 40)  # (None when the report names no state at all)
+                raise posting.Refused("bad_transition", f"The extension can't make a post {named}." if named else
+                                      "The extension didn't say where the post stands.", job)
             progress = body.get("progress")
             if isinstance(progress, bool) or not isinstance(progress, (int, float)) or not math.isfinite(progress):
                 progress = None

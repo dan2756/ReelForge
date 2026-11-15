@@ -814,6 +814,9 @@ class Jobs(ApiTest):
         for state in ("posting", "claimed", "queued", "expired", "nonsense", None, 7):  # not the extension's to say
             refused = self.event(job, state)
             self.assertEqual((refused.status, refused.error), (409, "bad_transition"), state)
+            # The sentence names what was said, and says so when nothing was (never "a post None").
+            self.assertEqual(refused.json["message"], f"The extension can't make a post {state}." if
+                             isinstance(state, str) else "The extension didn't say where the post stands.")
         other = self.event(job, "filling", token=self.pair(EDGE))
         self.assertEqual((other.status, other.error), (409, "not_yours"))
         self.assertEqual(self.event({"id": "pj_0000000000000000"}, "opening").status, 404)
@@ -1149,6 +1152,14 @@ class Pages(ApiTest):
         self.assertEqual(note, "TikTok changed its page, so the extension lost its way: post this one by hand. You "
                                "can finish in the tab that is open, or press Post by hand.")
         self.assertIn("TikTok said no. You can", words(state="failed", error_message="TikTok said no")[1])
+        # Where the failure itself says there is no tab to finish in, the page doesn't send you to one.
+        closed = "The tab was closed before the post was ready. Nothing was posted."
+        self.assertEqual(words(state="failed", step="upload", error_code="tab_closed", error_message=closed),
+                         ("Failed at uploading", closed + " Start it again from ReelForge, or press Post by hand.",
+                          "bad", True))
+        for code in extension_api.NO_TAB:
+            self.assertNotIn("tab that is open", words(state="failed", error_code=code)[1], code)
+            self.assertIn(code, posting.FAILURES)
         self.assertIn("then post again. You can", words(state="failed", error_message="check it, then post again.")[1])
         line, note, tone, by_hand = words(state="unknown")
         self.assertEqual((line, tone, by_hand), ("ReelForge can't tell whether this posted", "ask", False))
