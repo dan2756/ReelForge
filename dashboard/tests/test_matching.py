@@ -281,6 +281,81 @@ class TwinsTest(DbTest):
         self.assertEqual(analytics.auto_link(), 0)
         self.assertEqual(db.episodes(), [])
 
+    PIZZA = "What if your pizza doubled every 2 seconds?"
+
+    def pizza_twin(self) -> int:
+        """The pizza video posted on two platforms before ReelForge knew its file: an episode with no video."""
+        read("tiktok", [post("tt-pizza", f"{self.PIZZA} #fyp #whatif", 5000)])
+        read("youtube", [post("yt-pizza", f"{self.PIZZA} #shorts", 5003)])
+        analytics.auto_link()
+        (twin,) = db.episodes()
+        self.assertIsNone(twin["video"])
+        return twin["id"]
+
+    def test_starting_to_post_a_video_gives_its_twin_the_video(self):
+        twin = self.pizza_twin()
+        file = video("ep07_pizza_doubling")
+        self.assertEqual(db.adopt_episode(self.PIZZA, file), twin)  # the caption as the Publish form has it
+        self.assertEqual([(e["id"], e["video"]) for e in db.episodes()], [(twin, file)])
+        self.assertEqual(db.episode_for_video("ep07_pizza_doubling.mp4")["id"], twin)
+        self.assertEqual(db.adopt_episode("Reworded since", file), twin)  # by its file from then on
+        self.assertEqual(where("tiktok", "tt-pizza"), (twin, "twin"))
+        # Another video gets an episode of its own, as it always did.
+        other = db.adopt_episode("What if your kite doubled?", video("ep08_kite"))
+        self.assertNotEqual(other, twin)
+        self.assertEqual(len(db.episodes()), 2)
+
+    def test_a_twin_does_not_take_a_video_made_after_its_posts(self):
+        twin = self.pizza_twin()
+        went_up = (T0 + timedelta(minutes=5000)).timestamp()
+        remake = self.dir / "ep09_pizza_again.mp4"  # the same caption on a video made a week after those posts
+        remake.write_bytes(b"video")
+        os.utime(remake, (went_up + 7 * 86400,) * 2)
+        self.assertNotEqual(db.adopt_episode(self.PIZZA, str(remake)), twin)
+        first = self.dir / "ep07_pizza_doubling.mp4"  # the file those posts were made from
+        first.write_bytes(b"video")
+        os.utime(first, (went_up - 3600,) * 2)
+        self.assertEqual(db.adopt_episode(self.PIZZA, str(first)), twin)
+
+    def test_a_new_post_goes_to_the_episode_with_the_video(self):
+        twin = self.pizza_twin()
+        double = db.create_episode(self.PIZZA, video("ep07_pizza_doubling"), at(5020))  # as older versions made it
+        read("x", [post("x-pizza", f"{self.PIZZA} https://t.co/p", 5030)])
+        self.assertEqual(analytics.auto_link(), 1)
+        self.assertEqual(where("x", "x-pizza"), (double, "caption"))
+        self.assertEqual(where("tiktok", "tt-pizza"), (twin, "twin"))  # a post stays where it is
+
+    def test_double_episodes_from_older_versions_are_merged_once(self):
+        twin = self.pizza_twin()
+        file = video("ep07_pizza_doubling")
+        double = db.create_episode(self.PIZZA, file, at(5020))  # the upload page opened 20 minutes after the posts
+        kite = db.create_episode("What if your kite doubled?", video("ep08_kite"), at(5021))  # not posted yet: stays
+        with db.connect() as c:
+            c.execute("DELETE FROM meta WHERE key = ?", (db.TWINS_MERGED,))  # a database from an older version
+        db.init(self.dir / "stats.db")
+        self.assertEqual({e["id"]: e["video"] for e in db.episodes()}, {twin: file, kite: video("ep08_kite")})
+        self.assertEqual(where("tiktok", "tt-pizza"), (twin, "twin"))
+        backups = list(self.dir.glob("stats.db.bak-*-twins"))
+        self.assertEqual(len(backups), 1)
+        with closing(sqlite3.connect(backups[0])) as c:  # taken before the change
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM episodes").fetchone()[0], 3)
+        self.assertNotIn(double, [e["id"] for e in db.episodes()])
+        # Once: a double made afterwards is left for you to see, and nothing is backed up again.
+        again = db.create_episode(self.PIZZA, r"C:\x\ep10_pizza.mp4", at(6000))
+        db.init(self.dir / "stats.db")
+        self.assertIn(again, [e["id"] for e in db.episodes()])
+        self.assertEqual(list(self.dir.glob("stats.db.bak-*")), backups)
+
+    def test_the_merge_leaves_an_episode_with_posts_of_its_own(self):
+        twin = self.pizza_twin()
+        other = db.create_episode(self.PIZZA, video("ep07_pizza_doubling"), at(5020))
+        db.add_post("x", "x-pizza", other, self.PIZZA, None, at(5030))
+        with db.connect() as c:
+            c.execute("DELETE FROM meta WHERE key = ?", (db.TWINS_MERGED,))
+        db.init(self.dir / "stats.db")
+        self.assertEqual(sorted(e["id"] for e in db.episodes()), [twin, other])
+        self.assertEqual(list(self.dir.glob("stats.db.bak-*")), [])
+
 
 OLD_SCHEMA = """
 CREATE TABLE episodes (id INTEGER PRIMARY KEY, title TEXT NOT NULL, video TEXT, created_at TEXT NOT NULL);

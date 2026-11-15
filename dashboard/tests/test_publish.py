@@ -151,6 +151,20 @@ class UploadPage(PublishTest):
         self.assertEqual([t["title"] for t in w.sent("toast")], ["4 upload pages opened"])
         self.assertEqual(len(db.uploads()), 4)
 
+    def test_a_video_whose_posts_were_spotted_first_gets_them_not_a_second_episode(self):
+        # Posted on two platforms before any upload page was opened here: ReelForge filed the posts under an episode
+        # of their own, with no video. Opening the third platform's page must not make a second one.
+        twin = db.create_episode("Ep01", None, db.now_iso())
+        for key in ("tiktok", "youtube"):
+            db.add_post(key, f"{key}-1", None, "Ep01 #whatif", f"https://example.invalid/{key}")
+            db.link_post(key, f"{key}-1", twin, "twin")
+        w = self.window()
+        self.assertEqual(plain(w.view("files")["items"][0]["lines"][0]), "  ep01.mp4")
+        w.call("open_upload", "instagram", "Ep01", TAGS)
+        self.assertEqual([(e["id"], e["video"]) for e in db.episodes()], [(twin, str(self.video))])
+        self.assertEqual(w.svc.posted_platforms(), {"ep01.mp4": {"tiktok", "youtube"}})
+        self.assertEqual(plain(w.view("files")["items"][0]["lines"][0]), "✓ ep01.mp4")
+
 
 class Remove(PublishTest):
     def test_the_demo_never_moves_a_real_video_to_the_bin(self):

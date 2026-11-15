@@ -375,6 +375,7 @@ def _place(posts: list[dict], episodes: list[dict], links: dict) -> tuple[dict, 
     for e in sorted(episodes, key=lambda e: m.order[e["id"]]):
         if e["video"]:
             files.setdefault(db.video_file(e["video"]).name.lower(), []).append(e["id"])
+    bare = {e["id"] for e in episodes if not e["video"]}  # made from posts alone (twins): no video of their own
     placed = dict(links)
     taken = {(eid, ref[0]) for ref, (eid, how) in links.items() if how in FIXED_LINKS and eid is not None}
     claims, named = [], set()
@@ -394,9 +395,10 @@ def _place(posts: list[dict], episodes: list[dict], links: dict) -> tuple[dict, 
                 claims.append((2, kept, current, p))
         claims += [(1, 0.0, eid, p) for eid in files.get(p["upload"], ())]
     # One post per platform per episode, strongest claim first. On a tie the post already there keeps it (and a post
-    # stays in the episode it is in), then the one posted first, then the older episode.
+    # stays in the episode it is in), then the one posted first, then an episode that has a video (its ✓ on Publish
+    # goes by that), then the older episode.
     claims.sort(key=lambda c: (-c[0], -round(c[1], 6), c[2] != links[c[3]["ref"]][0], c[3]["published_at"] or "",
-                               c[3]["ref"], m.order[c[2]]))
+                               c[3]["ref"], c[2] in bare, m.order[c[2]]))
     for tier, _, eid, p in claims:
         ref = p["ref"]
         if placed[ref][0] is None and (eid, ref[0]) not in taken:

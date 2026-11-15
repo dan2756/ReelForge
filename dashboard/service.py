@@ -1718,8 +1718,7 @@ class Dashboard(StatsTab, SettingsTab, Service):
     @db_safe
     def record_manual(self, platforms: list[Platform], item: PublishItem) -> None:
         """Note a manual upload, so the video gets its ✓ and its posts can be matched to the episode."""
-        if not db.episode_for_video(item.video.name):
-            db.create_episode(item.title or item.video.stem, str(item.video))
+        db.adopt_episode(item.title or item.video.stem, str(item.video))
         for p in platforms:
             db.log_upload(p.key, item.video.name, "manual", message="opened the upload page")
         self.tell_others()
