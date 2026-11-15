@@ -1,6 +1,7 @@
 """Unpacking a .tar download (Blender and ffmpeg on Linux, a ReelForge update on Linux): studio.tools.untar, on a
 Python with tarfile's "data" filter and on one without (3.11.0 to 3.11.3, which Debian 12 ships), where asking for
-the filter was a TypeError and nothing could be unpacked at all."""
+the filter was a TypeError and nothing could be unpacked at all. On both, ReelForge looks at every entry itself
+before anything is unpacked: the filter alone let a chain of links lead out of the folder on Windows."""
 
 import importlib.util
 import io
@@ -41,6 +42,19 @@ def old_python():
     return lambda: (take.stop(), hide.stop())
 
 
+def trusting_python():
+    """tarfile with a "data" filter that lets every entry through. Python's own did that on Windows to links that
+    lead out one after another: it drops the ".." in a link's target before following the links already unpacked."""
+    real = tarfile.TarFile.extractall
+
+    def extractall(self, path=".", members=None, *, numeric_owner=False, filter=None):
+        return real(self, path, members, numeric_owner=numeric_owner, filter=tarfile.fully_trusted_filter)
+
+    take = mock.patch.object(tarfile.TarFile, "extractall", extractall)
+    take.start()
+    return take.stop
+
+
 class Untar(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
@@ -74,11 +88,20 @@ class Untar(unittest.TestCase):
         folder = tarfile.TarInfo("ffmpeg-n7.1/bin")
         folder.type, folder.mode = tarfile.DIRTYPE, 0o755
         # links that stay inside the folder are fine too, one by way of another as well (left out on Windows,
-        # where making one needs a privilege)
+        # where making one needs a privilege). The lib ones are what Blender's download is full of: a library
+        # under its short names, each a link to the next, one reached from another folder, and a second name for
+        # the same file (a hard link).
         links = [] if os.name == "nt" else [self.link("ffmpeg-n7.1/bin/ff", "ffmpeg"),
                                             self.link("ffmpeg-n7.1/doc", "../ffmpeg-n7.1/bin"),
-                                            self.link("ffmpeg-n7.1/run", "doc/ffmpeg")]
-        good = self.archive(folder, ("ffmpeg-n7.1/bin/ffmpeg", "run me"), ("ffmpeg-n7.1/LICENSE.txt", "GPL"), *links)
+                                            self.link("ffmpeg-n7.1/run", "doc/ffmpeg"),
+                                            self.link("ffmpeg-n7.1/lib/libav.so", "libav.so.9"),
+                                            self.link("ffmpeg-n7.1/lib/libav.so.9", "libav.so.9.0.1"),
+                                            self.link("ffmpeg-n7.1/bin/libav.so", "../lib/libav.so"),
+                                            self.link("ffmpeg-n7.1/lib/same", "ffmpeg-n7.1/lib/libav.so.9.0.1",
+                                                      hard=True)]
+        good = self.archive(folder, ("ffmpeg-n7.1/bin/ffmpeg", "run me"), ("ffmpeg-n7.1/LICENSE.txt", "GPL"),
+                            ("ffmpeg-n7.1/lib/libav.so.9.0.1", "a library"), *links)
+        landed = []
         for old in PYTHONS:
             with self.subTest(old_python=old):
                 out = self.dir / f"out-{old}"
@@ -95,11 +118,35 @@ class Untar(unittest.TestCase):
                     self.assertTrue(os.access(out / "ffmpeg-n7.1" / "bin" / "ffmpeg", os.X_OK))
                     self.assertEqual((out / "ffmpeg-n7.1" / "bin" / "ff").read_text(encoding="utf-8"), "run me")
                     self.assertEqual((out / "ffmpeg-n7.1" / "run").read_text(encoding="utf-8"), "run me")
+                    self.assertEqual(os.readlink(out / "ffmpeg-n7.1" / "lib" / "libav.so"), "libav.so.9")
+                    for name in ("bin/libav.so", "lib/libav.so", "lib/libav.so.9", "lib/same"):
+                        self.assertEqual((out / "ffmpeg-n7.1" / name).read_text(encoding="utf-8"), "a library", name)
+                landed.append(self.landed(out))
+        self.assertEqual(landed[1:], landed[:-1])     # the same files, links and rights whichever Python unpacked it
+        self.assertEqual(len(landed[0]), 6 if os.name == "nt" else 13)
+
+    @staticmethod
+    def landed(out: Path) -> dict:
+        """Everything under out: where each link points, and each file's bytes and rights. (Not a folder's rights:
+        with the filter Python leaves those to the system, which is no business of ReelForge's.)"""
+        found = {}
+        for folder, folders, files in os.walk(out):
+            for name in folders + files:
+                path = Path(folder, name)
+                rel = path.relative_to(out).as_posix()
+                if path.is_symlink():
+                    found[rel] = ("link", os.readlink(path))
+                elif path.is_dir():
+                    found[rel] = ("folder",)
+                else:
+                    found[rel] = ("file", path.read_bytes(), path.stat().st_mode & 0o777)
+        return found
 
     def test_nothing_lands_outside_the_folder_on_either(self):
         device = tarfile.TarInfo("kit/null")
         device.type = tarfile.CHRTYPE
-        for old in PYTHONS:
+        # On today's Python, on the old one, and on one whose own filter would let all of it through
+        for old in (*PYTHONS, *(["trusting"] if FILTERS else [])):
             for n in range(8):
                 box = self.dir / f"box-{old}-{n}"       # the archive, the folder it unpacks into, and nothing else
                 box.mkdir()
@@ -118,7 +165,7 @@ class Untar(unittest.TestCase):
                     "a device": [device]}.items())[n]
                 with self.subTest(old_python=old, what=what):
                     bad = self.archive(("kit/ok.txt", "fine"), *members, name=f"{box.name}/bad.tar.gz")
-                    undo = old_python() if old else (lambda: None)
+                    undo = old_python() if old is True else trusting_python() if old else (lambda: None)
                     try:
                         tools.untar(bad, box / "out")
                         refused = False
@@ -126,17 +173,10 @@ class Untar(unittest.TestCase):
                         refused = True
                     finally:
                         undo()
-                    self.assertLessEqual({p.name for p in box.iterdir()}, {"bad.tar.gz", "out"})
-                    if old:    # every entry is checked before the first is unpacked
-                        self.assertTrue(refused)
-                        self.assertFalse((box / "out").exists())
-                    else:      # Python's own filter refuses these too, or unpacks them inside the folder
-                        self.assertTrue(refused or what in ("an absolute path",
-                                                            "a link that leads out by way of another"), what)
-                        for folder, folders, files in os.walk(box / "out"):
-                            for name in folders + files:             # whatever it did unpack leads nowhere else
-                                real = os.path.realpath(os.path.join(folder, name))
-                                self.assertTrue(Path(real).is_relative_to(os.path.realpath(box / "out")), real)
+                    # every entry is checked before the first is unpacked, whatever Python's own filter would
+                    # have made of it: refused whole, and nothing of it is on disk
+                    self.assertTrue(refused)
+                    self.assertEqual([p.name for p in box.iterdir()], ["bad.tar.gz"])
 
     def test_an_update_on_linux_unpacks_on_the_old_python_too(self):
         root = self.dir / "ReelForge"
