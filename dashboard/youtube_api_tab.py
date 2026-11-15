@@ -68,6 +68,13 @@ def orphans() -> list[dict]:
     return [j for j in jobs if j["state"] != "unknown" or youtube_api.session(j["id"])]
 
 
+def another_uploading(job_id: str) -> bool:
+    """Whether another video's upload through the API is under way for this channel: a queued job waits for it."""
+    with db.connect() as c:
+        return c.execute("SELECT 1 FROM post_jobs WHERE via = 'api' AND superseded = 0 AND id != ? "
+                         "AND state IN ('uploading', 'posting') LIMIT 1", (job_id,)).fetchone() is not None
+
+
 def run(job_id: str, stop: Callable[[], bool] = lambda: False) -> dict | None:
     """Upload a queued job's video, one upload at a time for this channel, and move the job along as it goes.
     Returns the job as it stands afterwards. stop() saying True (ReelForge is closing) leaves it where it is, for
@@ -364,7 +371,8 @@ class YouTubeApiTab:
         (youtube_api_info) and your yes (post_with_api), never one press on a row. While a client is on file and
         this window isn't connected, the row has connect_api there instead. A posted row says what the read-back
         found, or that the video is private, until a stats read has its numbers (only a video everyone can see has
-        any). A row whose last piece is on its way has no buttons: only YouTube's word ends it."""
+        any). A row whose last piece is on its way has no buttons: only YouTube's word ends it. One that waits for
+        another video's upload to finish says that it is waiting its turn."""
         state = "off" if self.demo else youtube_api.status()["state"]
         connected = state == "on"
         for row in rows:
@@ -372,6 +380,9 @@ class YouTubeApiTab:
             if job is not None and job["via"] == "api" and row["job"] == job["id"]:
                 if row["state"] == "posting":
                     row["actions"] = []
+                elif row["state"] == "queued" and self._safe(lambda: another_uploading(job["id"]), False):
+                    row["line"] = Text("● waiting its turn", AMBER).append(
+                        "  another video is uploading to YouTube first", MUTED).json()
                 elif row["state"] == "posted" and not (post and post["views"] is not None):
                     said, act_on = to_look_at(job)
                     if said:

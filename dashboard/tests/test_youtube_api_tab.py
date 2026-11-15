@@ -814,7 +814,9 @@ class OnlyOnce(ApiPosting):
         second = self.api_post(w)["jobs"][0]["id"]
         w.pump(0.5)
         self.assertEqual(posting.get(second)["state"], "queued")  # it waits for the first to finish
-        self.assertEqual(plain(self.rows(w)["youtube"]["line"]).split("  ")[0], "● about to start")
+        row = self.rows(w)["youtube"]
+        self.assertEqual(plain(row["line"]), "● waiting its turn  another video is uploading to YouTube first")
+        self.assertEqual((row["busy"], row["actions"]), (True, ["cancel"]))
         self.assertEqual(len(self.google.starts), 1)
         self.google.hold.set()
         self.assertEqual((self.over(w, first)["state"], self.over(w, second)["state"]), ("posted", "posted"))
