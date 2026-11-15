@@ -27,6 +27,18 @@ export const PACKED_HOOKS = {
   x: ["post_button"],
 }
 
+// The hooks that a newer list never replaces although nothing clicks them, because what the script concludes
+// from them decides whether a post goes on: the captcha a job stops at, the account the tab is compared with, and
+// on YouTube the audience and visibility answers and the end of the upload, which decide whether the last screen
+// is left for the person, and the link the new video's id is read from. The hooks that a platform's signs name (a post went out, a challenge, signed out) are
+// kept with the signs themselves (worker/selectors.js).
+export const GUARD_HOOKS = {
+  tiktok: ["captcha"],
+  youtube: ["captcha", "kids_no", "kids_yes", "visibility", "visibility_public", "visibility_unlisted", "visibility_private", "upload_done", "post_link"],
+  instagram: ["captcha", "account"],
+  x: ["captcha", "account"],
+}
+
 // Where the upload page shows which account it is on, so the extension can compare it with the one ReelForge
 // has (the platforms with an "account" hook in selectors.json). On the others nothing is compared, and the
 // person is told to look at the tab.

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { EXTENSION_ID } from "./fake_app.mjs"
 import { EXTENSION_DIR, equal, ok } from "./harness.mjs"
-import { ACCOUNT_SHOWN, PACKED_HOOKS, PLATFORMS } from "../shared/consts.js"
+import { ACCOUNT_SHOWN, GUARD_HOOKS, PACKED_HOOKS, PLATFORMS } from "../shared/consts.js"
 
 const manifest = JSON.parse(readFileSync(join(EXTENSION_DIR, "manifest.json"), "utf8"))
 const selectors = JSON.parse(readFileSync(join(EXTENSION_DIR, "selectors.json"), "utf8"))
@@ -39,6 +39,46 @@ export const tests = {
   "where the account is said to be checked, the page has a hook for it"() {
     const hooked = Object.keys(selectors.platforms).filter(platform => selectors.platforms[platform].hooks.account)
     equal([...ACCOUNT_SHOWN].sort(), hooked.sort(), "platforms with an account hook")
+  },
+
+  async "a newer list from the app replaces no sign, no hook a sign names and no hook that guards a post"({ browser }) {
+    // Asked of the extension's own code, on one of its pages: a list one version newer in which every hook is
+    // the whole page and every sign says something else.
+    const popup = await browser.popup()
+    const seen = await popup.evaluate(async () => {
+      const sel = await import("/worker/selectors.js")
+      const packed = await (await fetch(chrome.runtime.getURL("selectors.json"))).json()
+      const theirs = JSON.parse(JSON.stringify(packed))
+      theirs.version = packed.version + 1
+      for (const platform of Object.values(theirs.platforms)) {
+        for (const name of Object.keys(platform.hooks)) platform.hooks[name] = { strategies: [{ id: "page", css: "body" }], timeout_ms: 1234 }
+        Object.assign(platform, { success: { url: ["/"], hooks: ["file_input"], gone_after_press: "file_input", timeout_ms: 4321 }, challenge: {}, signed_out: {} })
+      }
+      if (!sel.valid(theirs)) return null
+      await chrome.storage.local.set({ selectors: theirs })
+      const out = {}
+      for (const name of Object.keys(packed.platforms)) out[name] = await sel.selectorsFor(name)
+      return out
+    })
+    ok(seen, "the newer list is one the extension takes")
+    for (const platform of Object.keys(PLATFORMS)) {
+      const own = selectors.platforms[platform]
+      const got = seen[platform]
+      equal(got.version, selectors.version + 1, `${platform}: the list in use`)
+      equal(got.success, { ...own.success, timeout_ms: 4321 }, `${platform}'s sign that a post went out (only its wait is the app's)`)
+      equal([got.challenge, got.signed_out], [own.challenge, own.signed_out], `${platform}'s challenge and signed-out signs`)
+      const named = [own.success, own.challenge, own.signed_out].flatMap(sign => [...(sign?.hooks || []), sign?.gone_after_press]).filter(Boolean)
+      ok(named.length > 0 && GUARD_HOOKS[platform].includes("captcha"), `${platform} has hooks to keep`)
+      for (const hook of new Set([...PACKED_HOOKS[platform], ...GUARD_HOOKS[platform], ...named])) {
+        ok(own.hooks[hook], `${platform} has the hook ${hook}`)
+        equal(got.hooks[hook].strategies, own.hooks[hook].strategies, `${platform}'s ${hook}: where it looks`)
+      }
+      equal(got.hooks.file_input.strategies, [{ id: "page", css: "body" }], `${platform}'s file_input: any other hook is the app's`)
+    }
+    // The account is compared wherever the page shows it, and YouTube's last screen is left alone unless its
+    // answers are the channel's own: those hooks are among the kept ones.
+    for (const platform of ACCOUNT_SHOWN) ok(GUARD_HOOKS[platform].includes("account"), `${platform}'s account hook is kept`)
+    for (const hook of ["kids_no", "kids_yes", "visibility", "upload_done"]) ok(GUARD_HOOKS.youtube.includes(hook), `YouTube's ${hook} is kept`)
   },
 
   "every hook a script clicks is one a newer list from the app cannot replace"() {

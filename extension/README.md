@@ -156,12 +156,15 @@ anything breaks.
 
 The file is data, and the steps live in `platform/*.js`. Where the code looks decides what it clicks, though, so two
 rules are written in code. A click on the way to the last screen is refused when its element is the platform's
-final button, sits around or inside it, or carries its words (`rf.click` in `platform/engine.js`). And the hooks
-whose element gets clicked, the final button's hook and the `success` signs are always taken from the copy packed
-with the extension (`PACKED_HOOKS` in `shared/consts.js`).
+final button, sits around or inside it, or carries its words (`rf.click` in `platform/engine.js`). And these are
+always taken from the copy packed with the extension: the hooks whose element gets clicked and the final button's
+hook (`PACKED_HOOKS` in `shared/consts.js`); the `success`, `challenge` and `signed_out` signs with every hook they
+name; and the hooks that guard a post (`GUARD_HOOKS`: the captcha, the account, YouTube's audience and visibility
+answers, the end of its upload and the link its video's id is read from). A newer list can only change how long
+those are waited for.
 
 To fix a hook, edit the file and raise `"version"`. ReelForge serves its own copy to the extension, and for every
-other hook a newer one is used at once, without a Reload. A fix to a clicked hook takes a Reload. The role and
+other hook a newer one is used at once, without a Reload. A fix to one of the kept hooks or signs takes a Reload. The role and
 text ways are in English, plus the Chinese labels the sources list for Instagram; the attribute and id ways do not
 depend on language.
 
