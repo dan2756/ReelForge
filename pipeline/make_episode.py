@@ -1,14 +1,18 @@
 """The episode pipeline: one episodes/<id>/episode.json -> a finished, checked 9:16 video in ReelForge's Publish tab.
 
-  python pipeline/make_episode.py episodes/<id> --steps build,stills --stills 1,15,31
-  python pipeline/make_episode.py episodes/<id> --steps render        (20-40 min; resumable)
+  python pipeline/make_episode.py episodes/<id> --steps build,stills --stills 1,15,31    (or --stills lines)
+  python pipeline/make_episode.py episodes/<id> --steps render        (15-60 min; rerun to carry on)
   python pipeline/make_episode.py episodes/<id> --steps post          (audio, video, cover, captions, QA)
   python pipeline/make_episode.py episodes/<id> --steps ship          (deliver, clean, check the Publish tab)
+  python pipeline/make_episode.py episodes/<id> --status              (where the episode stands)
 
-Steps: build (Blender scene from episode.json) -> stills (preview frames) -> render (all frames, resumable)
+Steps: build (Blender scene from episode.json, then a lint of the spec) -> stills (preview frames, and the same
+       seconds with the text on in build/preview) -> render (all frames; frames of an older scene are never reused
+       without asking: --rerender all | SECONDS, --keep-frames)
        -> post (= audio, video, cover, caption, qa) -> your own review in build/qa/review.md
-       -> ship (= deliver: copy to "completed videos/" only if QA passed; clean: delete render frames;
-                 check: confirm ReelForge's Publish tab lists the video with the right caption and hashtags).
+       -> ship (= deliver: copy to "completed videos/" only if QA passed and the review is of this cut; clean: delete
+                 render frames; check: confirm ReelForge's Publish tab lists the video with the right caption and
+                 hashtags).
 """
 import argparse
 import json
