@@ -956,7 +956,9 @@ class HandleTest(DbTest):
             self.assertEqual(refresh().errors, [])
         notes = [n for n in notify.recent() if (n["key"] or "").startswith("handle:")]
         self.assertEqual([(n["key"], n["title"]) for n in notes], [("handle:tiktok:me", "TikTok is now read as @me")])
-        self.assertIn("read as @mrbest", notes[0]["body"])
+        self.assertEqual(notes[0]["body"], "Its stats so far were read as @mrbest, and none of @mrbest's videos are "
+                         "among @me's, so they look like another account's. ReelForge saved a copy from before, "
+                         "next to the stats database.")  # what was seen, not "they hold both accounts now"
         self.assertEqual(notify.target(notes[0]), notify.Target("accounts", account="tiktok"))
         self.assertEqual(len(self.copies()), 1)
 

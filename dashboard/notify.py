@@ -289,8 +289,9 @@ def handle_changed(platform: str, name: str, old: str, new: str) -> bool:
     (db.record_snapshot): told once per handle, since from here on the store holds both until you say which to keep
     on the Accounts tab."""
     return add("info", f"{name} is now read as {new}",
-               f"Its stats so far were read as {old}, so they hold both accounts now. ReelForge saved a copy from "
-               "before, next to the stats database.", key=f"handle:{platform}:{new.lstrip('@').lower()}")
+               f"Its stats so far were read as {old}, and none of {old}'s videos are among {new}'s, so they look "
+               "like another account's. ReelForge saved a copy from before, next to the stats database.",
+               key=f"handle:{platform}:{new.lstrip('@').lower()}")
 
 
 def update_available(version: str) -> bool:
