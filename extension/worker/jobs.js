@@ -331,12 +331,19 @@ async function doStartBatch(port, batch) {
   if (!res.ok || !Array.isArray(res.data?.jobs)) return "error:" + (res.data?.error || "http_" + res.status)
   await beat(found)
   let front = !(await allJobs()).some(isLive)
+  let waiting = false
   for (const job of res.data.jobs) {
-    if (job.via !== "extension" || job.state !== "queued" || !JOB_ID.test(String(job.id))) continue
+    // "claimed" is tried too: this browser may have taken it and been stopped before it wrote that down.
+    // The app answers such a claim a second time, and nobody else's.
+    if (job.via !== "extension" || !["queued", "claimed"].includes(job.state) || !JOB_ID.test(String(job.id))) continue
     if (await getJob(job.id)) continue
+    waiting ||= job.state === "queued"
     if (await startJob(found, job.id, front)) front = false
   }
-  return "started"
+  // Posts that were waiting, and none of them is this browser's now: they waited more than ten minutes, or
+  // another browser took them. Saying "started" would leave the person looking at nothing.
+  const held = (await Promise.all(res.data.jobs.map(job => getJob(String(job.id))))).some(Boolean)
+  return waiting && !held ? "error:not_claimed" : "started"
 }
 
 async function startJob(found, id, front) {
@@ -694,8 +701,9 @@ export async function peek(port, batch) {
   }
 }
 
-// The popup's Cancel on the confirm step: the jobs were written but nothing was opened. The app lets a waiting
-// job be cancelled only by the browser that holds it, so a refusal is followed by claim, then cancel.
+// The popup's Cancel on the confirm step: the jobs were written but nothing was opened. The app lets any
+// connected browser call off a job that is still waiting, and that leaves no trace of it there: no claim, and
+// no line in ReelForge's upload log that a later post could be filed under.
 export async function discard(port, batch) {
   const found = await app.at(port)
   if (!found?.paired || !BATCH_ID.test(String(batch))) return { ok: false }
@@ -704,11 +712,7 @@ export async function discard(port, batch) {
     const res = await app.api(found, `/v1/batch/${batch}`)
     for (const job of res.data?.jobs || []) {
       if (job.state !== "queued" || !JOB_ID.test(String(job.id)) || await getJob(job.id)) continue
-      const body = { install, state: "cancelled", detail: "cancelled before it started" }
-      const first = await app.api(found, `/v1/jobs/${job.id}/event`, { method: "POST", body })
-      if (first.ok) continue
-      const claim = await app.api(found, `/v1/jobs/${job.id}/claim`, { method: "POST", body: { install } })
-      if (claim.ok) await app.api(found, `/v1/jobs/${job.id}/event`, { method: "POST", body })
+      await app.api(found, `/v1/jobs/${job.id}/event`, { method: "POST", body: { install, state: "cancelled", detail: "cancelled before it started" } })
     }
   } catch {
     // The app is gone. Jobs nobody claims expire there by themselves after ten minutes.
