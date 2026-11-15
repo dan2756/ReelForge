@@ -89,7 +89,7 @@ sha256() {
 }
 
 fetch_release() {   # fetch_release RELEASE KIND EXT WORK DIR: download, check and unpack the newest package into DIR
-  local release="$1" kind="$2" ext="$3" work="$4" dir="$5" line want name top
+  local release="$1" kind="$2" ext="$3" work="$4" dir="$5" line want name top broken
   echo "Finding the newest ReelForge..."
   fetch "$release/SHA256SUMS.txt" "$work/SHA256SUMS.txt" || { echo "ReelForge wasn't installed: GitHub couldn't be reached."; return 1; }
   line="$(grep -E "^[0-9a-fA-F]{64} +\*?ReelForge-[0-9A-Za-z.-]+-$kind\.$ext\$" "$work/SHA256SUMS.txt" | head -n 1 || true)"
@@ -107,19 +107,25 @@ fetch_release() {   # fetch_release RELEASE KIND EXT WORK DIR: download, check a
     return 1
   fi
   echo "Unpacking it into $dir..."
-  mkdir -p "$work/unpack" "$(dirname "$dir")"
+  # main calls this function inside an "if", where bash switches set -e off, so each step that can fail says so
+  # itself. An unpack cut short (a full disk) would otherwise still leave one top folder, pass the check below and be
+  # moved into place as if it were whole.
+  broken="ReelForge wasn't installed: $name couldn't be unpacked (is the disk full?)."
+  mkdir -p "$work/unpack" "$(dirname "$dir")" || { echo "$broken"; return 1; }
   if [ "$kind" = macOS ]; then
-    unzip -q "$work/$name" -d "$work/unpack"       # keeps the scripts runnable
+    unzip -q "$work/$name" -d "$work/unpack" || { echo "$broken"; return 1; }       # unzip keeps the scripts runnable
   else
-    tar -xzf "$work/$name" -C "$work/unpack"
+    tar -xzf "$work/$name" -C "$work/unpack" || { echo "$broken"; return 1; }
   fi
   top="$(ls -A "$work/unpack")"
   if [ "$(printf '%s\n' "$top" | wc -l | tr -d ' ')" != 1 ] || [ ! -d "$work/unpack/$top" ]; then
     echo "ReelForge wasn't installed: $name isn't laid out the way ReelForge's are."
     return 1
   fi
-  [ -d "$dir" ] && rmdir "$dir"                    # the empty folder found earlier
-  mv "$work/unpack/$top" "$dir"
+  if [ -d "$dir" ]; then                           # the empty folder found earlier
+    rmdir "$dir" || { echo "ReelForge wasn't installed: $dir couldn't be replaced."; return 1; }
+  fi
+  mv "$work/unpack/$top" "$dir" || { echo "ReelForge wasn't installed: it couldn't be moved into $dir."; return 1; }
 }
 
 main "$@"
