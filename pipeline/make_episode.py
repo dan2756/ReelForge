@@ -12,6 +12,7 @@ Steps: build (Blender scene from episode.json) -> stills (preview frames) -> ren
 """
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -29,21 +30,55 @@ ALIASES = {"post": ["audio", "video", "cover", "caption", "qa"],     # then revi
            "all": ALL_STEPS}
 NEEDS_BLENDER = {"build", "stills", "render"}
 NEEDS_FFMPEG = {"audio", "video", "cover", "qa"}
+PROGRESS_EVERY = 20.0       # seconds between a long step's progress lines (the render's frame count)
 
 
-def run(cmd, log=None):
-    print(">", " ".join(f'"{c}"' if " " in str(c) else str(c) for c in cmd), flush=True)
+def run(cmd, log=None, progress=None):
+    """Run one step's command. With a log, its output goes to the end of that file (what an earlier run wrote stays
+    above it, so a render that is carried on keeps its whole story), and if the step fails the last lines are printed
+    here, not only the exit code. progress() gives a line to print every PROGRESS_EVERY seconds while it runs."""
+    cmd = [str(c) for c in cmd]
+    print(">", " ".join(f'"{c}"' if " " in c else c for c in cmd), flush=True)
     t0 = time.time()
-    try:
+    if not log:
+        code = subprocess.run(cmd).returncode
+    else:
+        with open(log, "a", encoding="utf-8", errors="replace") as fh:
+            fh.write(f"==== {time.strftime('%Y-%m-%d %H:%M:%S')}  {' '.join(cmd)}\n")
+            fh.flush()
+            start = os.fstat(fh.fileno()).st_size       # where this run's own output begins
+            with subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT) as proc:
+                try:
+                    while True:
+                        try:
+                            code = proc.wait(PROGRESS_EVERY)
+                            break
+                        except subprocess.TimeoutExpired:
+                            if progress:
+                                print("  " + progress(), flush=True)
+                except BaseException:       # Ctrl-C too: don't leave the step running with nobody waiting for it
+                    proc.kill()
+                    raise
+    if code:
         if log:
-            with open(log, "w", encoding="utf-8", errors="replace") as fh:
-                subprocess.run([str(c) for c in cmd], check=True, stdout=fh, stderr=subprocess.STDOUT)
-        else:
-            subprocess.run([str(c) for c in cmd], check=True)
-    except subprocess.CalledProcessError as e:
+            print(log_tail(log, start), flush=True)
         hint = f" (see {log})" if log else ""
-        raise SystemExit(f"step failed with exit code {e.returncode}{hint}") from None
+        raise SystemExit(f"step failed with exit code {code}{hint}")
     print(f"  done in {time.time() - t0:.0f}s", flush=True)
+
+
+def log_tail(log, start=0, lines=20):
+    """What to read first when a step fails: the end of what it wrote to its log from byte `start` on, and any
+    earlier line of that which names an error."""
+    with open(log, "rb") as fh:
+        fh.seek(start)
+        text = fh.read().decode("utf-8", "replace").splitlines()
+    out = []
+    errors = [line for line in text[:-lines] if "Traceback" in line or "Error" in line][-10:]
+    if errors:
+        out += [f"  lines of {log} that mention an error:"] + ["    " + line for line in errors]
+    out += [f"  the last lines of {log}:"] + ["    " + line for line in text[-lines:]]
+    return "\n".join(out)
 
 
 def main():
@@ -231,7 +266,36 @@ def render(build, spec, rerender="", keep=False):
               "(build again to turn the check on)")
     if stamp:
         framecache.write_stamp(frames / framecache.STAMP, stamp)
-    run([config.BLENDER, "-b", build / "scene.blend", "-a"], log=build / "render.log")
+    # Blender renders in one go and never looks back at a frame it has passed, so check what came out and go back
+    # once for anything that is missing before calling it a failure.
+    log = build / "render.log"
+    for attempt in ("first", "second"):
+        todo = framecache.missing(frames, total)
+        if not todo:
+            break
+        if attempt == "second":
+            print(f"  {framecache.describe(todo, fps)} did not come out: going back once", flush=True)
+        run([config.BLENDER, "-b", build / "scene.blend", "-a"], log=log, progress=render_progress(frames, total))
+        framecache.sweep_empty(frames)
+    todo = framecache.missing(frames, total)
+    if todo:
+        if log.exists():
+            print(log_tail(log, max(0, log.stat().st_size - 8192)), flush=True)
+        verb = "is" if framecache.count(todo) == 1 else "are"
+        raise SystemExit(f"render: {framecache.describe(todo, fps)} {verb} still missing after going back once. "
+                         "The end of build/render.log should say why.")
+    print(f"  all {total} frames are in build/frames")
+
+
+def render_progress(frames, total):
+    """A line for run() to print while Blender renders, counted from the files that have appeared in build/frames:
+    how far it is, how long a frame takes and how long the rest will take at that pace."""
+    t0, before = time.time(), len(framecache.present(frames))
+
+    def line():
+        done = len(framecache.present(frames))
+        return framecache.progress(done, total, done - before, time.time() - t0)
+    return line
 
 
 def check_publish(ep):

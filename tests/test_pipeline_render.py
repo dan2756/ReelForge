@@ -241,9 +241,109 @@ class RenderGuard(Steps):
         self.main("--steps", "render", "--rerender", "0-0.4")
         self.assertEqual({n for n in range(1, TOTAL + 1) if self.shows(n) == "pass"}, {1, 2, 3, 4, 5})
         self.spec["world"]["type"] = "street"
-        self.built()
+        street = self.built()
         self.main("--steps", "render", "--keep-frames")
+        self.assertEqual(framecache.read_stamp(self.frames / framecache.STAMP), street)
+        self.assertEqual(self.passes, 1)                        # every frame was there, so Blender had nothing to do
+
+
+class RenderPasses(Steps):
+    def test_nothing_missing_means_blender_is_not_started(self):
+        self.rendered(range(1, TOTAL + 1), self.built())
+        self.assertIn(f"all {TOTAL} frames are in build/frames", self.render())
+        self.assertEqual(self.passes, 0)
+
+    def test_it_goes_back_once_for_frames_that_did_not_come_out(self):
+        self.built()
+        self.lost = [{7, 8, 9, 21}]
+        out = self.render()
+        self.assertIn("frames 7-9 (0.6-0.8 s), 21 (2.0 s) did not come out: going back once", out)
         self.assertEqual(self.passes, 2)
+        self.assertEqual(framecache.missing(self.frames, TOTAL), [])
+
+    def test_a_frame_cut_off_during_the_render_is_made_again(self):
+        self.built()
+
+        def cut_one_off(cmd, log=None, **kw):
+            self.blender(cmd, log, **kw)
+            if self.passes == 1:
+                (self.frames / "f_0005.jpg").write_bytes(self.picture("pass 1")[:30])   # the disk was full
+        with mock.patch.object(make_episode, "run", cut_one_off):
+            self.render()
+        self.assertEqual((self.passes, self.shows(5)), (2, "pass"))
+        self.assertIn(b"pass 2", (self.frames / "f_0005.jpg").read_bytes())
+
+    def test_frames_still_missing_after_the_second_pass_fail_the_step_by_name(self):
+        self.built()
+        self.lost = [{7, 8, 9}, {8}]
+        with self.assertRaisesRegex(SystemExit, r"render: frame 8 \(0\.7 s\) is still missing after going back once"):
+            self.render()
+        self.assertEqual(self.passes, 2)
+
+    def test_a_render_that_fails_is_not_started_again(self):
+        self.built()
+        self.lost, self.exit = [set(range(12, TOTAL + 1))], [11]
+        with self.assertRaisesRegex(SystemExit, "exit code 11"):
+            self.render()
+        self.assertEqual(self.passes, 1)
+        self.render()                                           # the next run carries on where it stopped
+        self.assertEqual((self.shows(11), self.shows(12)), ("pass", "pass"))
+        self.assertIn(b"pass 2", (self.frames / "f_0012.jpg").read_bytes())
+
+    def test_progress_is_counted_from_the_files(self):
+        stamp = self.built()
+        self.rendered(range(1, 11), stamp)
+        with mock.patch.object(make_episode.time, "time", side_effect=[100.0, 109.0, 118.0]):
+            line = make_episode.render_progress(self.frames, TOTAL)
+            self.assertEqual(line(), f"frames 10/{TOTAL}, the first one is still rendering")
+            self.rendered(range(11, 21), stamp)
+            self.assertEqual(line(), f"frames 20/{TOTAL}, 1.8 s a frame, about 18 s left")
+
+
+class RunningAStep(unittest.TestCase):
+    """run() itself, with small Python commands in place of Blender."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.log = Path(tmp.name) / "render.log"
+
+    def run_step(self, code, **options):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            try:
+                make_episode.run([sys.executable, "-c", code], **options)
+            finally:
+                self.out = out.getvalue()
+
+    def test_the_log_is_added_to_not_replaced(self):
+        self.run_step("print('first run')", log=self.log)
+        self.run_step("print('second run')", log=self.log)
+        text = self.log.read_text(encoding="utf-8")
+        self.assertLess(text.index("first run"), text.index("second run"))
+        self.assertEqual(text.count("===="), 2)
+
+    def test_a_failed_step_prints_the_end_of_its_log_and_the_error_lines(self):
+        self.run_step("print('an earlier run')", log=self.log)
+        code = ("import sys\nprint('Traceback (most recent call last):')\nprint('KeyError: fps')\n"
+                "for n in range(30): print('line', n)\nsys.exit(3)")
+        with self.assertRaisesRegex(SystemExit, "step failed with exit code 3"):
+            self.run_step(code, log=self.log)
+        self.assertIn("that mention an error:\n    Traceback (most recent call last):\n    KeyError: fps", self.out)
+        self.assertIn("the last lines of", self.out)
+        self.assertIn("    line 29", self.out)
+        self.assertNotIn("    line 9\n", self.out)             # only the last 20
+        self.assertNotIn("an earlier run", self.out)            # and only this run's
+
+    def test_a_step_without_a_log_still_fails_with_its_exit_code(self):
+        with self.assertRaisesRegex(SystemExit, "step failed with exit code 4$"):
+            self.run_step("import sys; sys.exit(4)")
+
+    def test_progress_is_printed_while_the_step_runs(self):
+        with mock.patch.object(make_episode, "PROGRESS_EVERY", 0.05):
+            self.run_step("import time; time.sleep(0.6)", log=self.log, progress=lambda: "frames 3/30")
+        self.assertIn("  frames 3/30\n", self.out)
+        self.assertIn("done in", self.out)
 
 
 if __name__ == "__main__":
