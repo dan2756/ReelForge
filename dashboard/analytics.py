@@ -368,7 +368,7 @@ def _place(posts: list[dict], episodes: list[dict], links: dict) -> tuple[dict, 
     bare = {e["id"] for e in episodes if not e["video"]}  # made from posts alone (twins): no video of their own
     placed = dict(links)
     # A fixed link holds its episode's place on that platform, except numbers you typed in (manual-<episode>): the
-    # real post takes that place once ReelForge can read it (and the typed ones then go: db.retire_typed).
+    # real post takes that place once ReelForge can read it (and gets the typed readings: db.retire_typed).
     taken = {(eid, ref[0]) for ref, (eid, how) in links.items()
              if how in FIXED_LINKS and eid is not None and not ref[1].startswith(db.TYPED)}
     claims, named = [], set()

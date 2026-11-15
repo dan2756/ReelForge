@@ -880,19 +880,28 @@ def add_post(platform: str, post_id: str, episode_id: int | None, title: str, ur
 
 
 def retire_typed() -> int:
-    """Drop the numbers you typed in for an episode on a platform (a manual-<episode> post and its readings) once
-    that episode's real post there has been read since you typed them: ReelForge reads the platform itself now, so
-    the typed ones would only sit beside it with numbers that never move. Typed numbers stay for an episode whose
-    post hasn't been found, and for one whose post was last read before you typed them (the platform's log-in ran
-    out, and typing is how its numbers are kept up since). Returns how many went."""
+    """Hand the numbers you typed in for an episode on a platform (a manual-<episode> post) over to that episode's
+    real post there, once it has been read since you typed them: ReelForge reads the platform itself now, so the
+    typed ones would only sit beside it with numbers that never move. Their readings become the real post's, as
+    typed: its history for the time ReelForge couldn't read it. (They used to be deleted, so weeks of typed-in
+    numbers went the moment the log-in worked again.) Only the stand-in post itself goes. Typed numbers stay where
+    they are for an episode whose post hasn't been found, and for one whose post was last read before you typed
+    them (the platform's log-in ran out, and typing is how its numbers are kept up since). Returns how many were
+    handed over."""
     with connect() as db:
-        gone = db.execute(
-            """SELECT platform, post_id FROM posts t WHERE post_id LIKE 'manual-%' AND episode_id IS NOT NULL
-               AND EXISTS (SELECT 1 FROM posts r WHERE r.platform = t.platform AND r.episode_id = t.episode_id
-                           AND r.post_id NOT LIKE 'manual-%' AND r.last_ts > COALESCE(t.last_ts, ''))""").fetchall()
-        for table in ("post_stats", "posts"):
-            db.executemany(f"DELETE FROM {table} WHERE platform = ? AND post_id = ?", [tuple(r) for r in gone])
-    return len(gone)
+        # (an episode with two posts on the platform, linked by hand: the one that went up first gets them)
+        found = db.execute(
+            """SELECT t.platform, t.post_id AS typed,
+                      (SELECT r.post_id FROM posts r WHERE r.platform = t.platform AND r.episode_id = t.episode_id
+                       AND r.post_id NOT LIKE 'manual-%' AND r.last_ts > COALESCE(t.last_ts, '')
+                       ORDER BY r.published_at, r.post_id LIMIT 1) AS real
+               FROM posts t WHERE t.post_id LIKE 'manual-%' AND t.episode_id IS NOT NULL""").fetchall()
+        over = [r for r in found if r["real"]]
+        db.executemany("UPDATE post_stats SET post_id = ? WHERE platform = ? AND post_id = ?",
+                       [(r["real"], r["platform"], r["typed"]) for r in over])
+        db.executemany("DELETE FROM posts WHERE platform = ? AND post_id = ?",
+                       [(r["platform"], r["typed"]) for r in over])
+    return len(over)
 
 
 def link_post(platform: str, post_id: str, episode_id: int | None, how: str | None = "caption") -> None:

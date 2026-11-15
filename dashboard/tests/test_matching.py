@@ -499,13 +499,15 @@ class TypedInTest(DbTest):
         read("instagram", [post("ig777", CAPTIONS["instagram"].format(REAL["kite"][0]), 5, views=1350)], minutes=120)
         self.assertEqual(analytics.auto_link(), 1)
         self.assertEqual(where("instagram", "ig777"), (kite, "caption"))
-        # The kite video's typed numbers went with their readings; the jump video's post wasn't read, so its stay.
+        # The kite video's typed number is the real post's first reading now, and its stand-in is gone; the jump
+        # video's post wasn't read, so its typed number stays where it is.
         self.assertEqual(self.posts("instagram"), ["ig777", f"manual-{jump}"])
-        with db.connect() as c:
-            self.assertEqual(c.execute("SELECT COUNT(*) FROM post_stats WHERE post_id = ?",
-                                       (f"manual-{kite}",)).fetchone()[0], 0)
+        self.assertEqual(self.readings("instagram", f"manual-{kite}"), [])
+        self.assertEqual(self.readings("instagram", "ig777"), [1200, 1350])
+        self.assertEqual(self.readings("instagram", f"manual-{jump}"), [300])
         self.assertEqual(analytics.auto_link(), 0)
         self.assertEqual(self.posts("instagram"), ["ig777", f"manual-{jump}"])
+        self.assertEqual(self.readings("instagram", "ig777"), [1200, 1350])
 
     def test_typed_in_numbers_stay_while_no_post_is_read(self):
         kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
@@ -527,13 +529,36 @@ class TypedInTest(DbTest):
         analytics.auto_link()
         self.assertEqual(self.posts("x"), [f"manual-{kite}", "x1"])
         self.assertEqual(db.latest_accounts()["x"]["views"], 12000)
-        with db.connect() as c:
-            self.assertEqual(c.execute("SELECT COUNT(*) FROM post_stats WHERE post_id = ?",
-                                       (f"manual-{kite}",)).fetchone()[0], 1)
-        # Logged in again: the post itself is read, with newer numbers than the typed ones, which now go.
+        self.assertEqual(self.readings("x", f"manual-{kite}"), [12000])
+        # Logged in again: the post itself is read, with newer numbers than the typed ones.
         read("x", [post("x1", CAPTIONS["x"].format(REAL["kite"][0]), 5, views=12500)], minutes=48 * 60)
         analytics.auto_link()
         self.assertEqual(self.posts("x"), ["x1"])
+
+    def test_typed_in_numbers_become_the_real_posts_history(self):
+        """Weeks of numbers typed in while X was logged out used to be deleted, readings and all, the moment X was
+        read again: the post's history then jumped from its last read before the log-out to today. They are its
+        readings for those weeks now, as typed, between what was read before and after."""
+        kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
+        jump = db.create_episode(REAL["jump"][0], video(REAL["jump"][1]), at(-50))
+        week = 7 * 24 * 60
+        read("x", [post("x1", CAPTIONS["x"].format(REAL["kite"][0]), 5, views=9000),
+                   post("x2", CAPTIONS["x"].format(REAL["jump"][0]), 425, views=700)], minutes=600)
+        analytics.auto_link()
+        for n, views in enumerate((10_000, 11_000, 12_000), start=1):  # logged out since: typed in once a week
+            self.typed("x", {kite: views, jump: 800}, n * week)
+            analytics.auto_link()  # (what the other platforms' refreshes run meanwhile)
+        # Logged in again. X's page shows the kite post only: the jump one has left it.
+        read("x", [post("x1", CAPTIONS["x"].format(REAL["kite"][0]), 5, views=12_500)], minutes=4 * week)
+        analytics.auto_link()
+        self.assertEqual(self.posts("x"), [f"manual-{jump}", "x1", "x2"])  # jump's wait until its post is read
+        self.assertEqual(self.readings("x", "x1"), [9000, 10_000, 11_000, 12_000, 12_500])
+        self.assertEqual([v for _, v in db.post_series(at(-1000))["x", "x1"]], [9000, 10_000, 11_000, 12_000, 12_500])
+        self.assertEqual(self.readings("x", f"manual-{jump}"), [800, 800, 800])
+        self.assertEqual(next(p["views"] for p in db.posts_latest() if p["post_id"] == "x1"), 12_500)  # as read
+        self.assertEqual(where("x", "x1"), (kite, "caption"))
+        with db.connect() as c:  # nothing typed in was dropped on the way
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM post_stats WHERE platform = 'x'").fetchone()[0], 9)
 
     def test_a_typed_in_number_can_be_put_right(self):
         """34000 typed where 3400 was meant: the video, the account and their charts all come down to 3400."""
