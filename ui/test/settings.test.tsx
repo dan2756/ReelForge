@@ -88,8 +88,13 @@ describe("the Settings tab", () => {
   test("in an 80-column window what a row under On this computer says wraps, where it was cut off at its button", async () => {
     const h = await window([80, 90])
     expect(frame(h)).toContain("ON THIS COMPUTER")
-    // what the rows say, without the switch or button at the right of each (from column 46)
-    const said = frame(h).split("\n").map((r) => [...r].slice(2, 46).join("").trim()).join(" ").replace(/\s+/g, " ")
+    // what the rows say, without the switch or button at the right of each. Where those begin is read off the Restart
+    // row: the buttons are as wide as the widest of them, which is "Open in the file manager" on Linux, "Move to the
+    // Recycle Bin" on Windows and the shorter "Move to the Trash" on a Mac. (It was taken to be column 46 everywhere,
+    // which cut what a Mac's wider rows say: "… without typing a comm".)
+    const buttons = [...frame(h).split("\n").find((r) => r.includes("Restart ReelForge"))!].indexOf("▐")
+    expect(buttons).toBeGreaterThan(40)
+    const said = frame(h).split("\n").map((r) => [...r].slice(2, buttons).join("").trim()).join(" ").replace(/\s+/g, " ")
     expect(said).toContain("on: your stats update every hour, even with ReelForge closed") // (it ended "... even with R")
     expect(said).toContain("open ReelForge without typing a command")
     expect(frame(h)).toContain("Turn off") // its button, still in full beside it
