@@ -16,7 +16,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
-from dashboard import db, posting, youtube_api_tab
+from dashboard import db, posting, posting_tab, youtube_api_tab
 from dashboard.platforms import youtube_api
 from dashboard.platforms.youtube_api import AGAIN, UNPROVEN
 from dashboard.tests.google import CHANNEL
@@ -427,6 +427,55 @@ class Posting(ApiPosting):
         self.assertEqual(w.view("youtube_api")["channel"], CHANNEL)
         self.assertIn("last upload went to Night Physics", plain(w.view("youtube_api")["line"]))
         self.assertNotIn("sessions", json.loads(self.api_store.read_text("utf-8")))
+
+    def test_a_yes_to_a_question_about_another_video_than_the_picked_one_starts_nothing(self):
+        """The window sends back the video its question showed. The list picks another by itself when that one
+        leaves it (hidden in another window, here): a yes must not upload the new pick with the old one's title."""
+        other = self.root / "videos" / "ep02.mp4"
+        other.write_bytes(BYTES[::-1])
+        w = self.window()
+        w.call("pick_file", str(other))
+        info = w.call("youtube_api_info", "The second video", TAGS)
+        shown = {"video": info["video"]["path"], "made_for_kids": info["send"]["made_for_kids"]}
+        self.assertEqual(shown, {"video": str(other), "made_for_kids": False})
+        db.set_meta("hidden_videos", [str(other)])  # what another window's Hide writes
+        w.call("scan_files")                        # ... and what this window does when it sees the change
+        self.assertEqual(w.view("posting")["video"]["name"], "ep01.mp4")
+        self.assertIsNone(w.call("post_with_api", "The second video", TAGS, "private", False, shown))
+        toast = w.sent("toast")[-1]
+        self.assertEqual((toast["title"], toast["severity"]), ("Nothing was started", "warning"))
+        self.assertEqual(toast["body"], "The question was about ep02.mp4, and ep01.mp4 is the picked video now. "
+                                        f"Press {posting_tab.LABELS['post_api']} again to post this one.")
+        self.assertEqual((posting.recent(), self.google.starts, db.uploads()), ([], [], []))
+        # The same yes about the video that is picked goes ahead.
+        made = w.call("post_with_api", CAPTION, TAGS, "private", False,
+                      {"video": str(self.video), "made_for_kids": False})
+        job = self.over(w, made["jobs"][0]["id"])
+        self.assertEqual((job["state"], job["video"], len(self.google.videos)), ("posted", "ep01.mp4", 1))
+
+    def test_a_made_for_kids_answer_changed_since_the_question_starts_nothing(self):
+        """The question shows the made-for-kids answer a post will carry, or that none will be sent. When that is
+        another one by the time of the yes (changed in another window), what was shown is not what would be sent."""
+        self.connect_api(kids=None)
+        w = self.window()
+        info = w.call("youtube_api_info", CAPTION, TAGS)
+        shown = {"video": info["video"]["path"], "made_for_kids": info["send"]["made_for_kids"]}
+        self.assertIsNone(shown["made_for_kids"])  # the question said: none will be sent
+        youtube_api.set_defaults(made_for_kids=True)  # another window's choice, on the same file
+        self.assertIsNone(w.call("post_with_api", CAPTION, TAGS, "private", False, shown))
+        toast = w.sent("toast")[-1]
+        self.assertEqual((toast["title"], toast["severity"]), ("Nothing was started", "warning"))
+        self.assertIn("Your made-for-kids answer changed after the question was shown, so nothing was sent.",
+                      toast["body"])
+        self.assertEqual((posting.recent(), self.google.starts), ([], []))
+        # Asked again, the question shows the new answer, and a yes to that one is sent with it.
+        info = w.call("youtube_api_info", CAPTION, TAGS)
+        self.assertEqual(info["fields"][3], {"label": "Made for kids", "text": "Yes"})
+        made = w.call("post_with_api", CAPTION, TAGS, "private", False,
+                      {"video": info["video"]["path"], "made_for_kids": info["send"]["made_for_kids"]})
+        self.over(w, made["jobs"][0]["id"])
+        self.assertEqual(self.google.starts[0]["body"]["status"],
+                         {"privacyStatus": "private", "selfDeclaredMadeForKids": True})
 
     def test_the_rows_own_button_posts_with_the_form_as_it_is_and_never_again(self):
         w = self.window()

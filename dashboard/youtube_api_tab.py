@@ -562,11 +562,14 @@ class YouTubeApiTab:
         return self.youtube_api_view()
 
     @rpc
-    def post_with_api(self, caption: str, tags: str, privacy: str = "", force: bool = False) -> dict | None:
+    def post_with_api(self, caption: str, tags: str, privacy: str = "", force: bool = False,
+                      shown: dict | None = None) -> dict | None:
         """Your yes: post the picked video to YouTube through its API, with the form's caption and hashtags.
         privacy: who can see it ("": your choice for posts to come, private unless you changed it). force: post
-        it again although it is up there, or may be. Returns {"batch", "jobs": [{"id", "platform"}], "blocked",
-        "started"}; None when there was nothing to start from. The upload runs on a thread of its own."""
+        it again although it is up there, or may be. shown: what the question showed you, which the window sends
+        back ({"video": youtube_api_info's video.path, "made_for_kids": its send.made_for_kids}). Returns
+        {"batch", "jobs": [{"id", "platform"}], "blocked", "started"}; None when there was nothing to start from.
+        The upload runs on a thread of its own."""
         if self.demo:
             self.notify("Demo mode: nothing is posted.", timeout=4)
             return None
@@ -574,6 +577,21 @@ class YouTubeApiTab:
             return None
         said = youtube_api.status()
         privacy = privacy or said["privacy"]
+        if shown is not None:
+            # A yes is to what the question showed. The list picks another video by itself when the one in the
+            # question leaves it (hidden or removed in another window, or its file went), and the made-for-kids
+            # answer can be changed in another window. Then nothing starts, and this says which of the two it was.
+            asked = Path(str(shown.get("video") or ""))
+            if asked != self.selected_file:
+                self.notify(f"The question was about {asked.name}, and {self.selected_file.name} is the picked "
+                            "video now. Press Post with API… again to post this one.",
+                            title="Nothing was started", severity="warning", timeout=12)
+                return None
+            if shown.get("made_for_kids") is not said["made_for_kids"]:
+                self.notify("Your made-for-kids answer changed after the question was shown, so nothing was sent. "
+                            "Press Post with API… again to see what a post sends now.",
+                            title="Nothing was started", severity="warning", timeout=12)
+                return None
         if "youtube" not in self.platforms:
             why = "Connect YouTube on the Accounts tab first."
         elif said["state"] != "on":
