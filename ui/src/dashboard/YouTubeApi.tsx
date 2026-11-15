@@ -74,19 +74,22 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
   const api = useView<YouTubeApiView>(s.bridge, "youtube_api")
   const { width } = useTerminalDimensions()
   const [path, setPath] = useState("")
-  const [bad, setBad] = useState(false) // the file at that path wasn't taken (a pop-up says why)
+  const [bad, setBad] = useState(false) // the file at that path wasn't taken
+  const [why, setWhy] = useState("") // why the last try at connecting couldn't start, in the Python side's words
   const [leaving, setLeaving] = useState(false) // Disconnect was pressed: asking
   const [busy, setBusy] = useState(false)
-  /** Connect: with the client file at this path, or ("") with the one on file. The answer is whether Google's page is
-   * opening; why not comes as a pop-up, and the view follows your answer on that page. (true: this dialog says how
-   * it goes, so the Python side sends no pop-up to sit on its buttons unless something went wrong.) */
+  /** Connect: with the client file at this path, or ("") with the one on file. The answer is true when Google's page
+   * is opening, and the view follows your answer on that page. When it can't start, the answer is the sentence that
+   * says why, which is shown here. (true: this dialog says how it goes, so the Python side sends no pop-up to sit on
+   * its buttons. In a window 24 rows tall the one for a file that wasn't taken covered Close for fifteen seconds.) */
   const connect = async (file: string) => {
     if (busy) return
     setBusy(true)
-    const opening = await s.bridge.ask<boolean>("youtube_api_connect", file, true)
+    const said = await s.bridge.ask<boolean | string>("youtube_api_connect", file, true)
     setBusy(false)
-    setBad(Boolean(file) && !opening)
-    if (!opening) return
+    setBad(Boolean(file) && said !== true)
+    setWhy(typeof said === "string" ? said : "")
+    if (said !== true) return
     setPath("")
     fm.focus("api-close") // Google's page is open: a second Enter doesn't open it again
   }
@@ -124,9 +127,9 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
       <box flexDirection="row" flexShrink={0}>
         <Wrapped segs={api.line} />
       </box>
-      {waiting ? (
+      {waiting || (why && !api.wants_file) ? (
         <box flexDirection="row" marginTop={1} flexShrink={0}>
-          <Wrapped segs={[[api.words.waiting, DASH.warn]]} />
+          <Wrapped segs={[[waiting ? api.words.waiting : why, DASH.warn]]} />
         </box>
       ) : null}
       {/* What scrolls, in a window too short for all of it, so that the box for the file, what it is for and the
@@ -171,7 +174,9 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
             CLIENT FILE
           </text>
           <box flexDirection="row" flexShrink={0}>
-            <Wrapped segs={[[api.words.file, DASH.muted]]} />
+            {/* (why a file wasn't taken, in the place of what the box is for, until something else is typed: under
+                it there is no row to spare in a window 24 rows tall) */}
+            <Wrapped segs={why ? [[why, DASH.warn]] : [[api.words.file, DASH.muted]]} />
           </box>
         </box>
       ) : null}
@@ -187,6 +192,7 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
             onChange={(v) => {
               setPath(v)
               setBad(false)
+              setWhy("")
             }}
             onSubmit={(typed) => withFile(typed)}
           />

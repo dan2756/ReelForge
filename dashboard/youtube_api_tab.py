@@ -520,12 +520,14 @@ class YouTubeApiTab:
                 "force": again and not why, "blocked": block}
 
     @rpc
-    def youtube_api_connect(self, path: str = "", quiet: bool = False) -> bool:
+    def youtube_api_connect(self, path: str = "", quiet: bool = False) -> bool | str:
         """Connect: read the client file at path (the JSON you downloaded from Google Cloud; "" to connect again
         with the client already on file) and open Google's consent page in your browser. True when the page is
         opening; the view and a pop-up follow when you have answered there. quiet: asked for in the window's
-        dialog for the connection, which says itself that Google's page is open and that it is connected: no
-        pop-up says the same over its buttons. What went wrong is a pop-up either way."""
+        dialog for the connection, which says itself how it goes: that Google's page is open, that it is
+        connected, and why it couldn't start. No pop-up says the same over its buttons, and when it can't start
+        the answer is the sentence that says why. What goes wrong after Google's page opened is a pop-up either
+        way."""
         if self.demo:
             self.notify("The demo doesn't use YouTube's API.", timeout=4)
             return False
@@ -536,8 +538,10 @@ class YouTubeApiTab:
             self.api_consent = youtube_api.connect(
                 file or None, on_done=lambda outcome: self.loop.call_soon(self._api_connected, outcome))
         except ApiError as e:
-            self.notify(e.message, title="YouTube's API", severity="warning", timeout=15)
             self.follow_youtube_api(changed=True)
+            if quiet:
+                return e.message
+            self.notify(e.message, title="YouTube's API", severity="warning", timeout=15)
             return False
         self.api_quiet = bool(quiet)
         if not quiet:

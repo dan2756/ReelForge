@@ -347,9 +347,11 @@ class Buttons(ApiPosting):
         self.assertIn("never against Google itself", w.toasts()[1])
         self.assertEqual(self.rows(w)["youtube"]["actions"], ["post_api"])  # the row follows
 
-    def test_a_connect_asked_for_in_the_dialog_puts_no_pop_up_over_it_unless_something_went_wrong(self):
+    def test_a_connect_asked_for_in_the_dialog_puts_no_pop_up_over_it_while_the_dialog_can_say_it(self):
         """The dialog for the connection says that Google's page is open, and then that it is connected, with what
-        posts start as and how far this is tested. A pop-up saying the same sat on its buttons for twenty seconds."""
+        posts start as and how far this is tested. A pop-up saying the same sat on its buttons for twenty seconds.
+        So did the one for a client file that wasn't taken: its sentence is the call's answer, for the dialog to
+        show under the box."""
         w = self.window(api=False)
         self.assertTrue(w.call("youtube_api_connect", str(self.client_file), True))
         self.assertTrue(w.until(lambda: w.view("youtube_api")["state"] == "on"))
@@ -358,11 +360,21 @@ class Buttons(ApiPosting):
         view = w.view("youtube_api")
         self.assertIn("posts start as private", plain(view["line"]))  # what the pop-up would have said
         self.assertEqual(plain(view["lines"][-1]), UNPROVEN)
-        # What went wrong is said all the same: a file that isn't one, and a no on Google's page.
-        self.assertFalse(w.call("youtube_api_connect", str(self.root / "nothing.json"), True))
-        self.assertIn("There is no file at", w.toasts()[-1])
+        # A file that isn't one: the answer says why, and is never True.
+        nothing = self.root / "nothing.json"
+        self.assertEqual(w.call("youtube_api_connect", str(nothing), True), f"There is no file at {nothing}.")
+        web = self.root / "client_secret_web.json"
+        web.write_text(json.dumps({"web": {"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET}}), "utf-8")
+        self.assertEqual(w.call("youtube_api_connect", str(web), True),
+                         "client_secret_web.json is the file of a Web application client. ReelForge needs a Desktop "
+                         "app client: make one in Google Cloud and download its JSON.")
+        self.assertEqual(w.sent("toast"), [])
+        # Asked for anywhere else, the same refusal is a pop-up and the answer is False.
+        self.assertIs(w.call("youtube_api_connect", str(nothing)), False)
+        self.assertEqual(w.toasts(), [f"There is no file at {nothing}."])
+        # What goes wrong once Google's page is open is a pop-up either way: a no there.
         self.google.consent = "no"
-        self.assertTrue(w.call("youtube_api_connect", "", True))
+        self.assertIs(w.call("youtube_api_connect", "", True), True)
         self.assertTrue(w.until(lambda: "You said no on Google's page" in (w.toasts() or [""])[-1]))
         # Asked for anywhere else (the YouTube row's button), both pop-ups come as before.
         self.google.consent = "yes"

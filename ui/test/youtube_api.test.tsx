@@ -159,20 +159,25 @@ describe("a channel that never used YouTube's API", () => {
       expect(said).toContain(text)
     for (const text of ["FOR POSTS TO COME", "Disconnect", "▐ Connect ▌"]) expect(said).not.toContain(text) // nothing to choose or end yet
     // The box for the path has the keyboard. An empty one, a file that isn't there and a Web application's client
-    // are each turned away, and nothing opens.
+    // are each turned away, and nothing opens. The dialog says why itself, where it said what the box is for: no
+    // pop-up sits on its buttons.
     h.t.mockInput.pressKey("RETURN")
     await h.settle(400)
     expect(listed("opened.txt")).toEqual([])
     await h.t.mockInput.typeText(join(tmp, "nothing.json"))
     h.t.mockInput.pressKey("RETURN")
-    await until(h, () => popups().length > 0)
-    expect(popups().at(-1)).toBe(`YouTube's API: There is no file at ${join(tmp, "nothing.json")}.`)
+    await until(h, () => dialog(h).includes("There is no file"))
+    expect(dialog(h)).toContain(`CLIENT FILE There is no file at ${join(tmp, "nothing.json")}. `)
+    expect(dialog(h)).not.toContain("Type or paste where the client file is")
     for (let i = 0; i < "nothing.json".length; i++) h.t.mockInput.pressKey("BACKSPACE")
+    await h.settle(200)
+    expect(dialog(h)).not.toContain("There is no file") // typed on: what the box is for is back
+    expect(dialog(h)).toContain("CLIENT FILE Type or paste where the client file is")
     await h.t.mockInput.typeText("client_secret_web.json")
     await clickText(h, "Connect with this file", 2)
-    await until(h, () => popups().some((p) => p.includes("Web application")))
-    expect(popups().at(-1)).toBe("YouTube's API: client_secret_web.json is the file of a Web application client. ReelForge needs a Desktop app client: make one in Google Cloud and download its JSON.")
-    expect([api(h).state, onFile(), listed("opened.txt")]).toEqual(["off", null, []])
+    await until(h, () => dialog(h).includes("Web application"))
+    expect(dialog(h)).toContain("CLIENT FILE client_secret_web.json is the file of a Web application client. ReelForge needs a Desktop app client: make one in Google Cloud and download its JSON. ")
+    expect([api(h).state, onFile(), listed("opened.txt"), popups()]).toEqual(["off", null, [], []])
     expect(frame(h)).toContain("YOUTUBE API") // the dialog is still there, with what was typed
     expect(frame(h)).toContain("client_secret_web.json")
     h.t.mockInput.pressKey("ESCAPE") // out of the box
@@ -890,6 +895,13 @@ describe("when something goes wrong, or the window is small", () => {
     // The introduction scrolls. The box, what it is for and the buttons don't.
     for (const text of ["CLIENT FILE", "Type or paste where the client file is", "/path/to/client_secret_….json", "▐ Connect with this file ▌", "Guide: docs/YOUTUBE-API.md", "▐ Close ▌"])
       expect(frame(h)).toContain(text)
+    // A file that isn't taken says why in the dialog. As a pop-up it sat on Close and the guide here.
+    await h.t.mockInput.typeText("nothing.json")
+    h.t.mockInput.pressKey("RETURN")
+    await until(h, () => frame(h).includes("There is no file"))
+    for (const text of ["CLIENT FILE", "There is no file at nothing.json.", "nothing.json", "▐ Connect with this file ▌", "Guide: docs/YOUTUBE-API.md", "▐ Close ▌"]) expect(frame(h)).toContain(text)
+    expect(popups()).toEqual([])
+    for (let i = 0; i < "nothing.json".length; i++) h.t.mockInput.pressKey("BACKSPACE")
     await h.t.mockInput.typeText(join(tmp, "client_secret_test.json"))
     await h.settle(200)
     h.t.mockInput.pressKey("RETURN")
