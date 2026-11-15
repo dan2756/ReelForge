@@ -196,6 +196,28 @@ describe("posting by hand", () => {
     expect(at("VIDEOS  3")).toBe(-1) // scrolled away
   })
 
+  test("with the videos beside the form, Tab goes from the Caption box to Hashtags, and what is typed there is typed", async () => {
+    // By rows the list of videos came between the two (it starts a row under the Caption box): the hashtags typed
+    // after Tab ran the window's one-key shortcuts (p opened the profiles menu), and an arrow picked another video.
+    const h = await demo([120, 30])
+    for (const [size, typed] of [[[120, 30], "x"], [[150, 45], "y"]] as const) {
+      h.t.resize(size[0], size[1])
+      await h.settle(500)
+      await clickText(h, CAPTION.slice(0, 12), 2) // into the Caption box
+      h.t.mockInput.pressKey("TAB")
+      await h.settle(200)
+      await h.t.mockInput.typeText(typed + "p")
+      await h.settle(300)
+      expect(frame(h)).toContain(`${TAGS}${size[0] === 120 ? "xp" : "xpyp"}`) // typed into Hashtags, p and all
+      expect(frame(h)).not.toContain("New profile") // ... and the profiles menu did not open
+      h.t.mockInput.pressKey("TAB", { shift: true }) // back to the Caption box, not into the list
+      await h.settle(200)
+      await h.t.mockInput.typeText("!")
+      await h.settle(300)
+      expect(frame(h)).toContain(`${CAPTION}${size[0] === 120 ? "!" : "!!"}`)
+    }
+  })
+
   test("Tab brings a button that is out of sight into view before Enter can press it", async () => {
     const h = await demo([120, 22]) // too short for the By hand rows: they're below the fold
     expect(frame(h)).not.toContain("Copy Instagram text")

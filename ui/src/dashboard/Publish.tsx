@@ -73,6 +73,10 @@ function Files({ rows }: { rows?: number }) {
       )}
       <OptionList
         id="file-list"
+        // Beside the form (a wide window) the list starts a row under the Caption box, so by rows Tab went Caption,
+        // the list, Hashtags: typing the hashtags then ran the window's one-key shortcuts, and an arrow picked
+        // another video over the caption being written. The list comes first, then the form in one piece.
+        before={rows ? undefined : "f-caption"}
         items={files?.items ?? []}
         selected={files?.selected}
         spaced

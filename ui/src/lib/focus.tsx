@@ -16,6 +16,9 @@ export interface Focusable {
   /** A text field: it types the keys itself, so the app's one-key shortcuts don't run. */
   input?: boolean
   disabled?: () => boolean
+  /** The stop this one comes right before, where reading order by rows would put it in the middle of something: a
+   * list in a column beside a form, which starts a row under the form's first field. */
+  before?: () => string | undefined
 }
 
 export class FocusManager {
@@ -116,7 +119,15 @@ export class FocusManager {
       if (!n || !isShown(n) || n.width <= 0 || n.height <= 0) continue
       out.push([f, n.y, n.x])
     }
-    return out.sort((a, b) => a[1] - b[1] || a[2] - b[2]).map((x) => x[0])
+    const order = out.sort((a, b) => a[1] - b[1] || a[2] - b[2]).map((x) => x[0])
+    for (const f of [...order]) {
+      const target = f.before?.()
+      const at = target ? order.findIndex((o) => o.id === target) : -1
+      if (at < 0) continue
+      order.splice(order.indexOf(f), 1)
+      order.splice(order.findIndex((o) => o.id === target), 0, f)
+    }
+    return order
   }
 
   cycle(dir: 1 | -1) {
@@ -196,7 +207,7 @@ export function useFocusManager(): FocusManager {
  * Put `ref` on the renderable that marks where it is. */
 export function useFocus(
   id: string,
-  opts: { onKey?: (key: KeyEvent) => boolean; input?: boolean; disabled?: boolean; autoFocus?: boolean } = {},
+  opts: { onKey?: (key: KeyEvent) => boolean; input?: boolean; disabled?: boolean; autoFocus?: boolean; before?: string } = {},
 ) {
   const fm = useFocusManager()
   const scope = useContext(ScopeContext)
@@ -212,6 +223,7 @@ export function useFocus(
         onKey: (key) => latest.current.onKey?.(key) ?? false,
         input: opts.input,
         disabled: () => Boolean(latest.current.disabled),
+        before: () => latest.current.before,
       }),
     [fm, id, scope, opts.input],
   )

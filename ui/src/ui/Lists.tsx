@@ -262,6 +262,8 @@ export interface OptionListProps {
   empty?: ReactNode
   /** It has the keyboard as soon as it shows (a dialog's list). */
   autoFocus?: boolean
+  /** The stop Tab reaches right after this list, when rows alone would put the list in the middle of it (focus.tsx). */
+  before?: string
 }
 
 export function OptionList(props: OptionListProps) {
@@ -290,6 +292,7 @@ export function OptionList(props: OptionListProps) {
   const { ref, focused, focus } = useFocus(props.id, {
     disabled: !items.length, // (an empty list is no stop for Tab)
     autoFocus: props.autoFocus,
+    before: props.before,
     onKey: (key) => {
       if (isEnter(key) && props.selected) {
         props.onActivate?.(props.selected)
