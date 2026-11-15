@@ -6,8 +6,10 @@ the Codex settings you edited stay yours."""
 from __future__ import annotations
 
 import contextlib
+import io
 import os
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -125,6 +127,30 @@ class PartWayTest(unittest.TestCase):
         with mock.patch.object(update, "_download", offline), self.assertRaises(update.UpdateError) as stopped:
             update.apply(rel, root=self.root)                        # and a whole folder is called whole again
         self.assertFalse(stopped.exception.partial)
+
+    def test_it_finishes_beside_an_older_versions_paths_and_tools(self):
+        # 2.2.1's own update copied in no set order and waited for nothing, so one that stopped could leave this
+        # update.py in place beside 2.2.1's paths.py and tools.py, which have no replace and no untar. Every attempt
+        # after that ended in an AttributeError, from the window and from the terminal alike.
+        self.kit("2.2.1", self.root, **{"README.md": "old"})
+        new = self.kit("2.3.0", self.dir / "new", **{"README.md": "new"})
+        raw = io.BytesIO()
+        with tarfile.open(fileobj=raw, mode="w:gz") as t:
+            for name, data in (("ReelForge-2.3.1/studio/__init__.py", b'KIT_VERSION = "2.3.1"\n'),
+                               ("ReelForge-2.3.1/README.md", b"newer")):
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                t.addfile(info, io.BytesIO(data))
+        archive = self.dir / "ReelForge-2.3.1-Linux.tar.gz"
+        archive.write_bytes(raw.getvalue())
+        with mock.patch.dict(update.paths.__dict__), mock.patch.dict(update.tools.__dict__):
+            del update.paths.__dict__["replace"], update.tools.__dict__["untar"]
+            update._copy_tree(new, self.root, lambda *a: None)
+            self.assertEqual((update.read_version(self.root), (self.root / "README.md").read_text(encoding="utf-8")),
+                             ("2.3.0", "new"))
+            if hasattr(tarfile, "data_filter"):                      # 2.2.1 unpacked a .tar on such a Python only
+                update._copy_release(archive, self.root, self.dir, lambda *a: None)
+                self.assertEqual(update.read_version(self.root), "2.3.1")
 
     def after(self, pip: int = 0) -> tuple[list[list[str]], list[str]]:
         """Run the steps after the copy with nothing really run: (the commands, what was logged)."""

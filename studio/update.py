@@ -290,7 +290,7 @@ def _copy_release(archive: Path, root: Path, work: Path, progress: Progress) -> 
                 z.extractall(out)  # ZipFile drops absolute paths and ".." parts
                 runnable(z, out)
         else:
-            tools.untar(archive, out)   # nothing lands outside the folder, on any Python (see studio/tools.py)
+            _untar(archive, out)
     except (zipfile.BadZipFile, tarfile.TarError, OSError) as e:
         raise UpdateError(f"The download couldn't be unpacked ({e}); try again.") from e
     tops = [p for p in out.iterdir() if p.is_dir()]
@@ -325,7 +325,7 @@ def _copy_tree(src: Path, root: Path, progress: Progress) -> None:
                 os.chmod(tmp, 0o755)
             # Windows won't replace a file someone has open. Most let go within a moment, so wait for the first
             # one; once a file has stayed busy the update can't finish this time, and the rest aren't waited for.
-            paths.replace(tmp, dest, wait=0 if busy else BUSY_WAIT)
+            _replace(tmp, dest, wait=0 if busy else BUSY_WAIT)
             changed += 1
             if changed == 1:
                 _note_part_way(part_way)
@@ -352,6 +352,29 @@ def _note_part_way(part_way: Path) -> None:
                             "them. Update again to finish (ReelForge's Updates tab).\n", encoding="utf-8")
     except OSError:
         pass
+
+
+# The two helpers below come from studio/paths.py and studio/tools.py, and the updater has to work beside those
+# files as an older version had them: that version's own update, stopped part way, can leave this file new and
+# them old, and this file is then what finishes the update.
+
+def _replace(src: Path, dest: Path, wait: float) -> None:
+    """paths.replace, which waits for a file another program has open. Beside a paths.py from before it had one, a
+    plain replace."""
+    if hasattr(paths, "replace"):
+        paths.replace(src, dest, wait=wait)
+    else:
+        os.replace(src, dest)
+
+
+def _untar(archive: Path, out: Path) -> None:
+    """tools.untar: nothing lands outside the folder, on any Python. Beside a tools.py from before it had one, the
+    way that version unpacked, with Python's own check."""
+    if hasattr(tools, "untar"):
+        tools.untar(archive, out)
+    else:
+        with tarfile.open(archive) as t:
+            t.extractall(out, filter="data")
 
 
 def _drop(tmp: Path) -> None:
