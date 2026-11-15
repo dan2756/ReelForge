@@ -448,6 +448,10 @@ def forget_old_handle(platform: str) -> dict | None:
 
 
 def _record(db: sqlite3.Connection, platform: str, account, posts: list, ts: str) -> None:
+    # Typed-in numbers (manual-<episode> posts) and the platform's own posts are never added together.
+    typed = bool(posts) and all(p.post_id.startswith("manual-") for p in posts)
+    if typed:
+        _correct_typed(db, platform, posts)
     db.executemany(
         """INSERT INTO posts (platform, post_id, title, url, published_at,
                               last_ts, views, likes, comments, shares, saves)
@@ -469,8 +473,6 @@ def _record(db: sqlite3.Connection, platform: str, account, posts: list, ts: str
            VALUES (?,?,?,?,?,?,?,?)""",
         [(platform, p.post_id, ts, p.views, p.likes, p.comments, p.shares, p.saves) for p in posts],
     )
-    # Typed-in numbers (manual-<episode> posts) and the platform's own posts are never added together.
-    typed = bool(posts) and all(p.post_id.startswith("manual-") for p in posts)
     totals = []
     for field, given in (("views", account.views), ("likes", account.likes)):
         if given is None and posts:
@@ -482,8 +484,6 @@ def _record(db: sqlite3.Connection, platform: str, account, posts: list, ts: str
                 f"SELECT {field} FROM account_stats WHERE platform = ? AND ts < ? ORDER BY ts DESC LIMIT 1",
                 (platform, ts)).fetchone() or [None])[0]
         totals.append(given)
-    if typed:
-        _correct_typed(db, platform, posts, totals[0])
     # A read that couldn't see the followers (YouTube's page without its subscriber line) or the post count keeps
     # the last one seen: stored as unknown, the platform's card would go blank and every total would drop by it.
     counts = []
@@ -499,16 +499,29 @@ def _record(db: sqlite3.Connection, platform: str, account, posts: list, ts: str
     )
 
 
-def _correct_typed(db: sqlite3.Connection, platform: str, posts: list, total: int | None) -> None:
-    """A typed-in number put right downwards (34000 that should have been 3400): the earlier readings that were
-    higher come down to it, the video's and, on a platform with only typed-in numbers, the account's, so no chart
-    holds on to the slip (charts keep a count at its highest reading)."""
-    db.executemany("UPDATE post_stats SET views = ? WHERE platform = ? AND post_id = ? AND views > ?",
-                   [(p.views, platform, p.post_id, p.views) for p in posts if p.views is not None])
-    read_too = db.execute("SELECT 1 FROM posts WHERE platform = ? AND post_id NOT LIKE 'manual-%' LIMIT 1",
-                          (platform,)).fetchone()
-    if total is not None and not read_too:
-        db.execute("UPDATE account_stats SET views = ? WHERE platform = ? AND views > ?", (total, platform, total))
+def _correct_typed(db: sqlite3.Connection, platform: str, posts: list) -> None:
+    """A typed-in number put right downwards (34000 that should have been 3400), before the right one is stored:
+    the reading the slip was saved in comes down to it, with the ones since that only repeat it (every Save stores
+    each video's number again), and the account's total at those readings comes down by as much. So no chart holds
+    on to the slip (charts keep a count at its highest reading).
+
+    Readings from before the slip stay as they are. Every earlier reading above the new number used to come down,
+    so a number typed too low by mistake (3400 for 34000) flattened the video's whole history and the account's;
+    now it costs the newest step at most."""
+    for p in posts:
+        slip, saved = None, []  # the number being put right, and the readings it was saved in (newest first)
+        for row in db.execute("""SELECT rowid, ts, views FROM post_stats WHERE platform = ? AND post_id = ?
+                                 ORDER BY ts DESC, rowid DESC""", (platform, p.post_id)):
+            if slip is None and p.views is not None and (row["views"] or 0) > p.views:
+                slip = row["views"]
+            if slip is None or row["views"] != slip:
+                break
+            saved.append(row)
+        for row in saved:
+            db.execute("UPDATE post_stats SET views = ? WHERE rowid = ?", (p.views, row["rowid"]))
+            # (the reading of the account saved with it, in the same second: the sum of the typed-in numbers then)
+            db.execute("UPDATE account_stats SET views = MAX(views - ?, 0) WHERE platform = ? AND ts = ?",
+                       (slip - p.views, platform, row["ts"]))
 
 
 def latest_accounts() -> dict[str, sqlite3.Row]:

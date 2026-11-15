@@ -474,12 +474,49 @@ class TypedInTest(DbTest):
         self.assertEqual([v for _, v in db.post_series(at(-1000))["x", f"manual-{kite}"]], [3000, 3400, 3400])
         self.assertEqual([r["views"] for r in db.account_series("x", "")], [3100, 3500, 3500])
 
+    def readings(self, platform: str, post_id: str) -> list[int]:
+        """A post's readings as they're stored (charts hold a count at its highest: db.post_series)."""
+        with db.connect() as c:
+            return [r[0] for r in c.execute("SELECT views FROM post_stats WHERE platform = ? AND post_id = ? "
+                                            "ORDER BY ts, rowid", (platform, post_id))]
+
+    def test_a_slip_saved_again_before_it_was_noticed_is_put_right_everywhere_it_was_saved(self):
+        """Every Save stores each video's number again, so a slip is in every reading since it was typed."""
+        kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
+        jump = db.create_episode(REAL["jump"][0], video(REAL["jump"][1]), at(-50))
+        self.typed("x", {kite: 3000, jump: 100}, 60)
+        self.typed("x", {kite: 34000, jump: 100}, 120)  # the slip
+        self.typed("x", {kite: 34000, jump: 150}, 150)  # ... saved again with the other video's new number
+        self.typed("x", {kite: 3400, jump: 150}, 180)
+        self.assertEqual(self.readings("x", f"manual-{kite}"), [3000, 3400, 3400, 3400])
+        self.assertEqual(self.readings("x", f"manual-{jump}"), [100, 100, 150, 150])
+        self.assertEqual([r["views"] for r in db.account_series("x", "")], [3100, 3500, 3550, 3550])
+
+    def test_a_number_typed_too_low_by_mistake_leaves_the_history_alone(self):
+        """3400 typed where 34000 was meant, on a video with weeks of typed-in numbers: every earlier reading above
+        3400 used to come down to it, the video's and the account's, and stayed down once the right number was in."""
+        kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
+        jump = db.create_episode(REAL["jump"][0], video(REAL["jump"][1]), at(-50))
+        week = 7 * 24 * 60
+        for n, views in enumerate((10_000, 20_000, 30_000, 32_000), start=1):  # typed in once a week
+            self.typed("instagram", {kite: views, jump: 900}, n * week)
+        self.typed("instagram", {kite: 3_400, jump: 900}, 5 * week)  # the slip: one digit short
+        self.typed("instagram", {kite: 34_000, jump: 900}, 5 * week + 5)  # put right five minutes later
+        # Only the newest number came down with the slip. What came before it still holds the charts up.
+        self.assertEqual(self.readings("instagram", f"manual-{kite}"), [10_000, 20_000, 30_000, 3_400, 3_400, 34_000])
+        self.assertEqual([v for _, v in db.post_series(at(-1000))["instagram", f"manual-{kite}"]],
+                         [10_000, 20_000, 30_000, 30_000, 30_000, 34_000])
+        self.assertEqual([r["views"] for r in db.account_series("instagram", "")],
+                         [10_900, 20_900, 30_900, 4_300, 4_300, 34_900])
+        self.assertEqual(db.latest_accounts()["instagram"]["views"], 34_900)
+
     def test_putting_a_typed_in_number_right_leaves_read_numbers_alone(self):
         kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
         read("x", [post("1234", "something else", 0, views=9000)], minutes=30)  # read while X was logged in
         self.typed("x", {kite: 500}, 60)
         self.typed("x", {kite: 50}, 120)
-        self.assertEqual([r["views"] for r in db.account_series("x", "")], [9000, 500, 50])
+        # (the total saved with the slip was the typed-in numbers' own: it comes down with it; the read one stays)
+        self.assertEqual([r["views"] for r in db.account_series("x", "")], [9000, 50, 50])
         self.assertEqual(next(p["views"] for p in db.posts_latest() if p["post_id"] == "1234"), 9000)
 
 
