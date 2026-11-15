@@ -485,18 +485,19 @@ class Posting(ApiPosting):
                                                "YouTube Studio.")
         self.assertEqual(db.all_posts(), [])
 
-    def test_a_video_whose_id_cannot_be_read_is_posted_all_the_same(self):
-        job = self.job()
-        posting.advance(job["id"], "posting", by="app")
-        made = {"id": "not a video id", "privacy": "private", "made_for_kids": False, "upload_status": "uploaded",
-                "reason": "", "channel_id": "", "channel_title": ""}
-        done = youtube_api_tab.finish(job, {**made, "id": youtube_api._made({"id": made["id"]})["id"]})
-        self.assertEqual((done["state"], done["post_id"], done["url"]), ("posted", None, None))
-        self.assertTrue(done["detail"].startswith("YouTube took the video, but ReelForge couldn't read its id: find "
-                                                  "it in YouTube Studio."))
-        self.assertEqual(db.all_posts(), [])
-        blocked = posting.create_batch(self.video, ["youtube"], CAPTION, TAGS, self.cfg, via={"youtube": "api"})
-        self.assertEqual([b["reason"] for b in blocked["blocked"]], ["posted"])  # it is up: not sent again
+    def test_an_ok_that_names_no_video_is_never_called_posted(self):
+        # In answer to the first piece: one of four has gone, so the upload carries on and ends with its id.
+        self.google.script = [(200, "notAVideo")]
+        w = self.window()
+        job = self.posted(w)
+        self.assertEqual((job["state"], job["post_id"], job["url"], job["detail"]),
+                         ("posted", "vid00000001", LINK, None))
+        self.assertEqual((len(self.google.videos), bytes(self.google.videos[0]["data"])), (1, BYTES))
+        # In answer to the last piece, and to every question after it: nobody knows, and nothing says "posted".
+        self.google.script, self.google.then = [None, None, None, (200, "notAVideo")], (200, "notAVideo")
+        job = self.over(w, self.api_post(w, force=True)["jobs"][0]["id"])
+        self.assertEqual((job["state"], job["post_id"], job["url"]), ("unknown", None, None))
+        self.assertEqual(self.rows(w)["youtube"]["actions"], ["mark_posted", "not_posted"])
 
     def test_a_refusal_fails_the_job_in_a_sentence_and_retry_goes_through_the_api_again(self):
         self.google.start_script = [(403, "quotaExceeded")]

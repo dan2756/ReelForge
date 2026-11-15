@@ -600,6 +600,26 @@ class Uploading(ApiTest):
         self.assertEqual(youtube_api._stands(httpx.Response(308), SIZE), ("have", 0))
         self.assertEqual(youtube_api._stands(None, SIZE), ("unclear", None))
 
+    def test_an_ok_that_is_no_video_is_not_the_end_of_the_upload(self):
+        # Something in the way answers the first piece with 200 and a page of its own: only one of four pieces has
+        # gone, so nothing is finished. The session is asked, and the upload carries on from what it has.
+        self.google.script = [(200, "notAVideo")]
+        made = self.upload()
+        self.assertEqual(self.ranges()[:3], [f"bytes 0-999/{SIZE}", f"bytes */{SIZE}", f"bytes 0-999/{SIZE}"])
+        self.assertEqual((made["id"], bytes(self.one_video()["data"])), ("vid00000001", BYTES))
+        video = httpx.Response(200, json={"id": "vid00000001"})
+        self.assertEqual(youtube_api._stands(video, SIZE, ends=False), ("unclear", None))  # not from a piece before
+        self.assertEqual(youtube_api._stands(video, SIZE)[0], "made")                      # the last
+        self.assertEqual(youtube_api._stands(httpx.Response(200, json={"kind": "page"}), SIZE), ("unclear", None))
+        self.assertEqual(youtube_api._stands(httpx.Response(201, text="<html>OK</html>"), SIZE), ("unclear", None))
+
+    def test_an_ok_without_a_video_after_the_last_piece_is_unknown_and_never_posted(self):
+        self.google.script, self.google.then = [None, None, None, (200, "notAVideo")], (200, "notAVideo")
+        with self.assertRaises(Unknown):
+            self.upload()
+        self.assertEqual(self.ranges()[4:], [f"bytes */{SIZE}"] * youtube_api.TRIES)  # the session was asked
+        self.assertEqual(len(self.google.starts), 1)
+
     def test_a_token_that_runs_out_in_the_middle_is_renewed_once(self):
         self.google.script = [None, "401"]
         self.upload()

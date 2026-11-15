@@ -197,10 +197,8 @@ def finish(job: dict, made: dict) -> dict | None:
             f"YouTube took the upload and {made['upload_status']} it"
             + (f" ({made['reason']})" if made["reason"] else "") + ". Look at it in YouTube Studio."))
         return posting.get(job["id"])
-    url = f"https://youtube.com/shorts/{made['id']}" if made["id"] else None
+    url = f"https://youtube.com/shorts/{made['id']}"  # (an answer without a video's id is never "made")
     note = read_back(options.get("privacy"), options.get("made_for_kids") is True, made)
-    if not made["id"]:
-        note = f"YouTube took the video, but ReelForge couldn't read its id: find it in YouTube Studio. {note}".strip()
     try:
         return posting.advance(job["id"], "posted", by="app", post_id=made["id"], url=url, detail=note or None,
                                step="confirm" if note else None)
@@ -208,10 +206,9 @@ def finish(job: dict, made: dict) -> dict | None:
         # The job ended another way meanwhile (called off, or the clock gave up on it), but the video is up. It
         # goes into the stats as this episode's: that is what stops a second post of it, and a job that was
         # waiting to hear is settled by it.
-        if made["id"]:
-            db.add_post("youtube", made["id"], job["episode_id"], posting.headline(json.loads(job["text"])), url)
-            db.bump()
-            posting.reconcile()
+        db.add_post("youtube", made["id"], job["episode_id"], posting.headline(json.loads(job["text"])), url)
+        db.bump()
+        posting.reconcile()
         return posting.get(job["id"])
 
 

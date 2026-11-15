@@ -707,7 +707,8 @@ def upload(video: Path, title: str, description: str, privacy: str, made_for_kid
                     raise ApiError("changed", f"{video.name} changed while it was being uploaded.")
                 out = out or end == size
                 what, value = _stands(_put(http, uri, {"Content-Type": kind,
-                                                       "Content-Range": f"bytes {sent}-{end - 1}/{size}"}, piece), size)
+                                                       "Content-Range": f"bytes {sent}-{end - 1}/{size}"}, piece),
+                                      size, ends=end == size)
                 if what not in ("made", "have"):
                     # No answer, or one that says nothing about the piece: the session knows what it has.
                     if what != "auth":
@@ -796,14 +797,18 @@ def _put(http: httpx.Client, uri: str, headers: dict, content: bytes, fresh: boo
         return None
 
 
-def _stands(r: httpx.Response | None, size: int) -> tuple[str, object]:
+def _stands(r: httpx.Response | None, size: int, ends: bool = True) -> tuple[str, object]:
     """What an answer from a session means: ("made", the video) when the upload is finished, ("have", how many
     bytes YouTube has) when it wants more, ("auth", None) when it wants a newer token, ("unclear", None) when it
-    says nothing either way (no answer, or YouTube is busy). ApiError for a refusal."""
+    says nothing either way (no answer, or YouTube is busy). ApiError for a refusal. ends: the answer is to the
+    piece that ends the upload, or to the question where it stands: only those can say it is finished."""
     if r is None or r.status_code in (408, 429) or r.status_code >= 500:
         return "unclear", None
     if r.status_code in (200, 201):
-        return "made", _made(_json(r))
+        # Finished is a video with its id, in answer to something that can finish an upload. Any other "OK" (a
+        # page some proxy put in the way, say) is no word of YouTube's about the upload: the session is asked.
+        made = _made(_json(r))
+        return ("made", made) if ends and made["id"] else ("unclear", None)
     if r.status_code == 308:
         got = re.fullmatch(r"bytes=0-(\d+)", r.headers.get("range", "").strip())
         have = int(got[1]) + 1 if got else 0  # (no Range: it has nothing yet)
