@@ -231,7 +231,7 @@ class InstallTest(unittest.TestCase):
         ran, _ = self.after()                                        # only a file this update changed counts
         self.assertEqual([c[:2] for c in ran], [["-m", "studio.ui"], ["-m", "studio"]])
 
-    def test_packages_that_dont_install_are_said_truthfully_after_the_other_steps(self):
+    def test_packages_that_dont_install_are_said_truthfully_once_the_windows_are_in(self):
         self.kit("1.1.0", self.root, **{"requirements.txt": "a\nb\n", ".venv/installed.txt": "a\n",
                                         "my-studio/studio.toml": ""})
         with self.assertRaises(update.UpdateError) as stopped:
@@ -240,7 +240,7 @@ class InstallTest(unittest.TestCase):
         self.assertIn("The new version's files are in place, but its Python packages didn't install",
                       str(stopped.exception))
         self.assertIn("Close ReelForge and open it again: setup starts and installs them.", str(stopped.exception))
-        self.assertEqual([c[:2] for c in self.ran], [["-m", "pip"], ["-m", "studio.ui"], ["-m", "studio"]])
+        self.assertEqual([c[:2] for c in self.ran], [["-m", "pip"], ["-m", "studio.ui"]])   # the window's still done
         # still out of step, which is what the next start goes by (bin/reelforge.py, tests/test_studio.py)
         self.assertEqual((self.root / ".venv" / "installed.txt").read_text(encoding="utf-8"), "a\n")
 

@@ -366,6 +366,21 @@ def _git_pull(root: Path, progress: Progress) -> None:
         raise UpdateError(f"git pull didn't work ({msg[-1] if msg else 'no message'}).")
 
 
+def _stamp(root: Path) -> Path:
+    """The copy of requirements.txt that .venv's packages were last installed from (setup and updates keep it)."""
+    return root / ".venv" / "installed.txt"
+
+
+def _needs_packages(root: Path, requirements_before: str) -> bool:
+    """Whether the Python packages have to be installed: requirements.txt isn't the one .venv was installed from.
+    "Did this update change the file?" isn't the question: an update that stopped after copying the new
+    requirements.txt finds no change when it's run again, and used to skip the install for good. A copy with no
+    .venv of its own (a git copy run with another Python) has nothing to compare with, and falls back to that."""
+    if _stamp(root).exists():
+        return _hash(_stamp(root)) != _hash(root / "requirements.txt")
+    return _hash(root / "requirements.txt") != requirements_before
+
+
 def _venv_python(root: Path) -> str:
     for p in (root / ".venv" / "Scripts" / "python.exe", root / ".venv" / "bin" / "python"):
         if p.exists():
@@ -390,6 +405,10 @@ def _after(root: Path, requirements_before: str, progress: Progress, log: Callab
                          env={**os.environ, "PYTHONUTF8": "1"}, stdin=subprocess.DEVNULL)
     if res.returncode != 0:
         log("Updated, but the window's packages didn't install; ReelForge tries again when it opens.")
+    if not installed:   # said once the window's packages are in; the next start finds the Python ones out of step
+        raise UpdateError("The new version's files are in place, but its Python packages didn't install (are you "
+                          "online?). Close ReelForge and open it again: setup starts and installs them.",
+                          partial=True)
     if (root / "my-studio" / "studio.toml").exists() or any((root / "profiles").glob("*/my-studio/studio.toml")):
         progress("Rewriting CLAUDE.md and AGENTS.md", 0, 0)
         env = {k: v for k, v in os.environ.items() if k != "REELFORGE_PROFILE"}  # every profile's, not just this one's
@@ -398,25 +417,6 @@ def _after(root: Path, requirements_before: str, progress: Progress, log: Callab
         if res.returncode != 0:
             log("Updated, but rewriting CLAUDE.md / AGENTS.md failed; run: "
                 "reelforge channel --regenerate --preserve-settings")
-    if not installed:   # said last, so the steps above still ran: the next start finds the packages out of step
-        raise UpdateError("The new version's files are in place, but its Python packages didn't install (are you "
-                          "online?). Close ReelForge and open it again: setup starts and installs them.",
-                          partial=True)
-
-
-def _stamp(root: Path) -> Path:
-    """The copy of requirements.txt that .venv's packages were last installed from (setup and updates keep it)."""
-    return root / ".venv" / "installed.txt"
-
-
-def _needs_packages(root: Path, requirements_before: str) -> bool:
-    """Whether the Python packages have to be installed: requirements.txt isn't the one .venv was installed from.
-    "Did this update change the file?" isn't the question: an update that stopped after copying the new
-    requirements.txt finds no change when it's run again, and used to skip the install for good. A copy with no
-    .venv of its own (a git copy run with another Python) has nothing to compare with, and falls back to that."""
-    if _stamp(root).exists():
-        return _hash(_stamp(root)) != _hash(root / "requirements.txt")
-    return _hash(root / "requirements.txt") != requirements_before
 
 
 def _marker(root: Path) -> Path:
