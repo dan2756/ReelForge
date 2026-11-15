@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config  # noqa: E402
+import framecache  # noqa: E402
 from studio import settings  # noqa: E402
 
 ALL_STEPS = ["build", "stills", "render", "audio", "video", "cover", "caption", "qa", "deliver", "clean", "check"]
@@ -50,6 +51,10 @@ def main():
     ap.add_argument("episode", type=Path)
     ap.add_argument("--steps", default="all")
     ap.add_argument("--stills", default="", help="comma-separated seconds for preview stills")
+    ap.add_argument("--rerender", default="", metavar="all|SECONDS",
+                    help="render: all frames again, or only these seconds (12-15.5,31-33) keeping the rest")
+    ap.add_argument("--keep-frames", action="store_true",
+                    help="render: keep the frames on disk although the scene was built again since")
     args = ap.parse_args()
 
     ep = args.episode.resolve()
@@ -82,11 +87,12 @@ def main():
             [1, 15, 20, 26, 31, 38, 47, 55, 63, 67]
         frames = ",".join(str(int(round(s * fps)) + 1) for s in secs)
         (build / "stills").mkdir(exist_ok=True)
+        fresh_stills(build, built_scene(build, spec, "stills"), {int(n) for n in frames.split(",")})
         run([config.BLENDER, "-b", build / "scene.blend", "-o", build / "stills" / "s_####", "-F", "JPEG",
              "-f", frames], log=build / "stills.log")
 
     if "render" in steps:
-        run([config.BLENDER, "-b", build / "scene.blend", "-a"], log=build / "render.log")
+        render(build, spec, args.rerender, args.keep_frames)
 
     post = config.PIPELINE / "post"
     if "audio" in steps:
@@ -154,6 +160,78 @@ def clean(spec, build):
             freed += sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
             shutil.rmtree(d)
     print(f"  cleaned render files ({freed / 1e9:.2f} GB freed); scene.blend, series.json, audio and QA kept")
+
+
+def built_scene(build, spec, step):
+    """The stamp of the scene in build/scene.blend, once it's sure that this is still the scene episode.json and the
+    scene code describe (None for a scene built before ReelForge kept stamps). Blender renders whatever scene.blend
+    holds, so an edit made after the last build would not be in the pictures."""
+    if not (build / "scene.blend").exists():
+        raise SystemExit(f"{step}: build/scene.blend not found, run --steps build first")
+    stamp = framecache.read_stamp(build / framecache.SCENE)
+    if stamp is None and any((build / d / framecache.STAMP).exists() for d in ("frames", "stills")):
+        raise SystemExit(f"{step}: the last build did not finish, so build/scene.blend is an older scene. "
+                         "Run --steps build first.")
+    old = framecache.outdated(stamp, spec, config.PIPELINE / "blender") if stamp else []
+    if old:
+        raise SystemExit(f"{step}: {', '.join(old)} changed after the scene was built, so build/scene.blend "
+                         "still shows it as it was. Run --steps build first.")
+    return stamp
+
+
+def fresh_stills(build, stamp, numbers):
+    """Stills are rendered afresh every time: Blender skips a picture that is already on disk, and an old still of a
+    scene that has changed since is the last thing to be looking at. Stills left from an older scene go as well."""
+    stills = build / "stills"
+    older = stamp != framecache.read_stamp(stills / framecache.STAMP)
+    for f in stills.glob("s_*.jpg"):
+        if older or framecache.number(f) in numbers:
+            f.unlink()
+    if stamp:
+        framecache.write_stamp(stills / framecache.STAMP, stamp)
+
+
+def render(build, spec, rerender="", keep=False):
+    """Render every frame up to render_until into build/frames. Frames already there are kept (Blender skips them),
+    which is what lets a stopped render carry on, but only while they show this scene: after the scene is built
+    again the step stops and asks what to do with them. It never mixes old and new pictures on its own."""
+    fps = spec["fps"]
+    total = int(round(spec["render_until"] * fps))
+    frames = build / "frames"
+    if rerender and keep:
+        raise SystemExit("render: --rerender and --keep-frames don't go together (--rerender SECONDS already keeps "
+                         "the other frames)")
+    stamp = built_scene(build, spec, "render")
+    frames.mkdir(exist_ok=True)
+    swept = framecache.sweep_empty(frames)
+    if swept:
+        print(f"  removed {len(swept)} empty or cut-off frames that a stopped render left behind")
+    state, what = framecache.frames_state(build)
+    if rerender == "all":
+        print(f"  deleted {framecache.delete(frames, [(1, float('inf'))])} frames: rendering every frame again")
+    elif rerender:
+        try:
+            spans = framecache.frames_for(rerender, fps, total)
+        except ValueError as exc:
+            raise SystemExit(f"render: --rerender {exc}") from None
+        framecache.delete(frames, spans)
+        print(f"  rendering {framecache.describe(spans, fps)} again; the other frames are kept")
+    elif state in ("changed", "unstamped"):
+        n = len(framecache.present(frames))
+        if not keep:
+            raise SystemExit(
+                f"render: the {n} frames in build/frames {framecache.why(state, what)}.\n"
+                "  Blender would reuse them as they are, so say what to do with them:\n"
+                "    --rerender all             delete them and render every frame again\n"
+                "    --rerender 12-15.5,31-33   render only those seconds again and keep the rest\n"
+                "    --keep-frames              keep them all (the change did not touch the picture)")
+        print(f"  keeping the {n} frames on disk, as asked")
+    elif state == "untracked":
+        print("  note: this scene was built by an older ReelForge, so its frames can't be checked against it "
+              "(build again to turn the check on)")
+    if stamp:
+        framecache.write_stamp(frames / framecache.STAMP, stamp)
+    run([config.BLENDER, "-b", build / "scene.blend", "-a"], log=build / "render.log")
 
 
 def check_publish(ep):

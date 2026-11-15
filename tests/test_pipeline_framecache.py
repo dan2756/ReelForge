@@ -170,14 +170,16 @@ class FrameFiles(unittest.TestCase):
         self.assertTrue((self.frames / framecache.STAMP).exists())
 
     def test_ranges_are_described_in_frames_and_seconds(self):
-        self.assertEqual(framecache.describe([(361, 466), (931, 931)], 30), "frames 361-466 (12.0-15.5 s), 931 (31.0 s)")
+        self.assertEqual(framecache.describe([(361, 466), (931, 931)], 30),
+                         "frames 361-466 (12.0-15.5 s), 931 (31.0 s)")
         self.assertEqual(framecache.describe([(31, 31)], 30), "frame 31 (1.0 s)")
         self.assertIn("and 2 more ranges", framecache.describe([(n, n) for n in range(1, 17, 2)], 30))
 
     def test_the_progress_line(self):
-        self.assertEqual(framecache.progress(412, 1935, 400, 360.0), "frames 412/1935, 0.9 s a frame, about 23 min left")
-        self.assertEqual(framecache.progress(1930, 1935, 100, 90.0), "frames 1930/1935, 0.9 s a frame, about 4 s left")
-        self.assertEqual(framecache.progress(12, 1935, 0, 40.0), "frames 12/1935, the first one is still rendering")
+        for (done, made, seconds), line in (((412, 400, 360.0), "frames 412/1935, 0.9 s a frame, about 23 min left"),
+                                            ((1930, 100, 90.0), "frames 1930/1935, 0.9 s a frame, about 4 s left"),
+                                            ((12, 0, 40.0), "frames 12/1935, the first one is still rendering")):
+            self.assertEqual(framecache.progress(done, 1935, made, seconds), line)
 
 
 if __name__ == "__main__":
