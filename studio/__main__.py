@@ -448,6 +448,23 @@ def tab_for(word: str) -> str | None:
     return dash_tab_for(word)
 
 
+def unknown(word: str) -> str:
+    """What to say to a word that's neither a command nor a tab: one line, with the nearest one there is. (The whole
+    help used to follow it, forty lines that pushed this one off the screen.) The commands are the ones the help at
+    the top of this file lists, so a new one is known here as soon as it's written there."""
+    import difflib
+
+    words = {"help", "open", *re.findall(r"^  reelforge ([a-z][a-z-]+)", __doc__, re.M)}
+    try:
+        from dashboard.tabs import TABS
+        words.update(TABS)
+    except ImportError:
+        pass
+    near = difflib.get_close_matches(word.lower(), sorted(words), n=1, cutoff=0.6)
+    return (f"{KIT_NAME}: there's no command or tab called {word!r}." +
+            (f" Did you mean reelforge {near[0]}?" if near else "") + " reelforge help lists them all.")
+
+
 def dashboard(argv: list[str]) -> int:
     """Run the ReelForge window in this process; returns its exit code (75 asks the launcher to start it again)."""
     try:
@@ -573,7 +590,7 @@ def run(argv: list[str] | None = None) -> int:
         print("ffmpeg:", tools.find_ffmpeg())
         print("fonts:", *[str(f) for f in tools.find_fonts()], sep="\n  ")
         return 0
-    print(f"{KIT_NAME}: there's no command or tab called {cmd!r}.\n{__doc__}")
+    print(unknown(cmd))
     return 2
 
 
