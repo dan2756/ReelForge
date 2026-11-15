@@ -683,14 +683,15 @@ def add_post(platform: str, post_id: str, episode_id: int | None, title: str, ur
 
 def retire_typed() -> int:
     """Drop the numbers you typed in for an episode on a platform (a manual-<episode> post and its readings) once
-    that episode has the real post there: ReelForge reads the platform itself now, so the typed ones would only sit
-    beside it with numbers that never move. Typed numbers for an episode whose post hasn't been found stay. Returns
-    how many went."""
+    that episode's real post there has been read since you typed them: ReelForge reads the platform itself now, so
+    the typed ones would only sit beside it with numbers that never move. Typed numbers stay for an episode whose
+    post hasn't been found, and for one whose post was last read before you typed them (the platform's log-in ran
+    out, and typing is how its numbers are kept up since). Returns how many went."""
     with connect() as db:
         gone = db.execute(
             """SELECT platform, post_id FROM posts t WHERE post_id LIKE 'manual-%' AND episode_id IS NOT NULL
                AND EXISTS (SELECT 1 FROM posts r WHERE r.platform = t.platform AND r.episode_id = t.episode_id
-                           AND r.post_id NOT LIKE 'manual-%')""").fetchall()
+                           AND r.post_id NOT LIKE 'manual-%' AND r.last_ts > COALESCE(t.last_ts, ''))""").fetchall()
         for table in ("post_stats", "posts"):
             db.executemany(f"DELETE FROM {table} WHERE platform = ? AND post_id = ?", [tuple(r) for r in gone])
     return len(gone)

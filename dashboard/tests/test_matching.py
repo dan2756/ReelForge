@@ -438,6 +438,25 @@ class TypedInTest(DbTest):
         self.assertEqual(where("x", f"manual-{kite}"), (kite, "publish"))  # another platform's post doesn't replace it
         self.assertEqual(where("tiktok", "tt"), (kite, "caption"))
 
+    def test_numbers_typed_in_after_the_log_in_ran_out_stay_until_the_post_is_read_again(self):
+        """X was read for a while, then logged ReelForge's browser out: the numbers typed in since are the newer
+        ones. They used to vanish at the next refresh of any platform, because the episode had a post on X."""
+        kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
+        read("x", [post("x1", CAPTIONS["x"].format(REAL["kite"][0]), 5, views=9000)], minutes=30)
+        analytics.auto_link()
+        self.assertEqual(where("x", "x1"), (kite, "caption"))
+        self.typed("x", {kite: 12000}, 24 * 60)  # logged out since: typed in the next day
+        read("tiktok", [post("tt", CAPTIONS["tiktok"].format(REAL["kite"][0]), 6, views=50)], minutes=24 * 60 + 30)
+        analytics.auto_link()
+        self.assertEqual(self.posts("x"), [f"manual-{kite}", "x1"])
+        self.assertEqual(db.latest_accounts()["x"]["views"], 12000)
+        with db.connect() as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM post_stats WHERE post_id = ?",
+                                       (f"manual-{kite}",)).fetchone()[0], 1)
+        # Logged in again: the post itself is read, with newer numbers than the typed ones, which now go.
+        read("x", [post("x1", CAPTIONS["x"].format(REAL["kite"][0]), 5, views=12500)], minutes=48 * 60)
+        analytics.auto_link()
+        self.assertEqual(self.posts("x"), ["x1"])
 
     def test_a_typed_in_number_can_be_put_right(self):
         """34000 typed where 3400 was meant: the video, the account and their charts all come down to 3400."""
