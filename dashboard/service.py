@@ -1848,6 +1848,8 @@ class Dashboard(StatsTab, SettingsTab, Service):
                 status=status.json(), status_short=short.json() if short else None, body=body.json(),
                 note=Text(note, MUTED).json(), logs_in=logs_in,
                 login_label="Log in again" if source == "browser" else "Log in",
+                # Log out (logout_info, logout): only while ReelForge's browser is logged in to it.
+                logs_out=p.browser_stats and p.logged_in and not self.demo,
                 profile_disabled=not p.public_handle and not pretend, refresh_disabled=self.demo and not pretend,
                 show_log=not p.has_stats, chart=self.followers_chart(p, rows) if state == "on" else None)
             panels.append(panel)
@@ -1956,6 +1958,43 @@ class Dashboard(StatsTab, SettingsTab, Service):
         return (f"ReelForge's browser window didn't work for the {what}. Try again in a moment; data/refresh.log "
                 "says what stopped it.")
 
+    @rpc
+    def logout_info(self, key: str) -> dict | None:
+        """Are you sure? What the Log out dialog says: what goes (the log-in ReelForge's own browser keeps on this
+        computer) and what stays (the platform, connected, with its stats)."""
+        p = self.every.get(key)
+        if p is None or not p.browser_stats or not p.logged_in:
+            return None
+        if self.demo:
+            self.notify("Demo mode: nothing is changed.", timeout=4)
+            return None
+        note = Text()
+        note.append(f"{p.name}  ", f"bold {p.color}")
+        note.append(p.handle, "bold")
+        note.append(f"\n\nReelForge's own browser is logged out of {p.name}: the log-in it keeps on this computer, in "
+                    "ReelForge's data folder, is removed. Your normal browser and your phone stay logged in.", MUTED)
+        note.append(f"\n\n{p.name} stays connected, with everything read so far. ReelForge can't read it again until "
+                    "you press Log in on this tab.", MUTED)
+        return {"key": key, "title": f"LOG OUT OF {p.name.upper()}?", "note": note.json(), "button": "Log out"}
+
+    @rpc
+    def logout(self, key: str) -> None:
+        """Log ReelForge's browser out of a platform (Instagram, X): see logout_info."""
+        p = self.every.get(key)
+        if p is not None and p.browser_stats and not self.demo:
+            self.loop.run_worker(self._browser_logout, p, group="login")
+
+    def _browser_logout(self, p: Platform) -> None:
+        try:
+            browser.logout(p.key)
+        except Exception as e:
+            self.loop.call_soon(self.notify, self._browser_trouble(e, "log-out"), f"{p.name} still logged in",
+                                "error", 15)
+            return
+        self.loop.call_soon(self.notify, f"ReelForge's browser is logged out of {p.name}. Its stats so far stay; "
+                                         "press Log in to read it again.", f"{p.name} logged out", "information", 10)
+        self.loop.call_soon(self.follow_connections)
+
     # --- connecting and disconnecting -------------------------------------------------------
 
     @rpc
@@ -2018,14 +2057,20 @@ class Dashboard(StatsTab, SettingsTab, Service):
         note.append(f"\n\nReelForge stops reading {p.name}, and its cards, charts, columns, filters, upload buttons and "
                     "notifications leave every tab. Everything it has read so far stays saved, so connecting it again "
                     "(on this tab, with the same @handle) brings it all back.", MUTED)
-        if p.browser_stats:
-            note.append(f"\nYou stay logged in to {p.name} in ReelForge's browser.", MUTED)
-        return {"key": key, "title": f"DISCONNECT {p.name.upper()}?", "note": note.json()}
+        logged_in = p.browser_stats and p.logged_in
+        if logged_in:
+            note.append(f"\nReelForge's own browser stays logged in to {p.name}: that log-in is kept on this computer, "
+                        "in ReelForge's data folder, until you log out of it.", MUTED)
+        # logged_in: the window can offer to log out too (disconnect with logout=True).
+        return {"key": key, "title": f"DISCONNECT {p.name.upper()}?", "note": note.json(), "logged_in": logged_in}
 
     @rpc
-    def disconnect(self, key: str) -> None:
+    def disconnect(self, key: str, logout: bool = False) -> None:
+        """Disconnect a platform. logout: also log ReelForge's browser out of it (see logout_info)."""
         p = self.every.get(key)
         if p is not None and p.public_handle and not self.demo:
+            if logout and p.browser_stats and p.logged_in:
+                self.loop.run_worker(self._browser_logout, p, group="login")
             self.loop.run_worker(self._save_account, p, "", group="accounts")
 
     def _save_account(self, p: Platform, handle: str) -> None:

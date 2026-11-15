@@ -355,6 +355,21 @@ class LogIn(BrowserTest):
         self.assertIsNotNone(config.get_token("browser:x"))
 
 
+class LogOut(BrowserTest):
+    def test_log_out_removes_the_sites_cookies_and_forgets_the_log_in(self):
+        other = {"name": "auth_token", "domain": ".dropbox.com"}  # another site's cookie of the same name
+        self.window = w = Window(self.clock, [SESSION["x"], {"name": "ct0", "domain": "x.com"},
+                                              {"name": "auth_token", "domain": ".twitter.com"}, other,
+                                              SESSION["instagram"]])
+        for key in ("x", "instagram"):
+            config.set_token(f"browser:{key}", {"since": 1.0})
+        browser.logout("x")
+        self.assertEqual(w.jar, [other, SESSION["instagram"]])
+        self.assertEqual(self.windows, [True])  # in the background: no window to look at
+        self.assertEqual((browser.logged_in("x"), browser.logged_in("instagram")), (False, True))
+        self.assertFalse(browser._has_session(w, "x"))  # dropbox.com's cookie isn't x.com's
+
+
 def x_site(lands: str | None = None, tweets: list | None = None):
     """A healthy, logged-in X for any handle (or one that sends the page to `lands`)."""
     tweet = {"id_str": "9", "full_text": "a video post", "user_id_str": "1",

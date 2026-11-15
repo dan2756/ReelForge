@@ -26,6 +26,8 @@ from .base import Account, PlatformError, Post, detail, first_line
 LOGIN_URLS = {"instagram": "https://www.instagram.com/accounts/login/", "x": "https://x.com/i/flow/login"}
 HOME_URLS = {"instagram": "https://www.instagram.com/", "x": "https://x.com/home"}
 SESSION_COOKIES = {"instagram": ("instagram.com", "sessionid"), "x": ("x.com", "auth_token")}
+# Every site a platform keeps its log-in on (X still sets some of its cookies on its old address).
+COOKIE_SITES = {"instagram": ("instagram.com",), "x": ("x.com", "twitter.com")}
 # Each site's own pages that mean "not logged in" and "prove it's you", by the leading parts of their path.
 LOGIN_PAGES = {"instagram": ("accounts/login",), "x": ("login", "i/flow")}
 CHECK_PAGES = {"instagram": ("challenge", "checkpoint"), "x": ()}
@@ -202,6 +204,15 @@ def login(platform: str, timeout: float = 600) -> None:
                             f"The login window was open for {timeout / 60:.0f} minutes without a log-in, so ReelForge "
                             "closed it. Press Log in to try again.")
     config.set_token(f"browser:{platform}", {"since": time.time()})
+
+
+def logout(platform: str) -> None:
+    """Log ReelForge's browser out of a platform: the cookies its site set are removed from the browser profile, and
+    the log-in is forgotten (Disconnect alone keeps both). Your normal browser has nothing to do with it."""
+    with _browser() as ctx:
+        for site in COOKIE_SITES[platform]:
+            ctx.clear_cookies(domain=re.compile(rf"(^|\.){re.escape(site)}$"))
+    forget(platform)
 
 
 NAMES = {"instagram": "Instagram", "x": "X"}

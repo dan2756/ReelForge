@@ -293,6 +293,61 @@ class WindowTest(unittest.TestCase):
         self.assertIn("last read failed: TikTok couldn't be reached", body)
         self.assertNotIn(said, body)
 
+    def test_log_out_forgets_the_log_in_and_keeps_the_platform(self):
+        """Instagram and X: ReelForge's own browser can be logged out (it never could be). The platform stays, with
+        its stats; Disconnect says the log-in stays unless it's asked to take it along."""
+        every = self.real_platforms({"tiktok": "@mine", "instagram": "@mine"})
+        self.logged_in["instagram"] = True
+        done = []
+
+        def logout(key: str) -> None:
+            done.append(key)
+            self.logged_in[key] = False
+
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()), \
+                mock.patch.object(browser, "logout", logout):
+            w = self.open(every, demo_mode=False)
+            self.assertTrue(self.panel(w, "instagram")["logs_out"])
+            self.assertFalse(self.panel(w, "tiktok")["logs_out"])  # nothing to log out of
+            self.assertIsNone(w.call("logout_info", "tiktok"))
+            info = w.call("logout_info", "instagram")
+            self.assertEqual((info["key"], info["title"], info["button"]),
+                             ("instagram", "LOG OUT OF INSTAGRAM?", "Log out"))
+            note = plain(info["note"])
+            self.assertIn("ReelForge's own browser is logged out of Instagram", note)
+            self.assertIn("Your normal browser and your phone stay logged in.", note)
+            self.assertIn("Instagram stays connected, with everything read so far.", note)
+            w.call("logout", "instagram")
+            self.assertTrue(w.until(lambda: any(t["title"] == "Instagram logged out" for t in w.sent("toast"))))
+            self.assertEqual(done, ["instagram"])
+            self.assertIn("instagram", w.svc.platforms)  # the stats it has keep it on
+            panel = self.panel(w, "instagram")
+            self.assertFalse(panel["logs_out"])
+            self.assertIn("log in again to keep tracking", plain(panel["status"]))
+            # Disconnect: the log-in stays, and the dialog says so; asked to, it logs out as well.
+            self.logged_in["instagram"] = True
+            w.call("follow_connections")
+            info = w.call("disconnect_info", "instagram")
+            self.assertTrue(info["logged_in"])
+            self.assertIn("ReelForge's own browser stays logged in to Instagram", plain(info["note"]))
+            self.assertFalse(w.call("disconnect_info", "tiktok")["logged_in"])
+            w.call("disconnect", "instagram", True)
+            self.assertTrue(w.until(lambda: done == ["instagram", "instagram"] and "instagram" not in w.svc.platforms))
+            self.assertEqual(config.load_config()["instagram"]["handle"], "")
+        # A log-out the browser couldn't do says so in a sentence, and the log-in stays.
+        every = self.real_platforms({"x": "@mine"})
+        self.logged_in["x"] = True
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()), \
+                mock.patch.object(browser, "logout", side_effect=OSError("profile is locked")):
+            w = self.open(every, demo_mode=False)
+            w.call("logout", "x")
+            self.assertTrue(w.until(lambda: any(t["title"] == "X still logged in" for t in w.sent("toast"))))
+            self.assertIn("ReelForge's browser window didn't work for the log-out. Try again in a moment; "
+                          "data/refresh.log says what stopped it.", w.toasts())
+            self.assertNotIn("profile is locked", str(w.loop.events))
+        self.assertIn("error: the log-out in ReelForge's browser: OSError: profile is locked",
+                      sync.log_path().read_text("utf-8"))
+
     def test_a_log_in_the_browser_couldnt_do_is_said_plainly(self):
         """It says so in a sentence, and the error's own words go to the log. And a second press of Log in while the
         window is open doesn't queue another window behind it."""
