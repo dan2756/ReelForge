@@ -10,7 +10,7 @@
 <script src="/fixture/common.js"></script>
 <ytcp-app></ytcp-app>
 <script>
-// Built from the hooks YouTube Studio uploaders use: ytcp-uploads-dialog, ytcp-uploads-file-picker input,
+// Built from the hooks YouTube Studio uploaders use: ytcp-uploads-dialog, the file input inside it,
 // #title-textarea #textbox and #description-textarea #textbox (two elements with the same id, as on the real
 // page), the VIDEO_MADE_FOR_KIDS_* and PUBLIC / UNLISTED / PRIVATE radio buttons, #next-button pressed three
 // times, span.progress-label, the youtu.be link and #done-button.
@@ -26,10 +26,10 @@ root.innerHTML = `
     <h1>Upload videos</h1>
     <div class="error-area style-scope ytcp-uploads-dialog"></div>
     <div id="content">
-      <ytcp-uploads-file-picker>
+      <div id="picker">
         <button type="button" id="select-files-button">Select files</button>
         <input type="file" name="Filedata" style="display:none">
-      </ytcp-uploads-file-picker>
+      </div>
     </div>
   </ytcp-uploads-dialog>`
 const content = root.getElementById("content")
@@ -117,6 +117,8 @@ function details(file) {
     }
     fixture.posted = true
     root.querySelector("ytcp-uploads-dialog").remove()
+    // "quiet_save": a private video is saved and the dialog just closes, with nothing shown after it.
+    if (MODE === "quiet_save") return
     const share = document.createElement("ytcp-video-share-dialog")
     share.innerHTML = '<h2>Video published</h2><a href="https://youtu.be/FIXTUREvid01">https://youtu.be/FIXTUREvid01</a>'
     root.append(share)

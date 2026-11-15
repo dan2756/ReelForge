@@ -97,9 +97,11 @@
     return out.map(lower).filter(Boolean)
   }
 
-  // The text a person can see in one root. textContent would also read scripts and hidden translation tables.
+  // The text a person can see in a document, a shadow root or one element. textContent would also read scripts
+  // and hidden translation tables.
   function seenText(scope) {
     if (scope.body) return scope.body.innerText
+    if (typeof scope.innerText === "string") return scope.innerText
     return [...scope.children].filter(el => !/^(style|script|template)$/.test(el.localName)).map(el => el.innerText).join(" ")
   }
 
@@ -182,9 +184,9 @@
   const WATCH = { subtree: true, childList: true, attributes: true, characterData: true }
 
   // Waits for something on the page. A MutationObserver on the document and on every shadow root and frame
-  // there is now wakes it on each change; the slow timer covers roots that appear later. Every look also
-  // checks that the page has not turned into a sign-in page, a verification or an error.
-  rf.waitFor = (test, { timeout = 15000, step } = {}) => new Promise((resolve, reject) => {
+  // there is now wakes it on each change (at most once per `pace` ms); the slow timer covers roots that appear
+  // later. Every look also checks that the page has not turned into a sign-in page, a verification or an error.
+  rf.waitFor = (test, { timeout = 15000, step, pace = 60 } = {}) => new Promise((resolve, reject) => {
     let over = false
     let soon = null
     const end = (settle, value) => {
@@ -210,10 +212,10 @@
       }
     }
     const observer = new MutationObserver(() => {
-      soon ||= setTimeout(look, 60)
+      soon ||= setTimeout(look, pace)
     })
     for (const root of roots()) observer.observe(root, WATCH)
-    const slow = setInterval(look, 400)
+    const slow = setInterval(look, Math.max(400, pace))
     const limit = setTimeout(() => end(reject, new Stop("timeout", `Nothing happened on ${rf.job.name}'s page in time. The tab stays open: you can finish by hand there.`, { step })), timeout)
     look()
   })

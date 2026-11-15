@@ -16,6 +16,10 @@ void (async () => {
   const flow = rf.flows[job.platform]
   const P = job.name
 
+  // While the page works the worker hears from it at least every 20 seconds, so a frozen page can be told
+  // from a slow upload.
+  const alive = setInterval(() => rf.send({ t: "job.alive" }), 20000)
+
   let resume = null
   chrome.runtime.onMessage.addListener((message, from, reply) => {
     if (from.id !== chrome.runtime.id) return
@@ -23,15 +27,12 @@ void (async () => {
     if (message?.t === "override") resume?.()
     if (message?.t === "stop") {
       rf.stopped = true
+      clearInterval(alive)
       rf.unoutline()
       rf.say("Stopped", "bad", message.message || "")
       resume?.()
     }
   })
-
-  // While the page works the worker hears from it at least every 20 seconds, so a frozen page can be told
-  // from a slow upload.
-  const alive = setInterval(() => rf.send({ t: "job.alive" }), 20000)
 
   const handle = text => String(text || "").trim().replace(/^@/, "").toLowerCase()
 
@@ -52,18 +53,18 @@ void (async () => {
     rf.say("Posted", "good", "ReelForge has noted it.")
   }
 
-  // The person's own press. If the tab then closes before the platform confirms, ReelForge knows to ask
-  // "did it post?" instead of saying nothing happened.
+  // The person's own press of the final button (or Ctrl+Enter, which posts on X). If the tab then closes before
+  // the platform confirms, ReelForge knows to ask "did it post?" instead of saying nothing happened.
+  let pressed = false
   function noticePress() {
-    let told = false
     const tell = () => {
-      if (told) return
-      told = true
+      if (pressed) return
+      pressed = true
       rf.send({ t: "job.event", pressedByPerson: true })
     }
     const onClick = event => {
       const button = rf.probe(flow.final)
-      if (event.isTrusted && button && event.composedPath().includes(button)) tell()
+      if (event.isTrusted && button && rf.enabled(button) && event.composedPath().includes(button)) tell()
     }
     const onKey = event => {
       if (event.isTrusted && event.key === "Enter" && (event.ctrlKey || event.metaKey)) tell()
@@ -74,11 +75,31 @@ void (async () => {
     }
   }
 
+  // The form closing after the final button was pressed. On YouTube and X that is what a post going out looks
+  // like, in any language. It has to stay closed for two seconds, so the platform's own sign (with the post's
+  // link) gets the chance to come first.
+  let goneSince = 0
+  function formGone() {
+    const form = rf.sel.success?.gone_after_press
+    if (!pressed || !form || rf.probe(form)) {
+      goneSince = 0
+      return false
+    }
+    goneSince ||= Date.now()
+    return Date.now() - goneSince >= 2000
+  }
+
+  // Watches for the platform's own sign that the post went out. A sign that is already showing before anyone
+  // has pressed anything cannot be trusted on this page, and is then left out.
+  function sent(trustSign) {
+    return rf.waitFor(() => (trustSign && rf.sign("success")) || formGone(), { timeout: 46 * 60 * 1000, pace: 500 })
+  }
+
   async function watch() {
     rf.phase = "watch"
     noticePress()
-    // A little longer than the 45 minutes ReelForge itself waits on a ready post.
-    await rf.waitFor(() => rf.sign("success"), { timeout: 46 * 60 * 1000 })
+    // The wait is a little longer than the 45 minutes ReelForge itself waits on a ready post.
+    await sent(!rf.sign("success"))
     await posted()
   }
 
@@ -97,6 +118,7 @@ void (async () => {
     rf.unoutline()
     rf.say("Pressing Post for you", "work")
     const before = location.href
+    pressed = true
     rf.click(button)
     await rf.report({ step: "press" })
     const asking = () => rf.probe("post_confirm") || rf.sign("challenge")
@@ -110,7 +132,7 @@ void (async () => {
     await rf.report({ step: "confirm" })
     if (asking() && !rf.sign("success")) rf.say(`${P} is asking you something`, "warn", "Answer it in this tab. ReelForge will not.")
     try {
-      await rf.waitFor(() => rf.sign("success"), { timeout: 5 * 60 * 1000 })
+      await rf.waitFor(() => rf.sign("success") || formGone(), { timeout: 5 * 60 * 1000, pace: 500 })
     } catch (error) {
       if (error.code !== "timeout") throw error
       throw new rf.Stop("unknown_outcome", `Post was pressed on ${P} and no confirmation was seen. Check your profile before you post again.`, { state: "unknown", step: "confirm" })

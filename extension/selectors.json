@@ -70,7 +70,7 @@
         "posted": {
           "any": true,
           "strategies": [
-            { "id": "text", "page_text": ["Your video has been uploaded", "Video published"] }
+            { "id": "text", "css": "div", "text": ["Your video has been uploaded", "Video published", "视频已发布"], "match": "contains" }
           ]
         }
       }
@@ -86,7 +86,8 @@
         "hooks": ["captcha"]
       },
       "success": {
-        "hooks": ["posted"]
+        "hooks": ["posted"],
+        "gone_after_press": "upload_dialog"
       },
       "hooks": {
         "upload_dialog": {
@@ -100,7 +101,6 @@
           "visible": false,
           "timeout_ms": 20000,
           "strategies": [
-            { "id": "file-picker", "css": "ytcp-uploads-file-picker input[type='file']" },
             { "id": "in-dialog", "within": "upload_dialog", "css": "input[type='file']" },
             { "id": "only-file-input", "css": "input[type='file']" }
           ]
@@ -209,8 +209,7 @@
         "posted": {
           "any": true,
           "strategies": [
-            { "id": "share-dialog", "css": "ytcp-video-share-dialog" },
-            { "id": "text", "page_text": ["Video published", "Video saved as private", "Video saved as unlisted"] }
+            { "id": "share-dialog", "css": "ytcp-video-share-dialog" }
           ]
         }
       }
@@ -272,7 +271,8 @@
           "timeout_ms": 10000,
           "strategies": [
             { "id": "aria", "css": "div[role='dialog'][aria-label='Create new post']" },
-            { "id": "has-file-input", "css": "[role='dialog']:has(input[type='file'])" }
+            { "id": "has-file-input", "css": "[role='dialog']:has(input[type='file'])" },
+            { "id": "has-heading", "css": "[role='dialog']:has([role='heading'])" }
           ]
         },
         "file_input": {
@@ -336,7 +336,7 @@
         "posted": {
           "any": true,
           "strategies": [
-            { "id": "text", "page_text": ["Your reel has been shared", "Your post has been shared", "Reel shared", "Post shared"] }
+            { "id": "text", "within": "dialog", "page_text": ["Your reel has been shared", "Your post has been shared", "Reel shared", "Post shared"] }
           ]
         }
       }
@@ -354,7 +354,8 @@
         "hooks": ["captcha"]
       },
       "success": {
-        "hooks": ["post_link"]
+        "hooks": ["post_link"],
+        "gone_after_press": "compose_dialog"
       },
       "hooks": {
         "compose_dialog": {

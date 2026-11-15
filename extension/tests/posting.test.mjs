@@ -1,5 +1,5 @@
 // A batch from ReelForge's post page, through to "ready" on each platform, and the person pressing Post.
-import { equal, ok, until, note } from "./harness.mjs"
+import { equal, ok, until, note, quickSelectors } from "./harness.mjs"
 
 const HOST = { tiktok: "www.tiktok.com", youtube: "studio.youtube.com", instagram: "www.instagram.com", x: "x.com" }
 const FINAL = {
@@ -94,6 +94,22 @@ export const tests = {
     equal([job.post_id, job.url], ["1799999999999999999", "https://x.com/fixtureuser/status/1799999999999999999"], "status id and url from X's toast")
   },
 
+  async "YouTube: a save that only closes the dialog still counts, because the person pressed Save first"({ app, site, browser, video }) {
+    site.mode.youtube = "quiet_save"
+    const { job, tab } = await toReady({ app, browser }, "youtube", video())
+    await tab.locator("#done-button").click()
+    await until(() => `posted (it is ${job.state})`, () => job.state === "posted")
+    equal(job.post_id, "FIXTUREvid01", "the video id found before the dialog closed")
+  },
+
+  async "X: the composer closing after the person's press counts as posted, without a made-up id"({ app, site, browser, video }) {
+    site.mode.x = "no_toast"
+    const { job, tab } = await toReady({ app, browser }, "x", video())
+    await tab.locator("[data-testid=tweetButton]").click()
+    await until(() => `posted (it is ${job.state})`, () => job.state === "posted")
+    equal([job.post_id, job.url], [null, null], "post id and url")
+  },
+
   async "a video of several pieces arrives whole"({ app, browser, video }) {
     const film = video(9 * 1024 * 1024 + 123)
     const { job, tab } = await toReady({ app, browser }, "tiktok", film)
@@ -149,8 +165,7 @@ export const tests = {
     // The app's copy of selectors.json is newer and knows a hook the packed one does not: with it, the
     // "no_input" copy of TikTok (no file input the packed list can find) is no longer a dead end.
     site.mode.tiktok = "no_input"
-    const packed = JSON.parse((await import("node:fs")).readFileSync(new URL("../selectors.json", import.meta.url), "utf8"))
-    packed.version += 1
+    const packed = quickSelectors()
     packed.platforms.tiktok.signed_in.hooks = ["drop_zone"]
     packed.platforms.tiktok.hooks.drop_zone = { strategies: [{ id: "container", css: "div.upload-container" }] }
     app.selectors = packed

@@ -66,6 +66,8 @@ post.addEventListener("click", event => {
   fixture.posted = true
   dialog.remove()
   history.pushState({}, "", "/home")
+  // "no_toast": the composer closes and X shows nothing this extension knows.
+  if (MODE === "no_toast") return
   document.body.insertAdjacentHTML("beforeend", '<div data-testid="toast" role="alert"><span>Your post was sent.</span> <a href="/fixtureuser/status/1799999999999999999">View</a></div>')
 })
 </script>
