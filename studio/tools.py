@@ -118,8 +118,8 @@ def find_ffmpeg() -> str | None:
         return env if _exists(env) else None
     exe = "ffmpeg.exe" if WINDOWS else "ffmpeg"
     local = sorted(glob.glob(str(TOOLS / "ffmpeg*" / "bin" / exe)) + glob.glob(str(TOOLS / "ffmpeg*" / exe)))
-    if local:
-        return local[-1]
+    if local:      # one with ffprobe beside it first: a copy without it is half an install
+        return ([p for p in local if _exists(ffprobe_for(p))] or local)[-1]
     if _kit_only():
         return None
     on_path = shutil.which("ffmpeg")
@@ -139,6 +139,11 @@ def find_ffmpeg() -> str | None:
 def ffprobe_for(ffmpeg: str) -> str:
     p = Path(ffmpeg)
     return str(p.with_name("ffprobe" + p.suffix))
+
+
+def has_ffprobe(ffmpeg: str) -> bool:
+    """ffprobe is beside this ffmpeg, or on the PATH: QA measures every video with it, so ffmpeg alone isn't enough."""
+    return _exists(ffprobe_for(ffmpeg)) or bool(shutil.which("ffprobe"))
 
 
 # ---------------------------------------------------------------- fonts
@@ -277,6 +282,38 @@ def untar(archive: Path, dest: Path) -> list[str]:
         return names
 
 
+def _staging() -> Path:
+    """An empty tools/new: where a download is unpacked and looked over before its folder moves into place. A setup
+    that stops part way (its window closed, a full disk) then leaves its half there, where nothing looks for a tool,
+    and not where find_blender and find_ffmpeg would take it for an install. The name is short because Windows counts
+    the whole path of every file unpacked into it."""
+    stage = TOOLS / "new"
+    if stage.exists():
+        shutil.rmtree(stage)
+    stage.mkdir(parents=True)
+    return stage
+
+
+def _unpack(archive: Path) -> Path:
+    """Unpack a .zip or .tar download that holds one top folder into the staging folder; returns that folder."""
+    stage = _staging()
+    if archive.name.endswith(".zip"):
+        with zipfile.ZipFile(archive) as z:
+            top = z.namelist()[0].split("/")[0]
+            z.extractall(stage)
+    else:
+        top = untar(archive, stage)[0].split("/")[0]
+    return stage / top
+
+
+def _move_in(folder: Path, dst: Path) -> None:
+    """A staged folder, whole and checked, takes dst's place (a rename inside tools/, so it's there or it isn't)."""
+    if dst.exists():
+        shutil.rmtree(dst)
+    folder.rename(dst)
+    shutil.rmtree(TOOLS / "new", ignore_errors=True)
+
+
 def blender_asset() -> str:
     if WINDOWS:
         return f"blender-{BLENDER_VERSION}-windows-{'arm64' if arm() else 'x64'}.zip"
@@ -306,17 +343,11 @@ def install_blender(progress: Progress | None = None) -> str:
     _say(progress, "Unpacking Blender (a minute or two)")
     if asset.endswith((".zip", ".tar.xz")):
         # unpack, then rename the folder to the short tools/blender (Windows struggles with very long paths)
-        if asset.endswith(".zip"):
-            with zipfile.ZipFile(archive) as z:
-                top = z.namelist()[0].split("/")[0]
-                z.extractall(TOOLS)
-        else:
-            top = untar(archive, TOOLS)[0].split("/")[0]
-        dst = TOOLS / "blender"
-        if dst.exists():
-            shutil.rmtree(dst)
-        (TOOLS / top).rename(dst)
-        (dst / "kit-version.txt").write_text(f"{BLENDER_VERSION}\n", encoding="utf-8")
+        top = _unpack(archive)
+        if not (top / ("blender.exe" if WINDOWS else "blender")).is_file():
+            raise RuntimeError("the Blender download has no Blender in it; run setup again")
+        (top / "kit-version.txt").write_text(f"{BLENDER_VERSION}\n", encoding="utf-8")
+        _move_in(top, TOOLS / "blender")
     else:  # macOS .dmg: mount it and copy Blender.app out
         mnt = TOOLS / "downloads" / "blender-dmg"
         mnt.mkdir(parents=True, exist_ok=True)
@@ -382,25 +413,28 @@ def _ffmpeg_unpack(dst: Path, url: str, name: str, want: str, progress: Progress
     """Download an archive with one top folder holding bin/ffmpeg and bin/ffprobe, and make that folder dst."""
     archive = download(url, TOOLS / "downloads" / name, "ffmpeg", want, progress)
     _say(progress, "Unpacking ffmpeg")
-    if name.endswith(".zip"):
-        with zipfile.ZipFile(archive) as z:
-            top = z.namelist()[0].split("/")[0]
-            z.extractall(TOOLS)
-    else:
-        top = untar(archive, TOOLS)[0].split("/")[0]
-    if dst.exists():
-        shutil.rmtree(dst)
-    (TOOLS / top).rename(dst)
+    top = _unpack(archive)
+    _both(top)
+    _move_in(top, dst)
     archive.unlink(missing_ok=True)
+
+
+def _both(folder: Path) -> None:
+    """A staged ffmpeg folder has ffmpeg and ffprobe in its bin, or it doesn't go into place."""
+    exe = ".exe" if WINDOWS else ""
+    gone = [t for t in ("ffmpeg", "ffprobe") if not (folder / "bin" / (t + exe)).is_file()]
+    if gone:
+        raise RuntimeError(f"the ffmpeg download has no {' or '.join(gone)} in it; run setup again")
 
 
 def _ffmpeg_mac(dst: Path, progress: Progress | None) -> None:
     """Martin Riedl's builds come as one zip per program, each holding just the program. The link to the newest
     release redirects to the build itself, whose checksum sits next to it."""
     arch = "arm64" if arm() else "amd64"
-    if dst.exists():
-        shutil.rmtree(dst)
-    (dst / "bin").mkdir(parents=True)
+    # Both programs first, then into place: a second download that fails leaves the ffmpeg you had (or none), never
+    # a new ffmpeg without its ffprobe, which setup would take for a finished install.
+    top = _staging() / "ffmpeg"
+    (top / "bin").mkdir(parents=True)
     for tool in ("ffmpeg", "ffprobe"):
         with net.open_url(FFMPEG_MAC.format(arch=arch, tool=tool)) as r:
             url = r.geturl()
@@ -408,9 +442,11 @@ def _ffmpeg_mac(dst: Path, progress: Progress | None) -> None:
         archive = download(url, TOOLS / "downloads" / f"{tool}-macos-{arch}.zip", tool, want, progress)
         with zipfile.ZipFile(archive) as z:
             member = next(n for n in z.namelist() if n.rsplit("/", 1)[-1] == tool)
-            (dst / "bin" / tool).write_bytes(z.read(member))
-        (dst / "bin" / tool).chmod(0o755)
+            (top / "bin" / tool).write_bytes(z.read(member))
+        (top / "bin" / tool).chmod(0o755)
         archive.unlink(missing_ok=True)
+    _both(top)
+    _move_in(top, dst)
 
 
 def tool_size_note() -> str:

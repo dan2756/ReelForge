@@ -65,12 +65,13 @@ def plan() -> list[Item]:
                           400))
 
     ffmpeg = tools.find_ffmpeg()
-    if ffmpeg:
+    if ffmpeg and tools.has_ffprobe(ffmpeg):
         items.append(Item("ffmpeg", "ffmpeg", "turns the frames and sound into your video", True, _where(ffmpeg)))
-    else:
+    else:   # also an ffmpeg without its ffprobe (a setup that stopped between the two): setup gets both again
         source, mb = tools.ffmpeg_source()
         items.append(Item("ffmpeg", "ffmpeg", "turns the frames and sound into your video", False,
-                          f"about {mb} MB from {source}", mb))
+                          f"about {mb} MB from {source}" + (" (the ffmpeg here has no ffprobe)" if ffmpeg else ""),
+                          mb))
 
     gone = [n for n, m in sounds.missing() if m["source"] == "mixkit"]
     total = sounds.mixkit_count()

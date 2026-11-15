@@ -120,13 +120,12 @@ def checks(render_test: bool = False, quiet: bool = False) -> Report:
     if not ffmpeg:
         r.add(FAIL, "ffmpeg", f"not found: {fix}, or set STUDIO_FFMPEG")
     else:
-        probe = tools.ffprobe_for(ffmpeg)
         try:
             out = subprocess.run([ffmpeg, "-version"], capture_output=True, text=True, timeout=30).stdout
             ver = out.split("\n", 1)[0].replace("ffmpeg version ", "").split(" ")[0]
-            has_probe = Path(probe).exists() or shutil.which("ffprobe")
+            has_probe = tools.has_ffprobe(ffmpeg)
             r.add(OK if has_probe else FAIL, "ffmpeg", f"{ver} ({P.rel(Path(ffmpeg))})" +
-                  ("" if has_probe else "; ffprobe is missing next to it"))
+                  ("" if has_probe else f"; ffprobe is missing next to it: {fix}"))
         except (OSError, subprocess.SubprocessError) as e:
             r.add(FAIL, "ffmpeg", f"won't run: {e}")
 
