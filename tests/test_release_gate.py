@@ -1,7 +1,8 @@
 """A release waits for the tests of the very commit it's made from (.github/workflows): the Release workflow runs the
 Test workflow itself, and the Extension workflow (the browser extension's own tests), and publishes only after
 both. 2.2.0 and 2.2.1 were published while their own test runs were failing, because a tag started the two
-workflows side by side.
+workflows side by side. The gate is only as good as the workflows it runs, so they are held to failing when their
+tests do.
 
 The workflows are read as text (the kit has no YAML reader); they aren't part of a download, so there's nothing to
 check in an installed copy."""
@@ -73,6 +74,29 @@ class ReleaseGate(unittest.TestCase):
                 self.assertIn(gate, needs)
                 self.assertEqual(key(self.release[gate], "if"), key(publish, "if"))
                 self.assertNotIn("continue-on-error", self.release[gate])
+
+    def test_a_called_workflow_fails_when_its_tests_do(self):
+        # The release needs the job that calls a workflow, and that job is only as red as the workflow lets itself
+        # be. So no job of either may carry on after an error. (A step of test.yml may: the test render on GitHub's
+        # Intel Macs, which have no graphics card to render with.)
+        for workflow, text in self.called.items():
+            for name, job in jobs(text).items():
+                with self.subTest(workflow=workflow, job=name):
+                    self.assertEqual(key(job, "continue-on-error"), "")
+        # The extension's workflow is one job of plain steps, so more can be held: nothing in it carries on after
+        # an error, its job is never skipped, and both of its suites run as written, with nothing after the command
+        # that could swallow a failure.
+        extension = self.called["extension.yml"]
+        self.assertNotIn("continue-on-error", extension)
+        (job,) = jobs(extension).values()
+        self.assertEqual(key(job, "if"), "")
+        steps = job.split("\n      - ")
+        for suite in ("--stand-in", "--real"):
+            with self.subTest(suite=suite):
+                run = f"node extension/tests/run.mjs {suite}"
+                (step,) = [s for s in steps if run in s]
+                self.assertRegex(step, rf"(?m)^        run: {re.escape(run)}$")
+                self.assertNotRegex(step, r"(?m)^        if:")
 
     def test_the_tests_a_release_runs_get_a_token_that_can_only_read(self):
         # A called workflow's jobs get the token of the job that calls them, and the release's own can write (it
