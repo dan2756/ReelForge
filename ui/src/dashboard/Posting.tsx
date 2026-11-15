@@ -179,7 +179,7 @@ export function PostDialog({ data, close }: { data: PostData; close: () => void 
   const now = useView<PostingView>(s.bridge, "posting")
   const moved = Boolean(now && now.video?.path !== info.video.path)
   useEffect(() => {
-    if (!moved) return
+    if (!moved || sent.current) return // (a yes that is on its way is the Python side's to answer, and it says so)
     toasts.add({ title: "Nothing was started", body: `${info.video.name} isn't the picked video any more, so the question about it closed.`, severity: "warning", timeout: 10 })
     close()
   }, [moved])
