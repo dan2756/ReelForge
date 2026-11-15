@@ -24,10 +24,16 @@ RULE = ("Never post, upload or send anything", "with the browser extension (`doc
 GUIDES = ("AGENTS.md", "CLAUDE.md", "studio/templates/context.md.j2")
 PAGES = ("README.md", "dashboard/README.md", "THIRD_PARTY.md", "docs/PIPELINE.md", "docs/EXTENSION.md",
          "docs/YOUTUBE-API.md", "studio/templates/channel-bible.md.j2", *GUIDES)
+# Pages that are not in this tree yet. They come with the editing backend (pull request #6), which was written while
+# posting by hand was the only way, and are read from the day they are here.
+LATER = ("docs/AGENTCUT.md", "studio/agentcut.py")
 # What these pages said while posting by hand was the only way. (A stats read still "never posts, likes or follows
-# anything", which is about the browser that reads your numbers and stays true.)
+# anything", which is about the browser that reads your numbers and stays true.) The last four are that pull
+# request's wordings: "Finished edits wait in Publish for manual posting", "The user posts manually", "waits in
+# **Publish** for you to post by hand" and "No upload extension is included or required".
 GONE = ("ReelForge never posts", "never uploads anything", "kit never uploads", "posts for you", "posted for you",
-        "they post by hand.", "posts by hand from", "posts from, by hand", "uploads from there by hand")
+        "they post by hand.", "posts by hand from", "posts from, by hand", "uploads from there by hand",
+        "manual posting", "posts manually", "in **Publish** for you to post by hand", "No upload extension is included")
 
 
 def flat(text: str) -> str:
@@ -76,10 +82,10 @@ class TheAisRule(Scratch):
 
 class ThePages(unittest.TestCase):
     def test_no_page_still_says_that_reelforge_never_posts(self):
-        for rel in PAGES:
+        for rel in (*PAGES, *(later for later in LATER if (KIT / later).is_file())):
             text = flat((KIT / rel).read_text(encoding="utf-8"))
             for words in GONE:
-                self.assertNotIn(words, text, rel)
+                self.assertNotIn(words, text, f"{rel}: they post from Publish, with their own press, in three ways")
         self.assertNotIn("by hand", flat(reset.bootstrap_note("", "")))
 
     def test_the_pages_a_person_reads_say_nothing_is_posted_without_their_press_and_name_both_guides(self):
