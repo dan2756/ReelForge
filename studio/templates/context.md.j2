@@ -95,7 +95,14 @@ file is for, ask.
   premises.
 - **Work in stages.** Show the result and check in before big steps: the first video of a series, a new kind of
   scene, installing anything.
-- **Never post, upload or send anything.** Finished videos go to ReelForge's Publish tab, and {{ who }} posts them.
+- **Never post, upload or send anything.** Finished videos go to ReelForge's Publish tab, and {{ who }} posts them
+  from there: by hand, with the browser extension (`docs/EXTENSION.md`), or for YouTube through its API. Every post
+  starts with their own press.
+- **Never start a post for them or get round that press:** not through the window's back end
+  (`python -m studio.bridge`, `post_with_extension`, `post_action`), not through the extension's local server
+  (`reelforge extension serve`, `reelforge extension pair`, anything on `127.0.0.1` ports 47821 to 47830), and not
+  by changing the extension, its local pages or its connections (`extension/`, `dashboard/web/`,
+  `dashboard/data/extension.json`). Connecting a browser and switching on Press Post for me are for {{ who }} to do.
 - **That covers posting to YouTube through its API** (`docs/YOUTUBE-API.md`) too: connecting and posting are for
   {{ who }} to press in ReelForge's window. Never open Google's consent page for them, drive the window's back end
   (`python -m studio.bridge`) to connect or post, or call `post_with_api`, `youtube_api.connect`,
@@ -225,8 +232,9 @@ them on purpose, so they can't be posted. Never work round that; `new-episode` g
 ## Delivering to ReelForge's Publish tab
 
 ReelForge's Publish tab (`reelforge{{ pflag }} publish`) lists every `{{ here }}episodes/<id>/final/<id>.mp4`, newest first, with the post pre-filled from
-`episode.json`'s `title` and the hashtag line of `final/caption.txt`. {{ Who }} uploads from there by hand: each
-platform's button opens its upload page and copies exactly the text that site needs.
+`episode.json`'s `title` and the hashtag line of `final/caption.txt`. {{ Who }} posts from there, by hand (each
+platform's button opens its upload page and copies exactly the text that site needs) or with the browser extension
+or YouTube's API, if they set one up. Either way it starts with their press, never yours.
 - Keep that layout: `{{ here }}episodes/<id>/episode.json`, `final/<id>.mp4`, `final/caption.txt`, `final/cover.jpg`.
 - `{{ py }} -m studio publish-check {{ here_cmd }}episodes{{ sep }}<id>` runs the same check as `ship` at any time and prints
   each platform's post.
