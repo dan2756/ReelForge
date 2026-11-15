@@ -133,7 +133,10 @@ class FaqTest(unittest.TestCase):
         self.assertIn("`docs/EXTENSION.md`", extension)
         who = answer("Who presses Post?")
         self.assertTrue(who.startswith("You do."))
-        for said in ("**Press Post for me**", "**Stop before the Post button**", "said yes in your browser",
+        # A post started in ReelForge's question and one started in the extension's popup: each has its own
+        # switch for the press, and the answer names both.
+        for said in ("**Press Post for me**", "**Stop before the Post button** switched off in ReelForge's question",
+                     "your yes in your browser", "**Press Post for me on …** ticked in the extension's popup",
                      "Never on X.", "ReelForge has no command for it", "your AI is told never to post"):
             self.assertIn(said, who)
         api = answer("Can ReelForge upload to YouTube through its API?")
@@ -152,6 +155,8 @@ class FaqTest(unittest.TestCase):
         for words in ("BY HAND", 'label="Post…"', "Stop before the Post button"):
             self.assertIn(words, drawn)
         self.assertIn("Press Post for me", posting_tab.HOW_PRESS)
+        popup = (window.parent.parent.parent / "extension" / "popup" / "popup.js").read_text("utf-8")
+        self.assertIn("`Press Post for me on ${", popup)
         # What an update and a move leave to do in the browser, as docs/EXTENSION.md has it.
         self.assertIn("press Reload on its card on your browser's extensions page", answer("How do I update"))
         self.assertIn("load it again from the new folder afterwards", answer("Can I move the ReelForge folder?"))

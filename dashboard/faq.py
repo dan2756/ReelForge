@@ -125,8 +125,9 @@ def items(*, assistant: list[str], root: Path, episodes: Path, completed: Path, 
         {"q": "Who presses Post?",
          "a": "You do. The extension fills in the upload page and stops at the platform's own Post button. It "
               "presses that button for you only where you switched on **Press Post for me** in the extension's own "
-              "settings, and only for a post where you switched off **Stop before the Post button** and said yes in "
-              "your browser. Never on X.\n\n"
+              "settings, and only for a post you asked that for: with **Stop before the Post button** switched off "
+              "in ReelForge's question and your yes in your browser, or with **Press Post for me on …** ticked in "
+              "the extension's popup when you start the post there. Never on X.\n\n"
               "Nothing starts a post but your press. ReelForge has no command for it, and your AI is told never to "
               "post."},
         {"q": "Can ReelForge upload to YouTube through its API?",

@@ -110,6 +110,16 @@ class ThePages(unittest.TestCase):
             self.assertIn(words, window)
         self.assertNotIn("by-hand button", guide)
 
+    def test_a_page_that_says_the_extension_stops_before_post_says_when_it_presses_it(self):
+        # It presses Post itself where you switched that on and asked for it (docs/EXTENSION.md, "Two ways to
+        # post"), so "it stops there" alone says less than can happen.
+        for rel in ("README.md", "dashboard/README.md"):
+            text = flat((KIT / rel).read_text(encoding="utf-8")).replace("**", "")
+            self.assertIn("It stops there: you check the page and press Post. (It presses Post itself only where",
+                          text, rel)
+            self.assertIn("Press Post for me", text, rel)
+            self.assertIn("and never on X.)", text, rel)
+
     def test_neither_optional_way_is_said_to_work_on_the_live_sites(self):
         # They are tested against copies of the upload pages and a stand-in for Google. A page that names one says
         # so, or sends you to the guide that does.

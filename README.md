@@ -173,9 +173,10 @@ it, and there are three ways to post:
   nothing set up, and ReelForge spots the post by itself.
 - **With the browser extension** (optional). **Post…** shows each platform's exact text and asks first. Then your
   own browser opens each upload page, and the extension attaches the video and fills in the text. It stops there:
-  you check the page and press Post. [docs/EXTENSION.md](docs/EXTENSION.md) is its guide: how to set it up, what it
-  does and never does, what keeps it safe, and what to do when a post stops. It is tested against copies of the
-  upload pages, not yet on the live sites.
+  you check the page and press Post. (It presses Post itself only where you switched on Press Post for me in its
+  own settings and asked for that for the post, and never on X.) [docs/EXTENSION.md](docs/EXTENSION.md) is its
+  guide: how to set it up, what it does and never does, what keeps it safe, and what to do when a post stops. It is
+  tested against copies of the upload pages, not yet on the live sites.
 - **To YouTube through its own API** (optional). With a Google Cloud project you make yourself, ReelForge uploads
   the video itself when you press it on the Publish tab, private unless you choose otherwise.
   [docs/YOUTUBE-API.md](docs/YOUTUBE-API.md) is its guide: the steps in Google Cloud, what a post sends, the limits

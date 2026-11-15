@@ -210,7 +210,9 @@ without your press, and there are three ways to post:
 - **With the browser extension** (optional): **Post…**. A question shows each platform's exact text and account,
   with a tick box for each, and **Start** hands the ticked ones to the extension. Your own browser opens each
   upload page, and the extension attaches the video and fills in the text. It stops there: you check the page and
-  press Post. Until a browser is connected, **Post…** shows the steps to set it up (**Set it up** beside it, and
+  press Post. (It presses Post itself only where **Press Post for me** is switched on in its own settings and you
+  switched off **Stop before the Post button** in the question, or ticked the press in its popup, and never on X.)
+  Until a browser is connected, **Post…** shows the steps to set it up (**Set it up** beside it, and
   **Browsers…** once one is connected, open the same dialog, with **Connect a browser** and **Show the extension
   folder**). It is tested against copies of the upload pages, not yet on the live sites.
   [docs/EXTENSION.md](../docs/EXTENSION.md) is its guide.
