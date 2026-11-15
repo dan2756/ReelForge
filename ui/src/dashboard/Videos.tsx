@@ -21,7 +21,11 @@ export function Videos() {
   const videos = useView<TableView>(s.bridge, "videos")
   const badges = useView<{ line: Parts }>(s.bridge, "video_badges")
   useEffect(() => {
-    if (!videos) return
+    // Only a view that has just arrived says which row to highlight. Coming back to the tab shows the one sent last
+    // time again, and the highlight has moved since: taking its row a second time put the highlight back on the old
+    // row, over the chart of the new one (and took the keyboard again).
+    if (!videos || videos === s.videosApplied) return
+    s.videosApplied = videos
     if (videos.select !== undefined && videos.select !== s.video) s.set({ video: videos.select ?? null })
     if (videos.focus) setTimeout(() => focus.focus("videos-table"), 30)
   }, [videos])

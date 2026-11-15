@@ -108,6 +108,7 @@ export class DashState {
   picked: string | null = null // a card or account panel framed for a few seconds (a clicked notification)
   top: string | null = null // the highlighted row in Top performers
   video: string | null = null // ... on the Videos tab
+  videosApplied: unknown = null // the "videos" view whose row that tab has taken already (Videos.tsx)
   compareRow: string | null = null // ... in the Compare table
   note: string | null = null // the highlighted notification
   caption = ""

@@ -288,6 +288,34 @@ describe("tables and charts", () => {
     expect(frame(h)).toContain("Views 12h ▲")
   })
 
+  test("the highlighted video stays highlighted when you leave the Videos tab and come back", async () => {
+    const h = await window("videos")
+    const keys = h.bridge.view<{ rows: { key: string }[] }>("videos")!.rows.map((r) => r.key)
+    const charted = () => h.bridge.view<{ key: string | null }>("detail")?.key
+    /** How far down the table the highlighted row is: the one with the lit edge. */
+    const highlighted = () => {
+      const lines = rows(h)
+      const head = lines.findIndex((r) => r.includes("Views 12h"))
+      return lines.slice(head + 1).findIndex((r) => r.includes("▌●"))
+    }
+    expect(highlighted()).toBe(0)
+    h.t.mockInput.pressKey("TAB") // the table has the keyboard
+    await h.settle(200)
+    for (let i = 0; i < 2; i++) {
+      h.t.mockInput.pressArrow("down")
+      await h.settle(200)
+    }
+    for (let i = 0; i < 25 && charted() !== keys[2]; i++) await h.settle(200)
+    expect(highlighted()).toBe(2)
+    expect(charted()).toBe(keys[2]!) // the chart under the table is the third video's
+    await press(h, "1")
+    await press(h, "2")
+    await h.settle(500)
+    expect(activeTab(h)).toBe("Videos")
+    expect(highlighted()).toBe(2) // (it went back to the first row, over the third video's chart)
+    expect(charted()).toBe(keys[2]!)
+  })
+
   test("Newest, Oldest and Most views beside Episodes sort the Compare tab's list, under the platform scoreboard", async () => {
     const h = await window("compare")
     const listed = () => h.bridge.view<{ items: { id: string }[] }>("episodes")!.items.map((i) => i.id).join()

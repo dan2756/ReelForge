@@ -126,15 +126,17 @@ export function Table(props: TableProps) {
       return true
     },
   })
-  // keep the highlighted row in view
+  // keep the highlighted row in view (once the table knows its height: before that every row but the first looks
+  // out of view, and a table drawn again would scroll its highlighted row up to the top)
   const view = useRef({ offset, shown })
   view.current = { offset, shown }
+  const measured = Boolean(props.rowsShown ?? height)
   useEffect(() => {
-    if (index < 0) return
+    if (index < 0 || !measured) return
     const { offset: o, shown: s } = view.current
     if (index < o) setOffset(index)
     else if (index >= o + s) setOffset(index - s + 1)
-  }, [index])
+  }, [index, measured])
   useEffect(() => {
     const most = Math.max(rows.length - shown, 0)
     if (offset > most) setOffset(most)
