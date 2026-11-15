@@ -116,7 +116,10 @@ name: its row has **Again with API…**, whose question says that it makes a sec
 **Post it again**. A video is known by its content, not its file name. A video that came from the pipeline is
 posted only when QA passed on that exact file and the review says APPROVED for that cut.
 
-One video uploads at a time for a channel. A second one waits its turn.
+One video uploads at a time for a channel. A second one waits its turn, for up to ten minutes, and its row says
+so. If the first upload takes longer than that, the second never starts. Its row says it never started, and if
+you are looking at another video by then, a pop-up says it too. Press Post with API… on it again once the
+first is up.
 
 ### What a post sends
 
@@ -325,7 +328,8 @@ Tested here, by automated tests that run with ReelForge's own (`dashboard/tests/
 - that who can see the video is in every request, and that the made-for-kids answer is in it once you have given
   one and never before
 - the ledger: what may not be posted twice, in both directions between the extension and the API; cancelling;
-  two videos taking turns; ReelForge closed before and during the last piece, with and without a second window
+  two videos taking turns, and one whose turn doesn't come in time; ReelForge closed before and during the last
+  piece, with and without a second window
   that is still connected
 - that an update, a move and a factory reset treat the file as described above
 - that the client's id and secret, the tokens, Google's code and the upload's address appear nowhere in what is

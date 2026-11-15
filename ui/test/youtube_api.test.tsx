@@ -641,7 +641,7 @@ describe("a post through the API", () => {
     await ask(h)
     await clickText(h, "Post to YouTube", 2)
     await until(h, () => youtube(h).state === "queued")
-    expect(row(h)).toMatch(/^YouTube ● waiting its turn another video is uploading to YouTube first ▐ Cancel ▌$/)
+    expect(row(h)).toMatch(/^YouTube ● waiting its turn up to ten minutes, while another video uploads ▐ Cancel ▌$/)
     await clickText(h, "▐ Cancel ▌", 3)
     await until(h, () => youtube(h).state === "cancelled")
     expect(row(h)).toContain("○ cancelled (you cancelled it)")

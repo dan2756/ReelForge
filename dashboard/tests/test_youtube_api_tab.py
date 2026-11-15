@@ -1154,12 +1154,73 @@ class OnlyOnce(ApiPosting):
         w.pump(0.5)
         self.assertEqual(posting.get(second)["state"], "queued")  # it waits for the first to finish
         row = self.rows(w)["youtube"]
-        self.assertEqual(plain(row["line"]), "● waiting its turn  another video is uploading to YouTube first")
+        self.assertEqual(plain(row["line"]), "● waiting its turn  up to ten minutes, while another video uploads")
+        self.assertEqual(posting.QUEUED_FOR, timedelta(minutes=10))  # (what the row says it waits)
         self.assertEqual((row["busy"], row["actions"]), (True, ["cancel"]))
         self.assertEqual(len(self.google.starts), 1)
         self.google.hold.set()
         self.assertEqual((self.over(w, first)["state"], self.over(w, second)["state"]), ("posted", "posted"))
         self.assertEqual(sorted(bytes(v["data"]) for v in self.google.videos), sorted([BYTES, BYTES[::-1]]))
+
+    def test_a_turn_that_does_not_come_in_time_ends_the_job_there_and_then(self):
+        """The wait for another upload is as long as a queued job lives (ten minutes; a third of a second here).
+        When it is over the job ended nowhere: it sat queued until the clock's next half minute."""
+        self.connect_api()
+        job = self.job()
+        theirs = youtube_api.upload_lock()  # as a ReelForge in the middle of another video's upload holds
+        self.assertTrue(theirs.acquire())
+        try:
+            with mock.patch.object(posting, "QUEUED_FOR", timedelta(seconds=0.3)):
+                done = youtube_api_tab.run(job["id"])
+                self.assertEqual((done["state"], done["detail"]),
+                                 ("expired", "it waited ten minutes for another upload"))
+                # A ReelForge that is closing leaves its queued job as it is, for the clock.
+                closing = self.job()
+                self.assertEqual(youtube_api_tab.run(closing["id"], stop=lambda: True)["state"], "queued")
+                # One that was called off while it waited stays called off.
+                posting.cancel(closing["id"], "you cancelled it")
+                self.assertEqual(youtube_api_tab.run(closing["id"])["detail"], "you cancelled it")
+        finally:
+            theirs.release()
+        self.assertEqual((self.google.starts, db.uploads()), ([], []))  # nothing went out, and nothing says it did
+
+    def test_one_whose_turn_never_came_says_so_when_the_wait_is_over(self):
+        """A second video waits ten minutes for the first one's upload, and no longer. The end of that wait was
+        silent: no pop-up, and a row that said "it never started" some time in the next half minute. (The wait is
+        half a second here.)"""
+        other = self.root / "videos" / "ep02.mp4"
+        other.write_bytes(BYTES[::-1])
+        w = self.window()
+        w.call("tab_opened", "publish")
+        w.call("pick_file", str(self.video))
+        self.google.hold = threading.Event()
+        first = self.api_post(w)["jobs"][0]["id"]
+        self.assertTrue(w.until(lambda: self.rows(w)["youtube"]["state"] == "uploading"))
+        w.call("pick_file", str(other))
+        w.forget()
+        with mock.patch.object(posting, "QUEUED_FOR", timedelta(seconds=0.5)):
+            second = self.api_post(w)["jobs"][0]["id"]
+            # With its own row on show, the row says it, with what to do next. No pop-up covers that.
+            self.assertTrue(w.until(lambda: self.rows(w)["youtube"]["state"] == "expired", 10))
+            self.assertTrue(w.until(lambda: len(w.loop.live(("youtube-api",))) == 1, 10))  # (the first one's)
+            w.pump(0.1)
+            row = self.rows(w)["youtube"]
+            self.assertEqual((row["job"], row["actions"]), (second, ["post_api"]))
+            self.assertTrue(plain(row["line"]).startswith(
+                "○ it never started (it waited ten minutes for another upload)"), plain(row["line"]))
+            self.assertEqual([t["title"] for t in w.sent("toast") if "YouTube" in t["title"]], [])
+            # With the first video's row on show when the wait ends, a pop-up says it.
+            third = self.api_post(w)["jobs"][0]["id"]
+            w.call("pick_file", str(self.video))
+            self.assertTrue(w.until(lambda: posting.get(third)["state"] == "expired", 10))
+            self.assertTrue(w.until(lambda: any("YouTube" in t["title"] for t in w.sent("toast")), 10))
+        (toast,) = [t for t in w.sent("toast") if "YouTube" in t["title"]]
+        self.assertEqual((toast["title"], toast["severity"], toast["body"]), (
+            "YouTube: not posted", "warning",
+            "ep02.mp4 waited ten minutes for another upload and never started. Nothing was posted."))
+        self.google.hold.set()
+        self.assertEqual(self.over(w, first)["state"], "posted")
+        self.assertEqual((len(self.google.starts), len(self.google.videos)), (1, 1))  # the first, and only it
 
     def test_one_that_waited_too_long_for_its_turn_never_starts(self):
         self.connect_api()

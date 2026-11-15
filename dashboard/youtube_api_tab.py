@@ -87,6 +87,11 @@ KIDS_ASK = ("\"Made for kids\" is a declaration you make to YouTube, so ReelForg
 HOW = ("ReelForge uploads the video itself, through Google's API, with exactly this. Keep ReelForge open until its "
        "row says posted.")
 AGAIN_ASK = "It would be a second video."
+# A queued job waits ten minutes for its turn and no longer (posting.QUEUED_FOR: the clock expires it then, whoever
+# was to upload it). Said on its row while it waits, and when the wait is over. (TURN is short: with it the row is
+# still one row, Cancel and all, in a window 150 columns wide.)
+TURN = "up to ten minutes, while another video uploads"
+WAITED = "it waited ten minutes for another upload"
 
 
 # ---- one job's upload
@@ -114,7 +119,15 @@ def run(job_id: str, stop: Callable[[], bool] = lambda: False) -> dict | None:
     the next start to settle (settle_orphans); a job that was called off meanwhile stops the upload too."""
     lock = youtube_api.upload_lock()
     if not lock.acquire(wait=posting.QUEUED_FOR.total_seconds(), stop=stop):
-        return posting.get(job_id)  # another upload took that long: the clock has expired this one by now
+        # Another upload took that long, and this job's time is up. The clock ends it too, at its next half
+        # minute and in the extension's words ("not picked up in time"): ended here, it says at once what it
+        # waited for, and whoever started it hears of it (_api_done). Not when ReelForge is closing.
+        if not stop():
+            try:
+                posting.advance(job_id, "expired", by="app", detail=WAITED)
+            except (posting.Refused, sqlite3.Error):
+                pass  # the clock got there first, it was called off meanwhile, or the database is busy
+        return posting.get(job_id)
     try:
         job = posting.get(job_id)
         if job is None or job["via"] != "api" or job["state"] != "queued":
@@ -417,9 +430,10 @@ class YouTubeApiTab:
         this window isn't connected, the row has connect_api there instead. A posted row says what the read-back
         found, or that the video is private, until a stats read has its numbers (only a video everyone can see has
         any). A row whose last piece is on its way has no buttons: only YouTube's word ends it. One that waits for
-        another video's upload to finish says that it is waiting its turn. One whose try ended without a post has no
-        Try again: what that try was to send may not be what you would send now (the caption, who can see it, your
-        made-for-kids answer), so a new try starts like any post, from post_api and its question."""
+        another video's upload to finish says that it is waiting its turn, and for how long at most. One whose try
+        ended without a post has no Try again: what that try was to send may not be what you would send now (the
+        caption, who can see it, your made-for-kids answer), so a new try starts like any post, from post_api and
+        its question."""
         state = "off" if self.demo else youtube_api.status()["state"]
         connected = state == "on"
         for row in rows:
@@ -429,8 +443,7 @@ class YouTubeApiTab:
                 if row["state"] == "posting":
                     row["actions"] = []
                 elif row["state"] == "queued" and self._safe(lambda: another_uploading(job["id"]), False):
-                    row["line"] = Text("● waiting its turn", AMBER).append(
-                        "  another video is uploading to YouTube first", MUTED).json()
+                    row["line"] = Text("● waiting its turn", AMBER).append(f"  {TURN}", MUTED).json()
                 elif row["state"] == "posted" and not (post and post["views"] is not None):
                     said, act_on = to_look_at(job)
                     if said:
@@ -735,5 +748,8 @@ class YouTubeApiTab:
                         timeout=20)
         elif job and job["state"] == "unknown":
             self.notify(job["detail"] or STUDIO, title="YouTube: not sure it posted", severity="warning", timeout=25)
+        elif job and job["state"] == "expired":  # (its turn never came: the row of another video is on show)
+            self.notify(f"{job['video']} waited ten minutes for another upload and never started. Nothing was "
+                        "posted.", title="YouTube: not posted", severity="warning", timeout=20)
         self.follow_youtube_api(changed=True)  # the channel the upload went to, or a sign-in Google has ended
         self.jobs_changed(everywhere=True)
