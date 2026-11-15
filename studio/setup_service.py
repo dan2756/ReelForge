@@ -133,8 +133,9 @@ class Setup(Service):
             "items": [{"key": i.key, "name": i.name, "why": i.why, "ready": i.ready, "detail": i.detail,
                        "size_mb": i.size_mb, "can_install": i.can_install, "default": i.default} for i in items],
             "todo": [i.key for i in setup_flow.todo(items)],
-            "note": "Downloads come only from the official sites (blender.org, gyan.dev, Mixkit) and every file is "
-                    "checked. Mixkit's sounds are free to use in your videos, YouTube and social media included.",
+            "note": f"Downloads come only from the official sites (blender.org, {tools.ffmpeg_source()[0]}, Mixkit) "
+                    "and every file is checked. Mixkit's sounds are free to use in your videos, YouTube and social "
+                    "media included.",
         })
 
     @rpc
