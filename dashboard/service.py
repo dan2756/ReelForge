@@ -1,5 +1,5 @@
-"""ReelForge's window, the Python side: stats for TikTok, YouTube, Instagram and X, help posting by hand,
-notifications and updates.
+"""ReelForge's window, the Python side: stats for TikTok, YouTube, Instagram and X, help posting (by hand, with
+the browser extension, or for YouTube through its API), notifications and updates.
 
 The window itself is the OpenTUI app in ui/ (ui/src/dashboard/); this is what it shows and what its buttons do. It
 runs in studio/bridge.py's loop: the window calls the @rpc methods, and each update_* method sends one piece of the
