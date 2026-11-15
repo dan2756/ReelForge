@@ -458,8 +458,12 @@ class YouTubeApiTab:
         if current is None or current.outcome is not outcome:
             return  # an earlier try, which a newer one replaced
         if outcome["ok"]:
-            self.notify(f"{outcome['message']} Posts start as private until you choose otherwise. {UNPROVEN}",
-                        title="YouTube's API", timeout=20)
+            # Who sees a post is said as it is on file: a choice made before this connect still stands.
+            privacy = youtube_api.status()["privacy"]
+            starts = ("Posts start as private until you choose otherwise." if privacy == "private" else
+                      f"Posts start as {privacy}, as you chose earlier.")
+            self.notify(f"{outcome['message']} {starts} {UNPROVEN}", title="YouTube's API",
+                        severity="information" if privacy == "private" else "warning", timeout=20)
         elif outcome["code"] != "cancelled":
             self.notify(outcome["message"], title="YouTube's API", severity="warning", timeout=15)
         self.follow_youtube_api(changed=True)

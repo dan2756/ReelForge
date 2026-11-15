@@ -235,6 +235,26 @@ class Buttons(ApiPosting):
         self.assertIn("never against Google itself", w.toasts()[1])
         self.assertEqual(self.rows(w)["youtube"]["actions"], ["post_api"])  # the row follows
 
+    def test_connecting_again_says_what_posts_really_start_as(self):
+        w = self.window()
+        w.call("youtube_api_defaults", "public")  # your choice, made in an earlier session
+        self.reopen()
+        w.svc.follow_youtube_api(changed=True)
+        w.forget()
+        self.assertTrue(w.call("youtube_api_connect", ""))
+        self.assertTrue(w.until(lambda: w.view("youtube_api")["state"] == "on"))
+        toast = w.sent("toast")[-1]
+        self.assertIn("ReelForge is connected to YouTube's API. Posts start as public, as you chose earlier.",
+                      toast["body"])
+        self.assertNotIn("private", toast["body"].replace("Post as private first", ""))
+        self.assertEqual(toast["severity"], "warning")  # not the quiet default: worth a look
+        # The pop-up, the question and what one press on the row sends all say the same.
+        self.assertEqual(w.call("youtube_api_info", CAPTION, TAGS)["send"]["privacy"], "public")
+        w.call("post_action", "youtube", "post_api")
+        (job,) = posting.recent()
+        self.over(w, job["id"])
+        self.assertEqual(self.google.starts[0]["body"]["status"]["privacyStatus"], "public")
+
     def test_a_connect_that_cannot_start_or_is_refused_says_why(self):
         w = self.window(api=False)
         self.assertFalse(w.call("youtube_api_connect", ""))
