@@ -24,6 +24,7 @@ setDefaultTimeout(40_000)
 let open: Headless | null = null
 let tmp = ""
 const SERVER = { REELFORGE_EXTENSION_PORT: "0" } // this window listens for the extension, on any free port
+const NO_SERVER = { REELFORGE_EXTENSION_PORT: "off" } // ... and this one doesn't, whatever the tests were started with
 const CAPTION = "What if hail doubled every 2 seconds?"
 
 /** A window on the scratch channel, with what the test asks the preload for. */
@@ -544,7 +545,7 @@ describe("the extension's dialog", () => {
   })
 
   test("a window that isn't listening says why, instead of starting a post it can't hand over", async () => {
-    const h = await kit({ extension: "on" }, [150, 45], {}) // as the tests run by default: no local server
+    const h = await kit({ extension: "on" }, [150, 45], NO_SERVER)
     const why = "ReelForge isn't listening for the extension here (it is switched off)."
     expect(flat(h)).toContain(`▐ Post… ▌ ${why}`)
     await clickText(h, "▐ Post… ▌", 3)
@@ -556,7 +557,7 @@ describe("the extension's dialog", () => {
   })
 
   test("in a window that isn't listening, Post again… and Try again say why too, and every row stays as it is", async () => {
-    const h = await kit({ extension: "on", jobs: { tiktok: ["opening", "failed"], x: ["ready", "posted"] }, spotted: { instagram: 2100 } }, [150, 45], {})
+    const h = await kit({ extension: "on", jobs: { tiktok: ["opening", "failed"], x: ["ready", "posted"] }, spotted: { instagram: 2100 } }, [150, 45], NO_SERVER)
     const why = "ReelForge isn't listening for the extension here (it is switched off)."
     const made = jobsMade()
     for (const [name, key, button, stands] of [
