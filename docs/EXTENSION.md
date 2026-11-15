@@ -188,6 +188,16 @@ to, and that ReelForge gives it no command for it. Two smaller things are also l
 one of ReelForge's ports can ask the extension to connect to whatever serves it, and a program that listens on
 ReelForge's port in the two seconds after ReelForge closes could be sent the token once.
 
+Nor does it protect against another account on this computer, if the computer is shared and that account can see
+which programs yours is running. The pages ReelForge opens in your browser carry a key in their address: ten
+minutes for the page that connects a browser, two hours for a post's page. The address is handed to your browser
+when it is opened, and on most systems another account can read it there. With the first it could connect a
+program of its own before your browser does, which would then see your Publish list, your captions and the videos
+of posts it takes. With the second it could press that page's **Post by hand**. You would see the sign of it: the
+page says it was used already, or a browser you don't know is listed under **Browsers…** and by
+`reelforge extension`. Disconnect it there and connect yours again. On a computer only you use, none of this
+applies.
+
 ## Why not the platforms' own posting APIs
 
 Each platform has an API for posting. This table says what stands between a single creator and using it. It only
