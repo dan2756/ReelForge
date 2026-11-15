@@ -2433,10 +2433,10 @@ class Dashboard(StatsTab, SettingsTab, Service):
         try:
             message = kit_update.apply(kit_update.release_from(self.update_info), progress, log)
         except kit_update.UpdateError as e:
-            self.loop.call_soon(self.update_failed, str(e))
+            self.loop.call_soon(self.update_failed, str(e), not getattr(e, "partial", False))
             return
-        except Exception as e:
-            self.loop.call_soon(self.update_failed, f"{type(e).__name__}: {e}")
+        except Exception as e:   # anywhere in the update, so some of the new files may be in place already
+            self.loop.call_soon(self.update_failed, f"{type(e).__name__}: {e}. Update again to finish it.", False)
             return
         self.loop.call_soon(self.update_done, message)
 
@@ -2450,11 +2450,14 @@ class Dashboard(StatsTab, SettingsTab, Service):
                                   "progress": {"done": 1, "total": 1}, "done": True})
         self.loop.set_timer(1.5, lambda: self.exit(kit_update.RESTART))
 
-    def update_failed(self, message: str) -> None:
+    def update_failed(self, message: str, untouched: bool = True) -> None:
+        """untouched: nothing in the ReelForge folder changed (the download or its check failed), so the version you
+        have is whole. Otherwise some of the new version is in place, and the message itself says how to finish."""
         self.updating = False
         self.show_update()
-        self.emit("update_step", {"step": Text(f"The update didn't finish: {message}\nThe version you have keeps "
-                                               "working.", BAD).json(), "progress": None, "failed": True})
+        still = "\nThe version you have keeps working." if untouched else ""
+        self.emit("update_step", {"step": Text(f"The update didn't finish: {message}{still}", BAD).json(),
+                                  "progress": None, "failed": True})
 
     # --- shared actions -------------------------------------------------------------------
 

@@ -407,6 +407,38 @@ class HalfMadeSetup(unittest.TestCase):
         self.assertIn("stopped part way", r.stdout)
         self.assertNotIn("Traceback", r.stderr)
 
+    def test_packages_from_before_an_update_ask_for_repair_too(self):
+        """An update that stopped before it installed the new version's packages leaves requirements.txt the new one
+        and .venv/installed.txt, the copy setup keeps of the one it installed from, the old one."""
+        import shutil
+        import subprocess
+        import sys
+        import sysconfig
+
+        launcher = self.launcher()
+        root = Path(self.tmp.name)                     # the folder the bare .venv is in, as a ReelForge folder
+        venv, stamp = str(root / ".venv"), root / ".venv" / "installed.txt"
+        (root / "requirements.txt").write_text("numpy>=2.0\nnewpackage>=1.0\n", encoding="utf-8")
+        self.addCleanup((root / "requirements.txt").unlink)
+        self.addCleanup(stamp.unlink, missing_ok=True)
+        self.assertFalse(launcher.outdated(root, venv))            # no copy kept: nothing to go by
+        stamp.write_text("numpy>=2.0\n", encoding="utf-8")
+        self.assertTrue(launcher.outdated(root, venv))
+        self.assertFalse(launcher.outdated(root, sys.prefix))      # another Python running it: its own business
+        self.assertFalse(launcher.outdated(self.ROOT, sys.prefix))
+        # run as the program, by that .venv's Python (with these tests' packages, so none is missing)
+        (root / "bin").mkdir()
+        self.addCleanup(shutil.rmtree, root / "bin")
+        shutil.copy(self.ROOT / "bin" / "reelforge.py", root / "bin" / "reelforge.py")
+        env = {**os.environ, "PYTHONPATH": os.pathsep.join({sysconfig.get_paths()[k] for k in ("purelib", "platlib")})}
+        r = subprocess.run([str(self.bare), str(root / "bin" / "reelforge.py"), "help"], capture_output=True,
+                           text=True, timeout=120, env=env)
+        self.assertEqual(r.returncode, launcher.REPAIR, r.stdout + r.stderr)
+        self.assertIn("the last update stopped before it installed the new ones", r.stdout)
+        self.assertNotIn("Traceback", r.stderr)
+        stamp.write_text("numpy>=2.0\nnewpackage>=1.0\n", encoding="utf-8")   # setup has installed them
+        self.assertFalse(launcher.outdated(root, venv))
+
     def test_setup_makes_that_venv_again(self):
         import sys
 
