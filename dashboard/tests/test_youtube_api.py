@@ -553,6 +553,21 @@ class Uploading(ApiTest):
         self.assertEqual(self.pauses, [1.0, 2.0, 4.0])
         self.assertEqual((len(self.google.starts), len(self.google.sessions), len(self.google.videos)), (4, 1, 1))
 
+    def test_too_many_requests_is_waited_out_like_a_busy_server(self):
+        self.google.start_script = [(429, "rateLimitExceeded")]
+        self.google.script = [None, (429, "rateLimitExceeded")]
+        self.upload()
+        self.assertEqual(self.pauses, [1.0, 1.0])
+        self.assertEqual(bytes(self.google.videos[0]["data"]), BYTES)
+        self.assertEqual((len(self.google.sessions), len(self.google.videos)), (1, 1))
+
+    def test_an_answer_that_points_somewhere_else_is_never_followed(self):
+        self.google.start_script = ["redirect"]
+        e = self.refused("refused", self.upload)
+        self.assertEqual(e.message, "YouTube refused the upload (error 307).")
+        self.assertEqual(self.google.strays, [])  # the token went nowhere the answer pointed
+        self.assertEqual((self.google.sessions, self.google.puts), ({}, []))
+
     def test_youtube_out_of_reach_from_the_start(self):
         self.google.start_script = ["drop"] * youtube_api.TRIES
         e = self.refused("offline", self.upload)

@@ -29,7 +29,8 @@ class Google:
     no_refresh     the token answer has no refresh token
     token_script   what the next calls to the token address get instead of an answer: "503", or an error word
                    ("invalid_grant")
-    start_script   the same for starting an upload: "503", "drop", "401", or (status, reason) for a refusal
+    start_script   the same for starting an upload: "503", "drop", "401", "redirect" (it points somewhere else on
+                   this server: anything that follows is noted in strays), or (status, reason) for a refusal
     script, then   the same for each piece and each "where does it stand": None (the usual answer), "503" (the
                    piece is not kept), "503-kept" (it is, and the answer is still 503), "lost" (the piece is
                    kept, and made into the video if it was the last, but no answer comes), "drop" (no answer,
@@ -58,6 +59,7 @@ class Google:
         self.asked: list[dict] = []          # each consent page opened: its query
         self.token_calls: list[dict] = []    # each call to the token address: its form
         self.revoke_calls: list[str] = []
+        self.strays: list[tuple] = []        # anything asked of an address that isn't one of Google's here
         self.starts: list[dict] = []         # each upload started: {"query", "headers", "body"}
         self.puts: list[dict] = []           # each piece or question: {"range", "length", "bearer"}
         self.codes: dict[str, dict] = {}
@@ -146,6 +148,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         g, parts = self.google, urlsplit(self.path)
         if parts.path != "/auth":
+            g.strays.append(("GET", parts.path, self.bearer()))
             self.reply(404, {})
             return
         query = {k: v[0] for k, v in parse_qs(parts.query).items()}
@@ -184,6 +187,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif parts.path == "/upload/youtube/v3/videos":
             self.start(parse_qs(parts.query), raw)
         else:
+            g.strays.append(("POST", parts.path, self.bearer()))
             self.reply(404, {})
 
     def token(self, form: dict) -> None:
@@ -236,6 +240,8 @@ class _Handler(BaseHTTPRequestHandler):
             self.drop()
         elif said == "503":
             self.reply(503, {})
+        elif said == "redirect":
+            self.reply(307, None, {"Location": f"{g.base}/somewhere/else"})
         elif said == "401" or (said is None and self.bearer() not in g.access):
             self.reply(*refusal(401, "authError"))
         elif said:
