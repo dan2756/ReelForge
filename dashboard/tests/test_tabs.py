@@ -191,6 +191,12 @@ class WindowTest(Folder):
         self.assertEqual(dict(KEYS)["1-7"], "switch tabs")
         self.assertIn("Publish", dict(KEYS)["u"])
         self.assertIn("notifications", dict(KEYS)["n"])  # the bell, for the keyboard
+        self.assertIn("scroll", dict(KEYS)["PgUp/PgDn"])
+        self.assertIn("scrolls into view", dict(KEYS)["Tab"])
+        other = {topic[0]: topic[1] for topic in HELP if len(topic) == 2}
+        self.assertIn("(or n)", other["Notifications"])
+        self.assertIn("Delete or Backspace", other["Notifications"])
+        self.assertIn("80 columns by 24 rows", other["Small windows"])  # the smallest window it is drawn for
 
 
 if __name__ == "__main__":

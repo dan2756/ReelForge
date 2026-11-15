@@ -147,9 +147,9 @@ HELP = [
               "every platform you count has a first reading.", "totals"),
     ("Notifications", "The bell at the top right (or n) opens the drawer: updates, milestones, badges, finished videos and "
                       "log-ins that need you. A red dot on the bell means something's unread; click one to go "
-                      "to it, or the × at its right to delete it (Delete deletes the highlighted one), and Clear "
-                      "all deletes them all. The hourly background job (reelforge stats on) adds them while "
-                      "ReelForge is closed."),
+                      "to it (with the keyboard: the arrows, then Enter), or the × at its right to delete it "
+                      "(Delete or Backspace deletes the highlighted one), and Clear all deletes them all. The "
+                      "hourly background job (reelforge stats on) adds them while ReelForge is closed."),
     ("Profiles", "One profile for each channel you run, each with its own accounts, log-ins, stats, notifications, "
                  "Publish list and settings. The button with your channel's name at the top left switches between "
                  "them (a red dot on it: another profile has unread notifications), adds a new one (the same short "
@@ -165,12 +165,19 @@ HELP = [
                         "instead of starting another."),
     ("Badges", "Badges only ever compare you with yourself, from the numbers ReelForge has stored. Percentages need "
                "at least 10 videos or days to compare, and ties count against you, so a badge is always true."),
+    ("Small windows", "ReelForge fits a window of 80 columns by 24 rows. A tab that doesn't fit scrolls (the mouse "
+                      "wheel, or Page Up and Page Down), and on Publish the videos go above the form. In a narrow "
+                      "window Refresh, Help and Quit are the signs ↻ ? × at the top; narrower than 80 columns, ‹ or "
+                      "› at an end of the tabs means more of them are that way: click it, or press a tab's "
+                      "number."),
 ]
 KEYS = [("1-7", "switch tabs"), ("u", "open Publish (the green button at the top right)"),
         ("r / R", "refresh / force refresh"),
         ("n", "open or close the notifications (the bell at the top right)"),
         ("p", "profiles: switch, add, change or delete one"),
-        ("Tab", "move between buttons, lists and fields (Enter presses, the arrows move through a list)"),
+        ("Tab", "move between buttons, lists and fields (Shift+Tab goes back, Enter presses, the arrows move "
+                "through a list); what it lands on scrolls into view"),
+        ("PgUp/PgDn", "scroll a tab or a dialog that is longer than the window"),
         ("Esc", "close the drawer or a dialog, or leave a text field"), ("Ctrl+Q", "quit")]
 
 

@@ -67,9 +67,23 @@ while something moves; `REELFORGE_MOTION=0` turns it off.
 
 ## Keys and the mouse
 
-Everything works with either. Tab and Shift+Tab move between buttons, lists and fields in reading order (a dialog
-keeps Tab inside itself, and one that is scrolled out of sight scrolls into view); Enter or Space presses a button,
-the arrows move through a list or table, Enter (or a click on the highlighted row) opens it. In the ReelForge window 1-7 open the tabs in the order they're shown (the
-Settings tab's Tab order changes it), u opens Publish (the green button at the right of the header) and r / R
-refresh, except while a text field has the keyboard, p opens the profile menu and ? the help; Esc leaves the field,
-closes a dialog or the drawer. Ctrl+Q quits.
+Every button, list, table and field works with either. Tab and Shift+Tab move between them in reading order (a
+dialog keeps Tab inside itself and gives the keyboard back when it closes, and a control that is scrolled out of
+sight scrolls into view); Enter or Space presses a button, the arrows move through a list or table, Enter (or a
+click on the highlighted row) opens it. Page Up and Page Down scroll a tab or a dialog that is longer than the
+window. In the ReelForge window 1-7 open the tabs in the order they're shown (the Settings tab's Tab order changes
+it), u opens Publish (the green button at the right of the header), r / R refresh, n opens the notifications, p
+the profile menu and ? the help, except while a text field has the keyboard; Esc leaves the field, closes a dialog
+or the drawer. Ctrl+Q quits. The chips on a line (a chart's ranges and its key, Show on the Videos tab, Remove,
+Disconnect, Mark all read) and a table's headings are still mouse only.
+
+## Small windows, and nothing to show yet
+
+The window is drawn for 80 columns by 24 rows and up. Under about 96 columns the header puts the profile button and
+Refresh, Help and Quit over the tabs (`headerFit` in `src/dashboard/App.tsx`); narrower than 80, the tabs that fit
+show whole with ‹ and › for the rest. A tab too tall for the window scrolls.
+
+Until a tab's view arrives it shows one line, "Reading your stats…" (`Reading` in `src/ui/Panels.tsx`), which says
+what to do if nothing has come after ten seconds. A table with no rows shows the `empty` words the Python side sends
+with it. A call the Python side fails is a pop-up (`Bridge.send`, `Bridge.ask`, `Bridge.failed`): never await a bare
+`bridge.call` without a catch.

@@ -3,8 +3,8 @@
 A Text is a run of segments, each [text, style] or [text, style, action]: style is a few words such as
 "bold #3dff9a on #1f5c45" (bold, dim, italic, underline, strike, a text colour, "on" and a background colour), and
 an action makes that piece clickable (a chip, a key on a chart): ["set_range", "7d"] runs the action set_range with
-the argument "7d" (ui/src/dashboard/actions.ts). Parts are (Text, importance) pairs that the frontend fits to the
-room it has, leaving out the least important (highest number) first (ui/src/lib/fit.ts).
+the argument "7d" (DashState.run in ui/src/dashboard/state.tsx). Parts are (Text, importance) pairs that the frontend
+fits to the room it has, leaving out the least important (highest number) first (ui/src/lib/fit.ts).
 
 The colours every view shares are here too, and short_num, the shortest way to write a number.
 """
