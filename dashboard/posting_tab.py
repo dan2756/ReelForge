@@ -309,8 +309,8 @@ class PostingTab:
                          "line": state_line(job, post, p.name).json(), "busy": state in BUSY, "url": url,
                          "job": job["id"] if job and state == job["state"] else None,
                          "actions": [a for a in ACTIONS[state] if a != "open_post" or url]})
-        style = {"approved": GOOD, "none": MUTED}.get(review["state"], f"bold {AMBER}")
-        mark = {"approved": "✓ ", "none": ""}.get(review["state"], "! ")
+        style = {"approved": GOOD, "none": MUTED, "demo": MUTED}.get(review["state"], f"bold {AMBER}")
+        mark = {"approved": "✓ ", "none": "", "demo": ""}.get(review["state"], "! ")
         why = self.cant_post(video, review, extension, rows)
         view.update(video={"path": str(video), "name": video.name},
                     review={"state": review["state"], "line": Text(mark + review["line"], style).json()},

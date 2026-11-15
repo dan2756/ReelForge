@@ -74,6 +74,9 @@ class LedgerTest(unittest.TestCase):
         """As if the job had last been heard of (or made: created_at) this long ago."""
         then = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat(timespec="seconds")
         with db.connect() as c:
+            if column == "created_at":  # its line in the upload log was written in the same second
+                c.execute("UPDATE uploads SET ts = ? WHERE ts = (SELECT created_at FROM post_jobs WHERE id = ?) "
+                          "AND platform = ?", (then, job["id"], job["platform"]))
             c.execute(f"UPDATE post_jobs SET {column} = ? WHERE id = ?", (then, job["id"]))
 
     def events(self, job: dict) -> list[tuple]:
@@ -215,6 +218,21 @@ class Making(LedgerTest):
                 posting.advance(job["id"], end, by="app", error_code="timeout" if end == "failed" else None)
             self.assertEqual(self.state(job), end)
         self.assertEqual(self.job()["state"], "queued")
+
+    def test_a_job_nobody_picked_up_leaves_the_upload_log(self):
+        # A post that goes up in the next hours is filed under the video whose upload was last started there. A job
+        # that never reached a browser started nothing.
+        expired, cancelled, begun = self.job("tiktok"), self.job("youtube"), self.job("instagram")
+        self.age(expired, 11, "created_at")
+        posting.expire_stale()
+        posting.cancel(cancelled["id"])
+        self.walk(begun, "opening")
+        posting.cancel(begun["id"])  # its tab was opened: you may well finish that one by hand
+        self.assertEqual([(u["platform"], u["status"]) for u in db.uploads()], [("instagram", "extension")])
+        went_up = (db.parse(expired["created_at"]) + timedelta(minutes=20)).isoformat(timespec="seconds")
+        db.record_snapshot("tiktok", Account("@me", 100), [Post("7300000000000000001", "Something else entirely",
+                                                                None, went_up)])
+        self.assertEqual(analytics.auto_link(), 0)
 
     def test_a_post_the_stats_read_already_found_blocks_too(self):
         episode = db.create_episode(CAPTION, str(self.video))

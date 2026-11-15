@@ -556,6 +556,11 @@ def _write(c: sqlite3.Connection, old: dict, state: str, by: str, **fields) -> d
         given = {k: v for k, v in given.items() if k in ("step", "progress", "detail") or not old[k]}
     else:
         new.update(state=state, step=None, progress=None, detail=None)
+        if old["state"] == "queued" and state in FREE:
+            # Nobody picked it up, so nothing was opened anywhere: its line in the upload log goes, or a post that
+            # happens to go up in the next hours would be filed under this video (analytics.auto_link).
+            c.execute("DELETE FROM uploads WHERE ts = ? AND platform = ? AND video = ? AND status = ?",
+                      (old["created_at"], old["platform"], old["video"], old["via"]))
     if "post_id" in given and by != "reconcile" and not re.fullmatch(POST_ID.get(old["platform"], ".+"),
                                                                     str(given["post_id"])):
         del given["post_id"]

@@ -243,6 +243,7 @@ class Posting(PostingTest):
         self.assertEqual((made["batch"], made["jobs"], made["opened"]), (None, [], False))
         self.assertEqual([(j["state"], j["detail"]) for j in posting.recent()],
                          [("cancelled", "the posting page didn't open")] * 2)
+        self.assertEqual(db.uploads(), [])  # no page opened: nothing for a later post to be filed under
         toast = w.sent("toast")[-1]
         self.assertEqual((toast["title"], toast["severity"]), ("Nothing was posted", "warning"))
         self.assertIn("by hand", toast["body"])
