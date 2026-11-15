@@ -78,6 +78,33 @@ class Form(PublishTest):
         self.assertIn(f"{len(CAPTION)}/100", plain(w.view("preview")["caption"]))
 
 
+class Ready(PublishTest):
+    """A window that says when it's listening gets nothing before that, so the picked video's caption isn't lost."""
+
+    def test_nothing_is_sent_until_the_window_says_it_is_ready(self):
+        w = self.window(ready=True)
+        self.assertEqual(w.loop.events, [])
+        self.assertEqual(w.init["tab"], "publish")
+        w.call("ready")
+        form = w.view("form")
+        self.assertEqual((form["file"], form["caption"]), (str(self.video), "Ep01"))
+        self.assertEqual(len(w.view("files")["items"]), 1)
+
+    def test_ready_starts_it_once(self):
+        w = self.window(ready=True)
+        w.call("ready")
+        w.forget()
+        w.call("ready")
+        self.assertEqual(w.sent("platforms") + w.sent("form"), [])  # what only starting sends
+
+    def test_a_window_that_does_not_ask_starts_as_before(self):
+        w = self.window()
+        self.assertEqual(w.view("form")["caption"], "Ep01")
+        w.forget()
+        w.call("ready")  # harmless there
+        self.assertEqual(w.sent("platforms") + w.sent("form"), [])
+
+
 class UploadPage(PublishTest):
     """A platform's button: its text copied, the file shown, its upload page opened, and a note of it kept."""
 

@@ -277,13 +277,15 @@ class Dashboard(StatsTab, SettingsTab, Service):
         self.window_lock = None  # held while this window shows its profile (see hold_profile)
         self.deleted_sizes: dict[str, str] = {}  # each deleted profile's backup: how big it is (measure_deleted)
         self.toggling = threading.Lock()  # the Settings tab's On this computer panel changes one thing at a time
+        self.is_started = False  # started() has run: the first views are sent and the timers are going
 
     # --- starting ---------------------------------------------------------------------------
 
     def start(self, options: dict) -> dict:
         """options: tab, drawer, demo, screenshots (the README's pictures: the demo as a set-up account looks),
         only_demos (the Publish tab lists just the kit's demo videos), unconnected (demo platforms left unconnected),
-        switched (the window switched to this profile: Accounts, while it has nothing connected)."""
+        switched (the window switched to this profile: Accounts, while it has nothing connected), ready (the window
+        calls ready() once it is listening, and nothing is sent before that)."""
         from .__main__ import load_platforms
 
         cfg, every = load_platforms(bool(options.get("demo")), options.get("only_demos", False),
@@ -316,7 +318,8 @@ class Dashboard(StatsTab, SettingsTab, Service):
         if profiles and not self.demo:
             profiles.remember(self.profile)  # ReelForge opens on it next time
             self.hold_profile()
-        self.loop.call_soon(self.started)
+        if not options.get("ready"):  # a window that doesn't say when it's listening: everything is sent right away
+            self.loop.call_soon(self.started)
         return self.init_view(options)
 
     def init_view(self, options: dict) -> dict:
@@ -610,7 +613,17 @@ class Dashboard(StatsTab, SettingsTab, Service):
 
         self.deleted_sizes = {d.backup.name: fmt_size(profiles.size(d.backup)) for d in profiles.deleted()}
 
+    @rpc
+    def ready(self) -> None:
+        """The window has drawn itself and is listening (it asked to say so, with the start option "ready"). What
+        started() sends is more than views the window keeps: the picked video's caption for the Publish form and the
+        "Updated" and "Moved" pop-ups are heard only by a window that is already listening, and the Python side is
+        quick enough to send them before it is."""
+        if not self.is_started:
+            self.started()
+
     def started(self) -> None:
+        self.is_started = True
         self.update_profile()
         self.show_platforms()
         self.reload()
