@@ -71,9 +71,11 @@ class Untar(unittest.TestCase):
     def test_an_ordinary_archive_unpacks_the_same_on_both(self):
         folder = tarfile.TarInfo("ffmpeg-n7.1/bin")
         folder.type, folder.mode = tarfile.DIRTYPE, 0o755
-        # links that stay inside the folder are fine too (left out on Windows, where making one needs a privilege)
+        # links that stay inside the folder are fine too, one by way of another as well (left out on Windows,
+        # where making one needs a privilege)
         links = [] if os.name == "nt" else [self.link("ffmpeg-n7.1/bin/ff", "ffmpeg"),
-                                            self.link("ffmpeg-n7.1/doc", "../ffmpeg-n7.1/bin")]
+                                            self.link("ffmpeg-n7.1/doc", "../ffmpeg-n7.1/bin"),
+                                            self.link("ffmpeg-n7.1/run", "doc/ffmpeg")]
         good = self.archive(folder, ("ffmpeg-n7.1/bin/ffmpeg", "run me"), ("ffmpeg-n7.1/LICENSE.txt", "GPL"), *links)
         for old in PYTHONS:
             with self.subTest(old_python=old):
@@ -90,6 +92,7 @@ class Untar(unittest.TestCase):
                 if os.name != "nt":
                     self.assertTrue(os.access(out / "ffmpeg-n7.1" / "bin" / "ffmpeg", os.X_OK))
                     self.assertEqual((out / "ffmpeg-n7.1" / "bin" / "ff").read_text(encoding="utf-8"), "run me")
+                    self.assertEqual((out / "ffmpeg-n7.1" / "run").read_text(encoding="utf-8"), "run me")
 
     def test_nothing_lands_outside_the_folder_on_either(self):
         device = tarfile.TarInfo("kit/null")

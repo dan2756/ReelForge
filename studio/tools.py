@@ -265,7 +265,7 @@ def untar(archive: Path, dest: Path) -> list[str]:
     """Unpack a tar archive into dest and nowhere else; returns the names in it. Python 3.12 (and 3.11 from 3.11.4)
     checks that itself, with tarfile's "data" filter. Python 3.11.0 to 3.11.3, which Debian 12 ships, has no filters
     at all (asking for one is a TypeError), so there every entry is checked here first: no path or link that leaves
-    dest, none that goes by way of a link in the archive, and nothing but files, folders and links. Raises
+    dest, by itself or by way of another link in the archive, and nothing but files, folders and links. Raises
     tarfile.TarError for an archive that tries."""
     with tarfile.open(archive) as t:
         names = t.getnames()
@@ -279,21 +279,25 @@ def untar(archive: Path, dest: Path) -> list[str]:
         def inside(path: str) -> bool:
             return os.path.commonpath([root, os.path.realpath(os.path.join(root, path))]) == root
 
-        def by_a_link(path: str) -> bool:
-            """A folder on the way to path is one of the archive's own links. Where the path then leads depends on
-            that link once it's unpacked, and inside() can't tell: it looks before anything is there. A few links
-            that each stay inside could otherwise lead out together, and a file named beyond them land there."""
-            way = ""
-            for part in Path(path).parts[:-1]:
-                way = os.path.normpath(os.path.join(way, part))
-                if way in links:
+        def by_a_link(path: str, then_up: bool = False) -> bool:
+            """A folder on the way to path is one of the archive's own links (then_up: and the path climbs with ".."
+            after it). Where such a path leads depends on the link once it's unpacked, and inside() can't tell: it
+            looks before anything is there. A few links that each stay inside could otherwise lead out together,
+            and a file named beyond them land there."""
+            way, crossed = "", False
+            for part in Path(path).parts:
+                if crossed and (part == ".." or not then_up):
                     return True
+                way = os.path.normpath(os.path.join(way, part))
+                crossed = crossed or way in links
             return False
 
         for m in members:
             link = m.linkname if m.islnk() else os.path.join(os.path.dirname(m.name), m.linkname) if m.issym() else ""
+            # An entry is never named beyond a link (an archive of a real folder has none like that). A link may
+            # point through another one, as the links between a library's versions do, but not up from there.
             if not (m.isfile() or m.isdir() or link) or not inside(m.name) or not inside(link) \
-                    or by_a_link(m.name) or by_a_link(link):
+                    or by_a_link(m.name) or by_a_link(link, then_up=True):
                 raise tarfile.TarError(f"{m.name} isn't something to unpack here")
         t.extractall(dest)
         return names
