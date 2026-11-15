@@ -540,6 +540,19 @@ describe("profiles", () => {
     expect(frame(h)).toContain("PROFILES")
   })
 
+  test("the menu opens under its button in a window of any size, with its words in full", async () => {
+    for (const size of [[180, 50], [120, 30], [80, 24]] as [number, number][]) {
+      const h = await window("overview", size)
+      const button = find(h, "▐ Night")![0] // the left end of the profile button
+      await press(h, "p")
+      expect([...rows(h)[3]!].indexOf("╭")).toBe(button) // the menu's corner, straight under it
+      expect(frame(h)).toContain("one for each channel: its own accounts, stats and log-ins") // (its end was cut off)
+      expect(frame(h)).toContain("Esc closes")
+      await open?.close()
+      open = null
+    }
+  })
+
   test("when the stats were read sits under Refresh at the top, and the bar at the foot doesn't list the platforms", async () => {
     for (const [w, ago] of [
       [180, /^updated \d+m ago/],

@@ -109,6 +109,7 @@ export class DashState {
   top: string | null = null // the highlighted row in Top performers
   video: string | null = null // ... on the Videos tab
   videosApplied: unknown = null // the "videos" view whose row that tab has taken already (Videos.tsx)
+  profileButton: import("@opentui/core").Renderable | null = null // the header's profile button: its menu opens under it
   compareRow: string | null = null // ... in the Compare table
   note: string | null = null // the highlighted notification
   caption = ""

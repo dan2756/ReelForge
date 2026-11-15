@@ -5,6 +5,7 @@
 // ui/src/root.tsx starts the Python side again on it.
 
 import { TextAttributes, type KeyEvent, type Renderable } from "@opentui/core"
+import { useTerminalDimensions } from "@opentui/react"
 import { useState } from "react"
 import { useView } from "../bridge"
 import { useFocus, FocusScope } from "../lib/focus"
@@ -17,7 +18,7 @@ import { Confirm, typedMatches } from "./Settings"
 import { useDash } from "./state"
 import type { ProfileRow, ProfilesMenu, ProfileView } from "./types"
 
-export const MENU_WIDTH = 64
+export const MENU_WIDTH = 64 // at most: a narrower window's menu is the window's width
 
 /** The button: a pill with the profile's name (cut short to `room` columns) and ▾, and a red dot while another
  * profile has something unread. */
@@ -41,7 +42,15 @@ export function ProfileButton({ room = 40, height = 3 }: { room?: number; height
   const view = useView<ProfileView>(s.bridge, "profile") ?? s.init.profile
   const [hover, setHover] = useState(false)
   return (
-    <box flexDirection="row" height={height} alignItems="center" flexShrink={0} onMouseOver={() => setHover(true)} onMouseOut={() => setHover(false)}>
+    <box
+      ref={(node: Renderable | null) => void (s.profileButton = node)}
+      flexDirection="row"
+      height={height}
+      alignItems="center"
+      flexShrink={0}
+      onMouseOver={() => setHover(true)}
+      onMouseOut={() => setHover(false)}
+    >
       <Line segs={profileButton(view, s.dialog?.kind === "profiles", hover, room)} />
     </box>
   )
@@ -87,7 +96,11 @@ function MenuBox({ data, close }: { data: ProfilesMenu; close: () => void }) {
   const items: Item[] = [...data.rows.map((row) => ({ kind: "profile", row }) as Item), { kind: "new" }]
   if (current) items.push({ kind: "settings" })
   const [index, setIndex] = useState(Math.max(data.rows.findIndex((r) => r.current), 0))
-  const width = MENU_WIDTH - 4
+  const window = useTerminalDimensions().width
+  const menu = Math.min(MENU_WIDTH, window)
+  const width = menu - 4
+  // Under its button, wherever the header has put that (beside the anvil, or at the window's edge), and inside the window.
+  const left = Math.max(Math.min(s.profileButton?.x ?? 1, window - menu), 0)
   const run = (item: Item | undefined, remove = false) => {
     if (!item || (remove && item.kind !== "profile")) return
     if (remove && item.kind === "profile" && item.row.why) {
@@ -151,9 +164,9 @@ function MenuBox({ data, close }: { data: ProfilesMenu; close: () => void }) {
     <box
       ref={ref}
       position="absolute"
-      left={s.init.anvil.length ? 12 : 1}
+      left={left}
       top={3}
-      width={MENU_WIDTH}
+      width={menu}
       border
       borderStyle="rounded"
       borderColor={mix(DASH.border, "#ffffff", 0.08)}
@@ -165,11 +178,15 @@ function MenuBox({ data, close }: { data: ProfilesMenu; close: () => void }) {
       paddingBottom={1}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <text wrapMode="none" flexShrink={0}>
-        <span fg={DASH.text} attributes={TextAttributes.BOLD}>{" PROFILES"}</span>
-        <span fg={DASH.faint}>{"   one for each channel: its own accounts, stats and log-ins"}</span>
+      <text fg={DASH.text} attributes={TextAttributes.BOLD} wrapMode="none" flexShrink={0}>
+        {" PROFILES"}
       </text>
-      <box height={1} flexShrink={0} />
+      {/* under the title, where it has the menu's width (beside it, its end was always cut off) */}
+      <box flexDirection="row" paddingLeft={1} marginBottom={1} flexShrink={0}>
+        <text fg={DASH.faint} wrapMode="word" flexGrow={1} flexShrink={1}>
+          one for each channel: its own accounts, stats and log-ins
+        </text>
+      </box>
       {data.rows.map((row, i) => {
         const on = i === index
         const segs = rowSegs(row, width, on)
@@ -197,9 +214,11 @@ function MenuBox({ data, close }: { data: ProfilesMenu; close: () => void }) {
       </text>
       {action(" +  New profile", data.rows.length)}
       {current ? action(` ›  ${data.onboarded ? "Settings for" : "Set up"} ${current.name}`, data.rows.length + 1) : null}
-      <text fg={DASH.faint} wrapMode="none" flexShrink={0} marginTop={1}>
-        {"  ↑↓ pick   Enter opens   Del deletes   Esc closes"}
-      </text>
+      <box flexDirection="row" paddingLeft={2} marginTop={1} flexShrink={0}>
+        <text fg={DASH.faint} wrapMode="word" flexGrow={1} flexShrink={1}>
+          ↑↓ pick   Enter opens   Del deletes   Esc closes
+        </text>
+      </box>
     </box>
   )
 }
