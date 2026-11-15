@@ -130,6 +130,66 @@ class Lint(Episode):
         self.assertNotIn("HUD numbers", got)
 
 
+class WhereToLook(Episode):
+    """Warnings for what reviews keep finding. They say where to look and never fail a video."""
+
+    def test_a_line_that_is_on_screen_across_a_cut_is_pointed_out(self):
+        self.series["events"] = {"cuts": [2.0, 4.6, 8.0], "doublings": [1.0, 2.0]}
+        status, detail = self.lint_spec()["story lines stay on one shot"]
+        self.assertEqual((status, detail), ("WARN", "'You are a duck.' (1-3 s) is on screen across the cut at 2 s"))
+        self.series["events"]["cuts"] = [0.9, 3.1, 4.6]         # inside a fade, or between the lines
+        self.assertEqual(self.lint_spec()["story lines stay on one shot"],
+                         ("PASS", "no line is on screen across one of the 3 cuts"))
+        report, _ = self.lint()
+        self.assertTrue(report.passed)
+
+    def test_an_effect_without_cuts_gets_no_such_row(self):
+        self.series["events"] = [[30, "unload", 2.0]]           # render_distance lists events another way
+        self.assertNotIn("story lines stay on one shot", self.lint_spec())
+
+    def test_a_small_subject_behind_the_hud_is_pointed_out(self):
+        behind_hud, clear, huge = [200, 660, 420, 800], [600, 1400, 800, 1600], [0, 300, 1080, 1920]
+        self.series["subject_box"] = [clear] * 60 + [behind_hud] * 30 + [None] * 30 + [huge] * 150
+        status, detail = self.lint_spec()["the subject is clear of the text"]
+        self.assertEqual((status, detail), ("WARN", "2.0-3.0 s behind the HUD"))
+        self.series["subject_box"] = [clear] * 60 + [behind_hud] * 5 + [clear] * 205       # a sixth of a second
+        self.assertEqual(self.lint_spec()["the subject is clear of the text"][0], "PASS")
+
+    def test_a_subject_under_a_story_line_is_pointed_out_unless_compose_moves_the_line(self):
+        under_line = [440, 1200, 640, 1300]                    # the lines sit at y 1250 unless the layout says so
+        self.series["subject_box"] = [under_line] * 270
+        self.spec["hud"]["chapters"] = []
+        self.assertEqual(self.lint_spec()["the subject is clear of the text"],
+                         ("WARN", "1.0-3.0 s behind the line 'You are a duck.'; "
+                                  "3.5-4.7 s behind the line 'A bigger duck.'"))
+        self.spec["layout"] = {"line_y": 800}
+        self.assertEqual(self.lint_spec()["the subject is clear of the text"][0], "PASS")
+        self.spec["layout"] = {"avoid_subject": True}
+        self.assertEqual(self.lint_spec()["the subject is clear of the text"][0], "PASS")
+
+    def frames(self, n=40, pop=()):
+        """A slow pan across a soft gradient, with another picture put in at the frames in `pop`."""
+        y, x = np.mgrid[0:48, 0:27 + n]
+        scene = np.stack([2 * x + y, 200 - x, 60 + 3 * y], 2)
+        other = np.stack([250 - 4 * y, 30 + 5 * x[:, ::-1], 250 - 2 * x], 2) % 256
+        return [(other[:, :27] if i in pop else scene[:, i:i + 27]).astype(np.int16) for i in range(n)]
+
+    def pops(self, frames):
+        finder = qa.Pops()
+        for before, frame in zip([None] + frames, frames):
+            finder.add(frame, 99.0 if before is None else float(np.abs(frame - before).mean()))
+        return finder.found
+
+    def test_frames_that_pop_are_found(self):
+        self.assertEqual(self.pops(self.frames()), [])
+        self.assertEqual(self.pops(self.frames(pop={12})), [(12, 1)])
+        self.assertEqual(self.pops(self.frames(pop={12, 13, 30, 31, 32, 33})), [(12, 2), (30, 4)])
+
+    def test_a_cut_is_not_a_pop(self):
+        self.assertEqual(self.pops(self.frames(pop=set(range(20, 40)))), [])            # a new shot that stays
+        self.assertEqual(self.pops(self.frames(pop=set(range(20, 26)))), [])            # six frames: a short shot
+
+
 class SoundCheck(Episode):
     def setUp(self):
         super().setUp()

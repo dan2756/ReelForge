@@ -10,7 +10,9 @@ moments, seamless loop, clipping, loudness (LUFS, loudest 3 s, true peak), unint
 blasts (A-weighted), long samples piled on themselves, key sound hits audible at their moment, story-line
 overlaps/wrapping, HUD coverage and contrast, caption rules. Intended exceptions come from the spec (blackout,
 glitches with "stutter", the rewind/loop hold) or an optional
-"qa": {"black_ok": [[t0, t1]], "frozen_ok": [...], "silent_ok": [...]} block.
+"qa": {"black_ok": [[t0, t1]], "frozen_ok": [...], "silent_ok": [...], "pop_ok": [...]} block.
+Three more only warn, to say where a review should look: frames that pop (one to four frames unlike the frames
+either side), a story line on screen across a cut, the subject mostly behind the HUD or a line.
 `make_episode.py --steps deliver` refuses to copy a video whose qa.json is missing, failing or stale.
 """
 import json
@@ -55,6 +57,32 @@ def runs(mask, times, min_len):
                 out.append((times[start], times[i - 1], i - start))
             start = None
     return out
+
+
+class Pops:
+    """Finds frames that pop: one to four frames that differ strongly from the frames either side of them, while
+    those two look alike. A camera that flips for a frame, a ground that goes black for one, a frame from inside a
+    tree. QA's black check needs three black frames in a row, so these used to be found by eye, if at all.
+    Feed it every frame in order; `found` is [(index of the first popped frame, how many frames)]."""
+    JUMP = 8.0      # mean difference (0-255) between two small frames in a row that counts as a jump
+
+    def __init__(self):
+        self.frames, self.jumps = [], []    # the last few frames (int16), and how far each was from the one before
+        self.seen = 0
+        self.found = []
+
+    def add(self, frame, diff):
+        if self.seen and diff > self.JUMP:
+            for k in range(1, min(4, len(self.frames) - 1) + 1):
+                # the k frames before this one popped if they were jumped into as well, and this frame is back at
+                # what the frame before them showed (after a real cut it is not: the old shot is gone)
+                if self.jumps[-k] > self.JUMP and \
+                        float(np.abs(frame - self.frames[-k - 1]).mean()) < 0.35 * min(diff, self.jumps[-k]):
+                    self.found.append((self.seen - k, k))
+                    break
+        self.frames = (self.frames + [frame])[-6:]
+        self.jumps = (self.jumps + [diff if self.seen else 0.0])[-6:]
+        self.seen += 1
 
 
 def _rel_lum(rgb):
@@ -164,44 +192,6 @@ def check_hud_contrast(spec, video, R, step=6):
     R.add("HUD readable on every background", "FAIL" if long_runs else ("WARN" if any(low) else "PASS"), detail)
 
 
-class Report:
-    def __init__(self):
-        self.checks = []
-
-    def add(self, name, status, detail):
-        self.checks.append({"check": name, "status": status, "detail": detail})
-
-    @property
-    def passed(self):
-        return all(c["status"] != "FAIL" for c in self.checks)
-
-
-def check_captions(spec, final, R):
-    """Check the generated posts against the channel's caption rules."""
-    cap = {p: (final / f"caption_{p}.txt") for p in config.PLATFORMS}
-    cap_problems = [f"caption_{p}.txt missing" for p, f in cap.items() if not f.exists()]
-    if not (final / "caption.txt").exists():
-        cap_problems.append("caption.txt (read by the Publish tab) missing")
-    n_max, first = config.MAX_HASHTAGS, config.TIKTOK_FIRST_TAG
-    if not cap_problems:
-        if n_max > 0 and "tiktok" in cap and first:
-            tags = [w for w in cap["tiktok"].read_text(encoding="utf-8").split() if w.startswith("#")]
-            if not tags or tags[0].lower() != "#" + first.lower():
-                cap_problems.append(f"TikTok's first hashtag isn't #{first}")
-        for p, f in cap.items():
-            k = f.read_text(encoding="utf-8").count("#")
-            if k > n_max:
-                cap_problems.append(f"{p} has {k} hashtags (max {n_max})")
-        if "x" in cap and not config.HASHTAGS_ON_X and "#" in cap["x"].read_text(encoding="utf-8"):
-            cap_problems.append("X post contains a hashtag")
-        if "youtube" in cap and \
-                cap["youtube"].read_text(encoding="utf-8").splitlines()[0].strip() != " ".join(spec["title"].split()):
-            cap_problems.append("YouTube title isn't the episode title")
-    rules = [f"max {n_max}"] + ([f"#{first} first on TikTok"] if n_max > 0 and first and "tiktok" in cap else []) + \
-        (["none on X"] if "x" in cap and not config.HASHTAGS_ON_X else [])
-    R.add("caption rules", "FAIL" if cap_problems else "PASS", "; ".join(cap_problems) or ", ".join(rules))
-
-
 # What `reelforge new-episode` puts in a new episode.json until the hook line is written.
 PLACEHOLDER_TITLE = "WRITE THE HOOK LINE HERE"
 
@@ -269,6 +259,60 @@ def lint_spec(spec, series, R):
         R.add("cover frame", "FAIL" if late else "PASS",
               f"cover.time {cover['time']} s is past render_until ({spec['render_until']} s): the cover would be black"
               if late else f"the frame at {cover['time']} s")
+
+    # ---- what reviews keep finding and no rule can call wrong. These only ever warn: they say where to look.
+    events = series.get("events") if series else None
+    cuts = events.get("cuts") if isinstance(events, dict) else None
+    if lines and isinstance(cuts, list):
+        across = [f"{l[2]!r} ({l[0]:g}-{l[1]:g} s) is on screen across the cut at {c:g} s"
+                  for l in lines for c in cuts if l[0] + 0.15 < c < l[1] - 0.15]
+        R.add("story lines stay on one shot", "WARN" if across else "PASS",
+              "; ".join(across) or f"no line is on screen across one of the {len(cuts)} cuts")
+    if series and series.get("subject_box"):
+        behind = subject_behind_text(spec, series["subject_box"])
+        R.add("the subject is clear of the text", "WARN" if behind else "PASS",
+              "; ".join(behind[:8]) + (f" and {len(behind) - 8} more" if len(behind) > 8 else "")
+              if behind else "never more than half covered by the HUD or a line")
+
+
+def subject_behind_text(spec, boxes):
+    """Where the subject (series "subject_box": its screen box for each frame) is mostly covered by the HUD's readout
+    or by a story line for 0.3 s or more, as ["12.4-13.1 s behind the HUD", ...]. It counts when half of its box is
+    under the text, so a subject big enough to fill the frame is never "behind" anything. With layout.avoid_subject
+    compose moves each line off the subject itself, and the lines are left out."""
+    import overlay
+    fps, layout = spec["fps"], spec.get("layout", {})
+    hud = spec.get("hud") or {}
+    hud_box = (overlay.HUD_X, overlay.HUD_Y + 40, overlay.HUD_X + 560, overlay.HUD_Y + 215)
+    line_y = layout.get("line_y", overlay.LINE_Y)
+    try:
+        fnt = overlay.font(config.FONT_SERIF_ITALIC, 48)
+    except OSError:
+        fnt = None
+
+    def line_box(t, text, opt):
+        y = opt[0]["y"] if opt and "y" in opt[0] else \
+            (float(np.interp(t, *zip(*line_y))) if isinstance(line_y, list) else line_y)
+        rows = overlay.wrap(text, fnt, overlay.TEXT_MAX_W) if fnt else [text]
+        half_w = (max(fnt.getlength(r) for r in rows) if fnt else overlay.TEXT_MAX_W) / 2
+        return (config.WIDTH / 2 - half_w, y - 34 * len(rows), config.WIDTH / 2 + half_w, y + 34 * len(rows))
+
+    hidden = {}         # what covers it -> one flag per frame
+    for i, b in enumerate(boxes):
+        if not b or b[2] <= b[0] or b[3] <= b[1]:
+            continue
+        t = i / fps
+        over = [("the HUD", hud_box)] if any(c["from"] <= t < c["to"] for c in hud.get("chapters", [])) else []
+        if not layout.get("avoid_subject"):
+            over += [(f"the line {text!r}", line_box(t, text, opt))
+                     for start, end, text, *opt in spec.get("lines", []) if start <= t < end]
+        for what, r in over:
+            w, h = min(b[2], r[2]) - max(b[0], r[0]), min(b[3], r[3]) - max(b[1], r[1])
+            if w > 0 and h > 0 and w * h >= 0.5 * (b[2] - b[0]) * (b[3] - b[1]):
+                hidden.setdefault(what, [False] * len(boxes))[i] = True
+    times = [i / fps for i in range(len(boxes))]
+    return [f"{a:.1f}-{z:.1f} s behind {what}" for what, flags in hidden.items()
+            for a, z, _ in runs(flags, times, max(2, int(round(0.3 * fps))))]
 
 
 def check_audio(x, sr, spec, R):
@@ -435,6 +479,44 @@ def audio_check(ep_dir):
     return R
 
 
+class Report:
+    def __init__(self):
+        self.checks = []
+
+    def add(self, name, status, detail):
+        self.checks.append({"check": name, "status": status, "detail": detail})
+
+    @property
+    def passed(self):
+        return all(c["status"] != "FAIL" for c in self.checks)
+
+
+def check_captions(spec, final, R):
+    """Check the generated posts against the channel's caption rules."""
+    cap = {p: (final / f"caption_{p}.txt") for p in config.PLATFORMS}
+    cap_problems = [f"caption_{p}.txt missing" for p, f in cap.items() if not f.exists()]
+    if not (final / "caption.txt").exists():
+        cap_problems.append("caption.txt (read by the Publish tab) missing")
+    n_max, first = config.MAX_HASHTAGS, config.TIKTOK_FIRST_TAG
+    if not cap_problems:
+        if n_max > 0 and "tiktok" in cap and first:
+            tags = [w for w in cap["tiktok"].read_text(encoding="utf-8").split() if w.startswith("#")]
+            if not tags or tags[0].lower() != "#" + first.lower():
+                cap_problems.append(f"TikTok's first hashtag isn't #{first}")
+        for p, f in cap.items():
+            k = f.read_text(encoding="utf-8").count("#")
+            if k > n_max:
+                cap_problems.append(f"{p} has {k} hashtags (max {n_max})")
+        if "x" in cap and not config.HASHTAGS_ON_X and "#" in cap["x"].read_text(encoding="utf-8"):
+            cap_problems.append("X post contains a hashtag")
+        if "youtube" in cap and \
+                cap["youtube"].read_text(encoding="utf-8").splitlines()[0].strip() != " ".join(spec["title"].split()):
+            cap_problems.append("YouTube title isn't the episode title")
+    rules = [f"max {n_max}"] + ([f"#{first} first on TikTok"] if n_max > 0 and first and "tiktok" in cap else []) + \
+        (["none on X"] if "x" in cap and not config.HASHTAGS_ON_X else [])
+    R.add("caption rules", "FAIL" if cap_problems else "PASS", "; ".join(cap_problems) or ", ".join(rules))
+
+
 def check_episode(ep_dir):
     spec = json.loads((ep_dir / "episode.json").read_text(encoding="utf-8"))
     fps, dur = spec["fps"], spec["duration"]
@@ -476,6 +558,7 @@ def check_episode(ep_dir):
     proc = subprocess.Popen([config.FFMPEG, "-v", "error", "-i", str(video), "-vf", f"scale={w}:{h}",
                              "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
     luma_mean, luma_std, diffs, thumbs = [], [], [], {}
+    pops = Pops()
     first = prev = last = None
     idx = 0
     sheet_every = max(1, int(round(2.0 * fps)))
@@ -493,6 +576,7 @@ def check_episode(ep_dir):
         if first is None:
             first = f.astype(np.int16)
         prev = f.astype(np.int16)
+        pops.add(prev, diffs[-1])
         last = prev
         idx += 1
     proc.wait()
@@ -527,6 +611,18 @@ def check_episode(ep_dir):
     if spec.get("loop_to_start") and first is not None:
         mae = float(np.abs(first - last).mean())
         R.add("seamless loop (last frame = first frame)", "PASS" if mae < 2.5 else "FAIL", f"mean difference {mae:.2f}")
+    # frames that pop: a warning that says where to look, never a FAIL (a glitch, a flash and the rewind are meant
+    # to jump, and so is anything listed in "qa": {"pop_ok": [[t0, t1]]})
+    pop_ok = [(g["start"] - 0.2, g["end"] + 0.2) for g in spec.get("glitches", [])]
+    pop_ok += [(f["at"] - f.get("rise", 0.05) - 0.1, f["at"] + 3 * f.get("fall", 0.3)) for f in spec.get("flashes", [])]
+    pop_ok += [(rw["start"] - 0.1, dur)] if rw else []
+    pop_ok += [tuple(spec["blackout"])] if spec.get("blackout") else []
+    pop_ok += [tuple(x) for x in qa.get("pop_ok", [])]
+    popped = [(i, k) for i, k in pops.found if not in_windows(i / fps, pop_ok)]
+    R.add("no frames that pop", "WARN" if popped else "PASS",
+          ("look at " + ", ".join(f"{i / fps:.2f} s ({k} frame{'s' if k > 1 else ''})" for i, k in popped[:12]) +
+           (f" and {len(popped) - 12} more" if len(popped) > 12 else "") +
+           ": they differ from the frames either side, which look alike") if popped else "none")
 
     # contact sheets for the visual review
     keys = sorted(thumbs)
