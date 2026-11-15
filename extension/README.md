@@ -195,27 +195,43 @@ has been shared" wording, and YouTube's `ytcp-video-share-dialog`. A wrong one m
 ## Tests
 
 ```
-node extension/tests/run.mjs
-node extension/tests/run.mjs press        # only tests with "press" in their name
+node extension/tests/run.mjs               # everything
+node extension/tests/run.mjs --stand-in    # only the suites with a stand-in for ReelForge
+node extension/tests/run.mjs --real        # only the suite with ReelForge's real server
+node extension/tests/run.mjs press         # only tests with "press" in their name
 ```
 
 They need Node 22 and Playwright with its own Chromium (branded Chrome and Edge no longer load an extension from
-the command line). ReelForge must be closed while they run: they use its ports. A full run takes about seven
-minutes.
+the command line). ReelForge must be closed while they run: they use its ports. A full run takes about nine
+minutes: six and a half with the stand-in, two and a half with the real server.
 
-The tests load this folder as an unpacked extension into headless Chromium, with a stand-in for the ReelForge app
-(`tests/fake_app.mjs`, the app's HTTP API and nothing more) and copies of the four upload pages
+The tests load this folder as an unpacked extension into headless Chromium, with copies of the four upload pages
 (`tests/fixtures/`). The browser is told to resolve the platforms' names to a server on this computer, so the
 extension sees the real addresses while nothing leaves the machine and no account is used.
 
-The last suite (`tests/real.test.mjs`) swaps the stand-in for ReelForge's real server and ledger, started on a
-scratch channel by `tests/real_app.py`. It needs the Python that has ReelForge's packages: the folder's own
-`.venv`, or the one `REELFORGE_PYTHON` names. Without one it is skipped, and the run says so.
+Most suites give the extension a stand-in for the ReelForge app (`tests/fake_app.mjs`, the app's HTTP API and
+nothing more), which lets a test set up anything.
+
+The last suite (`tests/real.test.mjs`) swaps the stand-in for ReelForge's real server and ledger, started by
+`tests/real_app.py` on a scratch channel in a temporary folder: a finished video with QA passed and an approved
+review, four connected platforms, its own stats database and its own file of connected browsers. It needs the
+Python that has ReelForge's packages: the folder's own `.venv`, or the one `REELFORGE_PYTHON` names. Without one
+it is skipped, and the run says so (with `--real`, a run that tested nothing fails). It goes through pairing on
+the real pair page, a post from the real post page and one from the popup, four platforms to "ready" with the
+file compared by size and SHA-256, the press and its refusals, a second post of the same video, signed out,
+another account, a page that changed, a closed tab, a browser that never comes back, ReelForge restarted in the
+middle of a post, and Disconnect. `docs/EXTENSION.md` has the whole list.
+
+Its first test holds the stand-in to the real server: it sends both the same hundred or so requests, every call
+the extension makes and the ways each can be refused, and compares the answers one by one.
+
+`.github/workflows/extension.yml` is there to run both on every push. It has not run yet.
 
 **The copies prove the extension's own machinery, not the live sites.** They show that the file really arrives
 (the page computes its size and SHA-256), that the exact text lands in the right boxes, that nothing is pressed
 without your click and the grant, that no step clicks the final button, and that each failure is noticed and
-reported. They cannot show that TikTok's page still has the hook it had when someone last wrote it down.
+reported. With the real server they also show that the extension and ReelForge agree. They cannot show that
+TikTok's page still has the hook it had when someone last wrote it down.
 
 ## What still has to be checked with real accounts
 

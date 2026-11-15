@@ -258,8 +258,8 @@ browser use.
 
 ## What has and hasn't been verified
 
-Tested here, by automated tests that run with ReelForge's own (`dashboard/tests/test_extension_api.py`,
-`test_posting.py`, `test_posting_tab.py`):
+Tested here, by automated tests: ReelForge's own (`dashboard/tests/test_extension_api.py`, `test_posting.py`,
+`test_posting_tab.py`) and the extension's (`node extension/tests/run.mjs`, see `extension/README.md`):
 
 - every rule in "What keeps it safe": the address, where a request comes from, the token, pairing once and its ten
   minutes, two browsers asking at once, the size and kind of a request, the demo, and that none of the window's own
@@ -269,10 +269,29 @@ Tested here, by automated tests that run with ReelForge's own (`dashboard/tests/
 - the ledger: every state a post can be in, what refuses a second post, the one press of Post, what the clock
   ends, and that a post again that gets nowhere leaves the post before it standing
 - the extension against this server, both real, in headless Chromium with the copies of the upload pages
-  (`extension/tests/real.test.mjs`, the last suite of `node extension/tests/run.mjs`): pairing, a post from
-  ReelForge's post page to "posted" with its id in the stats, four platforms at once, the popup's Post and
-  Cancel, the press with and without your click on the page, a page that shows nothing after the press, a busy
-  database, a video replaced after Post, ReelForge restarted on another port, and posts that waited too long
+  (`extension/tests/real.test.mjs`: `node extension/tests/run.mjs --real`). The server runs on a scratch channel
+  in a temporary folder: a finished video with QA passed and an approved review, four connected platforms, its
+  own stats database and file of connected browsers. What it covers:
+  - pairing through the pair page, and a post from ReelForge's post page to "posted" with its id in the stats
+  - four platforms at once, with a video big enough to be handed over in parts: on each page the file is compared
+    by size and SHA-256, and the text in its boxes with what ReelForge wrote. The text also with accents, an
+    emoji, quotes and angle brackets in it
+  - the popup's Post and Cancel, and an X post that is too long
+  - the press with and without your click on the page, a second ask for it refused, and X refused
+  - a page that shows nothing after the press, your own press before the page was ready, and your answer in
+    ReelForge to "did it post?" reaching the extension's popup
+  - a second post of the same video refused while one is under way, once one is up, and while nobody is sure
+  - what stops a post: signed out on all four, another account in the browser, a page whose Post button is gone
+    (and Post by hand from the page), a closed tab, a video replaced after Post, a video whose review does not
+    say APPROVED, posts that waited more than ten minutes
+  - a browser that never comes back: its posts end by the clock, and the one whose video was on a page says to
+    check the platform first
+  - a busy database, ReelForge closed and opened again on another port in the middle of a post, a newer list of
+    page hooks, a newer version of the link, the demo
+  - Disconnect in the extension and in ReelForge
+- that the stand-in for ReelForge, which the extension's other suites run against, answers as this server does:
+  the same hundred or so requests go to both and the answers are compared one by one (the first test of that
+  suite)
 - that the extension's folder goes into the downloads and is replaced by an update, and that the file of connected
   browsers survives an update, a move and goes to the backup on a factory reset
 
@@ -288,7 +307,9 @@ Not verified:
 - **Anything on a live platform page.** No upload page was loaded and no account was used. Whether today's TikTok,
   YouTube, Instagram and X pages accept a video attached this way, where their boxes and buttons are, whether a
   scripted press of Post works, and how each shows that a post went up: all of that is only known from copies of
-  those pages.
+  those pages. That holds for every test above, the ones with the real server too.
+- The workflow that is to run both of the extension's suites on every push (`.github/workflows/extension.yml`).
+  It was written without a way to run it, so its first run on GitHub is its test.
 - Chrome, Edge and Brave as you install them. The runs here used Chromium.
 - The server on Windows and macOS. Its tests ran on Linux here.
 - A real video's size and time through the extension.
