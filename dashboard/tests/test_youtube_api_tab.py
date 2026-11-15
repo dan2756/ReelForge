@@ -1,7 +1,8 @@
 """Posting to YouTube through its own API as the window shows and starts it (dashboard.youtube_api_tab): the
 youtube_api view and the calls behind its buttons, a window that has just opened and has to connect before it can
-post, a post from your press to "posted" with what YouTube's answer says, every way one ends (failed, unknown, called off), the same rules as the extension's posts about what may not
-be posted twice, an upload a ReelForge closed in the middle of, and that nothing secret is ever sent to the window.
+post, a post from your press to "posted" with what YouTube's answer says, every way one ends (failed, unknown,
+called off), the same rules as the extension's posts about what may not be posted twice, an upload a ReelForge
+closed in the middle of, and that nothing secret is ever sent to the window.
 On a scratch channel; "Google" is the stand-in in dashboard/tests/google.py and "the browser" follows its consent
 page (test_youtube_api.google_for)."""
 

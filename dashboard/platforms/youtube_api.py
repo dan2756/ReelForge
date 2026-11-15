@@ -679,9 +679,10 @@ def upload(video: Path, title: str, description: str, privacy: str, made_for_kid
 
     Who can see it always goes with it, and is asked back: left out, YouTube would make the video public. The
     made-for-kids answer is a declaration of yours, so it goes only once you have given one (None: nothing is
-    declared, and the audience setting of your channel at YouTube applies). started(address) is called with the session's address before
-    any of the file goes, progress(sent, size) after each piece, and last() before the piece that ends the upload:
-    from then on the video may exist. stop() saying True ends it between two pieces (Stopped).
+    declared, and the audience setting of your channel at YouTube applies). started(address) is called with the
+    session's address before any of the file goes, progress(sent, size) after each piece, and last() before the
+    piece that ends the upload: from then on the video may exist. stop() saying True ends it between two pieces
+    (Stopped).
 
     ApiError: it didn't happen, and nothing was posted. Unknown: the last piece went out and neither its answer nor
     the session says whether YouTube has the whole file. Nothing here ever starts a second session for a video.
