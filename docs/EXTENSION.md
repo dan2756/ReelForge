@@ -208,8 +208,8 @@ So TikTok, Instagram and X go through the extension. YouTube can too, or through
 ## When something goes wrong
 
 The row for a post says what happened. These are the reasons the extension gives, and what to do. "Post again"
-below is **Try again** on a failed row. It makes a new post with the same text, and nothing is ever tried again by
-itself.
+below is **Try again** on a failed row. It makes a new post with the same text, which stops before the Post
+button whatever the first try was to do, and nothing is ever tried again by itself.
 
 | It says | What happened | What to do |
 |---|---|---|

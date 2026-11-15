@@ -355,12 +355,13 @@ def preview(video: Path, platforms: list[str], caption: str, tags: str, cfg: dic
 
 def retry(job_id: str, cfg: dict, demo: bool = False) -> dict:
     """The same post once more, for a job that failed, expired or was cancelled: a new job with the text that one
-    had. Returns what create_batch returns."""
+    had. It always stops before the platform's Post button, whatever that job was to do: Try again asks nothing,
+    and "stop before posting" is only switched off in a question (Post…). Returns what create_batch returns."""
     job = get(job_id)
     if job is None or job["state"] not in FREE:
         raise Refused("bad_transition", "Only a post that failed, expired or was cancelled can be tried again.", job)
     text, platform = json.loads(job["text"]), job["platform"]
-    return _create(whereabouts(job, cfg), {platform: text}, headline(text), cfg, bool(job["press"]), (),
+    return _create(whereabouts(job, cfg), {platform: text}, headline(text), cfg, False, (),
                    {platform: job["via"]}, {platform: json.loads(job["options"])}, demo)
 
 

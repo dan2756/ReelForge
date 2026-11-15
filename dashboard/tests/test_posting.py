@@ -495,8 +495,10 @@ class Making(LedgerTest):
         posting.advance(job["id"], "failed", install=CHROME, error_code="hook_not_found", step="find_input")
         (again,) = posting.retry(job["id"], self.cfg)["jobs"]
         self.assertNotEqual(again["id"], job["id"])
+        # ... and it stops before Post, though the first try was not to: Try again shows no question, and "stop
+        # before posting" is only ever switched off in one.
         self.assertEqual((again["text"], again["press"], again["state"], again["episode_id"]),
-                         (job["text"], 1, "queued", job["episode_id"]))
+                         (job["text"], 0, "queued", job["episode_id"]))
         self.assertEqual(len(db.episodes()), 1)
 
 
