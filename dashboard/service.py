@@ -630,6 +630,7 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
         self.show_platforms()
         self.reload()
         self.scan_files()
+        self.serve_extension()
         self.mind_the_jobs()
         self.update_notes()
         if self.tab == "settings":
@@ -650,6 +651,7 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
     def stop(self) -> None:
         for w in self.loop.live():
             w.is_cancelled = True
+        self.stop_serving()
         self.let_go_of_profile()
 
     def show_platforms(self) -> None:

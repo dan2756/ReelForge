@@ -1179,5 +1179,217 @@ class Pages(ApiTest):
         self.assertIn("prefers-reduced-motion: reduce", styles)
         self.assertIn(":focus-visible", styles)
 
+
+class WindowServes(PostingTest):
+    """The server as a window runs it: started with the window (never in the demo), told on the window's loop."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.folder = self.root / "extension"
+        self.folder.mkdir()
+        (self.folder / "manifest.json").write_text(json.dumps({"manifest_version": 3, "key": KEY}), "utf-8")
+        patch = mock.patch.object(extension_api, "folder", lambda: self.folder)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def serving(self, connect: bool = True) -> Window:
+        """Your own window, listening on a free port."""
+        if connect:
+            self.extension()
+        w = PublishTest.window(self, {key: Reader(key, name) for key, name in NAMES.items()})
+        w.svc.demo = False
+        w.svc.extension_ports = (0,)
+        w.svc.serve_extension()
+        self.addCleanup(w.svc.stop_serving)
+        w.forget()
+        w.svc.update_posting(fresh=True)
+        return w
+
+    def token(self, w: Window) -> str:
+        """A browser connects on the window's pair page: its token."""
+        w.call("pair_extension")
+        url = self.opened[-1]
+        port = w.svc.extension_port
+        html = ask(port, "GET", url.split(str(port), 1)[1]).body.decode()
+        secret = re.search(r'data-rf-secret="([^"]*)"', html).group(1)
+        answer = ask(port, "POST", "/v1/pair/claim", {"secret": secret, "install": "install-chrome",
+                                                      "name": "Chrome on this PC", "extension_version": "0.1.0",
+                                                      "protocol": 1}, origin=EXTENSION)
+        self.assertEqual(answer.status, 200, answer.body)
+        return answer.json["token"]
+
+    def test_a_window_starts_and_stops_the_server_with_itself(self):
+        with mock.patch.object(Dashboard, "serve_extension") as serve, \
+                mock.patch.object(Dashboard, "stop_serving") as stop:
+            w = PublishTest.window(self)
+            serve.assert_called_once_with()
+            w.svc.stop()
+            stop.assert_called_once_with()
+
+    def test_the_demo_never_listens(self):
+        w = PublishTest.window(self)  # the tests' plain window is the demo
+        w.svc.extension_ports = (0,)
+        w.svc.serve_extension()
+        self.assertIsNone(w.svc.extension_server)
+        w.svc.update_extension()
+        self.assertIsNone(w.view("extension")["port"])
+        self.assertFalse(w.call("pair_extension"))
+        w.call("unpair_extension", "install-chrome")
+        w.call("extension_folder")
+        self.assertEqual(self.opened, [])
+        self.assertTrue(all("demo" in t for t in w.toasts()[-3:]))
+
+    def test_your_own_window_listens_and_says_which_channel_it_is(self):
+        w = self.serving()
+        port = w.svc.extension_port
+        self.assertIsInstance(port, int)
+        w.svc.update_extension()
+        self.assertEqual(w.view("extension")["port"], port)
+        hello = ask(port, "GET", "/v1/hello").json
+        self.assertEqual((hello["app"], hello["demo"], set(hello["profile"])), ("reelforge", False, {"key", "name"}))
+        w.svc.serve_extension()  # asked twice: still the one server
+        self.assertEqual(w.svc.extension_port, port)
+        w.svc.stop()
+        self.assertIsNone(w.svc.extension_port)
+        with self.assertRaises(OSError):
+            ask(port, "GET", "/v1/hello")
+
+    def test_ports_that_are_all_taken_are_a_line_on_the_view_and_no_error(self):
+        taken = socket.socket()
+        taken.bind(("127.0.0.1", 0))
+        taken.listen(1)
+        self.addCleanup(taken.close)
+        self.extension()
+        w = PublishTest.window(self, {key: Reader(key, name) for key, name in NAMES.items()})
+        w.svc.demo = False
+        w.svc.extension_ports = (taken.getsockname()[1],)
+        w.forget()
+        w.svc.serve_extension()
+        w.svc.update_extension()
+        view = w.view("extension")
+        self.assertIsNone(view["port"])
+        self.assertTrue(any("isn't listening for the extension in this window" in "".join(seg[0] for seg in line)
+                            for line in view["lines"]))
+        self.assertEqual(w.toasts(), [])
+        made = w.call("post_with_extension", ["tiktok"], CAPTION, TAGS, True, None)  # pressing Post says so, calmly
+        self.assertEqual((made["opened"], made["jobs"]), (False, []))
+        self.assertIn("isn't listening for the extension in this window, so it couldn't open the posting page",
+                      w.toasts()[-1])
+        self.assertEqual([j["state"] for j in posting.recent()], ["cancelled"])
+
+    def test_a_server_that_cannot_start_for_any_reason_never_stops_the_window(self):
+        w = PublishTest.window(self)
+        w.svc.demo = False
+        with mock.patch.object(extension_api, "Server", side_effect=RuntimeError("boom")), \
+                contextlib.redirect_stderr(io.StringIO()):
+            w.svc.serve_extension()
+        self.assertIsNone(w.svc.extension_server)
+        self.assertIn("boom", w.svc.extension_problem)
+
+    def test_post_opens_the_local_page_for_the_batch(self):
+        w = self.serving()
+        made = w.call("post_with_extension", ["tiktok", "youtube"], CAPTION, TAGS, True, None)
+        self.assertTrue(made["opened"])
+        (url,) = self.opened
+        self.assertRegex(url, rf"^http://127\.0\.0\.1:{w.svc.extension_port}/post/{made['batch']}\?k=[\w-]+$")
+        page = ask(w.svc.extension_port, "GET", url.split(str(w.svc.extension_port), 1)[1])
+        self.assertEqual(page.status, 200)
+        self.assertIn(f'data-rf-batch="{made["batch"]}"', page.body.decode())
+
+    def test_no_browser_means_nothing_started_and_a_message_that_says_so(self):
+        w = self.serving()
+        self.browser = False
+        made = w.call("post_with_extension", ["tiktok"], CAPTION, TAGS, True, None)
+        self.assertEqual((made["opened"], made["batch"], made["jobs"]), (False, None, []))
+        toast = w.sent("toast")[-1]
+        self.assertEqual((toast["title"], toast["severity"]), ("Nothing was posted", "warning"))
+        self.assertIn("ReelForge couldn't open your browser, so it couldn't open the posting page", toast["body"])
+        self.assertEqual([j["state"] for j in posting.recent()], ["cancelled"])
+
+    def test_what_the_extension_does_shows_in_the_window_at_once(self):
+        w = self.serving(connect=False)
+        self.assertEqual(w.view("posting")["extension"]["state"], "off")
+        token = self.token(w)
+        self.assertTrue(w.until(lambda: w.view("extension") and w.view("extension")["state"] == "on", 3))
+        (install,) = w.view("extension")["installs"]
+        self.assertEqual((install["name"], install["version"]), ("Chrome on this PC", "0.1.0"))
+        (job,) = w.call("post_with_extension", ["tiktok"], CAPTION, TAGS, True, None)["jobs"]
+        port = w.svc.extension_port
+        claimed = ask(port, "POST", f"/v1/jobs/{job['id']}/claim", {}, token=token, origin=EXTENSION)
+        self.assertEqual(claimed.status, 200)
+        w.forget()
+        answer = ask(port, "POST", f"/v1/jobs/{job['id']}/event", {"state": "uploading", "progress": 0.5},
+                     token=token, origin=EXTENSION)
+        self.assertEqual(answer.status, 200)
+        w.pump(0.2)  # (not the second the window's own look takes)
+        row = self.rows(w)["tiktok"]
+        self.assertEqual((row["state"], "".join(seg[0] for seg in row["line"])), ("uploading", "● uploading 50%"))
+        # The names and accounts the extension is told are the window's own, read as they are now.
+        state = ask(port, "GET", "/v1/state", token=token).json
+        self.assertEqual([(p["key"], p["handle"], p["connected"]) for p in state["platforms"]],
+                         [(key, "@me", True) for key in NAMES])
+        self.assertEqual(state["videos"][0]["platforms"]["tiktok"]["state"], "uploading")
+
+    def test_post_by_hand_on_the_page_is_the_windows_own_flow(self):
+        w = self.serving()
+        made = w.call("post_with_extension", ["youtube"], CAPTION, TAGS, True, None)
+        url = self.opened.pop()
+        port = w.svc.extension_port
+        answers = []
+        thread = threading.Thread(target=lambda: answers.append(ask(
+            port, "POST", "/v1/page/manual", {"k": url.split("?k=")[1], "batch": made["batch"], "platform": "youtube"},
+            origin=f"http://127.0.0.1:{port}")))
+        thread.start()
+        self.assertTrue(w.until(lambda: bool(answers), 8))  # the window does it on its own loop
+        thread.join(5)
+        (answer,) = answers
+        self.assertEqual((answer.status, answer.json["opened"]), (200, True))
+        self.assertEqual((self.copied, self.opened), ([f"{CAPTION} #shorts"], [desktop.UPLOAD_PAGES["youtube"]]))
+        self.assertEqual([(u["platform"], u["status"]) for u in db.uploads()], [("youtube", "manual")])
+        self.assertEqual(len(w.svc.post_check_timers), 2)  # the new post is looked for, as after the button
+        w.pump(0.2)
+        row = self.rows(w)["youtube"]
+        self.assertEqual(row["state"], "cancelled")
+        self.assertIn("posted by hand", "".join(seg[0] for seg in row["line"]))
+
+    def test_connecting_a_browser_opens_the_pair_page_or_hands_you_its_address(self):
+        w = self.serving(connect=False)
+        self.assertTrue(w.call("pair_extension"))
+        (url,) = self.opened
+        self.assertRegex(url, rf"^http://127\.0\.0\.1:{w.svc.extension_port}/pair\?k=[\w-]+$")
+        self.assertEqual(w.sent("toast")[-1]["title"], "Connecting your browser")
+        self.browser = False
+        self.assertFalse(w.call("pair_extension"))
+        self.assertEqual(self.copied, [self.opened[-1]])  # the address, to paste into the browser yourself
+        toast = w.sent("toast")[-1]
+        self.assertEqual(toast["severity"], "warning")
+        self.assertIn("couldn't open your browser. The page's address is copied", toast["body"])
+        w.svc.stop_serving()
+        self.assertFalse(w.call("pair_extension"))
+        self.assertIn("isn't listening", w.toasts()[-1])
+
+    def test_disconnecting_a_browser_from_the_window(self):
+        w = self.serving()
+        w.svc.update_extension()
+        self.assertEqual(w.view("extension")["state"], "on")
+        w.call("unpair_extension", "install-chrome")
+        self.assertEqual(w.view("extension")["state"], "off")
+        self.assertIn("Chrome on this PC is disconnected", w.toasts()[-1])
+        w.call("unpair_extension", "install-chrome")
+        self.assertIn("wasn't connected any more", w.toasts()[-1])
+
+    def test_the_folder_is_shown_with_its_path_copied(self):
+        w = self.serving()
+        with mock.patch.object(desktop, "reveal") as reveal:
+            w.call("extension_folder")
+            reveal.assert_called_once_with(self.folder)
+        self.assertEqual(self.copied, [str(self.folder)])
+        self.assertIn("Load unpacked", w.toasts()[-1])
+        (self.folder / "manifest.json").unlink()
+        self.folder.rmdir()
+        w.call("extension_folder")
+        self.assertIn("has no extension folder yet", w.toasts()[-1])
+        self.assertEqual(len(self.copied), 1)
+
 if __name__ == "__main__":
     unittest.main()

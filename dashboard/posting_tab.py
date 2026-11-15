@@ -1,5 +1,6 @@
 """Posting with the browser extension, as the window shows and starts it. The ledger is dashboard/posting.py; the
-local server the extension talks to, its pages and pairing are dashboard/extension_api.py.
+local server the extension talks to, its pages and pairing are dashboard/extension_api.py, which this window starts
+and stops (serve_extension, stop_serving).
 
 A mixin of the window's service (dashboard/service.py). Two views:
 
@@ -11,8 +12,9 @@ A mixin of the window's service (dashboard/service.py). Two views:
               and where its folder is
 
 and the calls behind the buttons: post_info (what the question before a post shows), post_with_extension (your
-yes), post_action (a row's button) and dismiss_extension_hint. Every word of the two views is written here, so the
-window only draws them.
+yes), post_action (a row's button), pair_extension (connect a browser), unpair_extension (disconnect one),
+extension_folder (show the folder to load in the browser) and dismiss_extension_hint. Every word of the two views
+is written here, so the window only draws them.
 
 Nothing here posts by itself. A post starts with post_with_extension, which only your press in the window calls, and
 ends at the platform's own Post button unless you switched "stop before posting" off for it.
@@ -21,6 +23,9 @@ ends at the platform's own Post button unless you switched "stop before posting"
 from __future__ import annotations
 
 import sqlite3
+import sys
+import threading
+import traceback
 from datetime import timedelta
 from pathlib import Path
 
@@ -28,6 +33,7 @@ from studio.bridge import rpc
 
 from . import analytics, db, desktop, extension_api, posting, videos
 from .analytics import fmt_ago, fmt_num
+from .platforms import PublishItem
 from .posting import STEPS, TESTED, failure, standing
 from .view import BAD, GOOD, MUTED, TYPICAL, Text
 
@@ -129,7 +135,10 @@ class PostingTab:
 
     jobs_seen = 0                       # the ledger as this window last drew it (posting.signature)
     extension_seen: float | None = None  # the connections file's time, as last read
-    extension_port: int | None = None    # the local server's port once it listens (set by whoever starts it)
+    extension_server: extension_api.Server | None = None  # the local server, while this window listens
+    extension_port: int | None = None    # ... and its port
+    extension_ports: tuple[int, ...] | None = None  # the ports to try instead of extension_api's (the tests')
+    extension_problem = ""               # why this window isn't listening for the extension, when it isn't
     picked_review: tuple[Path, dict] | None = None  # the picked video's approval, worked out once per look
     form_text = ("", "")                 # the Publish form's caption and hashtags as last typed
 
@@ -205,6 +214,8 @@ class PostingTab:
         if status["state"] == "off" and not self.demo:
             lines.append(Text("Posting with the extension fills in each platform's upload page for you: the video, "
                               "the caption, the hashtags. You check it and press Post.", MUTED))
+        if self.extension_problem:
+            lines.append(Text(self.extension_problem, AMBER))
         if not self.demo:
             lines.append(Text(TESTED, MUTED))
         self.emit("extension", {
@@ -403,8 +414,10 @@ class PostingTab:
                         posting.cancel(j["id"], "the posting page didn't open", by="app")
                     except (posting.Refused, sqlite3.Error):
                         pass  # the clock expires it
-                self.notify("ReelForge couldn't open the posting page in your browser yet, so nothing was started. "
-                            "The buttons under UPLOAD still open each platform's page for you to post by hand.",
+                why = "ReelForge couldn't open your browser" if self.extension_server is not None else \
+                    "ReelForge isn't listening for the extension in this window"
+                self.notify(f"{why}, so it couldn't open the posting page and nothing was started. The buttons "
+                            "under UPLOAD still open each platform's page for you to post by hand.",
                             title="Nothing was posted", severity="warning", timeout=15)
         self.picked_review = None
         self.jobs_changed(everywhere=True)
@@ -417,9 +430,112 @@ class PostingTab:
         self.notify(f"The stats database is busy ({e}). Try again in a moment.", severity="warning", timeout=8)
 
     def open_post_page(self, batch: str) -> bool:
-        """Open the local page that hands a batch to the extension, in your browser. The local server does this
-        (dashboard/extension_api.py); without it there is no page to open."""
+        """Open the local page that hands a batch to the extension and shows where each post stands, in your
+        browser. False when this window isn't listening (there is no page then) or no browser opened."""
+        server = self.extension_server
+        return bool(server and desktop.open_url(server.post_url(batch)))
+
+    # --- the local server ---------------------------------------------------------------------------
+
+    def serve_extension(self) -> None:
+        """When the window starts: listen for the extension (dashboard/extension_api.py). Never in the demo. When
+        it can't (every port taken, a folder that can't be written), that is a line on the extension view and
+        nothing more: ReelForge works as it does without the extension."""
+        if self.demo or self.extension_server is not None:
+            return
+        try:
+            server = extension_api.Server(WindowApp(self), self.extension_ports)
+            if server.start():
+                self.extension_server, self.extension_port, self.extension_problem = server, server.port, ""
+            elif server.ports:
+                self.extension_problem = (
+                    "ReelForge isn't listening for the extension in this window: every port from "
+                    f"{server.ports[0]} to {server.ports[-1]} on this computer is taken, or its connections file "
+                    "can't be written. Close other ReelForge windows, then open this one again.")
+            else:
+                self.extension_problem = "ReelForge isn't listening for the extension here (it is switched off)."
+        except Exception as e:  # whatever it is, the window opens
+            traceback.print_exc()
+            self.extension_problem = f"ReelForge isn't listening for the extension in this window ({e})."
+
+    def stop_serving(self) -> None:
+        server, self.extension_server, self.extension_port = self.extension_server, None, None
+        if server is not None:
+            server.stop()
+
+    def heard_from_extension(self) -> None:
+        """On the loop, right after the local server changed a job or a connection: the views follow now instead
+        of at the next second's look."""
+        self.follow_extension()
+        if self._safe(posting.signature, self.jobs_seen) != self.jobs_seen:
+            self.jobs_changed()
+
+    def post_by_hand(self, job: dict, name: str) -> dict:
+        """The local page's Post by hand, for one job: this window's own flow for a platform's button (the text
+        copied, the file shown, the upload page opened and noted), with the text the job was made with."""
+        p = self.every.get(job["platform"])
+
+        def record(item: PublishItem) -> None:
+            if p is not None:
+                self.record_manual([p], item)
+
+        return extension_api.by_hand(job, name, self.copy_text, record)
+
+    @rpc
+    def pair_extension(self) -> bool:
+        """Connect a browser: open the local page the extension pairs on. With no extension in that browser yet,
+        the page says how to add it. True when a browser opened."""
+        if self.demo:
+            self.notify("The demo doesn't use the browser extension.", timeout=4)
+            return False
+        server = self.extension_server
+        if server is None:
+            self.notify(self.extension_problem or "ReelForge isn't listening for the extension in this window.",
+                        severity="warning", timeout=12)
+            return False
+        url = server.pair_url()
+        if desktop.open_url(url):
+            self.notify("A ReelForge page is opening in your browser: the extension connects there. No extension "
+                        "yet? The page says how to add it.", title="Connecting your browser", timeout=12)
+            return True
+        self.copy_text(url)
+        self.notify("ReelForge couldn't open your browser. The page's address is copied: paste it into the browser "
+                    "that has the extension. It works for ten minutes.", title="Connecting your browser",
+                    severity="warning", timeout=20)
         return False
+
+    @rpc
+    def unpair_extension(self, install: str) -> None:
+        """Disconnect a browser (by the install id the extension view lists it under): its token stops working."""
+        if self.demo:
+            self.notify("The demo doesn't use the browser extension.", timeout=4)
+            return
+        try:
+            name = extension_api.unpair(str(install))
+        except OSError as e:
+            self.notify(f"ReelForge couldn't change its connections file ({e}).", severity="warning", timeout=10)
+            return
+        self.notify(f"{name} is disconnected. Connect it again any time." if name else
+                    "That browser wasn't connected any more.", timeout=8)
+        self.follow_extension()
+
+    @rpc
+    def extension_folder(self) -> None:
+        """Show the extension's folder in the file manager, with its path on the clipboard: it is the folder to
+        pick after Load unpacked on your browser's extensions page."""
+        if self.demo:
+            self.notify("The demo doesn't use the browser extension.", timeout=4)
+            return
+        folder = extension_api.folder()
+        if not folder.is_dir():
+            self.notify(f"This ReelForge has no extension folder yet ({folder}). Update ReelForge on the Updates "
+                        "tab to get it.", severity="warning", timeout=12)
+            return
+        desktop.reveal(folder)
+        self.copy_text(str(folder))
+        self.notify(f"It is showing in {desktop.FILES_WINDOW}, and its path is copied. On your browser's "
+                    "extensions page, switch on Developer mode, press Load unpacked and pick it.",
+                    title="The extension's folder", timeout=15)
 
     @rpc
     def post_action(self, job: str, action: str) -> None:
@@ -473,3 +589,47 @@ class PostingTab:
         self._safe(lambda: db.set_meta(HINT, True), None)
         self.update_extension()
 
+
+class WindowApp(extension_api.App):
+    """This window, as the local server sees it. The server's requests run on threads of their own: what they read
+    here is read in one step, and anything that touches the window runs on the window's loop."""
+
+    def __init__(self, window) -> None:
+        self.window = window
+
+    @property
+    def cfg(self) -> dict:
+        return self.window.cfg
+
+    @property
+    def demo(self) -> bool:
+        return self.window.demo
+
+    def profile(self) -> dict:
+        p = self.window.profile
+        return {"key": p.key if p else ".", "name": p.name if p else ""}
+
+    def platforms(self) -> list[dict]:
+        on = set(self.window.platforms)
+        return [{"key": p.key, "name": p.name, "handle": p.handle, "connected": p.key in on}
+                for p in list(self.window.every.values())]
+
+    def changed(self) -> None:
+        self.window.loop.call_soon(self.window.heard_from_extension)
+
+    def by_hand(self, job: dict, name: str) -> dict | None:
+        """The by-hand flow, run on the window's loop while this thread waits for it (None: it didn't answer in
+        ten seconds, or it failed there, where the window says so)."""
+        done = threading.Event()
+        answer: list[dict] = []
+
+        def run() -> None:
+            try:
+                answer.append(self.window.post_by_hand(job, name))
+            finally:
+                done.set()
+
+        self.window.loop.call_soon(run)
+        if not done.wait(10):
+            print("extension: the window didn't run a by-hand post in time", file=sys.stderr)
+        return answer[0] if answer else None
