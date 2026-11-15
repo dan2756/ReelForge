@@ -771,6 +771,17 @@ class Uploading(ApiTest):
         self.video.write_bytes(b"")
         self.refused("empty", self.upload)
 
+    def test_a_read_that_gives_less_than_was_asked_for_is_not_a_changed_file(self):
+        class Short(io.FileIO):
+            def read(self, size: int = -1) -> bytes:  # what a read straight from a drive may do
+                return super().read(min(size, 700) if size > 0 else size)
+
+        with mock.patch.object(Path, "open", lambda path, *args, **kw: Short(str(path), "r")):
+            made = self.upload()
+        self.assertEqual((made["id"], bytes(self.one_video()["data"])), ("vid00000001", BYTES))
+        self.assertEqual(self.ranges(), [f"bytes 0-999/{SIZE}", f"bytes 1000-1999/{SIZE}", f"bytes 2000-2999/{SIZE}",
+                                         f"bytes 3000-{SIZE - 1}/{SIZE}"])
+
     def test_asking_a_saved_session_where_it_stands(self):
         uris = []
         self.google.script, self.google.then = [None, None, None, "lost"], "drop"

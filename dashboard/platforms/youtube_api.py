@@ -701,9 +701,8 @@ def upload(video: Path, title: str, description: str, privacy: str, made_for_kid
                     raise ApiError("offline", "The connection to YouTube kept breaking, so the upload stopped.")
                 if end == size and not out:
                     last()
-                f.seek(sent)
-                piece = f.read(end - sent)
-                if len(piece) != end - sent:
+                piece = _piece(f, sent, end - sent)
+                if len(piece) != end - sent:  # the file ends before where it ended when the upload started
                     raise ApiError("changed", f"{video.name} changed while it was being uploaded.")
                 out = out or end == size
                 what, value = _stands(_put(http, uri, {"Content-Type": kind,
@@ -725,6 +724,20 @@ def upload(video: Path, title: str, description: str, privacy: str, made_for_kid
             stuck = 0 if value > sent else stuck + 1
             sent = value
             progress(sent, size)
+
+
+def _piece(f, start: int, length: int) -> bytes:
+    """A piece of the file as it is now: read until it is whole or the file ends. One read may give less than was
+    asked for (on a network drive, say) without the file having changed."""
+    f.seek(start)
+    parts, left = [], length
+    while left:
+        part = f.read(left)
+        if not part:
+            break
+        parts.append(part)
+        left -= len(part)
+    return b"".join(parts)
 
 
 def ask(uri: str, size: int) -> dict | None:
