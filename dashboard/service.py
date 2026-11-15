@@ -2226,10 +2226,25 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
         try:
             config.save_handle(p.key, handle)
         except Exception as e:
-            why = str(e) if isinstance(e, config.ConfigError) else "config.toml couldn't be written."
             sync.log([f"error: saving {p.name}'s handle: {detail(e)}"])
-            self.loop.call_soon(self.notify, f"{p.name}'s handle wasn't saved, and nothing changed. {why}", "",
-                                "error", 12)
+            # The handle goes into several files in turn, config.toml among the last (studio.generate.set_account),
+            # so which one failed isn't known here, and some may have been written. config.toml is the one
+            # ReelForge goes by: what it holds now says whether the handle was saved.
+            try:
+                kept = str((config.load_config().get(p.key) or {}).get("handle", ""))
+            except Exception:
+                kept = None
+            done, not_done = (f"{p.name}'s handle is saved", f"{p.name}'s handle wasn't saved") if handle else \
+                (f"{p.name} is disconnected", f"{p.name} wasn't disconnected")
+            if kept == handle:
+                self.loop.call_soon(self.notify, f"{done}, but ReelForge couldn't finish updating your channel's "
+                                                 "other files (your AI's notes among them). data/refresh.log says "
+                                                 "what stopped it.", "", "warning", 12)
+                self.loop.call_soon(self.account_saved, p, handle)
+                return
+            why = str(e) if isinstance(e, config.ConfigError) else \
+                "ReelForge couldn't write your settings; data/refresh.log says what stopped it."
+            self.loop.call_soon(self.notify, f"{not_done}. {why}", "", "error", 12)
             return
         self.loop.call_soon(self.account_saved, p, handle)
 

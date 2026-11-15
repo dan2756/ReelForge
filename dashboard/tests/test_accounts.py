@@ -464,10 +464,42 @@ class WindowTest(unittest.TestCase):
             with mock.patch.object(config, "save_handle", side_effect=denied):
                 self.assertIsNone(w.call("connect", "youtube", "@new"))
                 self.assertTrue(w.until(lambda: w.toasts()))
-            self.assertEqual(w.toasts(), ["YouTube's handle wasn't saved, and nothing changed. config.toml couldn't "
-                                          "be written."])
+            self.assertEqual(w.toasts(), ["YouTube's handle wasn't saved. ReelForge couldn't write your settings; "
+                                          "data/refresh.log says what stopped it."])
             self.assertNotIn("youtube", w.svc.platforms)
+            self.assertEqual(config.load_config()["youtube"].get("handle", ""), "")
+            w.forget()
+            with mock.patch.object(config, "save_handle", side_effect=denied):
+                w.call("disconnect", "tiktok")
+                self.assertTrue(w.until(lambda: w.toasts()))
+            self.assertEqual(w.toasts(), ["TikTok wasn't disconnected. ReelForge couldn't write your settings; "
+                                          "data/refresh.log says what stopped it."])
+            self.assertIn("tiktok", w.svc.platforms)
         self.assertIn("error: saving YouTube's handle: PermissionError: [Errno 13] Permission denied: 'config.toml'",
+                      sync.log_path().read_text("utf-8"))
+
+    def test_a_handle_saved_part_way_says_what_is_true(self):
+        """The handle goes into several files in turn. When one after config.toml can't be written, the handle is
+        in config.toml and the platform connects a moment later: it used to say "wasn't saved, and nothing changed.
+        config.toml couldn't be written." all the same."""
+        every = self.real_platforms({"tiktok": "@mine"})
+        save = config.save_handle
+
+        def part_way(key: str, handle: str) -> None:
+            save(key, handle)  # config.toml has it
+            raise OSError(28, "No space left on device", "AGENTS.md")
+
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()):
+            w = self.open(every, demo_mode=False)
+            w.forget()
+            with mock.patch.object(config, "save_handle", part_way):
+                self.assertIsNone(w.call("connect", "youtube", "@new"))
+                self.assertTrue(w.until(lambda: "youtube" in w.svc.platforms))
+            self.assertIn("YouTube's handle is saved, but ReelForge couldn't finish updating your channel's other "
+                          "files (your AI's notes among them). data/refresh.log says what stopped it.", w.toasts())
+            self.assertFalse([t for t in w.toasts() if "wasn't saved" in t])
+            self.assertEqual(self.panel(w, "youtube")["state"], "on")
+        self.assertIn("error: saving YouTube's handle: OSError: [Errno 28] No space left on device: 'AGENTS.md'",
                       sync.log_path().read_text("utf-8"))
 
     def test_a_handle_in_config_toml_that_isnt_one_is_said_on_its_panel(self):
