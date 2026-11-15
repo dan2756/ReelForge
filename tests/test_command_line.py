@@ -1,5 +1,5 @@
 """The reelforge command's own answers (studio/__main__.py), in a scratch ReelForge folder: a word it doesn't know,
-and the next command new-episode gives for a channel you added."""
+the next command new-episode gives for a channel you added, and publish-check on an episode.json with a typo."""
 
 import io
 import unittest
@@ -62,6 +62,20 @@ class Commands(Scratch):
         code, out = self.run_main("new-episode", "snowball")
         self.assertEqual(code, 0, out)
         self.assertIn(f'"{Path("episodes") / "ep01_snowball"}" --steps build,stills', out)
+
+    def test_publish_check_on_an_episode_json_with_a_typo_is_one_fail_line(self):
+        self.onboard_main()
+        ep = self.root / "episodes" / "ep01_snowball"
+        ep.mkdir(parents=True)
+        for text, why in (('{"id": "ep01_snowball", "title": "What if"', "Expecting"), ('{"title": "No id"}', 'no "id"'),
+                          ("[]", 'no "id"')):
+            with self.subTest(text=text):
+                (ep / "episode.json").write_text(text, encoding="utf-8")
+                code, out = self.run_main("publish-check", "episodes/ep01_snowball")
+                self.assertEqual(code, 1)
+                self.assertEqual(len(out.strip().splitlines()), 1, out)
+                self.assertIn(f"FAIL  {(ep / 'episode.json').resolve()} can't be read:", out)
+                self.assertIn(why, out)
 
 
 if __name__ == "__main__":
