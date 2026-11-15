@@ -1,6 +1,7 @@
 """A release waits for the tests of the very commit it's made from (.github/workflows): the Release workflow runs the
-Test workflow itself and publishes only after it. 2.2.0 and 2.2.1 were published while their own test runs were
-failing, because a tag started the two workflows side by side.
+Test workflow itself, and the Extension workflow (the browser extension's own tests), and publishes only after
+both. 2.2.0 and 2.2.1 were published while their own test runs were failing, because a tag started the two
+workflows side by side.
 
 The workflows are read as text (the kit has no YAML reader); they aren't part of a download, so there's nothing to
 check in an installed copy."""
@@ -26,33 +27,65 @@ def key(job: str, name: str) -> str:
     return found[1].strip() if found else ""
 
 
+def under(job: str, name: str) -> list[str]:
+    """The lines under one of a job's own settings (its six-space lines), without their comments."""
+    found = re.search(rf"^    {name}:[ \t]*\n((?:      .*\n)*)", job, re.M)
+    return [line.split("#")[0].strip() for line in found[1].splitlines()] if found else []
+
+
+CALLED = ("test.yml", "extension.yml")   # the workflows a release runs and waits for
+
+
 @unittest.skipUnless(WORKFLOWS.is_dir(), "the workflows aren't part of a download")
 class ReleaseGate(unittest.TestCase):
     def setUp(self):
-        self.test = (WORKFLOWS / "test.yml").read_text(encoding="utf-8")
+        self.called = {name: (WORKFLOWS / name).read_text(encoding="utf-8") for name in CALLED}
         self.release = jobs((WORKFLOWS / "release.yml").read_text(encoding="utf-8"))
 
-    def test_the_test_workflow_can_be_run_by_the_release(self):
-        triggers = self.test[self.test.index("\non:\n"):self.test.index("\njobs:\n")]
-        self.assertRegex(triggers, r"(?m)^  workflow_call:\s*$")
-        self.assertRegex(triggers, r"(?m)^  pull_request:\s*$")                 # and still by a pull request,
-        self.assertRegex(triggers, r'(?m)^  push:\s*\n    branches: \["\*\*"\]')  # and a push to any branch
+    def gate(self, workflow: str) -> str:
+        """The job of release.yml that runs a workflow."""
+        found = next((name for name, job in self.release.items()
+                      if key(job, "uses") == f"./.github/workflows/{workflow}"), None)
+        self.assertIsNotNone(found, f"no job in release.yml runs {workflow}")
+        return found
+
+    def test_the_test_workflows_can_be_run_by_the_release(self):
+        for name, text in self.called.items():
+            with self.subTest(workflow=name):
+                triggers = text[text.index("\non:\n"):text.index("\njobs:\n")]
+                self.assertRegex(triggers, r"(?m)^  workflow_call:\s*$")
+                self.assertRegex(triggers, r"(?m)^  pull_request:\s*$")                 # and still by a pull request,
+                self.assertRegex(triggers, r'(?m)^  push:\s*\n    branches: \["\*\*"\]')  # a push to any branch,
+                self.assertRegex(triggers, r"(?m)^  workflow_dispatch:\s*$")            # and by hand
 
     def test_publishing_needs_every_test_of_this_commit(self):
-        gate = next((name for name, job in self.release.items()
-                     if key(job, "uses") == "./.github/workflows/test.yml"), None)
-        self.assertIsNotNone(gate, "no job in release.yml runs the Test workflow")
         publish = self.release["release"]
         self.assertIn("gh release create", publish)
         needs = re.findall(r"[A-Za-z0-9_-]+", key(publish, "needs"))
-        self.assertIn(gate, needs)
         self.assertIn("packages", needs)
         # Nothing lets the release run when the tests didn't: no always(), and the tests run whenever it would
         # (a job that needs a skipped job is skipped too, so it could not be the tests that are left out).
         self.assertEqual(key(publish, "if"), "startsWith(github.ref, 'refs/tags/v')")
-        self.assertEqual(key(self.release[gate], "if"), key(publish, "if"))
-        for job in (publish, self.release[gate]):
-            self.assertNotIn("continue-on-error", job.split("    steps:")[0])
+        self.assertNotIn("continue-on-error", publish.split("    steps:")[0])
+        for workflow in CALLED:
+            with self.subTest(workflow=workflow):
+                gate = self.gate(workflow)
+                self.assertIn(gate, needs)
+                self.assertEqual(key(self.release[gate], "if"), key(publish, "if"))
+                self.assertNotIn("continue-on-error", self.release[gate])
+
+    def test_the_tests_a_release_runs_get_a_token_that_can_only_read(self):
+        # A called workflow's jobs get the token of the job that calls them, and the release's own can write (it
+        # publishes). The tests run the commit's code, so the jobs that call them hand on read access to the
+        # checkout and nothing else. A called workflow that asked for more would stop the release before it starts.
+        for workflow in CALLED:
+            with self.subTest(workflow=workflow):
+                self.assertEqual(under(self.release[self.gate(workflow)], "permissions"), ["contents: read"])
+                self.assertNotRegex(self.called[workflow], r"(?m)^\s+[a-z-]+:\s*write\b")
+        # ... while publishing still can: the workflow's own setting, which the release job goes by
+        release = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
+        self.assertRegex(release[:release.index("\njobs:\n")], r"(?m)^permissions:\n(?:  .*\n)*?  contents: write$")
+        self.assertEqual(under(self.release["release"], "permissions"), [])
 
     def test_only_the_built_downloads_are_published(self):
         # the release uploads everything in dist/, and the jobs of the Test workflow may keep files of their own

@@ -310,7 +310,8 @@ Not verified:
   scripted press of Post works, and how each shows that a post went up: all of that is only known from copies of
   those pages. That holds for every test above, the ones with the real server too.
 - The workflow that is to run both of the extension's suites on every push (`.github/workflows/extension.yml`).
-  It was written without a way to run it, so its first run on GitHub is its test.
+  It was written without a way to run it, so its first run on GitHub is its test. A release waits for it as well,
+  and that has not run either.
 - Chrome, Edge and Brave as you install them. The runs here used Chromium.
 - The server on Windows and macOS. Its tests ran on Linux here.
 - A real video's size and time through the extension.
