@@ -152,7 +152,7 @@ class PartWayTest(unittest.TestCase):
                 update._copy_release(archive, self.root, self.dir, lambda *a: None)
                 self.assertEqual(update.read_version(self.root), "2.3.1")
 
-    def after(self, pip: int = 0) -> tuple[list[list[str]], list[str]]:
+    def finish(self, pip: int = 0) -> tuple[list[list[str]], list[str]]:
         """Run the steps after the copy with nothing really run: (the commands, what was logged)."""
         ran, logged = [], []
 
@@ -162,7 +162,8 @@ class PartWayTest(unittest.TestCase):
 
         with mock.patch.object(update.subprocess, "run", run):
             try:
-                update._after(self.root, update._hash(self.root / "requirements.txt"), lambda *a: None, logged.append)
+                update._finish(self.root, update._hash(self.root / "requirements.txt"), "1.0.0", "1.1.0",
+                               lambda *a: None, logged.append)
             finally:
                 self.ran = ran
         return ran, logged
@@ -172,35 +173,42 @@ class PartWayTest(unittest.TestCase):
         # its own start and never installed the packages. What .venv was installed from is what counts.
         self.kit("1.1.0", self.root, **{"requirements.txt": "a\nb\n", ".venv/installed.txt": "a\n",
                                         "my-studio/studio.toml": ""})
-        ran, logged = self.after()
+        ran, logged = self.finish()
         self.assertEqual([c[:3] for c in ran], [["-m", "pip", "install"], ["-m", "studio.ui", "install"],
                                                 ["-m", "studio", "channel"]])
         self.assertEqual(ran[2], ["-m", "studio", "channel", "--regenerate", "--preserve-settings"])
         self.assertEqual((self.root / ".venv" / "installed.txt").read_text(encoding="utf-8"), "a\nb\n")
         self.assertEqual(logged, [])
-        ran, _ = self.after()                                        # in step now: nothing to install
+        ran, _ = self.finish()                                       # in step now: nothing to install
         self.assertEqual([c[:2] for c in ran], [["-m", "studio.ui"], ["-m", "studio"]])
         (self.root / ".venv" / "installed.txt").unlink()            # no record of what was installed: as before,
-        ran, _ = self.after()                                        # only a file this update changed counts
+        ran, _ = self.finish()                                       # only a file this update changed counts
         self.assertEqual([c[:2] for c in ran], [["-m", "studio.ui"], ["-m", "studio"]])
 
-    def test_packages_that_dont_install_are_said_truthfully_once_the_windows_are_in(self):
+    def test_packages_that_dont_install_are_said_truthfully_once_everything_else_is_done(self):
         self.kit("1.1.0", self.root, **{"requirements.txt": "a\nb\n", ".venv/installed.txt": "a\n",
                                         "my-studio/studio.toml": ""})
         with self.assertRaises(update.UpdateError) as stopped:
-            self.after(pip=1)
+            self.finish(pip=1)
         self.assertTrue(stopped.exception.partial)
         self.assertIn("The new version's files are in place, but its Python packages didn't install",
                       str(stopped.exception))
         self.assertIn("Close ReelForge and open it again: setup starts and installs them.", str(stopped.exception))
-        self.assertEqual([c[:2] for c in self.ran], [["-m", "pip"], ["-m", "studio.ui"]])   # the window's still done
+        # The window's packages and your AI's notes are still done. It used to stop before the notes, and after
+        # setup had repaired the packages nothing wrote them again: your AI kept the old version's instructions.
+        self.assertEqual(self.ran, [["-m", "pip", "install", "--disable-pip-version-check", "--quiet", "-r",
+                                     str(self.root / "requirements.txt")], ["-m", "studio.ui", "install"],
+                                    ["-m", "studio", "channel", "--regenerate", "--preserve-settings"]])
+        # the window that opens once setup has repaired the packages says "Updated to 1.1.0"
+        marker = update.take_marker(self.root)
+        self.assertEqual((marker["from"], marker["to"]), ("1.0.0", "1.1.0"))
         # still out of step, which is what the next start goes by (bin/reelforge.py, tests/test_studio.py)
         self.assertEqual((self.root / ".venv" / "installed.txt").read_text(encoding="utf-8"), "a\n")
         # a copy with no .venv of its own (a git copy run with another Python) has no setup to do it: it says how
         (self.root / ".venv" / "installed.txt").unlink()
         with mock.patch.object(update.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "")), \
                 self.assertRaises(update.UpdateError) as stopped:
-            update._after(self.root, "another requirements.txt", lambda *a: None, lambda text: None)
+            update._finish(self.root, "another requirements.txt", "1.0.0", "1.1.0", lambda *a: None, lambda text: None)
         self.assertIn("-m pip install -r requirements.txt", str(stopped.exception))
         self.assertNotIn("setup starts", str(stopped.exception))
 

@@ -188,10 +188,7 @@ def apply(rel: Release, progress: Progress | None = None, log: Callable[[str], N
             raise
         finally:
             shutil.rmtree(work, ignore_errors=True)
-    new = read_version(root) or rel.version
-    _after(root, before, progress, log)
-    _write_marker(root, old, new)
-    return f"Updated ReelForge from {old} to {new}."
+    return _finish(root, before, old, read_version(root) or rel.version, progress, log)
 
 
 def move_in(root: Path, progress: Progress | None = None, log: Callable[[str], None] = print) -> str:
@@ -204,9 +201,23 @@ def move_in(root: Path, progress: Progress | None = None, log: Callable[[str], N
     before = _hash(root / "requirements.txt")
     old = read_version(root)
     _copy_tree(ROOT, root, progress)
-    new = read_version(root) or KIT_VERSION
-    _after(root, before, progress, log)
+    return _finish(root, before, old, read_version(root) or KIT_VERSION, progress, log)
+
+
+def _finish(root: Path, requirements_before: str, old: str, new: str, progress: Progress,
+            log: Callable[[str], None]) -> str:
+    """Once the new files are in: the Python packages, the steps after them (_after), and the note the restarted
+    window reads. Packages that didn't install are said last, when everything else is done. The window's packages
+    are in then and your AI's notes are the new version's, so opening ReelForge again, which repairs the packages,
+    is all that's left. (It used to stop before the notes, and nothing wrote them again after the repair.)"""
+    installed = _packages(root, requirements_before, progress)
+    _after(root, requirements_before, progress, log)
     _write_marker(root, old, new)
+    if not installed:
+        how = ("Close ReelForge and open it again: setup starts and installs them." if _stamp(root).exists() else
+               f"Install them with: {_venv_python(root)} -m pip install -r requirements.txt")   # no .venv to repair
+        raise UpdateError("The new version's files are in place, but its Python packages didn't install (are you "
+                          f"online?). {how}", partial=True)
     return f"Updated ReelForge from {old} to {new}."
 
 
@@ -432,28 +443,29 @@ def _venv_python(root: Path) -> str:
     return sys.executable
 
 
+def _packages(root: Path, requirements_before: str, progress: Progress) -> bool:
+    """Install the new version's Python packages when they aren't the ones installed. False when pip stopped: the
+    next start then finds them out of step (bin/reelforge.py) and setup repairs them."""
+    if not _needs_packages(root, requirements_before):
+        return True
+    progress("Installing new Python packages", 0, 0)
+    res = subprocess.run([_venv_python(root), "-m", "pip", "install", "--disable-pip-version-check", "--quiet", "-r",
+                          str(root / "requirements.txt")], capture_output=True, text=True, cwd=root)
+    if res.returncode == 0 and _stamp(root).parent.exists():
+        shutil.copy2(root / "requirements.txt", _stamp(root))
+    return res.returncode == 0
+
+
 def _after(root: Path, requirements_before: str, progress: Progress, log: Callable[[str], None]) -> None:
     """New Python packages if needed, the window's (Bun and OpenTUI), then agent instructions refreshed without
     replacing settings or accounts from older onboarding answers."""
     py = _venv_python(root)
-    installed = True
-    if _needs_packages(root, requirements_before):
-        progress("Installing new Python packages", 0, 0)
-        res = subprocess.run([py, "-m", "pip", "install", "--disable-pip-version-check", "--quiet", "-r",
-                              str(root / "requirements.txt")], capture_output=True, text=True, cwd=root)
-        installed = res.returncode == 0
-        if installed and _stamp(root).parent.exists():
-            shutil.copy2(root / "requirements.txt", _stamp(root))
+    # The Python packages are _packages' step now, which _finish runs just before this one and reports after it.
     progress("Getting the window's packages", 0, 0)
     res = subprocess.run([py, "-m", "studio.ui", "install"], capture_output=True, text=True, cwd=root,
                          env={**os.environ, "PYTHONUTF8": "1"}, stdin=subprocess.DEVNULL)
     if res.returncode != 0:
         log("Updated, but the window's packages didn't install; ReelForge tries again when it opens.")
-    if not installed:   # said once the window's packages are in; the next start finds the Python ones out of step
-        how = ("Close ReelForge and open it again: setup starts and installs them." if _stamp(root).exists() else
-               f"Install them with: {py} -m pip install -r requirements.txt")   # no .venv of its own to repair
-        raise UpdateError("The new version's files are in place, but its Python packages didn't install (are you "
-                          f"online?). {how}", partial=True)
     if (root / "my-studio" / "studio.toml").exists() or any((root / "profiles").glob("*/my-studio/studio.toml")):
         progress("Rewriting CLAUDE.md and AGENTS.md", 0, 0)
         env = {k: v for k, v in os.environ.items() if k != "REELFORGE_PROFILE"}  # every profile's, not just this one's
