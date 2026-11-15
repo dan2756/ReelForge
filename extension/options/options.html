@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ReelForge settings</title>
+  <link rel="stylesheet" href="../ui/ui.css">
+</head>
+<body class="options">
+  <main>
+    <header>
+      <img src="../icons/icon48.png" width="32" height="32" alt="">
+      <h1 class="grow">ReelForge</h1>
+      <span id="status" class="pill" data-tone="busy" role="status">Looking</span>
+    </header>
+
+    <section>
+      <h2>Who presses Post</h2>
+      <p>ReelForge attaches your video, fills in the text and stops. You check the page and press Post. That is how it
+        works unless you switch on one of these.</p>
+      <p class="soft">The platforms' terms restrict automated posting, and nobody can promise an account is safe when a
+        program presses the button. Pressing Post yourself is the safer choice.</p>
+      <div id="press" class="stack"></div>
+    </section>
+
+    <section>
+      <h2>Connection</h2>
+      <p id="connection" class="soft">Looking for ReelForge on this computer</p>
+      <div class="row"><button id="disconnect" type="button" disabled>Disconnect</button></div>
+      <p id="feedback" class="small soft" role="status"></p>
+    </section>
+
+    <section>
+      <h2>About</h2>
+      <p id="about" class="soft"></p>
+      <p class="soft">This extension has been tested against copies of the four upload pages, not yet on the live
+        sites. If a page has changed, it stops and says so, and you can always finish by hand.</p>
+    </section>
+  </main>
+  <script type="module" src="options.js"></script>
+</body>
+</html>
