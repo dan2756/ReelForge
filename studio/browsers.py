@@ -11,7 +11,6 @@ Standard library only: setup and doctor ask about it before the dashboard loads.
 
 from __future__ import annotations
 
-import functools
 import glob
 import json
 import os
@@ -121,11 +120,10 @@ def key(b: Browser) -> str:
     return str(b.exe) if b.exe else "playwright"
 
 
-@functools.lru_cache(maxsize=8)
 def major_version(b: Browser) -> int:
-    """The browser's major version (156), read without starting it where possible; 0 when it can't be told. Looked up
-    once per browser while ReelForge runs: on Linux it means running the browser with --version, and every read in
-    the background asks (user_agent)."""
+    """The browser's major version (156), read without starting it where possible; 0 when it can't be told. Every
+    read in the background asks (user_agent). Windows and macOS read a folder's name or a small file, each time.
+    Linux has to run the browser with --version, so there the answer is kept (_linux_version)."""
     text = ""
     try:
         if b.exe is None:
@@ -137,11 +135,30 @@ def major_version(b: Browser) -> int:
             text = plistlib.loads((b.exe.parent.parent / "Info.plist").read_bytes()).get(
                 "CFBundleShortVersionString", "")
         else:
-            text = subprocess.run([str(b.exe), "--version"], capture_output=True, text=True, timeout=20).stdout
+            text = _linux_version(b.exe)
     except (OSError, ValueError, subprocess.SubprocessError, plistlib.InvalidFileException):
         return 0
     m = re.search(r"(\d+)\.\d+", text)
     return int(m.group(1)) if m else 0
+
+
+_said: dict[Path, tuple[int, str]] = {}  # what each browser program said its version is, and its file's time then
+
+
+def _linux_version(exe: Path) -> str:
+    """What the browser says when run with --version, asked once for as long as its program file stays the same.
+    An update replaces the file, so a ReelForge window left open across one asks again: kept for good, it went on
+    presenting the old version beside the new browser. An answer without a version in it isn't kept either."""
+    try:
+        changed = exe.stat().st_mtime_ns
+    except OSError:
+        changed = 0
+    if _said.get(exe, (None, ""))[0] != changed:
+        text = subprocess.run([str(exe), "--version"], capture_output=True, text=True, timeout=20).stdout
+        if not re.search(r"\d+\.\d+", text):
+            return ""
+        _said[exe] = (changed, text)
+    return _said[exe][1]
 
 
 def user_agent(b: Browser) -> str:
