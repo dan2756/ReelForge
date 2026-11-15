@@ -267,7 +267,8 @@ def status() -> dict:
     opened, "grant" or "client" when Google ended the sign-in it had) or "off". client: a client is on file, so
     connecting needs no file. since and expires: when you connected, and when Google said the sign-in runs out, if
     it said. channel: where the last upload went ({"id", "title"}), the only way Google tells with this permission.
-    privacy and made_for_kids: your choices for the next post."""
+    privacy and made_for_kids: your choices for the next post. made_for_kids is None until you have answered:
+    nothing here answers that for you."""
     store = read_store()
     client = _usable(store.get("client_id")) and _usable(store.get("client_secret"))
     on = _signed_in(store) if client else None
@@ -280,7 +281,7 @@ def status() -> dict:
         "why": None if on or not client else _ended.get(str(store_path()), "session"),
         "channel": {"id": _word(channel.get("id")), "title": _line(channel.get("title"), 100)} if channel else None,
         "privacy": store.get("privacy") if store.get("privacy") in PRIVACY else "private",
-        "made_for_kids": store.get("made_for_kids") is True,
+        "made_for_kids": store.get("made_for_kids") if isinstance(store.get("made_for_kids"), bool) else None,
     }
 
 
@@ -671,13 +672,14 @@ def disconnect() -> dict:
 
 # ---- uploading
 
-def upload(video: Path, title: str, description: str, privacy: str, made_for_kids: bool, *,
+def upload(video: Path, title: str, description: str, privacy: str, made_for_kids: bool | None, *,
            started: Callable[[str], object], progress: Callable[[int, int], object] = lambda sent, size: None,
            last: Callable[[], object] = lambda: None, stop: Callable[[], bool] = lambda: False) -> dict:
     """Send a video to the connected channel and return what YouTube says it made of it (_made).
 
-    Who can see it and the made-for-kids answer always go with it, and their part of the answer is asked back:
-    left out, YouTube would make the video public. started(address) is called with the session's address before
+    Who can see it always goes with it, and is asked back: left out, YouTube would make the video public. The
+    made-for-kids answer is a declaration of yours, so it goes only once you have given one (None: nothing is
+    declared, and the audience setting of your channel at YouTube applies). started(address) is called with the session's address before
     any of the file goes, progress(sent, size) after each piece, and last() before the piece that ends the upload:
     from then on the video may exist. stop() saying True ends it between two pieces (Stopped).
 
@@ -691,7 +693,9 @@ def upload(video: Path, title: str, description: str, privacy: str, made_for_kid
         raise ApiError("empty", f"{video.name} is empty.")
     kind = KINDS.get(video.suffix.lower(), "application/octet-stream")
     body = {"snippet": {"title": title, "description": description, "categoryId": CATEGORY},
-            "status": {"privacyStatus": privacy, "selfDeclaredMadeForKids": bool(made_for_kids)}}
+            "status": {"privacyStatus": privacy}}
+    if isinstance(made_for_kids, bool):
+        body["status"]["selfDeclaredMadeForKids"] = made_for_kids
     uri = _start(body, size, kind)
     started(uri)
     sent = stuck = 0  # stuck: how many pieces in a row left YouTube with no more of the file than before
@@ -885,8 +889,10 @@ def _refusal(r: httpx.Response) -> ApiError:
 
 def _made(data: dict) -> dict:
     """What YouTube says it made of an upload, cut down to what ReelForge uses: {"id" (None if it isn't a video
-    id), "privacy" (as YouTube stored it: None if it didn't say), "made_for_kids" (the same), "upload_status",
-    "reason" (why it was rejected or failed, if it was), "channel_id", "channel_title"}."""
+    id), "privacy" (as YouTube stored it: None if it didn't say), "made_for_kids" (your declaration as it stored
+    it: None if it has none), "for_kids" (whether YouTube treats the video as made for kids, whoever said so: None
+    if it didn't say), "upload_status", "reason" (why it was rejected or failed, if it was), "channel_id",
+    "channel_title"}."""
     status = data.get("status") if isinstance(data.get("status"), dict) else {}
     snippet = data.get("snippet") if isinstance(data.get("snippet"), dict) else {}
     video, kids = data.get("id"), status.get("selfDeclaredMadeForKids")
@@ -894,6 +900,7 @@ def _made(data: dict) -> dict:
         "id": video if isinstance(video, str) and re.fullmatch(r"[\w-]{11}", video) else None,
         "privacy": status.get("privacyStatus") if status.get("privacyStatus") in PRIVACY else None,
         "made_for_kids": kids if isinstance(kids, bool) else None,
+        "for_kids": status.get("madeForKids") if isinstance(status.get("madeForKids"), bool) else None,
         "upload_status": _word(status.get("uploadStatus")),
         "reason": _word(status.get("rejectionReason") or status.get("failureReason")),
         "channel_id": _word(snippet.get("channelId")),
@@ -929,7 +936,9 @@ def main(argv: list[str]) -> int:
             channel = said["channel"]
             print("  channel    " + (f"{channel['title'] or channel['id']} (where the last upload went)" if channel
                                      else "Google says which one with the first upload"))
-            print(f"  posts      start as {said['privacy']}, made for kids: {'yes' if said['made_for_kids'] else 'no'}")
+            kids = {True: "yes", False: "no"}.get(said["made_for_kids"],
+                                                  "not answered, so your channel's own setting at YouTube applies")
+            print(f"  posts      start as {said['privacy']}, made for kids: {kids}")
         print(f"  kept in    {store_path()}" + ("" if store_path().exists() else "  (nothing yet)"))
         print(f"\n{UNPROVEN}\ndocs/YOUTUBE-API.md says how to set it up, and what is and isn't known about it.")
         return 0

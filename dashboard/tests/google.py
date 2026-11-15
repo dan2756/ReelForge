@@ -40,6 +40,8 @@ class Google:
                    (status, reason) for a refusal. then: what every one gets once the script has run out.
     stores_as      who YouTube lets see every video, whatever was asked ("private": what it used to do to
                    uploads from an unverified project)
+    channel_kids   the channel's own audience setting: whether a video uploaded with no made-for-kids answer is
+                   treated as made for kids
     upload_status  the uploadStatus of the videos it makes ("uploaded" unless a test says otherwise)
     session_at     where the session's address points (None: here)
     on_put         called with how many pieces and questions came before, as each one arrives
@@ -53,6 +55,7 @@ class Google:
         self.script: list = []
         self.then = None
         self.stores_as: str | None = None
+        self.channel_kids = False
         self.upload_status = "uploaded"
         self.session_at: str | None = None
         self.on_put = None
@@ -96,6 +99,8 @@ class Google:
 
     def video(self, session: dict) -> dict:
         body, asked = session["body"], session["body"].get("status", {})
+        declared = asked.get("selfDeclaredMadeForKids")
+        said = isinstance(declared, bool)
         return {"kind": "youtube#video", "id": session["video"],
                 "snippet": {"channelId": CHANNEL["id"], "channelTitle": CHANNEL["title"],
                             "title": body.get("snippet", {}).get("title"),
@@ -104,8 +109,8 @@ class Google:
                 "status": {"uploadStatus": self.upload_status,
                            **({"rejectionReason": "duplicate"} if self.upload_status == "rejected" else {}),
                            "privacyStatus": self.stores_as or asked.get("privacyStatus", "public"),
-                           "selfDeclaredMadeForKids": asked.get("selfDeclaredMadeForKids", False),
-                           "madeForKids": asked.get("selfDeclaredMadeForKids", False)}}
+                           **({"selfDeclaredMadeForKids": declared} if said else {}),
+                           "madeForKids": declared if said else self.channel_kids}}
 
 
 def refusal(status: int, reason: str) -> tuple[int, dict]:

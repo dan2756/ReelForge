@@ -116,8 +116,13 @@ One video uploads at a time for a channel. A second one waits its turn.
 | Title | what **Copy YouTube caption** copies: your caption, then `#shorts` |
 | Description | what **Copy YouTube hashtags** copies |
 | Who can see it | private, unlisted or public: your choice, always sent |
-| Made for kids | No, unless you changed your answer in ReelForge. Always sent |
+| Made for kids | your answer, once you have given ReelForge one. Until then nothing is sent |
 | Category | People & Blogs |
+
+"Made for kids" is a declaration you make to YouTube, so ReelForge never makes it for you. Until you have
+answered in ReelForge, a post carries no answer and the audience setting of your channel in YouTube Studio applies.
+The row then says that no answer was sent and what YouTube made of the video, and asks you to look if YouTube has
+it as made for kids. What YouTube does with an upload that carries no answer is known only from its documentation.
 
 ReelForge does not set the altered-content answer, tags, a thumbnail, a playlist or a schedule. Set those in
 YouTube Studio. It leaves telling your subscribers to YouTube, which does it for a public video unless told
@@ -204,8 +209,8 @@ One file for each channel:
 - your first channel: `dashboard/data/youtube_api.json`
 - a channel you added: `profiles/<its folder>/dashboard/data/youtube_api.json`
 
-It holds the client's id and secret from the file you gave, your choices (who can see a post, the made-for-kids
-answer), the channel the last upload went to, and the address of an upload while one is under way.
+It holds the client's id and secret from the file you gave, your choices (who can see a post, and the
+made-for-kids answer once you have given one), the channel the last upload went to, and the address of an upload while one is under way.
 
 **The sign-in is not in it, or in any file.** What Google gives ReelForge when you say yes (a refresh token) stays
 in the memory of the window that connected and is gone when that window closes. The client's id and secret alone
@@ -262,11 +267,11 @@ What the window gets and calls:
 
 | | |
 |---|---|
-| view `youtube_api` | `state` (`off`: no client on file, `connecting`, `on`, `again`: a client is on file and this window has no sign-in), `line`, `lines`, `client`, `channel`, `privacy`, `made_for_kids`, `privacies`, `note`, `docs` |
+| view `youtube_api` | `state` (`off`: no client on file, `connecting`, `on`, `again`: a client is on file and this window has no sign-in), `line`, `lines`, `client`, `channel`, `privacy`, `made_for_kids` (`true`, `false`, or `null` until the person has answered), `privacies`, `note`, `docs` |
 | `youtube_api_info(caption, tags)` | the view, and for the picked video `send`, `fields`, `left`, `can_post`, `why`, `force`, `blocked`, `review` |
 | `youtube_api_connect(path)` | reads the client file and opens Google's page. `""` connects again with the client on file |
 | `youtube_api_disconnect()` | forgets the connection and tells Google |
-| `youtube_api_defaults(privacy, made_for_kids)` | your choices for the posts to come |
+| `youtube_api_defaults(privacy, made_for_kids)` | your choices for the posts to come. `made_for_kids` is the person's answer: `true` or `false`. Until it is given, `send.made_for_kids` is `null` and nothing is declared |
 | `post_with_api(caption, tags, privacy, force)` | your press: makes the job and starts the upload |
 | view `posting` | while the API is connected and a post could start, the YouTube row has `api: {"force": ...}` (`force`: it would be a post again). Unless it would be one, `post_api` is among its `actions`. While the state is `again`, `connect_api` is there instead |
 | `post_action(job, "post_api")` | the row's own button: posts the picked video with the form's text and your choices, never "again". Posting again takes `post_with_api(..., force)` |
@@ -274,7 +279,8 @@ What the window gets and calls:
 
 A job goes `queued`, `uploading` (with `progress`), `posting` (the last piece is on its way), then `posted`, or
 ends as `failed` or `unknown`. Retry on a failed row goes through the API again. A posted job whose `step` is
-`confirm` has a sentence in `detail` about how YouTube stored the video: something for the person to look at.
+`confirm` has a sentence in `detail` about how YouTube stored the video: something for the person to look at. One
+whose `step` is `note` went without a made-for-kids answer, and its `detail` says so.
 
 The sign-in is held in the window's process (`youtube_api._held`) and never written down, so `status()` in any
 other process says `again`, and `upload()` there has nothing to send with. A command never connects: its sign-in
@@ -301,7 +307,8 @@ Tested here, by automated tests that run with ReelForge's own (`dashboard/tests/
   that proves nothing (a word ReelForge doesn't know, or a "no" to the piece sent a second time): not sure it
   posted, and no Retry
 - the read-back: a video YouTube stored as private when public was asked for
-- that who can see the video and the made-for-kids answer are in every request
+- that who can see the video is in every request, and that the made-for-kids answer is in it once you have given
+  one and never before
 - the ledger: what may not be posted twice, in both directions between the extension and the API; cancelling;
   two videos taking turns; ReelForge closed before and during the last piece, with and without a second window
   that is still connected

@@ -43,10 +43,14 @@ class ApiPosting(PostingTest):
         google_for(self, self.root)
         self.api_store = self.root / "youtube_api.json"  # the connection's file, beside the scratch stats
 
-    def connect_api(self) -> None:
+    def connect_api(self, kids: bool | None = False) -> None:
+        """Connect, as a ReelForge whose person has said their videos are not made for kids (kids: that answer;
+        None: they haven't given one)."""
         consent = youtube_api.connect(self.client_file)
         self.assertTrue(consent.done.wait(10))
         self.assertTrue(consent.outcome["ok"])
+        if kids is not None:
+            youtube_api.set_defaults(made_for_kids=kids)
 
     def window(self, api: bool = True, **options) -> Window:
         if api and not self.api_store.exists():
@@ -105,7 +109,7 @@ class View(ApiPosting):
         w = self.window(api=False)
         view = w.view("youtube_api")
         self.assertEqual((view["state"], view["client"], view["channel"], view["privacy"], view["made_for_kids"]),
-                         ("off", False, None, "private", False))
+                         ("off", False, None, "private", None))
         self.assertEqual(plain(view["line"]), "○ YouTube API not connected")
         said = [plain(line) for line in view["lines"]]
         self.assertIn("docs/YOUTUBE-API.md has the steps.", said[0])
@@ -174,8 +178,46 @@ class View(ApiPosting):
         self.assertEqual(self.rows(w)["youtube"]["actions"], ["post_api"])
         self.assertEqual(self.posted(w)["state"], "posted")
         self.assertEqual(json.loads(self.api_store.read_text("utf-8")),
-                         {"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
+                         {"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET, "made_for_kids": False,
                           "channel": {"id": CHANNEL["id"], "title": CHANNEL["title"]}})  # still no sign-in on file
+
+    def test_until_you_answer_no_made_for_kids_answer_is_sent_and_everything_says_so(self):
+        self.connect_api(kids=None)
+        w = self.window()
+        self.assertIsNone(w.view("youtube_api")["made_for_kids"])
+        info = w.call("youtube_api_info", CAPTION, TAGS)
+        self.assertIsNone(info["send"]["made_for_kids"])
+        self.assertEqual(info["fields"][3], {"label": "Made for kids", "text": "Not sent: you haven't answered, so "
+                                                                               "your channel's own setting applies"})
+        job = self.posted(w)
+        self.assertEqual(self.google.starts[0]["body"]["status"], {"privacyStatus": "private"})  # as the question said
+        self.assertEqual(json.loads(job["options"]), {"privacy": "private", "made_for_kids": None})
+        self.assertEqual((job["state"], job["step"], job["detail"]),
+                         ("posted", "note", "ReelForge sent no made-for-kids answer, so your channel's own audience "
+                                            "setting applies. YouTube has it as not made for kids."))
+        said = self.rows(w)["youtube"]["line"][-1]  # said quietly, with the rest: nothing is wrong
+        self.assertEqual(said[0], "  It is private, as you chose. Change who can see it in YouTube Studio when you're "
+                                  "ready. " + job["detail"])
+        self.assertNotIn(youtube_api_tab.AMBER, said[1])
+        self.assertEqual(w.sent("toast")[-1]["severity"], "information")
+        # Once you have answered, your answer goes with every post, and there is nothing to add.
+        self.assertIs(w.call("youtube_api_defaults", None, False)["made_for_kids"], False)
+        job = self.over(w, self.api_post(w, force=True)["jobs"][0]["id"])
+        self.assertEqual(self.google.starts[1]["body"]["status"],
+                         {"privacyStatus": "private", "selfDeclaredMadeForKids": False})
+        self.assertEqual((job["step"], job["detail"]), (None, None))
+
+    def test_a_video_youtube_calls_made_for_kids_without_your_answer_is_something_to_look_at(self):
+        self.connect_api(kids=None)
+        self.google.channel_kids = True  # the channel's own audience setting, in YouTube Studio
+        w = self.window()
+        job = self.posted(w)
+        self.assertEqual((job["state"], job["step"]), ("posted", "confirm"))
+        self.assertEqual(job["detail"], "YouTube has it as made for kids. ReelForge sent no answer to that, because "
+                                        "you haven't given one, so this is your channel's own setting. Check its "
+                                        "audience in YouTube Studio.")
+        self.assertIn(youtube_api_tab.AMBER, self.rows(w)["youtube"]["line"][-1][1])
+        self.assertEqual(w.sent("toast")[-1]["severity"], "warning")
 
     def test_the_demo_has_none_of_it(self):
         self.connect_api()
@@ -465,16 +507,24 @@ class Posting(ApiPosting):
         self.assertEqual(w.sent("toast")[-1]["body"], f"It is up. {LINK}")
 
     def test_what_the_read_back_says(self):
-        made = {"privacy": "private", "made_for_kids": False}
+        made = {"privacy": "private", "made_for_kids": False, "for_kids": False}
         self.assertEqual(youtube_api_tab.read_back("private", False, made), "")  # as it was sent: nothing to say
         self.assertEqual(youtube_api_tab.read_back("unlisted", False, {**made, "privacy": "unlisted"}), "")
         self.assertIn("stored it as private, not unlisted", youtube_api_tab.read_back("unlisted", False, made))
         unsaid = youtube_api_tab.read_back("public", False, {**made, "privacy": None})
         self.assertEqual(unsaid, "YouTube didn't say who can see it: check that in YouTube Studio.")
-        said = youtube_api_tab.read_back("public", False, {"privacy": "public", "made_for_kids": True})
+        kids = {"privacy": "public", "made_for_kids": True, "for_kids": True}
+        said = youtube_api_tab.read_back("public", False, kids)
         self.assertEqual(said, "YouTube has it as made for kids, which isn't what ReelForge sent. Check its audience "
                                "in YouTube Studio.")
-        self.assertEqual(youtube_api_tab.read_back("public", True, {"privacy": "public", "made_for_kids": None}), "")
+        self.assertEqual(youtube_api_tab.read_back("public", True, {**kids, "made_for_kids": None}), "")
+        # With no answer of yours sent, there is nothing to compare: only "made for kids" is worth a look.
+        unsaid = {"privacy": "public", "made_for_kids": None, "for_kids": False}
+        self.assertEqual(youtube_api_tab.read_back("public", None, unsaid), "")
+        self.assertIn("ReelForge sent no answer to that", youtube_api_tab.read_back("public", None, kids))
+        self.assertEqual(youtube_api_tab.left_to_youtube(False, made), "")
+        self.assertEqual(youtube_api_tab.left_to_youtube(None, {**unsaid, "for_kids": None}),
+                         "ReelForge sent no made-for-kids answer, so your channel's own audience setting applies.")
 
     def test_an_upload_youtube_takes_and_then_turns_down_is_not_a_post(self):
         self.google.upload_status = "rejected"

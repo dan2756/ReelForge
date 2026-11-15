@@ -481,7 +481,7 @@ class Uploading(ApiTest):
         self.assertEqual(self.ranges(), [f"bytes 0-999/{SIZE}", f"bytes 1000-1999/{SIZE}", f"bytes 2000-2999/{SIZE}",
                                          f"bytes 3000-{SIZE - 1}/{SIZE}"])
         self.assertEqual(bytes(self.one_video()["data"]), BYTES)
-        self.assertEqual(made, {"id": "vid00000001", "privacy": "private", "made_for_kids": False,
+        self.assertEqual(made, {"id": "vid00000001", "privacy": "private", "made_for_kids": False, "for_kids": False,
                                 "upload_status": "uploaded", "reason": "", "channel_id": CHANNEL["id"],
                                 "channel_title": CHANNEL["title"]})
         # The session is noted before any of the file goes, and the ledger hears of the last piece before it does.
@@ -497,7 +497,20 @@ class Uploading(ApiTest):
         self.assertEqual((made["id"], bytes(self.one_video()["data"])), ("vid00000001", BYTES))
         self.assertEqual((PIECE > SIZE, PIECE % (256 * 1024)), (True, 0))  # a multiple of 256 KiB, as YouTube asks
 
-    def test_who_can_see_it_and_the_kids_answer_always_go_with_it_and_are_asked_back(self):
+    def test_no_made_for_kids_answer_is_sent_until_you_have_given_one(self):
+        # It is a declaration of yours. With none given, the request carries none, and YouTube's answer says what
+        # the channel's own audience setting made of the video.
+        self.google.channel_kids = True
+        made = self.upload(made_for_kids=None)
+        self.assertEqual(self.google.starts[0]["body"]["status"], {"privacyStatus": "private"})
+        self.assertEqual((made["made_for_kids"], made["for_kids"]), (None, True))
+        for answer in (False, True):
+            made = self.upload(made_for_kids=answer)
+            self.assertEqual(self.google.starts[-1]["body"]["status"],
+                             {"privacyStatus": "private", "selfDeclaredMadeForKids": answer})
+            self.assertEqual((made["made_for_kids"], made["for_kids"]), (answer, answer))
+
+    def test_who_can_see_it_always_goes_with_it_and_is_asked_back(self):
         self.upload("unlisted", title="Café ✓ 日本 #shorts", made_for_kids=True)
         (start,) = self.google.starts
         self.assertEqual(start["query"], {"uploadType": "resumable", "part": "snippet,status"})
@@ -906,8 +919,10 @@ class Store(ApiTest):
 
     def test_your_choices_start_safe_and_only_take_what_they_know(self):
         said = youtube_api.status()
-        self.assertEqual((said["privacy"], said["made_for_kids"]), ("private", False))
+        self.assertEqual((said["privacy"], said["made_for_kids"]), ("private", None))  # not answered: not "no"
         self.connect()
+        self.assertIsNone(youtube_api.status()["made_for_kids"])
+        self.assertNotIn("made_for_kids", self.on_file())
         youtube_api.set_defaults("everyone")  # not a choice there is
         self.assertEqual(youtube_api.status()["privacy"], "private")
         youtube_api.set_defaults("public", True)
@@ -1083,9 +1098,12 @@ class CommandLine(ApiTest):
         self.assertIn("client     on file", said)
         self.assertIn("sign-in    never kept in a file: you connect in ReelForge's window", said)
         self.assertIn("channel    Night Physics (where the last upload went)", said)
-        self.assertIn("posts      start as private, made for kids: no", said)
+        self.assertIn("posts      start as private, made for kids: not answered, so your channel's own setting at "
+                      "YouTube applies\n", said)
         self.assertNotIn(CLIENT_ID, said)
         self.assertNotIn(self.held(), said)
+        youtube_api.set_defaults("unlisted", False)
+        self.assertIn("posts      start as unlisted, made for kids: no\n", self.run_main()[1])
 
     def test_client_takes_the_file_and_signs_in_nowhere(self):
         code, said = self.run_main("client", str(self.client_file))

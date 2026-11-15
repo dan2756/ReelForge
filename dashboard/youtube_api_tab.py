@@ -46,6 +46,9 @@ AMBER = TYPICAL
 DOCS = "docs/YOUTUBE-API.md"
 STALE = timedelta(minutes=10)  # on a drive that can't lock files: an upload silent this long has nobody sending it
 WHO = {"private": "Private", "unlisted": "Unlisted", "public": "Public"}
+# The made-for-kids answer as the question before a post shows it. None: you haven't answered, and ReelForge never
+# answers for you.
+KIDS = {True: "Yes", False: "No", None: "Not sent: you haven't answered, so your channel's own setting applies"}
 # What ReelForge leaves to YouTube Studio, said wherever a post is about to be sent.
 NOT_SET = ("ReelForge doesn't set the altered-content answer, tags, a thumbnail or a schedule. Set those in YouTube "
            "Studio.")
@@ -123,8 +126,8 @@ def _upload(job: dict, stop: Callable[[], bool]) -> None:
         if not posting.unchanged(job):
             raise ApiError("changed", "The video file changed after you pressed Post. Check it, then post again.")
         made = youtube_api.upload(Path(job["video_path"]), text.get("title", ""), text.get("description", ""),
-                                  privacy, options.get("made_for_kids") is True, started=started,
-                                  progress=progress, last=last, stop=stop)
+                                  privacy, kids_answer(options), started=started, progress=progress, last=last,
+                                  stop=stop)
     except youtube_api.Stopped:
         pass  # called off (the job says so), or ReelForge is closing (the next start settles it)
     except youtube_api.Unknown:
@@ -162,9 +165,15 @@ def _stopped_short(job: dict, why: str) -> None:
         _end(job, "failed", error_code="interrupted", error_message=f"{why} Nothing was posted: start it again.")
 
 
-def read_back(privacy: str, made_for_kids: bool, made: dict) -> str:
+def kids_answer(options: dict) -> bool | None:
+    """The made-for-kids answer a job was made with: yours, or None when you hadn't given one."""
+    return options.get("made_for_kids") if isinstance(options.get("made_for_kids"), bool) else None
+
+
+def read_back(privacy: str, made_for_kids: bool | None, made: dict) -> str:
     """What YouTube's own answer about a video says that isn't what was sent: who can see it, and the
-    made-for-kids answer, with what to do about each. "" when it stored both as they were sent."""
+    made-for-kids answer, with what to do about each. "" when it stored both as they were sent. With no answer of
+    yours sent (None), a video YouTube treats as made for kids is said too: nobody here declared that."""
     said = []
     if made["privacy"] is None:
         said.append("YouTube didn't say who can see it: check that in YouTube Studio.")
@@ -172,24 +181,40 @@ def read_back(privacy: str, made_for_kids: bool, made: dict) -> str:
         said.append(f"YouTube stored it as {made['privacy']}, not {privacy} as you chose. Change who can see it in "
                     "YouTube Studio. YouTube has been known to keep uploads private when they come from a Google "
                     f"Cloud project it hasn't verified: {DOCS} says more.")
-    if made["made_for_kids"] is not None and made["made_for_kids"] != made_for_kids:
+    if made_for_kids is None:
+        if made["for_kids"]:
+            said.append("YouTube has it as made for kids. ReelForge sent no answer to that, because you haven't "
+                        "given one, so this is your channel's own setting. Check its audience in YouTube Studio.")
+    elif made["made_for_kids"] is not None and made["made_for_kids"] != made_for_kids:
         said.append(f"YouTube has it as {'made' if made['made_for_kids'] else 'not made'} for kids, which isn't "
                     "what ReelForge sent. Check its audience in YouTube Studio.")
     return " ".join(said)
 
 
+def left_to_youtube(made_for_kids: bool | None, made: dict) -> str:
+    """For a post that went without a made-for-kids answer of yours: that it did, and what YouTube made of it."""
+    if made_for_kids is not None:
+        return ""
+    stored = {True: " YouTube has it as made for kids.", False: " YouTube has it as not made for kids."}
+    return ("ReelForge sent no made-for-kids answer, so your channel's own audience setting applies."
+            + stored.get(made["for_kids"], ""))
+
+
 def to_look_at(job: dict) -> tuple[str, bool]:
     """What a posted job has to add, and whether it is something to act on: what the read-back found (finish notes
-    it with the step "confirm"), else that the video is private because you chose so."""
+    it with the step "confirm"), else that the video is private because you chose so, and that it went without a
+    made-for-kids answer (noted with the step "note")."""
     if job["step"] == "confirm" and job["detail"]:
         return job["detail"], True
-    return (PRIVATE if json.loads(job["options"]).get("privacy") == "private" else ""), False
+    private = PRIVATE if json.loads(job["options"]).get("privacy") == "private" else ""
+    return " ".join(x for x in (private, job["detail"] if job["step"] == "note" else "") if x), False
 
 
 def finish(job: dict, made: dict) -> dict | None:
     """An upload YouTube has taken whole: the job is posted, with the video's id and its link, and with what the
     read-back found if it found anything (then its step is "confirm": there is something for you to look at). One
-    YouTube turned down after taking it is failed, with its reason."""
+    that went without a made-for-kids answer says so (step "note"). One YouTube turned down after taking it is
+    failed, with its reason."""
     options = json.loads(job["options"])
     youtube_api.note_channel(made)
     if made["upload_status"] in ("failed", "rejected", "deleted"):
@@ -198,10 +223,11 @@ def finish(job: dict, made: dict) -> dict | None:
             + (f" ({made['reason']})" if made["reason"] else "") + ". Look at it in YouTube Studio."))
         return posting.get(job["id"])
     url = f"https://youtube.com/shorts/{made['id']}"  # (an answer without a video's id is never "made")
-    note = read_back(options.get("privacy"), options.get("made_for_kids") is True, made)
+    note = read_back(options.get("privacy"), kids_answer(options), made)
+    quiet = "" if note else left_to_youtube(kids_answer(options), made)
     try:
-        return posting.advance(job["id"], "posted", by="app", post_id=made["id"], url=url, detail=note or None,
-                               step="confirm" if note else None)
+        return posting.advance(job["id"], "posted", by="app", post_id=made["id"], url=url,
+                               detail=note or quiet or None, step="confirm" if note else "note" if quiet else None)
     except posting.Refused:
         # The job ended another way meanwhile (called off, or the clock gave up on it), but the video is up. It
         # goes into the stats as this episode's: that is what stops a second post of it, and a job that was
@@ -290,7 +316,7 @@ class YouTubeApiTab:
         sign-in), a line and the lines under it, the channel the last upload went to, and your choices for the next
         post."""
         if self.demo:
-            said = {"state": "off", "client": False, "channel": None, "privacy": "private", "made_for_kids": False}
+            said = {"state": "off", "client": False, "channel": None, "privacy": "private", "made_for_kids": None}
             line, lines = Text("○ The demo doesn't use YouTube's API", MUTED), []
         else:
             said = youtube_api.status()
@@ -383,7 +409,8 @@ class YouTubeApiTab:
     @rpc
     def youtube_api_info(self, caption: str = "", tags: str = "") -> dict | None:
         """The connection (youtube_api_view), and for the picked video what a post through the API would send:
-        "send" ({"title", "description", "privacy", "made_for_kids", "category"}), the same as "fields" to show,
+        "send" ({"title", "description", "privacy", "made_for_kids" (None: none is sent, because you haven't
+        answered), "category"}), the same as "fields" to show,
         "left" (what ReelForge doesn't set), whether it can start ("can_post", "why"), and whether it would be a
         post again ("force": the video is up there, or may be). With no caption and hashtags given, the form's as
         last typed."""
@@ -410,7 +437,7 @@ class YouTubeApiTab:
         fields = [{"label": "Title", "text": send["title"] or "—"},
                   {"label": "Description", "text": send["description"] or "—"},
                   {"label": "Who can see it", "text": WHO[send["privacy"]]},
-                  {"label": "Made for kids", "text": "Yes" if send["made_for_kids"] else "No"},
+                  {"label": "Made for kids", "text": KIDS[send["made_for_kids"]]},
                   {"label": "Category", "text": "People & Blogs"}]
         said = youtube_api.status()  # (the view may say "connecting" over a connection that is good)
         if said["state"] != "on":
@@ -506,7 +533,8 @@ class YouTubeApiTab:
     @rpc
     def youtube_api_defaults(self, privacy: str | None = None, made_for_kids: bool | None = None) -> dict | None:
         """Your choices for the posts to come: who can see one ("private", "unlisted" or "public") and whether your
-        videos are made for kids. Returns the view."""
+        videos are made for kids (your answer: until you give one, a post declares nothing about that). Returns
+        the view."""
         if self.demo:
             self.notify("The demo doesn't use YouTube's API.", timeout=4)
             return None
