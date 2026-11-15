@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -312,11 +313,38 @@ def _guides(a: dict, s: dict, w: SimpleNamespace, out) -> None:
         out(target, text)
 
 
-NOTES = "## Research notes"
+SLATE, NOTES, SUGGESTED = "## Slate", "## Research notes", " *(suggested)*"
+
+
+def _slate(bible: str) -> tuple[int, int]:
+    """Where the slate's list is in a channel bible: from its first idea to where the section's list ends (the title
+    examples, or the next section). Both the end when it has no ideas; (-1, -1) for a bible with no slate."""
+    head = re.search(rf"^{SLATE}.*$", bible, re.M)
+    if not head:
+        return -1, -1
+    stop = re.search(r"^(## |Title pattern examples:)", bible[head.end():], re.M)
+    end = head.end() + stop.start() if stop else len(bible)
+    idea = re.search(r"^[-*] ", bible[head.end():end], re.M)
+    return (head.end() + idea.start() if idea else end), end
 
 
 def _keep_yours(old: str, new: str) -> str:
-    """A newly rendered channel bible with the research notes your AI added to the old one carried over."""
+    """A newly rendered channel bible with what your AI keeps in it carried over from the old one: the slate (its
+    ideas in their order, with whatever was added or marked on them) and the research notes. The slate still gains an
+    idea the new answers bring (yours ahead of the format's suggestions), and loses a suggestion nobody touched that
+    the format no longer makes. An idea counts as there already when a line has its words, however it's marked
+    ("~~a snowball~~ (ep03)"), so marking one used never brings it back as new."""
+    (a, b), (c, d) = _slate(old), _slate(new)
+    if a >= 0 and c >= 0:
+        fresh = new[c:d].rstrip().splitlines()
+        ideas = [ln for ln in old[a:b].rstrip().splitlines() if not ln.endswith(SUGGESTED) or ln in fresh]
+        have = "\n".join(ideas).casefold()
+        more = [ln for ln in fresh if not re.search(
+            r"(?<![\w'])" + re.escape(ln.removeprefix("- ").removesuffix(SUGGESTED).casefold()) + r"(?![\w'])", have)]
+        first = next((i for i, ln in enumerate(ideas) if ln.endswith(SUGGESTED)), len(ideas))
+        ideas[first:first] = [ln for ln in more if not ln.endswith(SUGGESTED)]
+        ideas += [ln for ln in more if ln.endswith(SUGGESTED)]
+        new = new[:c] + "\n".join(ideas) + ("\n\n" if ideas else "") + new[d:]
     if NOTES in old and NOTES in new:
         notes = old[old.index(NOTES) + len(NOTES):].strip()
         if notes:
@@ -365,7 +393,8 @@ def write_all(answers: dict, profile=None) -> list[Path]:
 
     # Every file is rendered and checked by now, so whatever stops this (answers to fix, a typo in the dashboard's
     # config.toml, notes too long for Codex) has stopped it above, with every file still as it was.
-    if old is not None:      # a copy of the bible as it was
+    # A copy of the bible as it was, when it changes (its first lines carry today's date: that alone is no change).
+    if old is not None and old.split("-->", 1)[-1] != bible.split("-->", 1)[-1]:
         P.write_atomic(w.backups / f"channel-bible.{dt.datetime.now():%Y%m%d-%H%M%S}.md", old)
     written: list[Path] = []
     for path, text in files:
