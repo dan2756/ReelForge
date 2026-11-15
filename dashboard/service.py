@@ -2333,18 +2333,29 @@ class Dashboard(StatsTab, SettingsTab, Service):
             self.loop.run_worker(self._update_check, False, group="update-check", exclusive=True)
 
     def _update_check(self, manual: bool) -> None:
-        info = kit_update.check()
-        info["checked"] = db.now_iso()
         try:
-            db.set_meta("update_check", info)
-            if info["newer"]:
-                notify.update_available(info["latest"])
-        except sqlite3.Error:
-            pass
+            info = kit_update.check()
+            info["checked"] = db.now_iso()
+            try:
+                db.set_meta("update_check", info)
+                if info["newer"]:
+                    notify.update_available(info["latest"])
+            except sqlite3.Error:
+                pass
+        except Exception:  # the check answers its own failures, so this is a surprise: "Checking…" still has to go
+            self.loop.call_soon(self.clear_update_step)
+            raise
         self.loop.call_soon(self.after_update_check, info, manual)
+
+    def clear_update_step(self) -> None:
+        """Take "Checking…" off the Updates tab so the check's answer shows. An update being put in place keeps its
+        progress line."""
+        if not self.updating:
+            self.emit("update_step", {})
 
     def after_update_check(self, info: dict, manual: bool) -> None:
         self.update_info = info
+        self.clear_update_step()
         self.show_update()
         self.show_new_notes()
         if manual and not info["error"] and not info["newer"]:
