@@ -430,6 +430,21 @@ class WindowTest(unittest.TestCase):
         self.assertIn("error: the log-in in ReelForge's browser: RuntimeError: Target crashed | Call log: | "
                       "- navigating to login", sync.log_path().read_text("utf-8"))
 
+    def test_a_handle_that_cant_be_saved_says_so_plainly(self):
+        every = self.real_platforms({"tiktok": "@mine"})
+        denied = PermissionError(13, "Permission denied", "config.toml")
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()):
+            w = self.open(every, demo_mode=False)
+            w.forget()
+            with mock.patch.object(config, "save_handle", side_effect=denied):
+                self.assertIsNone(w.call("connect", "youtube", "@new"))
+                self.assertTrue(w.until(lambda: w.toasts()))
+            self.assertEqual(w.toasts(), ["YouTube's handle wasn't saved, and nothing changed. config.toml couldn't "
+                                          "be written."])
+            self.assertNotIn("youtube", w.svc.platforms)
+        self.assertIn("error: saving YouTube's handle: PermissionError: [Errno 13] Permission denied: 'config.toml'",
+                      sync.log_path().read_text("utf-8"))
+
     def test_another_window_connecting_shows_here(self):
         """Every ReelForge window follows a platform connected (or disconnected) in another one."""
         self.forget("x")

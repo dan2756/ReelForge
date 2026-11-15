@@ -2155,7 +2155,10 @@ class Dashboard(StatsTab, SettingsTab, Service):
         try:
             config.save_handle(p.key, handle)
         except Exception as e:
-            self.loop.call_soon(self.notify, f"Couldn't save {p.name}'s handle: {e}", "", "error", 12)
+            why = str(e) if isinstance(e, config.ConfigError) else "config.toml couldn't be written."
+            sync.log([f"error: saving {p.name}'s handle: {detail(e)}"])
+            self.loop.call_soon(self.notify, f"{p.name}'s handle wasn't saved, and nothing changed. {why}", "",
+                                "error", 12)
             return
         self.loop.call_soon(self.account_saved, p, handle)
 
