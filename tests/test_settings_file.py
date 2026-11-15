@@ -97,6 +97,18 @@ class Commands(Scratch):
         self.assertEqual([c["status"] for c in rows], [doctor.FAIL])
         self.assertIn(str(extra.settings), rows[0]["detail"])
 
+    def test_doctor_reports_a_typo_in_the_windows_settings_too(self):
+        cfg = P.DASHBOARD / "config.toml"
+        cfg.write_text(cfg.read_text(encoding="utf-8").replace("refresh_minutes = 30", "refresh_minutes = 3o"),
+                       encoding="utf-8")
+        code, out, _ = self.run_main("doctor", "--json")
+        rows = {c["what"]: c for c in json.loads(out)["checks"]}
+        self.assertEqual((code, rows["Settings"]["status"]), (1, doctor.FAIL))
+        self.assertIn(f"{cfg} has a typo (", rows["Settings"]["detail"])
+        self.assertIn("line 6", rows["Settings"]["detail"])
+        self.assertNotIn("Dashboard", rows)               # not "configured" while it can't be read
+        self.assertEqual(rows["First-time setup"]["status"], doctor.OK)
+
     def test_the_json_listing_still_lists_every_channel(self):
         extra = profiles.create("Cool Epic Facts")
         extra.my_studio.mkdir(parents=True)

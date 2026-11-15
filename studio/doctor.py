@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 from pathlib import Path
 
 from . import BLENDER_VERSION, KIT_NAME, KIT_VERSION
@@ -177,8 +178,19 @@ def checks(render_test: bool = False, quiet: bool = False) -> Report:
         r.add(WARN, "First-time setup", "not done yet: run reelforge channel (or channel" +
               (".bat)" if P.WINDOWS else ".sh)"))
 
+    def window_settings(cfg: Path) -> bool:
+        """A profile's config.toml reads (or isn't there yet). One with a typo stops ReelForge's window from opening
+        on that profile, so it's a failed check that names the file."""
+        try:
+            if cfg.exists():
+                tomllib.loads(cfg.read_text(encoding="utf-8"))
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
+            r.add(FAIL, "Settings", f"{cfg} has a typo ({e}): ReelForge can't open until it's fixed in a text editor")
+            return False
+        return True
+
     dash_cfg = P.DASHBOARD / "config.toml"
-    if P.DASHBOARD.exists():
+    if P.DASHBOARD.exists() and window_settings(dash_cfg):
         r.add(OK if dash_cfg.exists() else WARN, "Dashboard", "configured" if dash_cfg.exists() else
               "not configured yet (first-time setup writes dashboard/config.toml)")
     from . import profiles
@@ -189,6 +201,7 @@ def checks(render_test: bool = False, quiet: bool = False) -> Report:
             S.load(p.settings)
         except S.SettingsError as e:
             r.add(FAIL, "Settings", str(e))
+        window_settings(p.config)
     if more:  # the other channels, each set up in its own folder (studio/profiles.py)
         unset = [p.name for p in more if not p.onboarded]
         r.add(WARN if unset else OK, "Profiles", f"{len(more) + 1} channels: " +
