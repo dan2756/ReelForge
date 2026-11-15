@@ -73,8 +73,8 @@ Things to know:
 
 - **You have ten minutes** to answer on Google's page. After that, connect again.
 - **The browser has to be on this computer.** Google sends the answer to an address only this computer has.
-- **Each channel connects by itself.** With more than one profile, connect each one. They can share one client
-  file if the channels are test users of the same project.
+- **Each channel connects by itself.** With more than one profile, connect each one. They can use the same
+  client file, as long as each channel's Google account is a test user of that project.
 - **ReelForge can't tell you which channel it is connected to** until the first upload. The permission it asks
   for doesn't cover reading your account. The answer to an upload names the channel, and ReelForge shows it from
   then on. This is one more reason to post privately the first time.
@@ -108,7 +108,9 @@ One video uploads at a time for a channel. A second one waits its turn.
 | Category | People & Blogs |
 
 ReelForge does not set the altered-content answer, tags, a thumbnail, a playlist or a schedule. Set those in
-YouTube Studio. YouTube has no switch for Shorts: by its own rule a vertical video of up to three minutes is one.
+YouTube Studio. It leaves telling your subscribers to YouTube, which does it for a public video unless told
+otherwise. YouTube has no switch for Shorts: by its own rule a vertical video of up to three minutes is one
+(excerpt).
 
 ### If something stops in the middle
 
