@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 """
 
 _path: Path | None = None
+_demo = False  # the store is the demo's made-up one: nothing about it is kept (no backups, no log)
 
 
 LATEST_COLUMNS = ("last_ts", "views", "likes", "comments", "shares", "saves")
@@ -83,10 +84,10 @@ TYPED = "manual-"  # a post id that starts with this holds numbers you typed in 
 BACKUPS_KEPT = 7
 
 
-def init(path: Path) -> None:
-    global _path
+def init(path: Path, demo: bool = False) -> None:
+    global _path, _demo
     path.parent.mkdir(parents=True, exist_ok=True)
-    _path = path
+    _path, _demo = path, demo
     with connect() as db:
         db.execute("PRAGMA journal_mode=WAL")
         db.executescript(SCHEMA)
@@ -412,8 +413,11 @@ def compact(min_hours: float = 20) -> int:
 def daily_backup(keep: int = BACKUPS_KEPT) -> Path | None:
     """Save data/backups/stats-YYYYMMDD.db unless today's is there, and keep the newest `keep`.
 
-    Never raises: a failed backup only means there is none today. Returns today's backup, or None.
+    Never raises: a failed backup only means there is none today. Returns today's backup, or None. The demo's
+    made-up stats aren't backed up: its copies would sit among the real ones.
     """
+    if _demo:
+        return None
     try:
         folder = _path.parent / "backups"
         folder.mkdir(exist_ok=True)

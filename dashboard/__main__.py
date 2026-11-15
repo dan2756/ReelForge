@@ -84,7 +84,7 @@ def load_platforms(demo: bool = False, only_demos: bool = False, unconnected=())
         path = config.DATA_DIR / "demo.db"
         for suffix in ("", "-wal", "-shm"):
             path.with_name(path.name + suffix).unlink(missing_ok=True)
-        db.init(path)
+        db.init(path, demo=True)
         if only_demos:
             from . import videos
 
