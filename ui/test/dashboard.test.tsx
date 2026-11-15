@@ -745,6 +745,22 @@ describe("profiles", () => {
     }
   })
 
+  test("in a window 80 columns wide the box for a @handle shows what is typed in it, with its buttons under it", async () => {
+    // Two panels side by side there, and beside Connect and Sign up the box was five cells wide: "@you", then "cs"
+    // of @nightphysics. The first thing a new channel does, at the smallest size ReelForge is made for.
+    const h = await window("accounts", [80, 24], false, { unconnected: ["tiktok", "youtube", "instagram", "x"] })
+    await clickText(h, "@yourname", 2) // the whole placeholder shows
+    await h.t.mockInput.typeText("@nightphysics")
+    await h.settle(300)
+    const lines = frame(h).split("\n")
+    const at = lines.findIndex((r) => r.includes("@nightphysics"))
+    expect(at).toBeGreaterThan(0)
+    expect(lines[at + 2]).toMatch(/▐ Connect ▌ ▐ Sign up → ▌/)
+    h.t.resize(140, 30) // with room for all three in a row, they are in one, as before
+    await h.settle(500)
+    expect(frame(h)).toMatch(/@nightphysics +▐ Connect ▌ ▐ Sign up → ▌/)
+  })
+
   test("in a window 24 rows tall a sign-up dialog keeps its handle box and its buttons inside it: the steps scroll", async () => {
     // TikTok's, Instagram's and X's are a row taller than such a window takes. Nothing in them could give way, so
     // Cancel and Connect were drawn on the dialog's bottom border.

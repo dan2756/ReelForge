@@ -111,7 +111,9 @@ function Status({ panel: p }: { panel: AccountPanelView }) {
 }
 
 /** Not connected: a box for the @handle (a link to the profile works too), Connect, and Sign up for someone without
- * the account yet. One row, so even a short window shows all three. */
+ * the account yet. One row where the panel has room for it, so even a short window shows all three. In a narrow
+ * panel (two side by side in a window 80 columns wide) the buttons go under the box: beside them it was five cells
+ * wide, and the handle being typed couldn't be read. */
 function Connect({ panel: p }: { panel: AccountPanelView }) {
   const s = useDash()
   const typed = s.handles[p.key] ?? ""
@@ -119,8 +121,8 @@ function Connect({ panel: p }: { panel: AccountPanelView }) {
   const signUp = () => void s.openDialog("signup", s.bridge.call("signup_guide", p.key))
   return (
     <>
-      <box flexDirection="row" height={3} marginTop={1} flexShrink={0} alignItems="center">
-        <box flexGrow={1} maxWidth={40} marginRight={2}>
+      <box flexDirection="row" flexWrap="wrap" marginTop={1} flexShrink={0} alignItems="center">
+        <box flexGrow={1} flexShrink={1} flexBasis={0} minWidth={22} maxWidth={40} height={3} marginRight={2} overflow="hidden">
           <TextField
             id={`handle-${p.key}`}
             value={typed}
@@ -131,8 +133,10 @@ function Connect({ panel: p }: { panel: AccountPanelView }) {
             onSubmit={(v) => void s.connect(p.key, v)}
           />
         </box>
-        <Button id={`connect-${p.key}`} label="Connect" variant="primary" marginRight={1} onPress={() => void s.connect(p.key, s.handles[p.key] ?? "")} />
-        {p.signup ? <Button id={`signup-${p.key}`} label="Sign up →" marginRight={1} onPress={signUp} /> : null}
+        <box flexDirection="row" height={1} flexShrink={0}>
+          <Button id={`connect-${p.key}`} label="Connect" variant="primary" marginRight={1} onPress={() => void s.connect(p.key, s.handles[p.key] ?? "")} />
+          {p.signup ? <Button id={`signup-${p.key}`} label="Sign up →" marginRight={1} onPress={signUp} /> : null}
+        </box>
       </box>
       {error ? (
         <text fg={DASH.bad} wrapMode="word" flexShrink={0}>
