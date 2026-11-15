@@ -88,7 +88,39 @@ class YouTubeApiRow(Scratch):
             status, _, said = self.row()   # (row() checks that what is left of the file isn't shown)
             self.assertEqual(status, doctor.WARN)
             self.assertIn(f"{Path('dashboard') / 'data' / 'youtube_api.json'} can't be read", said)
-            self.assertIn("reelforge youtube-api client FILE", said)
+            self.assertTrue(said.endswith("again: reelforge youtube-api client FILE"), said)
+
+    def test_with_several_channels_the_command_it_gives_is_for_the_channel_whose_file_it_is(self):
+        # Left to itself the command works on the first channel: it would leave the broken file as it is, and give
+        # the first channel a client it never asked for.
+        other = self.second()
+        theirs = self.give_client(other)
+        theirs.write_text("{not json", "utf-8")
+        profiles.use(profiles.main())
+        status, _, said = self.row()
+        self.assertEqual(status, doctor.WARN)
+        self.assertEqual(said, f"{Path('profiles') / 'cool-epic-facts' / 'dashboard' / 'data' / 'youtube_api.json'} "
+                               "can't be read, so ReelForge has no client there. Give it the client file again: "
+                               "reelforge -p cool-epic-facts youtube-api client FILE")
+        # The command as it is printed, with the file: the warning goes, and the first channel has no file still.
+        from studio.__main__ import main
+
+        command = said.split("again: ")[1].split()
+        self.assertEqual(command[0], "reelforge")
+        downloaded = str(self.root / "downloads" / "client_secret_1234567890-abc.json")
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(main([downloaded if word == "FILE" else word for word in command[1:]]), 0)
+        self.assertEqual(self.row()[2], "client on file for Cool Epic Facts (not set up for Night Physics). You "
+                                        "connect in ReelForge's window each time it opens")
+        self.assertFalse((self.root / "dashboard" / "data" / "youtube_api.json").exists())
+        # Both broken: each file, and each channel's own command (the first one's too, now that there are two).
+        mine = self.give_client()
+        for store in (mine, theirs):
+            store.write_text("{not json", "utf-8")
+        said = self.row()[2]
+        self.assertIn(f"{Path('dashboard') / 'data' / 'youtube_api.json'}, {Path('profiles') / 'cool-epic-facts'}", said)
+        self.assertTrue(said.endswith("again: reelforge -p night-physics youtube-api client FILE and reelforge -p "
+                                      "cool-epic-facts youtube-api client FILE"), said)
 
     def test_whatever_else_goes_wrong_is_a_warning_without_the_errors_own_words(self):
         self.give_client()
