@@ -227,17 +227,33 @@ def create_batch(video: Path, platforms: list[str], caption: str, tags: str, cfg
     hashtags as the Publish form has them.
 
     Returns {"batch": its id (None when nothing could start), "jobs": [the new rows],
-    "blocked": [{"platform", "reason", "message", and "job" and "url" when there are any}]}. A platform is blocked
-    when the video isn't approved (videos.approval), when it has a job that is under way, posted or unknown, or when
-    a stats read has already found this video's post there. force names the platforms to post to again all the same:
-    it sets a posted or unknown job aside, never one that is under way (cancel that first). press: you switched
-    "stop before posting" off. via and options are per platform ("api" for a platform's own API, and what it needs).
+    "blocked": [{"platform", "reason", "message", and "job", "state" and "url" when there are any}]}. A platform is
+    blocked when the video isn't approved (videos.approval), when it has a job that is under way, posted or unknown,
+    or when a stats read has already found this video's post there. force names the platforms to post to again all
+    the same: it sets a posted or unknown job aside, never one that is under way (cancel that first). press: you
+    switched "stop before posting" off. via and options are per platform ("api" for a platform's own API, and what
+    it needs).
     """
     item = PublishItem(video=video, caption=(caption or "").strip(), tags=(tags or "").strip())
+    return _create(video, {p: snapshot(item, p) for p in platforms}, item.title, cfg, press, force, via, options, demo)
+
+
+def preview(video: Path, platforms: list[str], caption: str, tags: str, cfg: dict, *,
+            force: tuple[str, ...] | list[str] = (), demo: bool = False) -> dict:
+    """What create_batch would do with this right now, without doing it, for the question before a post:
+    {"review": the video's approval, "texts": {platform: its text}, "blocked": {platform: why it can't go}}."""
+    item = PublishItem(video=video, caption=(caption or "").strip(), tags=(tags or "").strip())
     texts = {p: snapshot(item, p) for p in platforms}
-    if not item.title:
-        return _nothing(platforms, "empty", "Write a caption first.")
-    return _create(video, texts, item.title, cfg, press, force, via, options, demo)
+    review, blocked = _before(video, texts, item.title, cfg, demo)
+    left = [p for p in platforms if p not in {b["platform"] for b in blocked}]
+    if left:
+        sha, episode = digest(video), db.episode_for_video(video.name)
+        with db.connect() as c:
+            for p in left:
+                block, _ = _standing(c, sha, p, episode["id"] if episode else None, force)
+                if block:
+                    blocked.append(block)
+    return {"review": review, "texts": texts, "blocked": {b["platform"]: b for b in blocked}}
 
 
 def retry(job_id: str, cfg: dict, demo: bool = False) -> dict:
@@ -251,52 +267,67 @@ def retry(job_id: str, cfg: dict, demo: bool = False) -> dict:
                    {platform: job["via"]}, {platform: json.loads(job["options"])}, demo)
 
 
-def _nothing(platforms, reason: str, message: str) -> dict:
-    return {"batch": None, "jobs": [], "blocked": [{"platform": p, "reason": reason, "message": message}
-                                                  for p in platforms]}
+def _before(video: Path, texts: dict[str, dict], title: str, cfg: dict, demo: bool) -> tuple[dict, list[dict]]:
+    """What stops a post before the ledger is looked at: (the video's approval, the platforms that can't go and
+    why). A video that is gone, isn't approved or has no caption stops every platform."""
+    def every(reason: str, message: str) -> list[dict]:
+        return [{"platform": p, "reason": reason, "message": message} for p in texts]
 
-
-def _create(video: Path, texts: dict[str, dict], title: str, cfg: dict, press: bool, force, via, options,
-            demo: bool) -> dict:
-    platforms = list(texts)
     if not video.is_file():
-        return _nothing(platforms, "missing", f"{video.name} isn't there any more.")
+        return {"state": "none", "line": ""}, every("missing", f"{video.name} isn't there any more.")
     review = {"state": "demo", "line": "This is the demo: nothing is posted from it."} if demo else \
         videos.approval(video, cfg)
     if review["state"] not in videos.POSTABLE:
-        return _nothing(platforms, "review", review["line"])
+        return review, every("review", review["line"])
+    if not title:
+        return review, every("empty", "Write a caption first.")
     blocked = []
-    for p in platforms:
+    for p in texts:
         if p not in desktop.UPLOAD_PAGES:
             blocked.append({"platform": p, "reason": "unknown_platform", "message": f"ReelForge doesn't post to {p}."})
         elif p == "x" and len(texts[p]["text"]) > X_LIMIT:
             blocked.append({"platform": p, "reason": "too_long", "message": f"An X post takes {X_LIMIT} characters "
                             f"and this one has {len(texts[p]['text'])}. Shorten the caption."})
-    left = [p for p in platforms if p not in {b["platform"] for b in blocked}]
+    return review, blocked
+
+
+def _standing(c: sqlite3.Connection, sha: str, platform: str, episode: int | None,
+              force) -> tuple[dict | None, dict | None]:
+    """For one platform, as the ledger and the stats stand: (why a new job can't be made for this video, the posted
+    or unknown job a forced one sets aside)."""
+    live = c.execute(f"SELECT * FROM post_jobs WHERE video_sha256 = ? AND platform = ? AND superseded = 0 "
+                     f"AND state IN ({','.join('?' * len(LIVE))})", (sha, platform, *LIVE)).fetchone()
+    if live and (live["state"] in IN_FLIGHT or platform not in force):
+        return _in_the_way(dict(live)), None
+    if live:  # posted, or unknown: you said to post again
+        return None, dict(live)
+    spotted = c.execute("SELECT url FROM posts WHERE episode_id = ? AND platform = ? AND post_id NOT LIKE 'manual-%' "
+                        "ORDER BY published_at LIMIT 1", (episode, platform)).fetchone()
+    if spotted and platform not in force:
+        return {"platform": platform, "reason": "spotted", "url": spotted["url"],
+                "message": "Already posted: ReelForge found this video's post there."}, None
+    return None, None
+
+
+def _create(video: Path, texts: dict[str, dict], title: str, cfg: dict, press: bool, force, via, options,
+            demo: bool) -> dict:
+    review, blocked = _before(video, texts, title, cfg, demo)
+    left = [p for p in texts if p not in {b["platform"] for b in blocked}]
     if not left:
         return {"batch": None, "jobs": [], "blocked": blocked}
     sha, size = digest(video), video.stat().st_size
-    episode = db.adopt_episode(title or video.stem, str(video))
+    episode = db.adopt_episode(title, str(video))
     batch, now, made = "pb_" + secrets.token_hex(8), db.now_iso(), []
     with db.connect() as c:
         c.execute("BEGIN IMMEDIATE")  # the look and the insert are one step, whoever else is making jobs
-        spotted = {}
-        for q in c.execute("SELECT platform, url FROM posts WHERE episode_id = ? AND post_id NOT LIKE 'manual-%' "
-                           "ORDER BY published_at DESC", (episode,)):
-            spotted[q["platform"]] = q["url"]  # the first one that went up
         for p in left:
-            live = c.execute(f"SELECT * FROM post_jobs WHERE video_sha256 = ? AND platform = ? AND superseded = 0 "
-                             f"AND state IN ({','.join('?' * len(LIVE))})", (sha, p, *LIVE)).fetchone()
-            if live and (live["state"] in IN_FLIGHT or p not in force):
-                blocked.append(_in_the_way(dict(live)))
+            block, aside = _standing(c, sha, p, episode, force)
+            if block:
+                blocked.append(block)
                 continue
-            if live:  # posted, or unknown: you said to post again
-                c.execute("UPDATE post_jobs SET superseded = 1, updated_at = ? WHERE id = ?", (now, live["id"]))
-                _event(c, live["id"], now, live["state"], None, "set aside: posted again")
-            elif p in spotted and p not in force:
-                blocked.append({"platform": p, "reason": "spotted", "url": spotted[p],
-                                "message": "Already posted: ReelForge found this video's post there."})
-                continue
+            if aside:
+                c.execute("UPDATE post_jobs SET superseded = 1, updated_at = ? WHERE id = ?", (now, aside["id"]))
+                _event(c, aside["id"], now, aside["state"], None, "set aside: posted again")
             job = {"id": "pj_" + secrets.token_hex(8), "batch": batch, "created_at": now, "updated_at": now,
                    "platform": p, "via": (via or {}).get(p, "extension"), "video": video.name,
                    "video_path": str(video), "video_sha256": sha, "video_size": size, "episode_id": episode,

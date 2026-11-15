@@ -1,7 +1,8 @@
 """The posting ledger (dashboard.posting): making jobs and what refuses one, every move a job can and can't make,
 claiming, the one press of Post, what the clock and a stats read decide, and the video's identity. Then the check
-before a post (dashboard.videos.approval): every state a video can be in. Nothing here needs a window, a browser or
-the extension: "the extension" is whoever calls claim and advance."""
+before a post (dashboard.videos.approval): every state a video can be in. Nothing here needs a browser or the
+extension: "the extension" is whoever calls claim and advance. Only the test that the text is what the Copy buttons
+copy opens a window's Python side."""
 
 from __future__ import annotations
 
@@ -19,10 +20,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-from dashboard import analytics, db, posting, videos
+from dashboard import analytics, db, demo, desktop, posting, videos
 from dashboard.config import PLATFORM_KEYS
 from dashboard.platforms import Account, Post
 from dashboard.posting import Refused
+from dashboard.tests.window import Window
 
 CAPTION, TAGS = "What if gravity doubled every second?", "#whatif #physics #gravity"
 CHROME, EDGE = "install-chrome", "install-edge"  # two browsers with the extension
@@ -116,6 +118,55 @@ class Making(LedgerTest):
             "instagram": {"caption": f"{CAPTION} {TAGS}"},
             "x": {"text": CAPTION},
         })
+
+    def test_the_text_is_what_the_copy_buttons_copy(self):
+        copied: list[str] = []
+        with mock.patch.object(desktop, "copy", lambda text: copied.append(text) or True), \
+                mock.patch.object(desktop, "reveal", lambda path: None), \
+                mock.patch.object(desktop, "open_url", lambda url: True):
+            for x_tags in (False, True):  # a channel without hashtags on X, and one with
+                with mock.patch.object(videos, "X_TAGS", x_tags):
+                    self.video.write_bytes(f"cut {x_tags}".encode())
+                    w = Window({**self.cfg, "refresh_minutes": 0}, demo.platforms(), tab="publish")
+                    self.addCleanup(w.close)
+                    caption, tags = f"{CAPTION} #space", "#whatif #physics #gravity #doubling #sim #more"
+                    text = {j["platform"]: json.loads(j["text"])
+                            for j in posting.create_batch(self.video, list(PLATFORM_KEYS), caption, tags,
+                                                          self.cfg, force=PLATFORM_KEYS)["jobs"]}
+
+                    def copy(button: str) -> str:
+                        w.call("copy_field", button, caption, tags)
+                        return copied[-1]
+
+                    self.assertEqual(text["tiktok"], {"caption": copy("copy-tiktok")})
+                    self.assertEqual(text["instagram"], {"caption": copy("copy-instagram")})
+                    self.assertEqual(text["youtube"], {"title": copy("copy-youtube-caption"),
+                                                       "description": copy("copy-youtube")})
+                    w.call("open_upload", "x", caption, tags)  # X's button copies the X post
+                    self.assertEqual(text["x"], {"text": copied[-1]})
+                    self.assertEqual("#" in text["x"]["text"], x_tags)
+                    self.assertNotIn("#", text["youtube"]["title"].removesuffix(" #shorts"))
+                    for j in posting.recent():
+                        posting.cancel(j["id"])
+
+    def test_a_look_before_posting_makes_nothing_and_says_what_would_be_refused(self):
+        job = self.walk(self.job("tiktok"), *STEPS)
+        episode = posting.get(job["id"])["episode_id"]
+        db.add_post("youtube", "abcdefghijk", episode, CAPTION, "https://youtu.be/abcdefghijk")
+        before = (posting.signature(), db.changes(), len(posting.recent()), len(db.uploads()))
+        look = posting.preview(self.video, list(PLATFORM_KEYS), CAPTION, TAGS, self.cfg)
+        self.assertEqual((posting.signature(), db.changes(), len(posting.recent()), len(db.uploads())), before)
+        self.assertEqual(look["review"]["state"], "none")
+        self.assertEqual(look["texts"]["x"], {"text": CAPTION})
+        self.assertEqual({p: b["reason"] for p, b in look["blocked"].items()},
+                         {"tiktok": "in_progress", "youtube": "spotted"})
+        self.assertEqual(look["blocked"]["tiktok"]["job"], job["id"])
+        again = posting.preview(self.video, ["tiktok", "youtube"], CAPTION, TAGS, self.cfg, force=["tiktok", "youtube"])
+        self.assertEqual(list(again["blocked"]), ["tiktok"])  # under way: saying "again" doesn't help
+        self.assertEqual({b["reason"] for b in posting.preview(self.video, ["tiktok", "x"], "", TAGS,
+                                                               self.cfg)["blocked"].values()}, {"empty"})
+        gone = posting.preview(self.root / "videos" / "gone.mp4", ["tiktok"], CAPTION, TAGS, self.cfg)
+        self.assertEqual(gone["blocked"]["tiktok"]["reason"], "missing")
 
     def test_a_job_under_way_blocks_another_and_force_does_not_help(self):
         job = self.job()
