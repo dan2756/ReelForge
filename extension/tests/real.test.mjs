@@ -288,7 +288,9 @@ export const tests = {
     await becomes(t.app, jobs.youtube, ["posted"])
     const job = await t.app.job(jobs.youtube)
     equal([job.post_id, job.url, job.claimed_by !== null], ["FIXTUREvid1", "https://youtu.be/FIXTUREvid1", true], "the job's post id and link")
-    // The id is the one the stats reader uses, so the post is filed under this video before any read.
+    // The id is the one the stats reader uses, so the post is filed under this video before any read. (It is
+    // filed right after the job is written, so a look in between finds the job posted and no post yet.)
+    await until("the post to be in the stats", async () => (await t.app.ask("posts")).length > 0)
     equal(await t.app.ask("posts"), [{ platform: "youtube", post_id: "FIXTUREvid1", episode_id: job.episode_id, link: "publish", url: "https://youtu.be/FIXTUREvid1" }], "the stats' posts")
     equal(await t.app.ask("events", { id: jobs.youtube }).then(all => all.filter((state, i) => state !== all[i - 1])), ["queued", "claimed", "opening", "uploading", "filling", "ready", "posted"], "the job's states, in order")
     await until("the page to say it is posted", async () => (await text(page.locator("#rows"))).includes("Posted"))
