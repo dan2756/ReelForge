@@ -93,6 +93,13 @@ describe("the Settings tab", () => {
     expect(said).toContain("on: your stats update every hour, even with ReelForge closed") // (it ended "... even with R")
     expect(said).toContain("open ReelForge without typing a command")
     expect(frame(h)).toContain("Turn off") // its button, still in full beside it
+    // however many lines a row takes, it has a line of space over it and its button beside its name
+    const lines = frame(h).split("\n")
+    for (const name of ["The reelforge command", "ReelForge's icon", "ReelForge's folder", "Restart ReelForge"]) {
+      const y = lines.findIndex((r) => r.includes(name))
+      expect(lines[y - 1]!.replace(/[┃\s]/g, "")).toBe("")
+      expect(lines[y]).toMatch(/▐.+▌/)
+    }
   })
 
   test("Settings and Updates are the last two tabs, so 6 opens it and 7 Updates", async () => {
@@ -526,7 +533,7 @@ describe("Background refresh on a channel that's set up", () => {
   test("a problem with the hourly job's last read is drawn as a warning, and can be read to its end", async () => {
     // (ui/test/posting_preload.py: the same channel, with the hourly job's last read marked as having had a problem)
     tmp = mkdtempSync(join(tmpdir(), "reelforge-job-"))
-    const h = (open = await headless("dashboard", { tab: "settings" }, 84, 64, {
+    const h = (open = await headless("dashboard", { tab: "settings" }, 84, 66, {
       REELFORGE_BRIDGE_PRELOAD: join(ROOT, "ui", "test", "posting_preload.py"),
       REELFORGE_TEST_ROOT: tmp,
       REELFORGE_TEST_POSTING: JSON.stringify({ job_problem: true }),

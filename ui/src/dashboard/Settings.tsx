@@ -358,10 +358,11 @@ function Computer({ v }: { v: SettingsView }) {
   }, [v.computer])
   const width = Math.max(RESTART.length, ...(rows ?? []).map((row) => row.button.length)) + 4
   // tone: green for what's on, grey for what's off, and amber for a row that says something went wrong. What a row
-  // says wraps under itself where the window is too narrow for it on one line (it was cut at the button).
+  // says wraps under itself where the window is too narrow for it on one line (it was cut at the button). Each row
+  // has a line of space over it and its button beside its name, however many lines it takes.
   const item = (key: string, label: string, value: string, tone: "good" | "warn" | "plain", control: ReactNode) => (
-    <box key={key} flexDirection="row" minHeight={3} flexShrink={0} alignItems="center" gap={1}>
-      <box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} justifyContent="center">
+    <box key={key} flexDirection="row" paddingTop={1} flexShrink={0} alignItems="flex-start" gap={1}>
+      <box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
         <text attributes={TextAttributes.BOLD} wrapMode="none">
           {label}
         </text>
