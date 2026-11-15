@@ -1,0 +1,125 @@
+/* ReelForge's two local pages (pair.html, post.html). Nothing here is loaded from anywhere but this computer. */
+:root {
+  --page: #111214;
+  --panel: #18191c;
+  --line: #2a2b30;
+  --text: #e8e8e6;
+  --soft: #a6a7ab;
+  --red: #e8213a;
+  --green: #3dff9a;
+  --amber: #f0b45a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--page);
+  color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+[hidden] { display: none !important; }
+.offscreen { position: fixed; left: -9999px; top: 0; opacity: 0; }
+code, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; }
+code { padding: 1px 5px; border-radius: 4px; background: #222327; overflow-wrap: anywhere; }
+b { font-weight: 600; }
+.soft { color: var(--soft); }
+.small { font-size: 13.5px; }
+:focus-visible { outline: 2px solid #fff; outline-offset: 2px; border-radius: 4px; }
+::selection { background: rgba(232, 33, 58, .45); }
+
+.page { max-width: 640px; margin: 0 auto; padding: 44px 24px 64px; }
+.brand { display: flex; align-items: center; gap: 9px; margin: 0 0 30px; font-weight: 600; letter-spacing: .01em; }
+.brand img { display: block; border-radius: 5px; }
+h1 { margin: 0 0 6px; font-size: 24px; line-height: 1.2; font-weight: 500; text-wrap: balance; }
+h2 { margin: 0 0 8px; font-size: 16px; line-height: 1.3; font-weight: 600; }
+p { margin: 0 0 14px; }
+#video, #lead { overflow-wrap: anywhere; }
+
+/* --- what ReelForge or the extension has to say about the page as a whole */
+.notice {
+  margin: 18px 0 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--line), inset 3px 0 0 var(--amber);
+}
+.notice.bad { box-shadow: inset 0 0 0 1px var(--line), inset 3px 0 0 var(--red); }
+
+.panel {
+  margin: 18px 0 0;
+  padding: 18px 18px 6px;
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.panel.good { box-shadow: inset 0 0 0 1px var(--line), inset 3px 0 0 var(--green); }
+.steps { margin: 0 0 14px; padding-left: 22px; }
+.steps li { margin: 0 0 9px; padding-left: 2px; }
+.copyline { display: flex; align-items: center; gap: 10px; margin-top: 7px; flex-wrap: wrap; }
+.path { flex: 1 1 220px; min-width: 0; padding: 7px 9px; line-height: 1.45; }
+
+/* --- buttons: white for the thing to do, dark for the rest (as on reelforge.tools) */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 36px; padding: 0 16px;
+  border: 0; border-radius: 999px;
+  background: #fff; color: #000;
+  font: 500 14px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  text-decoration: none; cursor: pointer;
+}
+.btn:hover { background: #e8e8e6; }
+.btn:active { transform: translateY(1px); }
+.btn.dark { background: #1d1e21; color: var(--text); box-shadow: inset 0 0 0 1px #34353a; }
+.btn.dark:hover { background: #26272b; box-shadow: inset 0 0 0 1px #45464c; }
+.btn.small { min-height: 30px; padding: 0 13px; font-size: 13px; }
+.btn.done { background: var(--green); color: #04210f; }
+.btn[disabled] { opacity: .55; cursor: default; }
+.linkish { padding: 0; border: 0; background: none; color: var(--text); font: inherit; text-decoration: underline; cursor: pointer; }
+.linkish:hover { color: #fff; }
+a { color: var(--text); }
+a:hover { color: #fff; }
+
+/* --- a row for each platform */
+.rows { list-style: none; margin: 22px 0 0; padding: 0; display: grid; gap: 10px; }
+.row {
+  display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 4px 12px; align-items: start;
+  padding: 15px 16px;
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.dot { width: 10px; height: 10px; margin-top: 7px; border-radius: 50%; background: #55565c; }
+.row[data-tone="busy"] .dot { background: var(--text); animation: pulse 1.4s ease-in-out infinite; }
+.row[data-tone="ready"] .dot { background: #fff; box-shadow: 0 0 0 4px rgba(255, 255, 255, .16); }
+.row[data-tone="good"] .dot { background: var(--green); }
+.row[data-tone="bad"] .dot { background: var(--red); }
+.row[data-tone="ask"] .dot { background: var(--amber); }
+.row[data-tone="ready"] { box-shadow: inset 0 0 0 1px #4a4b52; }
+@keyframes pulse { 50% { opacity: .35; } }
+.what { min-width: 0; }
+.name { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; font-weight: 600; }
+.handle { color: var(--soft); font-weight: 400; overflow-wrap: anywhere; }
+.line { margin-top: 1px; overflow-wrap: anywhere; }
+.row[data-tone="ready"] .line { font-weight: 600; }
+.row[data-tone="wait"] .line { color: var(--soft); }
+.note { margin-top: 3px; color: var(--soft); font-size: 13.5px; overflow-wrap: anywhere; }
+.acts { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 11px; }
+
+progress { display: block; width: 100%; height: 6px; margin-top: 9px; border: 0; border-radius: 999px; background: #26272b; overflow: hidden; appearance: none; -webkit-appearance: none; }
+progress::-webkit-progress-bar { background: #26272b; border-radius: 999px; }
+progress::-webkit-progress-value { background: var(--text); border-radius: 999px; transition: width .4s ease; }
+progress::-moz-progress-bar { background: var(--text); border-radius: 999px; }
+
+.foot { margin-top: 26px; }
+
+@media (max-width: 480px) {
+  .page { padding: 28px 16px 48px; }
+  h1 { font-size: 21px; }
+  .brand { margin-bottom: 22px; }
+  .panel { padding: 16px 14px 4px; }
+  .row { padding: 14px 13px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

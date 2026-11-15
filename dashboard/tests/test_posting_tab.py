@@ -9,7 +9,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
-from dashboard import db, desktop, posting, posting_tab
+from dashboard import db, desktop, extension_api, posting, posting_tab
 from dashboard.platforms import Post
 from dashboard.tests.test_posting import approve
 from dashboard.tests.test_publish import CAPTION, TAGS, PublishTest, Reader
@@ -27,7 +27,7 @@ class PostingTest(PublishTest):
     def setUp(self) -> None:
         super().setUp()
         self.store = self.root / "extension.json"
-        patch = mock.patch.object(posting_tab, "store_path", lambda: self.store)
+        patch = mock.patch.object(extension_api, "store_path", lambda: self.store)
         patch.start()
         self.addCleanup(patch.stop)
         self.pages: list[str] = []  # the batches whose page "opened"
@@ -520,16 +520,33 @@ class ExtensionView(PostingTest):
     def test_an_extension_of_another_version_is_old_and_post_waits_for_the_update(self):
         self.extension(protocol=0)
         w = self.window()
+        older = ("The browser extension is older than this ReelForge. Press Reload on its card on your browser's "
+                 "extensions page.")
         self.assertEqual(self.view(w)["state"], "old")
-        self.assertEqual((w.view("posting")["can_post"], w.view("posting")["why"]),
-                         (False, "Update the browser extension first."))
-        self.extension()
-        w.svc.extension_mismatch = "This ReelForge is older than the extension: update ReelForge."  # the server's word
+        self.assertEqual((w.view("posting")["can_post"], w.view("posting")["why"]), (False, older))
+        self.extension(protocol=2)  # the other way round: the sentence says which side to update
         view = self.view(w)
         self.assertEqual(view["state"], "old")
-        self.assertIn("This ReelForge is older than the extension", plain(view["line"]))
+        self.assertIn("This ReelForge is older than the browser extension", plain(view["line"]))
         w.svc.update_posting()
-        self.assertEqual(w.view("posting")["why"], "This ReelForge is older than the extension: update ReelForge.")
+        self.assertEqual(w.view("posting")["why"],
+                         "This ReelForge is older than the browser extension. Update ReelForge on its Updates tab.")
+
+    def test_one_browser_that_is_behind_does_not_stop_another(self):
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self.store.write_text(json.dumps({"paired": [
+            {"install": CHROME, "name": "Chrome", "last_seen": now},
+            {"install": "install-edge", "name": "Edge", "last_seen": now, "protocol": 0}]}), encoding="utf-8")
+        w = self.window()
+        view = self.view(w)
+        self.assertEqual((view["state"], [i["old"] for i in view["installs"]]), ("on", [False, True]))
+        self.assertTrue(w.view("posting")["can_post"])
+
+    def test_what_a_browser_was_seen_signed_in_to_is_passed_on_as_the_extension_said_it(self):
+        self.extension(accounts={"tiktok": {"signed_in": True, "handle": "@me"}})
+        w = self.window()
+        (install,) = self.view(w)["installs"]
+        self.assertEqual(install["accounts"], {"tiktok": {"signed_in": True, "handle": "@me"}})
 
     def test_a_browser_that_connects_while_the_window_is_open_shows_within_a_second(self):
         w = self.window(connect=False)

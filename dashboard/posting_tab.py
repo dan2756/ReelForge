@@ -20,14 +20,13 @@ ends at the platform's own Post button unless you switched "stop before posting"
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from datetime import timedelta
 from pathlib import Path
 
 from studio.bridge import rpc
 
-from . import analytics, config, db, desktop, posting, videos
+from . import analytics, db, desktop, extension_api, posting, videos
 from .analytics import fmt_ago, fmt_num
 from .posting import STEPS, TESTED, failure, standing
 from .view import BAD, GOOD, MUTED, TYPICAL, Text
@@ -59,21 +58,6 @@ ACTIONS = {
 }
 # What each platform's text is called in its own boxes, for the question before a post.
 FIELDS = {"title": "Title", "description": "Description", "caption": "Caption", "text": "Post"}
-
-
-def store_path() -> Path:
-    """Where the extension's connections are kept (dashboard/extension_api.py writes it): one file for every
-    profile of this ReelForge folder, since a browser connects to ReelForge, not to a channel."""
-    return config.APP_DIR / "data" / "extension.json"
-
-
-def read_store() -> dict:
-    """The connections file, or {} while there is none (or it can't be read: then nothing is connected)."""
-    try:
-        data = json.loads(store_path().read_text("utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
 
 
 def numbers(post: dict) -> str:
@@ -146,8 +130,6 @@ class PostingTab:
     jobs_seen = 0                       # the ledger as this window last drew it (posting.signature)
     extension_seen: float | None = None  # the connections file's time, as last read
     extension_port: int | None = None    # the local server's port once it listens (set by whoever starts it)
-    extension_mismatch = ""              # set by the server when the extension speaks another version of the link:
-                                         # the sentence that says which side to update
     picked_review: tuple[Path, dict] | None = None  # the picked video's approval, worked out once per look
     form_text = ("", "")                 # the Publish form's caption and hashtags as last typed
 
@@ -180,30 +162,32 @@ class PostingTab:
         if self.demo:
             return {"state": "off", "line": Text("○ The demo doesn't use the browser extension", MUTED), "installs": []}
         now, installs = analytics.now(), []
-        for p in read_store().get("paired") or []:
-            if not isinstance(p, dict):
-                continue
+        for p in extension_api.paired(extension_api.read_store()):
             try:
                 seen = db.parse(p["last_seen"])
             except (KeyError, TypeError, ValueError):
                 seen = None
+            theirs = p.get("protocol", posting.PROTOCOL)
             installs.append({"install": str(p.get("install", "")), "name": str(p.get("name") or "A browser"),
                              "version": str(p.get("version", "")),
                              "seen": fmt_ago(p.get("last_seen")) if seen else "never",
                              "on": bool(seen and now - seen <= ON_WITHIN),
-                             "old": p.get("protocol", posting.PROTOCOL) != posting.PROTOCOL, "at": seen})
+                             "old": theirs != posting.PROTOCOL, "at": seen, "protocol": theirs,
+                             # What that browser was last seen signed in to. It is the extension's word about its
+                             # own browser, and says nothing about the accounts connected in ReelForge.
+                             "accounts": p.get("accounts") if isinstance(p.get("accounts"), dict) else {}})
         installs.sort(key=lambda i: (i["at"] is not None, i["at"]), reverse=True)  # the one heard from last, first
+        theirs = installs[0]["protocol"] if installs else None
         for i in installs:
-            del i["at"]
+            del i["at"], i["protocol"]
         if not installs:
             return {"state": "off", "line": Text("○ Browser extension not connected", MUTED), "installs": []}
         first = installs[0]
         who = first["name"] + (f" · v{first['version']}" if first["version"] else "")
-        if self.extension_mismatch or all(i["old"] for i in installs):
-            line = Text("● Browser extension needs an update", f"bold {BAD}")
-            line.append("  " + (self.extension_mismatch or "It is an older version than this ReelForge works with."),
-                        MUTED)
-            return {"state": "old", "line": line, "installs": installs}
+        if all(i["old"] for i in installs):  # (one browser that is behind doesn't stop another that isn't)
+            why = extension_api.update_which(theirs)
+            line = Text("● Browser extension needs an update", f"bold {BAD}").append("  " + why, MUTED)
+            return {"state": "old", "line": line, "installs": installs, "why": why}
         if first["on"]:
             line = Text("● Browser extension connected", f"bold {GOOD}")
             return {"state": "on", "line": line.append(f"  {who} · seen {first['seen']}", MUTED),
@@ -216,14 +200,11 @@ class PostingTab:
         """The extension's own view: its state, the browsers it's connected in, the port ReelForge listens on for
         it, where its folder is, and whether you closed the hint to set it up."""
         status = self.extension_status()
-        folder = config.APP_DIR.parent / "extension"
+        folder = extension_api.folder()
         lines = []
         if status["state"] == "off" and not self.demo:
             lines.append(Text("Posting with the extension fills in each platform's upload page for you: the video, "
                               "the caption, the hashtags. You check it and press Post.", MUTED))
-        if status["state"] == "old":
-            lines.append(Text("Reload it on your browser's extensions page (or load the folder below again), then "
-                              "connect it once more.", MUTED))
         if not self.demo:
             lines.append(Text(TESTED, MUTED))
         self.emit("extension", {
@@ -237,7 +218,7 @@ class PostingTab:
         """Every second (keep_in_step): a browser that connected, said hello or was disconnected since the last
         look, whichever window's server it spoke to."""
         try:
-            seen = store_path().stat().st_mtime
+            seen = extension_api.store_path().stat().st_mtime
         except OSError:
             seen = None
         if seen != self.extension_seen:
@@ -301,7 +282,7 @@ class PostingTab:
         if extension["state"] == "off":
             return "Connect the browser extension first."
         if extension["state"] == "old":
-            return self.extension_mismatch or "Update the browser extension first."
+            return extension.get("why") or "Update the browser extension first."
         return ""
 
     # --- keeping it current ------------------------------------------------------------------------
@@ -491,3 +472,4 @@ class PostingTab:
         """Close the Publish tab's hint to set the extension up, for good (this channel's)."""
         self._safe(lambda: db.set_meta(HINT, True), None)
         self.update_extension()
+

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en" data-rf-page="pair" data-rf-protocol="{{protocol}}" data-rf-port="{{port}}" data-rf-secret="{{secret}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect your browser · ReelForge</title>
+<link rel="icon" href="/assets/icon.svg">
+<link rel="stylesheet" href="/assets/page.css">
+<script src="/assets/page.js" defer></script>
+</head>
+<body>
+<main class="page">
+  <p class="brand"><img src="/assets/icon.svg" alt="" width="22" height="22"> ReelForge</p>
+  <h1 id="title">Connecting this browser</h1>
+  <p id="lead" class="soft">Looking for ReelForge's extension in this browser…</p>
+
+  <p id="notice" class="notice" role="status" hidden></p>
+
+  <section id="done" class="panel good" aria-labelledby="done-title" hidden>
+    <h2 id="done-title">Connected</h2>
+    <p id="done-who"></p>
+    <p class="soft">You can close this page. In ReelForge, go to Publish, pick a video and post it with the
+      extension. It fills in each upload page and stops there: you check it and press Post.</p>
+  </section>
+
+  <section id="setup" class="panel" aria-labelledby="setup-title" hidden>
+    <h2 id="setup-title">The extension isn't in this browser</h2>
+    <p id="setup-why">ReelForge's browser extension isn't loaded in this browser, or it is switched off. Adding it
+      takes a minute.</p>
+    <ol class="steps">
+      <li>Open your browser's extensions page: type <code>chrome://extensions</code> in the address bar
+        (in Edge <code>edge://extensions</code>, in Brave <code>brave://extensions</code>).</li>
+      <li>Switch on <b>Developer mode</b>, at the top right of that page.</li>
+      <li id="setup-folder">Press <b>Load unpacked</b> and pick this folder:
+        <span class="copyline"><code id="folder" class="path"></code>
+          <button type="button" class="btn small" data-copy="folder">Copy</button></span></li>
+      <li>Come back to this page and reload it. It connects by itself.</li>
+    </ol>
+    <p class="soft small">It works in Chrome, Edge and Brave. Is the extension in another browser? Open this page
+      there: <button type="button" class="linkish" data-copy="address">copy this page's address</button>. This
+      page works once, for ten minutes.</p>
+  </section>
+
+  <p id="note" class="foot soft small"></p>
+  <noscript><p class="notice">This page needs JavaScript to connect your browser.</p></noscript>
+</main>
+</body>
+</html>
