@@ -38,5 +38,14 @@
     ask({ t: "batch", batch: root.dataset.rfBatch || "" }).then(state => {
       announce("reelforge:batch", "data-rf-batch-state", state)
     })
+    // "Press Post for me" for this batch takes a person's own click on the page's button for it. A click made
+    // by a script (the page's own, or a program driving the page) is not one, and opening this page is not
+    // one either: without the click the extension fills everything in and stops, whatever ReelForge asked for.
+    document.addEventListener("click", event => {
+      if (!event.isTrusted || !(event.target instanceof Element) || !event.target.closest("[data-rf-press]")) return
+      ask({ t: "batch.press", batch: root.dataset.rfBatch || "" }).then(state => {
+        announce("reelforge:press", "data-rf-press", state)
+      })
+    }, true)
   }
 })()

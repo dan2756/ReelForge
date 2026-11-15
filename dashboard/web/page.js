@@ -34,6 +34,7 @@
     app_unreachable: "The extension couldn't reach ReelForge. Is ReelForge still open?",
     demo: "ReelForge is showing its demo, which never posts.",
     no_batch: "ReelForge has no posts for this page any more. Start again from its Publish tab.",
+    not_claimed: "These posts waited more than ten minutes, or another browser took them. Nothing was opened here. Start again from ReelForge.",
   }
   const trouble = code => TROUBLE[code] ||
     `The extension couldn't do this (${code}). Reload this page to try again, or start again from ReelForge.`
@@ -295,12 +296,13 @@
       }
     }
     setup(missing && queued)
+    drawPress(jobs, state)
 
     if (over) {
       notice("This page can't follow ReelForge any more: it is from an earlier run, or more than two hours old. ReelForge's Publish tab shows where each post stands.")
     } else if (closed) {
       notice("ReelForge was closed. Open it again to see where this stands.")
-    } else if (wrong && queued) {
+    } else if (wrong && (queued || wrong === "not_claimed")) {
       notice(trouble(wrong), true)
     } else if (state === "unpaired" && queued) {
       notice("The extension in this browser isn't connected to ReelForge yet. In ReelForge, go to Publish and connect your browser, then start the post again. You can also post by hand below.")
@@ -311,6 +313,24 @@
     }
   }
 
+  // "Press Post for me" takes your own click on this page's button, in this browser: the extension listens for
+  // it (a click a script makes doesn't count) and presses nothing without it, whatever ReelForge asked for.
+  // The question shows while a post that asked for the press is still on its way to ready.
+  function drawPress(jobs, state) {
+    const said = root.dataset.rfPress || ""
+    const early = ["queued", "claimed", "opening", "uploading", "filling"]
+    const asked = jobs.filter(job => job.press && early.includes(job.state))
+    show(el("press"), extension() && state === "started" && !over && (asked.length > 0 || said === "ok") && jobs.some(job => job.press))
+    if (said === "ok") {
+      write(el("press-title"), "The extension presses Post for you")
+      write(el("press-why"), "Where Press Post for me is on in the extension's settings, it presses Post once each page is filled in. Everywhere else, and always on X, you check the page and press Post yourself.")
+      show(el("press-yes"), false)
+    } else if (said) {
+      write(el("press-why"), "The extension couldn't take that. Everything is filled in for you to check, and you press Post yourself.")
+      show(el("press-yes"), false)
+    }
+  }
+
   function draw() {
     if (page === "pair") drawPair()
     else drawPost()
@@ -318,7 +338,7 @@
 
   // The extension sets its attributes whenever it gets to it: before this script runs, or well after.
   new MutationObserver(draw).observe(root, { attributes: true })
-  for (const name of ["reelforge:extension", "reelforge:pair", "reelforge:batch"]) window.addEventListener(name, draw)
+  for (const name of ["reelforge:extension", "reelforge:pair", "reelforge:batch", "reelforge:press"]) window.addEventListener(name, draw)
   setTimeout(() => { waited = true; draw() }, 2500)
   tick()
 })()

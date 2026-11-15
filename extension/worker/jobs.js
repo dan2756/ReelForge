@@ -185,7 +185,6 @@ async function inject(job) {
     // closed one is gone, and the other is still there with an address this extension is not allowed to see.
     await new Promise(resolve => setTimeout(resolve, 400))
     const tab = await chrome.tabs.get(job.tabId).catch(() => null)
-    const p = platformName(job.platform)
     if (!tab) return tabGone(job)
     if (/error page/i.test(String(error?.message || error))) return leftPage(job, "platform_error", `${p}'s page did not load. Check your connection, then post again.`)
     // Still on the platform: the page was between two loads. The next load brings the script in.
@@ -313,11 +312,32 @@ async function finish(id, state, code, message, step) {
 
 let starting = Promise.resolve()
 
+const pressKey = batch => "press:" + batch
+
+// Press Post for me is allowed for a batch only once a person has said so for that batch in this browser: with
+// the popup's own button, or with a real click on the "press Post for me" button of ReelForge's post page.
+// What the app's job says, and the switch in Settings, are not enough: both can be there with nobody at the
+// computer. Kept with the jobs, for the worker's next start.
+async function pressSaid(batch) {
+  return (await session.get(pressKey(batch)))[pressKey(batch)] === true
+}
+
+// `port`: the ReelForge whose post page the click was on. A page of anything else on that port says nothing.
+export async function sayPress(port, batch) {
+  if (!BATCH_ID.test(String(batch))) return "error:bad_batch"
+  if (!(await app.at(port))?.paired) return "unpaired"
+  await session.set({ [pressKey(batch)]: true })
+  return "ok"
+}
+
 // A batch handed over by the local post page or the popup. Handing the same batch over twice (a reloaded
 // page, a second copy of it) opens nothing new: a job already held here is skipped, and the app grants a
-// claim only once.
-export function startBatch(port, batch) {
-  const run = starting.then(() => doStartBatch(port, batch))
+// claim only once. `press`: the person started it with the popup's own button.
+export function startBatch(port, batch, press = false) {
+  const run = starting.then(async () => {
+    if (press === true) await sayPress(port, batch)
+    return doStartBatch(port, batch)
+  })
   starting = run.catch(() => {})
   return run
 }
@@ -417,8 +437,10 @@ export async function tabHello(tabId, url) {
       id: job.id, platform: job.platform, name: platformName(job.platform), text: job.text, video: job.video, handle: job.handle,
       state: job.state, attached: job.attached === true, accountOk: job.accountOk === true,
       pressedByPerson: job.pressedByPerson === true, pressAsked: job.pressAsked === true,
-      // Press for me needs all three: the person switched it on here, switched "stop before posting" off for
-      // this post, and it is not X. The app still has the last word when the press is asked for.
+      // Press for me needs all of: the person switched it on here, switched "stop before posting" off for
+      // this post, said yes to it for this batch in this browser, and it is not X. The app still has the last
+      // word when the press is asked for. (The yes may still come while the page is being filled in, so it
+      // is looked at when the press is asked for, not here.)
       press: job.press && !job.pressAsked && await pressSwitch(job.platform),
     },
   }
@@ -464,6 +486,7 @@ export async function tabPress(tabId) {
   const no = (error, message) => ({ ok: false, error, message })
   if (!job || job.state !== "ready") return no("not_ready", "This post is not ready to be pressed.")
   if (!job.press || !(await pressSwitch(job.platform))) return no("press_not_allowed", "Press Post for me is off for this post.")
+  if (!(await pressSaid(job.batch))) return no("press_not_allowed", "nobody said yes to it for this post in this browser.")
   const first = await locked(job.id, async () => {
     const fresh = await getJob(job.id)
     if (!fresh || fresh.pressAsked) return false
