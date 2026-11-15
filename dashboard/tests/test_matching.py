@@ -375,6 +375,20 @@ class SnapshotTest(DbTest):
         latest = next(p for p in db.posts_latest() if p["post_id"] == "v")
         self.assertEqual((latest["views"], latest["likes"]), (2600, 41))
 
+    def test_a_read_without_the_follower_count_keeps_the_last_one(self):
+        def youtube(followers, posts, minutes):
+            account = SimpleNamespace(handle="@yourchannel", followers=followers, views=None, likes=None, posts=posts)
+            db.record_snapshot("youtube", account, [post("v", "V", 0, views=10)], at(minutes))
+
+        youtube(None, None, 30)  # a new channel: YouTube doesn't show the count yet
+        self.assertIsNone(db.latest_accounts()["youtube"]["followers"])
+        youtube(400, 12, 60)
+        youtube(None, None, 120)  # the page came without its subscriber line
+        latest = db.latest_accounts()["youtube"]
+        self.assertEqual((latest["ts"], latest["followers"], latest["posts"]), (at(120), 400, 12))
+        youtube(390, 12, 180)  # a count that really went down is stored as read
+        self.assertEqual(db.latest_accounts()["youtube"]["followers"], 390)
+
     def test_typed_in_and_read_numbers_are_not_added_together(self):
         eid = db.create_episode("E", None, at(0))
         db.add_post("x", f"manual-{eid}", eid, "E", None, at(0))

@@ -225,9 +225,18 @@ def _record(db: sqlite3.Connection, platform: str, account, posts: list, ts: str
         totals.append(given)
     if typed:
         _correct_typed(db, platform, posts, totals[0])
+    # A read that couldn't see the followers (YouTube's page without its subscriber line) or the post count keeps
+    # the last one seen: stored as unknown, the platform's card would go blank and every total would drop by it.
+    counts = []
+    for field, given in (("followers", account.followers), ("posts", account.posts)):
+        if given is None:
+            given = (db.execute(
+                f"""SELECT {field} FROM account_stats WHERE platform = ? AND ts < ? AND {field} IS NOT NULL
+                    ORDER BY ts DESC LIMIT 1""", (platform, ts)).fetchone() or [None])[0]
+        counts.append(given)
     db.execute(
         "INSERT INTO account_stats VALUES (?,?,?,?,?,?,?)",
-        (platform, ts, account.handle, account.followers, *totals, account.posts),
+        (platform, ts, account.handle, counts[0], *totals, counts[1]),
     )
 
 
