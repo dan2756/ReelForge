@@ -14,7 +14,7 @@ import { Button } from "../ui/Button"
 import { ProgressBar } from "../ui/Graphics"
 import { Line } from "../ui/Line"
 import { Mascot } from "../ui/Mascot"
-import { Scroll, ToastStack, toasts, useTick, Wrapped } from "../ui/Panels"
+import { Modal, Scroll, ToastStack, toasts, useTick, Wrapped } from "../ui/Panels"
 import { Frame, frameLayout } from "./Frame"
 import { Onboard } from "./Onboard"
 
@@ -270,9 +270,12 @@ interface Job {
   percent?: boolean
 }
 
-/** Step 1, continued: each download with its progress, then the health check. */
-function Work({ bridge, init, keys, onNext, onAgain }: SetupProps & { keys: string[]; onNext: () => void; onAgain: () => void }) {
+/** Step 1, continued: each download with its progress, then the health check. Esc (or Ctrl+Q, Ctrl+C) leaves, as on
+ * the other screens; while something is still under way it asks first, since its one button can't be pressed then and
+ * a download that stalls would leave no way out but closing the terminal. */
+function Work({ bridge, init, quit, keys, onNext, onAgain }: SetupProps & { keys: string[]; onNext: () => void; onAgain: () => void }) {
   const theme = useTheme()
+  const [leaving, setLeaving] = useState(false)
   const jobs = useView<{ jobs: Job[] }>(bridge, "jobs")
   const checks = useView<{ rows?: Segs[]; bad?: boolean; warning?: string; next?: string; checking?: boolean }>(bridge, "checks")
   const [state, setState] = useState<Record<string, { text: string; done: number; total: number; state: string }>>({})
@@ -286,6 +289,7 @@ function Work({ bridge, init, keys, onNext, onAgain }: SetupProps & { keys: stri
   const tick = useTick(working || !checks?.rows, 120)
   const spin = init.fancy ? "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏" : "-\\|/"
   const finished = Boolean(checks?.rows)
+  useEscape(() => (finished ? quit(0) : setLeaving((asked) => !asked))) // (Esc again: keep going)
   // The bars get what the screen has left after the names, the percentages and 28 cells for each one's status, from
   // 10 up to 44 cells.
   const { width, height } = useTerminalDimensions()
@@ -368,6 +372,17 @@ function Work({ bridge, init, keys, onNext, onAgain }: SetupProps & { keys: stri
           {checks?.bad ? <Button id="again" label="Check again" minWidth={20} onPress={onAgain} /> : null}
         </box>
       </box>
+      {leaving && !finished ? (
+        <Modal name="stop" title="Stop setting up?" width={64}>
+          <text wrapMode="word" flexShrink={0}>
+            What has finished stays. A download that is under way stops, and setup carries on from there the next time you run it.
+          </text>
+          <box flexDirection="row" height={1} marginTop={2} gap={2} flexShrink={0}>
+            <Button id="work-stay" label="Keep going" variant="primary" autoFocus onPress={() => setLeaving(false)} />
+            <Button id="work-stop" label="Stop" variant="error" onPress={() => quit(0)} />
+          </box>
+        </Modal>
+      ) : null}
     </Frame>
   )
 }
