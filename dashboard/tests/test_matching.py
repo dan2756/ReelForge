@@ -992,6 +992,15 @@ class CompactTest(DbTest):
         db.compact(min_hours=0)  # once a day: today's stays as it is
         self.assertEqual(today.stat().st_mtime_ns, stamp)
 
+    def test_the_backup_is_noted_as_made_when_it_was_made(self):
+        """Today's copy is there already at every start but the day's first. Each start noted it as backed up just
+        now, so Settings said "backed up 3m ago" for a copy that could be most of a day old."""
+        today = db.daily_backup()
+        made = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(hours=5)
+        os.utime(today, (made.timestamp(), made.timestamp()))
+        self.assertEqual(db.daily_backup(), today)  # there already: nothing is copied
+        self.assertEqual(db.parse(db.last_backup()["ok"]), made)
+
     def test_failed_backup_never_stops_compaction(self):
         (self.dir / "backups").write_text("a file where the folder should be")
         db.compact(min_hours=0)

@@ -781,8 +781,8 @@ def daily_backup(keep: int = BACKUPS_KEPT) -> Path | None:
     """Save data/backups/stats-YYYYMMDD.db unless today's is there, and keep the newest `keep`.
 
     Never raises: a failed backup only means there is none today. Returns today's backup, or None. How it went is
-    kept for the Settings tab (last_backup). The demo's made-up stats aren't backed up: its copies would sit among
-    the real ones.
+    kept for the Settings tab (last_backup): when today's copy was made, which is earlier today when it was there
+    already. The demo's made-up stats aren't backed up: its copies would sit among the real ones.
     """
     if _demo:
         return None
@@ -799,22 +799,25 @@ def daily_backup(keep: int = BACKUPS_KEPT) -> Path | None:
         ours = sorted(f for f in folder.iterdir() if re.fullmatch(rf"{re.escape(_path.stem)}-\d{{8}}\.db", f.name))
         for old in ours[:-keep]:
             old.unlink()
+        made = to_iso(target.stat().st_mtime)
     except Exception as e:
         _note_backup(e)
         return None
-    _note_backup(None)
+    _note_backup(None, made)
     return target
 
 
-def _note_backup(error: Exception | None) -> None:
-    """Keep how the daily backup went (meta "backup"): {"ok": when the last one worked}, and after one that didn't
-    also {"failed": when, "why": in a few words}. A backup that fails every day (a full disk, a folder ReelForge
-    can't write to) would otherwise go unnoticed until the day it's needed."""
+def _note_backup(error: Exception | None, made: str = "") -> None:
+    """Keep how the daily backup went (meta "backup"): {"ok": when the last good copy was made}, and after one that
+    didn't work also {"failed": when, "why": in a few words}. A backup that fails every day (a full disk, a folder
+    ReelForge can't write to) would otherwise go unnoticed until the day it's needed. made: when today's copy was
+    written, which is not now when it was there already (the Settings tab said "backed up 3m ago" after every
+    start, for a copy up to a day old)."""
     try:
         was = get_meta("backup")
         note = {"ok": was.get("ok") if isinstance(was, dict) else None}
         if error is None:
-            note = {"ok": now_iso()}
+            note = {"ok": made}
         else:
             why = error.strerror if isinstance(error, OSError) and error.strerror else \
                 str(error) if isinstance(error, sqlite3.Error) else type(error).__name__

@@ -91,7 +91,7 @@ class SettingsTab:
             # Beside whether the hourly job is on: how its last read and the daily backup went. What's wrong comes
             # first, since the line is cut where the panel ends. (A row of its own would push the danger zone off
             # a short window.)
-            wrong, fine = self.kept_note()
+            wrong, fine = self.kept_note(job["on"])
             job["value"] = " · ".join([*wrong, job["value"], *fine])
             job["problem"] = bool(wrong)
         self.measure_deleted()
@@ -235,17 +235,19 @@ class SettingsTab:
         return out
 
     @staticmethod
-    def kept_note() -> tuple[list[str], list[str]]:
+    def kept_note(job_on: bool = True) -> tuple[list[str], list[str]]:
         """How the hourly job's last read of this channel's stats went, and their daily backup (data/backups, one a
         day): (what went wrong, what went fine), each in a few words, for the Background refresh row. Neither has a
         window to say it in, so a read that had a problem or a backup that failed shows here. Nothing is said about
-        one that hasn't happened yet, or when the stats can't be looked at right now."""
+        one that hasn't happened yet, or when the stats can't be looked at right now. job_on: whether the job is
+        switched on. Off, its last read is old news, problem or not, and isn't said (it used to stay on the row
+        for as long as the job was off); the backup is the window's doing too, so that still is."""
         try:
             job, backup = db.get_meta("job"), db.last_backup()
         except Exception:
             return [], []
         wrong, fine = [], []
-        if isinstance(job, dict) and job.get("at"):
+        if job_on and isinstance(job, dict) and job.get("at"):
             if job.get("problems"):
                 wrong.append(f"its last read, {fmt_ago(job['at'])}, had a problem (see data/refresh.log)")
             else:

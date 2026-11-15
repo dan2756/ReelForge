@@ -135,6 +135,15 @@ class KeptNoteTest(unittest.TestCase):
         db.daily_backup()  # it works again
         self.assertEqual(SettingsTab.kept_note(), ([], ["read 0m ago", "backed up 0m ago"]))
 
+    def test_a_job_thats_switched_off_has_nothing_to_say(self):
+        """Its last read stayed on the row, "had a problem" and all, for as long as Background refresh was off.
+        The backup is the window's doing as well, so that is still said."""
+        db.set_meta("job", {"at": db.now_iso(), "read": "TikTok", "problems": 2})
+        db.compact(min_hours=0)
+        self.assertEqual(SettingsTab.kept_note(job_on=False), ([], ["backed up 0m ago"]))
+        db.set_meta("job", {"at": db.now_iso(), "read": "TikTok", "problems": 0})
+        self.assertEqual(SettingsTab.kept_note(job_on=False), ([], ["backed up 0m ago"]))
+
     def test_nothing_when_the_stats_cant_be_looked_at(self):
         with mock.patch.object(db, "get_meta", side_effect=sqlite3.OperationalError("database is locked")):
             self.assertEqual(SettingsTab.kept_note(), ([], []))
@@ -215,6 +224,13 @@ class WindowTest(unittest.TestCase):
                              f"the daily backup failed 0m ago (Permission denied) · {ON} · read 0m ago")
             # ... in the row that was there, not one of its own: the tab is as tall as it was.
             self.assertEqual([r["key"] for r in w.view("settings")["computer"]], ["stats", "command", "icon", "folder"])
+            # Switched off after a read that had a problem: the row says it's off, not what the job last did.
+            db.set_meta("job", {"at": db.now_iso(), "read": "TikTok", "problems": 1})
+            db.set_meta("backup", {"ok": db.now_iso()})
+            w.call("settings_toggle", "stats", False)
+            self.assertTrue(w.until(lambda: (self.stats_row() or {}).get("on") is False, 10), w.sent("settings"))
+            self.assertEqual((self.stats_row()["value"], self.stats_row()["problem"]),
+                             (f"{OFF} · backed up 0m ago", False))
 
     def test_copy_prompt_for_your_ai_copies_the_prompt_first_time_setup_gave_you(self):
         with mock.patch.object(desktop, "copy", return_value=True) as copy:
