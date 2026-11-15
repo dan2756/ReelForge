@@ -18,7 +18,9 @@ a window. The second is a mixin of the window's service (dashboard/service.py), 
 its mind_the_jobs runs first. One view, youtube_api (the connection: off, connecting, on or again), and the calls
 behind the buttons: youtube_api_info, youtube_api_connect, youtube_api_disconnect, youtube_api_defaults and
 post_with_api. PostingTab asks this half about its rows (api_rows) and their buttons (api_action). An upload starts
-only from post_with_api and from a row's post_api and Retry buttons, and only your press in the window calls those.
+only from post_with_api and from a row's post_api button, and only your press in the window calls those. A try that
+ended without a post is never sent again as it was: a new try is a new post, with the text and choices as they are
+now.
 
 The sign-in is held by the window that connected and is never in a file (youtube_api._held), so a window that has
 just opened says "again" until you connect in it, and nothing outside a connected window can upload.
@@ -53,7 +55,43 @@ KIDS = {True: "Yes", False: "No", None: "Not sent: you haven't answered, so your
 NOT_SET = ("ReelForge doesn't set the altered-content answer, tags, a thumbnail or a schedule. Set those in YouTube "
            "Studio.")
 STUDIO = "Check YouTube Studio before trying again."
-PRIVATE = "It is private, as you chose. Change who can see it in YouTube Studio when you're ready."
+# (Short: with it a posted row is three rows tall in a window 120 columns wide, and the by-hand buttons stay in view.)
+PRIVATE = "It is private, as you chose. Change it in YouTube Studio."
+# What the window's dialog for the connection says beside its controls (the view's "words"), and the question before
+# a post. Written here, beside what the controls do, so the window only draws them.
+# On the Publish tab's one line, while a post is on offer there. Short: it has to fit beside "● YouTube API connected"
+# and the line's button in a window 120 columns wide. The question before a post says it in full (UNPROVEN).
+CAVEAT = "tested on a stand-in only"
+# (No brackets in these: the window's word wrap breaks a line right after an opening one.)
+FILE = ("Type or paste where the client file is that you downloaded from your Google Cloud project. Its name starts "
+        "with client_secret_ and ends in .json. ReelForge keeps the client's id and its secret from it, then opens "
+        "Google's consent page.")
+GONE_FILE = ("Google no longer knows the client on file. Type or paste where the client file of one that exists in "
+             "your Google Cloud project is. Its name starts with client_secret_ and ends in .json. ReelForge keeps "
+             "its id and its secret, then opens Google's consent page.")
+WAITING = ("Google's consent page is open in your browser. Pick the Google account your channel belongs to and "
+           "allow ReelForge to upload videos. Google says it hasn't verified the app: the app is your own Google "
+           "Cloud project. You have ten minutes, and the browser has to be on this computer. After that, connect "
+           "again.")
+LEAVE = {True: ("Disconnect? ReelForge forgets the client, then tells Google that this window's access has ended. "
+                "No ReelForge window can post through the API until you give the client file again."),
+         # (This window has no sign-in to end. One that Google gave an earlier window may still be listed there.)
+         False: ("Disconnect? ReelForge forgets the client. This window is not connected, so it can't end "
+                 "ReelForge's access at Google. If you ever allowed it there, take it off yourself at "
+                 "myaccount.google.com/connections. No ReelForge window can post through the API until you give the "
+                 "client file again.")}
+START_AS = "A new post starts as the one you pick here. You can choose otherwise for one post, in its question."
+KIDS_ASK = ("\"Made for kids\" is a declaration you make to YouTube, so ReelForge never makes it for you. Until you "
+            "answer, a post sends none and your channel's own audience setting in YouTube Studio applies.")
+# (Both short: in a window 24 rows tall every row they take is one less of what will be sent.)
+HOW = ("ReelForge uploads the video itself, through Google's API, with exactly this. Keep ReelForge open until its "
+       "row says posted.")
+AGAIN_ASK = "It would be a second video."
+# A queued job waits ten minutes for its turn and no longer (posting.QUEUED_FOR: the clock expires it then, whoever
+# was to upload it). Said on its row while it waits, and when the wait is over. (TURN is short: with it the row is
+# still one row, Cancel and all, in a window 150 columns wide.)
+TURN = "up to ten minutes, while another video uploads"
+WAITED = "it waited ten minutes for another upload"
 
 
 # ---- one job's upload
@@ -68,13 +106,28 @@ def orphans() -> list[dict]:
     return [j for j in jobs if j["state"] != "unknown" or youtube_api.session(j["id"])]
 
 
+def another_uploading(job_id: str) -> bool:
+    """Whether another video's upload through the API is under way for this channel: a queued job waits for it."""
+    with db.connect() as c:
+        return c.execute("SELECT 1 FROM post_jobs WHERE via = 'api' AND superseded = 0 AND id != ? "
+                         "AND state IN ('uploading', 'posting') LIMIT 1", (job_id,)).fetchone() is not None
+
+
 def run(job_id: str, stop: Callable[[], bool] = lambda: False) -> dict | None:
     """Upload a queued job's video, one upload at a time for this channel, and move the job along as it goes.
     Returns the job as it stands afterwards. stop() saying True (ReelForge is closing) leaves it where it is, for
     the next start to settle (settle_orphans); a job that was called off meanwhile stops the upload too."""
     lock = youtube_api.upload_lock()
     if not lock.acquire(wait=posting.QUEUED_FOR.total_seconds(), stop=stop):
-        return posting.get(job_id)  # another upload took that long: the clock has expired this one by now
+        # Another upload took that long, and this job's time is up. The clock ends it too, at its next half
+        # minute and in the extension's words ("not picked up in time"): ended here, it says at once what it
+        # waited for, and whoever started it hears of it (_api_done). Not when ReelForge is closing.
+        if not stop():
+            try:
+                posting.advance(job_id, "expired", by="app", detail=WAITED)
+            except (posting.Refused, sqlite3.Error):
+                pass  # the clock got there first, it was called off meanwhile, or the database is busy
+        return posting.get(job_id)
     try:
         job = posting.get(job_id)
         if job is None or job["via"] != "api" or job["state"] != "queued":
@@ -283,6 +336,7 @@ class YouTubeApiTab:
     """The YouTube API's half of the window's service."""
 
     api_consent: youtube_api.Consent | None = None  # the try at connecting that is waiting for you, or the last one
+    api_quiet = False                               # that try was asked for in the dialog, which says how it goes
     api_seen: float | None | bool = False           # the connection file's time as last shown (False: not yet)
 
     def mind_the_jobs(self) -> None:
@@ -324,13 +378,23 @@ class YouTubeApiTab:
             lines.append(Text(UNPROVEN, MUTED))
         waiting = self.api_consent is not None and not self.api_consent.done.is_set()
         if waiting:
-            line = Text("● Waiting for your answer on Google's page", f"bold {AMBER}")
+            # (In pieces, as the line below: where the Publish tab has no room for all of it, it drops the last
+            # ones and never cuts a word.)
+            line = Text("● Waiting for your answer", f"bold {AMBER}").append(" on Google's page", f"bold {AMBER}")
             line.append("  it opened in your browser", MUTED)
         return {"state": "connecting" if waiting else said["state"], "line": line.json(),
                 "lines": [t.json() for t in lines], "client": said["client"], "channel": said["channel"],
                 "privacy": said["privacy"], "made_for_kids": said["made_for_kids"],
                 "privacies": [{"key": key, "label": WHO[key]} for key in PRIVACY], "docs": DOCS,
-                "note": UNPROVEN}
+                "note": UNPROVEN,
+                # Connecting takes a client file: none is on file, or Google no longer knows the one that is. (To
+                # change to another client otherwise, disconnect first.)
+                "wants_file": not said["client"] or said.get("why") == "client",
+                # The sentences beside the dialog's controls. caveat: for the Publish tab's line, while a post is on
+                # offer ("": none is). leave: what Disconnect asks first, by whether this window has a sign-in.
+                "words": {"caveat": CAVEAT if said["state"] == "on" else "",
+                          "file": GONE_FILE if said["client"] else FILE, "waiting": WAITING,
+                          "leave": LEAVE[said["state"] == "on"], "start_as": START_AS, "kids": KIDS_ASK}}
 
     def _api_line(self, said: dict) -> tuple[Text, list[Text]]:
         if said["state"] == "on":
@@ -350,7 +414,8 @@ class YouTubeApiTab:
             return Text("● YouTube API connected", f"bold {GOOD}").append("  " + " · ".join(b for b in bits if b),
                                                                          MUTED), lines
         if said["state"] == "again" and said["why"] == "session":  # every window starts here: nothing is wrong
-            return Text("○ YouTube API: not connected in this window", MUTED), [Text(AGAIN["session"], MUTED)]
+            return Text("○ YouTube API: not connected", MUTED).append(" in this window", MUTED), [
+                Text(AGAIN["session"], MUTED)]
         if said["state"] == "again":
             return Text("● YouTube API: connect again", f"bold {AMBER}"), [Text(AGAIN[said["why"]], MUTED)]
         return Text("○ YouTube API not connected", MUTED), [
@@ -364,14 +429,21 @@ class YouTubeApiTab:
         (youtube_api_info) and your yes (post_with_api), never one press on a row. While a client is on file and
         this window isn't connected, the row has connect_api there instead. A posted row says what the read-back
         found, or that the video is private, until a stats read has its numbers (only a video everyone can see has
-        any). A row whose last piece is on its way has no buttons: only YouTube's word ends it."""
+        any). A row whose last piece is on its way has no buttons: only YouTube's word ends it. One that waits for
+        another video's upload to finish says that it is waiting its turn, and for how long at most. One whose try
+        ended without a post has no Try again: what that try was to send may not be what you would send now (the
+        caption, who can see it, your made-for-kids answer), so a new try starts like any post, from post_api and
+        its question."""
         state = "off" if self.demo else youtube_api.status()["state"]
         connected = state == "on"
         for row in rows:
             job, post = jobs.get(row["key"]), posts.get(row["key"])
             if job is not None and job["via"] == "api" and row["job"] == job["id"]:
+                row["actions"] = [a for a in row["actions"] if a != "retry"]
                 if row["state"] == "posting":
                     row["actions"] = []
+                elif row["state"] == "queued" and self._safe(lambda: another_uploading(job["id"]), False):
+                    row["line"] = Text("● waiting its turn", AMBER).append(f"  {TURN}", MUTED).json()
                 elif row["state"] == "posted" and not (post and post["views"] is not None):
                     said, act_on = to_look_at(job)
                     if said:
@@ -388,16 +460,18 @@ class YouTubeApiTab:
 
     def api_action(self, row: dict | None, platform: str, action: str) -> bool:
         """A row's button that goes through the API, not the extension (PostingTab.post_action asks this first).
-        True when it was one: Retry on a job that went through the API, post_api, which posts the picked video
-        with the form's text as last typed and your choices, and never "again", or connect_api, which opens
-        Google's page to connect this window with the client on file."""
+        True when it was one: post_api, which posts the picked video with the form's text as last typed and your
+        choices, and never "again", connect_api, which opens Google's page to connect this window with the client
+        on file, or retry on a job that went through the API. No row offers that one, and it uploads nothing: it
+        says where a new try starts."""
         retry = action == "retry" and row is not None and row["via"] == "api"
         if not retry and not (action in ("post_api", "connect_api") and platform == "youtube"):
             return False
         if self.demo:
             self.notify("Demo mode: nothing is posted.", timeout=4)
         elif retry:
-            self.retry_with_api(row)
+            self.notify("Press Post with API… on the YouTube row to try again. Its question shows what will be sent "
+                        "now.", title="Nothing was started", severity="warning", timeout=10)
         elif action == "connect_api":
             self.youtube_api_connect("")
         else:
@@ -408,16 +482,17 @@ class YouTubeApiTab:
 
     @rpc
     def youtube_api_info(self, caption: str = "", tags: str = "") -> dict | None:
-        """The connection (youtube_api_view), and for the picked video what a post through the API would send:
+        """The connection (youtube_api_view), and for the picked video ("video": its path, name, size and "sha256",
+        which is the file as it is now) what a post through the API would send:
         "send" ({"title", "description", "privacy", "made_for_kids" (None: none is sent, because you haven't
         answered), "category"}), the same as "fields" to show,
         "left" (what ReelForge doesn't set), whether it can start ("can_post", "why"), and whether it would be a
-        post again ("force": the video is up there, or may be). With no caption and hashtags given, the form's as
-        last typed."""
+        post again ("force": the video is up there, or may be), with what happens after your yes ("how") and what
+        a post again means ("again"). With no caption and hashtags given, the form's as last typed."""
         if not caption and not tags:
             caption, tags = self.form_text
         out = {**self.youtube_api_view(), "video": None, "review": None, "send": None, "fields": [],
-               "left": NOT_SET, "can_post": False, "force": False, "blocked": None}
+               "left": NOT_SET, "can_post": False, "force": False, "blocked": None, "how": HOW, "again": AGAIN_ASK}
         video = self.selected_file
         if self.demo:
             return {**out, "why": "The demo doesn't post anything."}
@@ -432,13 +507,16 @@ class YouTubeApiTab:
             return None
         text, block = look["texts"]["youtube"], look["blocked"].get("youtube")
         again = bool(block and block["reason"] in ("posted", "spotted", "unknown"))
-        send = {"title": text["title"], "description": text["description"], "privacy": out["privacy"],
-                "made_for_kids": out["made_for_kids"], "category": youtube_api.CATEGORY}
-        fields = [{"label": "Title", "text": send["title"] or "—"},
-                  {"label": "Description", "text": send["description"] or "—"},
-                  {"label": "Who can see it", "text": WHO[send["privacy"]]},
-                  {"label": "Made for kids", "text": KIDS[send["made_for_kids"]]},
-                  {"label": "Category", "text": "People & Blogs"}]
+        send = {"privacy": out["privacy"], "made_for_kids": out["made_for_kids"], "title": text["title"],
+                "description": text["description"], "category": youtube_api.CATEGORY}
+        # Your two choices first. In a window 24 rows tall only the first rows show without scrolling, and under a
+        # long title "Who can see it: Public" was out of sight while Post could be pressed.
+        # (key: which of "send" a row shows. The window puts the choice for this one post on the "privacy" row.)
+        fields = [{"key": "privacy", "label": "Who can see it", "text": WHO[send["privacy"]]},
+                  {"key": "made_for_kids", "label": "Made for kids", "text": KIDS[send["made_for_kids"]]},
+                  {"key": "title", "label": "Title", "text": send["title"] or "—"},
+                  {"key": "description", "label": "Description", "text": send["description"] or "—"},
+                  {"key": "category", "label": "Category", "text": "People & Blogs"}]
         said = youtube_api.status()  # (the view may say "connecting" over a connection that is good)
         if said["state"] != "on":
             why = AGAIN[said["why"]] if said["state"] == "again" else "Connect YouTube's API first."
@@ -449,15 +527,20 @@ class YouTubeApiTab:
         else:
             why = ""
         return {**out, "video": {"path": str(video), "name": video.name,
-                                 "size": f"{video.stat().st_size / 1024 / 1024:.1f} MB"},
+                                 "size": f"{video.stat().st_size / 1024 / 1024:.1f} MB",
+                                 "sha256": posting.digest(video)},
                 "review": look["review"], "send": send, "fields": fields, "can_post": not why, "why": why,
                 "force": again and not why, "blocked": block}
 
     @rpc
-    def youtube_api_connect(self, path: str = "") -> bool:
+    def youtube_api_connect(self, path: str = "", quiet: bool = False) -> bool | str:
         """Connect: read the client file at path (the JSON you downloaded from Google Cloud; "" to connect again
         with the client already on file) and open Google's consent page in your browser. True when the page is
-        opening; the view and a pop-up follow when you have answered there."""
+        opening; the view and a pop-up follow when you have answered there. quiet: asked for in the window's
+        dialog for the connection, which says itself how it goes: that Google's page is open, that it is
+        connected, and why it couldn't start. No pop-up says the same over its buttons, and when it can't start
+        the answer is the sentence that says why. What goes wrong after Google's page opened is a pop-up either
+        way."""
         if self.demo:
             self.notify("The demo doesn't use YouTube's API.", timeout=4)
             return False
@@ -468,12 +551,17 @@ class YouTubeApiTab:
             self.api_consent = youtube_api.connect(
                 file or None, on_done=lambda outcome: self.loop.call_soon(self._api_connected, outcome))
         except ApiError as e:
-            self.notify(e.message, title="YouTube's API", severity="warning", timeout=15)
             self.follow_youtube_api(changed=True)
+            if quiet:
+                return e.message
+            self.notify(e.message, title="YouTube's API", severity="warning", timeout=15)
             return False
-        self.notify("Google's consent page is opening in your browser. Pick the Google account your channel belongs "
-                    "to and allow ReelForge to upload videos. Google will say it hasn't verified the app: the app "
-                    "is your own Google Cloud project.", title="Connecting YouTube's API", timeout=20)
+        self.api_quiet = bool(quiet)
+        if not quiet:
+            self.notify("Google's consent page is opening in your browser. Pick the Google account your channel "
+                        "belongs to and allow ReelForge to upload videos. Google will say it hasn't verified the "
+                        "app: the app is your own Google Cloud project.", title="Connecting YouTube's API",
+                        timeout=20)
         self.follow_youtube_api(changed=True)
         return True
 
@@ -481,7 +569,9 @@ class YouTubeApiTab:
         current = self.api_consent
         if current is None or current.outcome is not outcome:
             return  # an earlier try, which a newer one replaced
-        if outcome["ok"]:
+        if outcome["ok"] and self.api_quiet:
+            pass  # the dialog that asked shows it: the line, what posts start as, and how far this is tested
+        elif outcome["ok"]:
             # Who sees a post is said as it is on file: a choice made before this connect still stands.
             privacy = youtube_api.status()["privacy"]
             starts = ("Posts start as private until you choose otherwise." if privacy == "private" else
@@ -551,11 +641,15 @@ class YouTubeApiTab:
         return self.youtube_api_view()
 
     @rpc
-    def post_with_api(self, caption: str, tags: str, privacy: str = "", force: bool = False) -> dict | None:
+    def post_with_api(self, caption: str, tags: str, privacy: str = "", force: bool = False,
+                      shown: dict | None = None) -> dict | None:
         """Your yes: post the picked video to YouTube through its API, with the form's caption and hashtags.
         privacy: who can see it ("": your choice for posts to come, private unless you changed it). force: post
-        it again although it is up there, or may be. Returns {"batch", "jobs": [{"id", "platform"}], "blocked",
-        "started"}; None when there was nothing to start from. The upload runs on a thread of its own."""
+        it again although it is up there, or may be. shown: what the question showed you, which the window sends
+        back ({"video": youtube_api_info's video.path, "sha256": its video.sha256, "made_for_kids": its
+        send.made_for_kids}). Returns
+        {"batch", "jobs": [{"id", "platform"}], "blocked", "started"}; None when there was nothing to start from.
+        The upload runs on a thread of its own."""
         if self.demo:
             self.notify("Demo mode: nothing is posted.", timeout=4)
             return None
@@ -563,6 +657,31 @@ class YouTubeApiTab:
             return None
         said = youtube_api.status()
         privacy = privacy or said["privacy"]
+        if shown is not None:
+            # A yes is to what the question showed. The list picks another video by itself when the one in the
+            # question leaves it (hidden or removed in another window, or its file went), a file can be written
+            # over under its name (a new render, a copy), and the made-for-kids answer can be changed in another
+            # window. Then nothing starts, and this says which of the three it was.
+            asked = Path(str(shown.get("video") or ""))
+            if asked != self.selected_file:
+                self.notify(f"The question was about {asked.name}, and {self.selected_file.name} is the picked "
+                            "video now. Press Post with API… again to post this one.",
+                            title="Nothing was started", severity="warning", timeout=12)
+                return None
+            try:
+                same = shown.get("sha256") == posting.digest(self.selected_file)
+            except OSError:
+                same = False
+            if not same:  # (nobody sees the video again before it is up: through the extension you do, in the tab)
+                self.notify(f"{asked.name} changed after the question was shown: it is another file now, so "
+                            "nothing was sent. Check the video, then press Post with API… again.",
+                            title="Nothing was started", severity="warning", timeout=12)
+                return None
+            if shown.get("made_for_kids") is not said["made_for_kids"]:
+                self.notify("Your made-for-kids answer changed after the question was shown, so nothing was sent. "
+                            "Press Post with API… again to see what a post sends now.",
+                            title="Nothing was started", severity="warning", timeout=12)
+                return None
         if "youtube" not in self.platforms:
             why = "Connect YouTube on the Accounts tab first."
         elif said["state"] != "on":
@@ -584,21 +703,6 @@ class YouTubeApiTab:
             return None
         return self._api_started(made)
 
-    def retry_with_api(self, job: dict) -> None:
-        """Retry on a row whose post went through the API: the same text and choices once more, in a new job and a
-        new upload. Only a job that ended without a post has the button."""
-        said = youtube_api.status()
-        if said["state"] != "on":
-            self.notify(AGAIN[said["why"]] if said["state"] == "again" else NOT_CONNECTED, title="YouTube's API",
-                        severity="warning", timeout=10)
-            return
-        try:
-            self._api_started(posting.retry(job["id"], self.cfg))
-        except posting.Refused as e:
-            self.notify(e.message, title="YouTube", severity="warning", timeout=8)
-        except sqlite3.OperationalError as e:
-            self.say_busy(e)
-
     def _api_started(self, made: dict) -> dict:
         for b in made["blocked"]:
             self.notify(b["message"], title="YouTube: not started", severity="warning", timeout=12)
@@ -615,9 +719,27 @@ class YouTubeApiTab:
         if not worker.is_cancelled:
             self.loop.call_soon(self._api_done, job)
 
+    def _row_says(self, job: dict) -> bool:
+        """Whether the Publish tab is open on a row that says how this job ended: the picked video's YouTube row,
+        while it is this job's. After a post again that ended without a post it isn't: the post that is up has
+        the row again (posting.standing, and the job that was set aside stands again), and it says "posted". Nor
+        does a row that shows an earlier post's numbers say what a new post has to add (api_rows)."""
+        video = self.selected_file
+        if self.tab != "publish" or video is None or str(video) != job["video_path"]:
+            return False
+        current = self._safe(lambda: posting.for_files([video]).get(video, {}).get("youtube"), None)
+        post = self.spotted_posts(video).get("youtube")
+        if current is None or current["id"] != job["id"] or posting.standing(current, post) != job["state"]:
+            return False
+        return job["state"] != "posted" or not (post and post["views"] is not None)
+
     def _api_done(self, job: dict | None) -> None:
-        """On the loop, when this window's upload is over: say how it ended."""
-        if job and job["state"] == "posted":
+        """On the loop, when this window's upload is over: say how it ended. Not in a pop-up while the Publish tab
+        is open on that video and its row says the same, with the buttons for it: the pop-up sat on them for
+        twenty seconds."""
+        if job and self._row_says(job):
+            pass
+        elif job and job["state"] == "posted":
             said, act_on = to_look_at(job)
             self.notify((said or "It is up.") + (f" {job['url']}" if job["url"] else ""), title="Posted to YouTube",
                         severity="warning" if act_on else "information", timeout=20)
@@ -626,5 +748,8 @@ class YouTubeApiTab:
                         timeout=20)
         elif job and job["state"] == "unknown":
             self.notify(job["detail"] or STUDIO, title="YouTube: not sure it posted", severity="warning", timeout=25)
+        elif job and job["state"] == "expired":  # (its turn never came: the row of another video is on show)
+            self.notify(f"{job['video']} waited ten minutes for another upload and never started. Nothing was "
+                        "posted.", title="YouTube: not posted", severity="warning", timeout=20)
         self.follow_youtube_api(changed=True)  # the channel the upload went to, or a sign-in Google has ended
         self.jobs_changed(everywhere=True)

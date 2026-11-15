@@ -14,7 +14,6 @@ it starts (REELFORGE_BRIDGE_PRELOAD). What a test asks for comes in REELFORGE_TE
   logged_in    the platforms ReelForge's own browser is logged in to (they read their stats through it)
   needs_login  the platforms still waiting for their one log-in there (nothing reads them yet: Type in stats)
   was          {platform: "@old"}: stats that platform was read under before its handle changed
-  job_problem  true: the hourly job's last read had a problem (the Settings tab's Background refresh row)
   fail         an RPC that raises (or a list of them), to see what the window makes of a call that failed
 
 Nothing here touches this computer or the network. No browser opens: each page that would is listed in
@@ -183,8 +182,6 @@ def load_platforms(demo: bool = False, only_demos: bool = False, unconnected=())
         made = posting.create_batch(hail, list(jobs), CAPTION, TAGS, cfg)
         for job in made["jobs"]:
             _work(job["id"], jobs[job["platform"]])
-    if ASKED.get("job_problem"):
-        db.set_meta("job", {"at": db.now_iso(), "read": 1, "problems": 1})
     on = ASKED.get("platforms", NAMES)
     return cfg, {key: Reader(key, found.get(key, ()), key in on) for key in NAMES}
 

@@ -11,9 +11,6 @@ for Google on the computer it was built on. It has never uploaded a video to Goo
 trial: leave it private, and check it in YouTube Studio. The last section of this page says exactly what has been
 tested and how.
 
-ReelForge's window does not have buttons for it yet. What is behind them is built and tested, and the command
-below already takes your client file. Where this page says "in the window", that part is still to come.
-
 ## What it is, and who it is for
 
 - It is the official way to upload: the same API that upload tools and schedulers use. Nothing is typed into a
@@ -61,16 +58,9 @@ Keep the file out of any folder you share or commit. ReelForge's own `.gitignore
 
 ## Connect ReelForge
 
-First give ReelForge the file you downloaded, once (ReelForge's window will offer the same):
-
-```
-reelforge youtube-api client path/to/client_secret_....json
-```
-
-ReelForge keeps the two values it needs from it, the client's id and its secret. This connects nothing yet, and
-you can delete the downloaded file.
-
-Then connect in ReelForge's window. Google's consent page opens in your browser.
+On the Publish tab, above Post…, press **YouTube API…**. Its dialog has a box for the client file. Type or paste
+where the file you downloaded is, and press **Connect with this file**. Google's consent page opens in your
+browser, and the dialog says that it is waiting for your answer there.
 
 1. Pick the Google account your channel belongs to. If the account has more than one channel, Google asks which.
 2. Google says it hasn't verified the app. The app is your own Google Cloud project. Continue.
@@ -78,6 +68,23 @@ Then connect in ReelForge's window. Google's consent page opens in your browser.
 
 Google then sends you back to a page that says "ReelForge is connected to YouTube". That page is served by
 ReelForge on your own computer (`127.0.0.1`), for that one answer, and then it stops listening.
+
+The dialog now says "YouTube API connected", and the YouTube row on the Publish tab has a **Post with API…**
+button. ReelForge has kept the two values it needs from the file, the client's id and its secret, so you can
+delete the downloaded file.
+
+Under **For posts to come**, the same dialog has your two choices: who can see a new post, and your made-for-kids
+answer, which reads "Not answered" until you give one.
+
+The next time you open ReelForge, the YouTube row has **Connect API** in place of Post with API…. Press it, or
+**Connect** in the dialog: Google's page opens again, and no file is asked for.
+
+You can also give ReelForge the file from a terminal. This keeps the two values and connects nothing: connecting
+is only in the window.
+
+```
+reelforge youtube-api client path/to/client_secret_....json
+```
 
 Things to know:
 
@@ -94,20 +101,25 @@ Things to know:
 
 ## How a post goes
 
-1. You press Post for YouTube's API in the window and choose who can see the video: private, unlisted or public.
-   It is **private until you change it**. You can choose otherwise for one post, or change what your posts start
-   as.
+1. On the Publish tab, pick a video and press **Post with API…** on the YouTube row. A question shows exactly
+   what will be sent, and lets you choose who can see this video: private, unlisted or public. It is **private
+   until you change it**: here for this one post, or in the YouTube API… dialog for the posts to come. Nothing is
+   uploaded until you press **Post to YouTube** there.
 2. ReelForge makes one job, as it does for the extension, and uploads the video in pieces. The row shows the
-   percent. ReelForge has to stay open while it uploads.
-3. When YouTube has the whole file, the row says posted, with the video's link. ReelForge reads YouTube's answer
-   and tells you if YouTube stored the video another way than you asked. See "The limits" below.
+   percent, and **Cancel** stops it. ReelForge has to stay open while it uploads.
+3. When YouTube has the whole file, the row says posted, and **Open** opens the video. ReelForge reads YouTube's
+   answer and tells you on the row if YouTube stored the video another way than you asked. See "The limits" below.
 
 The same rules as for the extension apply. A video can have one post under way to YouTube, whichever way it goes.
 A video that is up on YouTube, or that a stats read has found there, is not posted again unless you ask for it by
-name. A video is known by its content, not its file name. A video that came from the pipeline is posted only when
-QA passed on that exact file and the review says APPROVED for that cut.
+name: its row has **Again with API…**, whose question says that it makes a second video and whose button reads
+**Post it again**. A video is known by its content, not its file name. A video that came from the pipeline is
+posted only when QA passed on that exact file and the review says APPROVED for that cut.
 
-One video uploads at a time for a channel. A second one waits its turn.
+One video uploads at a time for a channel. A second one waits its turn, for up to ten minutes, and its row says
+so. If the first upload takes longer than that, the second never starts. Its row says it never started, and if
+you are looking at another video by then, a pop-up says it too. Press Post with API… on it again once the
+first is up.
 
 ### What a post sends
 
@@ -135,8 +147,9 @@ otherwise. YouTube has no switch for Shorts: by its own rule a vertical video of
 - **The connection drops.** ReelForge waits a little and asks YouTube how much of the file it has, then carries on
   from there. It never starts the upload over by itself.
 - **The last piece went out and no answer came.** ReelForge asks YouTube whether the upload finished. If YouTube
-  can't be asked either, the post is marked **not sure it posted**. Look in YouTube Studio, then say on the
-  Publish tab whether it is there. ReelForge never tries such a post again by itself, because the video may be up.
+  can't be asked either, the post is marked **not sure it posted**. Look in YouTube Studio, then say on its row
+  whether it is there: **It's posted** or **It didn't post**. ReelForge never tries such a post again by itself,
+  because the video may be up.
 - **You cancel.** No more of the file is sent, and YouTube makes no video from a file it only has part of.
 - **You close ReelForge.** The next time it opens, the post is settled. If the last piece had not gone out,
   nothing was posted and the row says failed. If it had, the post is marked not sure it posted: the sign-in went
@@ -181,11 +194,13 @@ When Google's answer says how long the sign-in lasts, ReelForge shows how many d
 
 ## When something goes wrong
 
-A failed post says why in a sentence, and nothing was posted. These are the ones you are most likely to meet.
+A failed post says why in a sentence, and nothing was posted. Its row has **Post with API…** again. A new try
+starts with the question, like any post, so you see what it will send: the caption and your choices as they are
+then, not as they were. These are the sentences you are most likely to meet.
 
 | It says | What to do |
 |---|---|
-| ReelForge keeps YouTube's sign-in only while it is open | Connect in this window, then post or press Retry |
+| ReelForge keeps YouTube's sign-in only while it is open | Connect in this window, then press Post with API… |
 | YouTube's sign-in has run out or was taken back at Google | Connect again |
 | Google no longer knows the OAuth client | The client was deleted in Google Cloud. Make a new Desktop client and connect with its file |
 | Your Google Cloud project has used up today's YouTube API allowance | Wait until midnight Pacific time, or post this one by hand |
@@ -193,9 +208,9 @@ A failed post says why in a sentence, and nothing was posted. These are the ones
 | The Google account you connected has no YouTube channel | Connect again and pick the account, or the channel, that is yours |
 | Google didn't give ReelForge permission to upload | Connect again and allow it on Google's page |
 | YouTube didn't take the title | Shorten the caption, and take out any `<` or `>` |
-| YouTube couldn't be reached | Check your connection, then press Retry |
+| YouTube couldn't be reached | Check your connection, then press Post with API… again |
 | The video file changed after you pressed Post | Check the video, then post again |
-| ReelForge was closed during the upload | Nothing was posted. Press Retry |
+| ReelForge was closed during the upload | Nothing was posted. Press Post with API… again |
 | YouTube took the upload and rejected it | Look at the video in YouTube Studio. The reason is in brackets: "duplicate" is a video YouTube already has |
 | YouTube refused the upload (some word) | The word in brackets is Google's own, for a refusal ReelForge has no sentence for. Post this one by hand. If it came in answer to the last piece, the post is "not sure it posted" instead, because such a word proves nothing |
 
@@ -234,7 +249,7 @@ memory, is beyond what ReelForge can stop.
 
 ## Disconnect
 
-In the window, or:
+In the window: **YouTube API…**, then **Disconnect**, which asks first. Or:
 
 ```
 reelforge youtube-api disconnect
@@ -269,20 +284,21 @@ What the window gets and calls:
 
 | | |
 |---|---|
-| view `youtube_api` | `state` (`off`: no client on file, `connecting`, `on`, `again`: a client is on file and this window has no sign-in), `line`, `lines`, `client`, `channel`, `privacy`, `made_for_kids` (`true`, `false`, or `null` until the person has answered), `privacies`, `note`, `docs` |
-| `youtube_api_info(caption, tags)` | the view, and for the picked video `send`, `fields`, `left`, `can_post`, `why`, `force`, `blocked`, `review` |
-| `youtube_api_connect(path)` | reads the client file and opens Google's page. `""` connects again with the client on file |
+| view `youtube_api` | `state` (`off`: no client on file, `connecting`, `on`, `again`: a client is on file and this window has no sign-in), `line`, `lines`, `client`, `wants_file` (connecting takes a client file), `channel`, `privacy`, `made_for_kids` (`true`, `false`, or `null` until the person has answered), `privacies`, `note`, `docs`, `words` (the sentences beside the dialog's controls) |
+| `youtube_api_info(caption, tags)` | the view, and for the picked video `video` (with `sha256`: the file as it is now), `send`, `fields`, `left`, `can_post`, `why`, `force`, `blocked`, `review`, `how`, `again` |
+| `youtube_api_connect(path, quiet)` | reads the client file and opens Google's page: `true` when it is opening. `""` connects again with the client on file. `quiet`: the dialog asked, which says itself how it goes. Then no pop-up says it, and when connecting can't start the answer is the sentence that says why |
 | `youtube_api_disconnect()` | forgets the connection and tells Google |
 | `youtube_api_defaults(privacy, made_for_kids)` | your choices for the posts to come. `made_for_kids` is the person's answer: `true` or `false`. Until it is given, `send.made_for_kids` is `null` and nothing is declared |
-| `post_with_api(caption, tags, privacy, force)` | your press: makes the job and starts the upload |
-| view `posting` | while the API is connected and a post could start, the YouTube row has `api: {"force": ...}` (`force`: it would be a post again). Unless it would be one, `post_api` is among its `actions`. While the state is `again`, `connect_api` is there instead |
-| `post_action(job, "post_api")` | the row's own button: posts the picked video with the form's text and your choices, never "again". Posting again takes `post_with_api(..., force)` |
-| `post_action(job, "connect_api")` | the row's button while this window is not connected: the same as `youtube_api_connect("")` |
+| `post_with_api(caption, tags, privacy, force, shown)` | your press: makes the job and starts the upload. `shown`: what the question showed (`{"video": its path, "sha256": the file's, "made_for_kids": ...}`), which the window sends back. When any of them is another one by now, nothing starts |
+| view `posting` | while the API is connected and a post could start, the YouTube row has `api: {"force": ...}` (`force`: it would be a post again). Unless it would be one, `post_api` is among its `actions`. While the state is `again`, `connect_api` is there instead. Each row's `via` says how its job goes (`"extension"` or `"api"`), and `labels` has the words for every button |
+| `post_action(job, "post_api")` | posts the picked video with the form's text and your choices, never "again", and without a question. The window does not call it: its button for `post_api` opens the question (`youtube_api_info`), and Post there calls `post_with_api`. Posting again takes `post_with_api(..., force)` |
+| `post_action(job, "connect_api")` | the same as `youtube_api_connect("")`. The window's button for it opens the dialog and connects from there |
 
 A job goes `queued`, `uploading` (with `progress`), `posting` (the last piece is on its way), then `posted`, or
-ends as `failed` or `unknown`. Retry on a failed row goes through the API again. A posted job whose `step` is
-`confirm` has a sentence in `detail` about how YouTube stored the video: something for the person to look at. One
-whose `step` is `note` went without a made-for-kids answer, and its `detail` says so.
+ends as `failed` or `unknown`. A row whose job went through the API has no Try again (`retry`): a new try is a new
+post, from `post_api` and the question, and `post_action(job, "retry")` on such a job uploads nothing. A posted
+job whose `step` is `confirm` has a sentence in `detail` about how YouTube stored the video: something for the
+person to look at. One whose `step` is `note` went without a made-for-kids answer, and its `detail` says so.
 
 The sign-in is held in the window's process (`youtube_api._held`) and never written down, so `status()` in any
 other process says `again`, and `upload()` there has nothing to send with. A command never connects: its sign-in
@@ -307,16 +323,23 @@ Tested here, by automated tests that run with ReelForge's own (`dashboard/tests/
   error, the last answer lost and found, the last answer lost for good (not sure it posted, and one upload only),
   a sign-in that ends in the middle, every refusal ReelForge has a sentence for, and a refusal of the last piece
   that proves nothing (a word ReelForge doesn't know, or a "no" to the piece sent a second time): not sure it
-  posted, and no Retry
+  posted, and no button that posts it again
 - the read-back: a video YouTube stored as private when public was asked for
 - that who can see the video is in every request, and that the made-for-kids answer is in it once you have given
   one and never before
 - the ledger: what may not be posted twice, in both directions between the extension and the API; cancelling;
-  two videos taking turns; ReelForge closed before and during the last piece, with and without a second window
+  two videos taking turns, and one whose turn doesn't come in time; ReelForge closed before and during the last
+  piece, with and without a second window
   that is still connected
 - that an update, a move and a factory reset treat the file as described above
 - that the client's id and secret, the tokens, Google's code and the upload's address appear nowhere in what is
   printed, logged, sent to the window, answered to it, put in an error, or kept in the stats database
+- the window (`ui/test/youtube_api.test.tsx`), drawn without a terminal and clicked through against the same
+  stand-in, with "your browser" played by the test: the client file and a file that is refused, Connect and the
+  wait for Google's page, a no there, the two choices, the question and what it sends, a yes after the video's
+  file was replaced (nothing starts), a post from uploading to posted with its link, a refusal and the new try
+  after it, a post again that is refused, a post that is not sure, Cancel, a window opened afterwards (not
+  connected, and its Post starts nothing), and Disconnect
 
 Seen from Google itself, without any account:
 
@@ -338,5 +361,5 @@ Not verified:
 - The steps in Google Cloud, on a real screen.
 - The limits marked "excerpt".
 - Windows and macOS. The tests ran on Linux.
-- The window. Its Python side is built and tested, and was driven from start to finish the way the window would
-  drive it, against the stand-in. The window itself does not show this yet.
+- The window in a terminal, with a real browser and Google's own page. Its tests draw it without a terminal and
+  answer for the browser.

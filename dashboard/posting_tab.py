@@ -19,7 +19,9 @@ extension_folder (show the folder to load in the browser) and dismiss_extension_
 is written here, so the window only draws them.
 
 Nothing here posts by itself. A post starts with post_with_extension, which only your press in the window calls, and
-ends at the platform's own Post button unless you switched "stop before posting" off for it.
+ends at the platform's own Post button. The extension presses that button only where all of this holds: you switched
+"stop before posting" off for the post, Press Post for me is on for the platform in the extension's own settings, and
+you said yes to it for that post in the browser, on ReelForge's own page, which opens first. Never on X.
 """
 
 from __future__ import annotations
@@ -71,8 +73,12 @@ ACTIONS = {
 # What each platform's text is called in its own boxes, for the question before a post.
 FIELDS = {"title": "Title", "description": "Description", "caption": "Caption", "text": "Post"}
 # What the button for each of a row's actions says. Short: a row that is posted keeps its two beside its numbers.
+# The last three are for YouTube's own API (youtube_api_tab.py): post_api and connect_api are actions on the YouTube
+# row, and post_api_again is the window's own button on a row whose "api" says a post there would be a post again.
+# An ending "…" means the button asks before anything starts.
 LABELS = {"retry": "Try again", "cancel": "Cancel", "mark_posted": "It's posted", "not_posted": "It didn't post",
-          "open_post": "Open", "post_again": "Post again…"}
+          "open_post": "Open", "post_again": "Post again…", "post_api": "Post with API…",
+          "connect_api": "Connect API", "post_api_again": "Again with API…"}
 # Setting the extension up, once (docs/EXTENSION.md says the same at more length).
 SETUP = (
     "Open your browser's extensions page: type chrome://extensions in the address bar. In Edge it is "
@@ -87,11 +93,16 @@ SETUP = (
 SIGNED_NOTE = ("That is what the extension saw in each browser. It is apart from the accounts connected on the Accounts "
                "tab, which ReelForge reads your stats from.")
 # What happens after your yes to the question before a post: as it is asked, and with "stop before posting" off.
+# That switch alone presses nothing (docs/EXTENSION.md, "Two ways to post"): the extension also wants Press Post for
+# me switched on in its own settings, and your click for this post on ReelForge's own page (dashboard/web/post.html),
+# which opens in your browser before any upload page does. Said as that page: "the page that opens" read as the
+# platform's upload page. HOW_PRESS is about the press alone, and no longer than three rows in a window 80 columns
+# wide: at six, the question had no row left for its platforms in a window 24 rows tall, and drew them over each other.
 HOW = ("ReelForge opens each upload page in your browser, attaches the video and fills in the text. You check it "
        "and press Post.")
-HOW_PRESS = ("ReelForge opens each upload page in your browser, attaches the video and fills in the text. Where you "
-             "switched on Press Post for me in the extension's settings, the extension presses Post too. Everywhere "
-             "else, and always on X, you check it and press Post.")
+HOW_PRESS = ("The extension presses Post only where Press Post for me is on in its settings, and after you click "
+             "Yes, press Post for me on ReelForge's own page, which opens first. Never on X. Otherwise you press "
+             "Post.")
 
 
 def numbers(post: dict) -> str:
@@ -327,6 +338,8 @@ class PostingTab:
                          "line": state_line(job, post, p.name, opened.get(p.key)).json(), "busy": state in BUSY,
                          "url": url,
                          "job": job["id"] if job and state == job["state"] else None,
+                         # How that job goes: "extension" or "api". The window asks it before Try again.
+                         "via": job["via"] if job and state == job["state"] else None,
                          "actions": [a for a in ACTIONS[state] if a != "open_post" or url]})
         self.api_rows(rows, jobs, posts)  # what posting through YouTube's own API adds (youtube_api_tab.py)
         style = {"approved": GOOD, "none": MUTED, "demo": MUTED}.get(review["state"], f"bold {AMBER}")
@@ -459,8 +472,8 @@ class PostingTab:
                             force: list[str] | None = None, video: str | None = None) -> dict | None:
         """Your yes to the question: a job for each ticked platform (posting.create_batch), then the local page that
         hands them to the extension. stop_before: the extension stops at the platform's own Post button (off only
-        where post_info said press is available). force: the platforms to post to again although the video is up
-        there. video: the file the question was about (post_info's video.path), which the window sends back.
+        where post_info said press is available, and the extension then still asks you in the browser before it
+        presses). force: the platforms to post to again although the video is up there. video: the file the question was about (post_info's video.path), which the window sends back.
         Returns {"batch", "jobs": [{"id", "platform"}], "blocked": [...], "opened"}; None when there was
         nothing to start from."""
         if self.demo:
@@ -634,8 +647,9 @@ class PostingTab:
     def post_action(self, job: str, action: str) -> None:
         """A button on a platform's row. job: the row's job id, or its platform's key when it has none (a post the
         stats read found). cancel calls a job off; mark_posted and not_posted are your word on one ReelForge lost
-        track of; retry starts a failed one again with the same text; open_post opens the post; post_again starts
-        a new post of the picked video there, with the form's text as it is, stopping before Post."""
+        track of; retry starts a failed one again with the same text, through the extension, which stops before
+        Post (a try through YouTube's API has no retry: api_rows); open_post opens the post; post_again starts a
+        new post of the picked video there, with the form's text as it is, stopping before Post."""
         row = self._safe(lambda: posting.get(job), None) if job not in self.every else None
         platform = row["platform"] if row else job
         if self.api_action(row, platform, action):  # a button that goes through YouTube's API (youtube_api_tab.py)

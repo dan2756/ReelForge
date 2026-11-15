@@ -4,7 +4,7 @@
 import { createContext, useContext, useSyncExternalStore } from "react"
 import type { Bridge } from "../bridge"
 import type { Action } from "../lib/styled"
-import type { ExtensionView, Init, PostInfo, PostingRow, ProfilesMenu } from "./types"
+import type { ExtensionView, Init, PostInfo, PostingRow, ProfilesMenu, YouTubeApiInfo } from "./types"
 
 /** Rows above a tab's own: the header (3) and the hairline under it. */
 export const TOP_ROWS = 4
@@ -49,6 +49,8 @@ export type Dialog =
   | { kind: "handle_change"; data: { key: string; title: string; note: import("../lib/styled").Segs; forget: string; keep: string } }
   | { kind: "post"; data: PostData }
   | { kind: "extension"; from?: "post" } // from: Post was pressed with no extension set up, so by hand is offered too
+  | { kind: "youtube_api"; connect?: boolean } // the connection to YouTube's own API. connect: and connect now
+  | { kind: "api_post"; data: ApiPostData }
   | { kind: "profiles"; data: ProfilesMenu }
   | { kind: "delete_profile"; data: import("./Profiles").DeleteProfileData }
   | { kind: "discard_profile"; data: import("./Settings").DeletedProfile & { bin: string } }
@@ -83,6 +85,13 @@ export interface PostData {
   caption: string // the form as it was asked about: exactly what the question shows is what gets posted
   tags: string
   only?: string[]
+}
+
+/** The question before a post through YouTube's API: what youtube_api_info said, and the form it was asked about. */
+export interface ApiPostData {
+  info: YouTubeApiInfo
+  caption: string
+  tags: string
 }
 
 export interface LogData {
@@ -239,6 +248,7 @@ export class DashState {
       | "logout"
       | "handle_change"
       | "post"
+      | "api_post"
       | "profiles"
       | "delete_profile"
       | "factory_reset"
@@ -265,12 +275,30 @@ export class DashState {
     )
   }
 
-  /** A button on a platform's posting row. Posting again asks first, since the video is already up there. A window
-   * that can't hand a post to the extension (it isn't listening for it) says why instead, with by hand beside it, as
-   * Post… does: Post again and Try again would start something that is called off at once. */
+  /** The question before a post through YouTube's API, with exactly what would be sent for the form as it is now.
+   * Nothing is uploaded until its yes. */
+  openApiPost(): Promise<void> {
+    const { caption, tags } = this
+    return this.openDialog(
+      "api_post",
+      this.bridge.call<YouTubeApiInfo | null>("youtube_api_info", caption, tags).then((info) => (info ? { info, caption, tags } : null)),
+    )
+  }
+
+  /** A button on a platform's posting row. Posting again asks first, since the video is already up there, and so
+   * does a post through YouTube's API (post_api, and post_api_again for a video that is up): one press on a row
+   * never uploads. Connect API opens the connection's dialog and connects from there, so that the dialog says what
+   * Google's page is waiting for (the Python side's own row action says it in pop-ups, which piled up over the
+   * rows). A window that can't hand a post to the extension (it isn't listening for it) says why instead, with by
+   * hand beside it, as Post… does: Post again and Try again would start something that is called off at once. Try
+   * again on a post that went through the API would be an upload on one press, so it is the question too (the
+   * Python side offers no such button, and the question asks it about the form and the choices as they are now). */
   postAction(row: PostingRow, action: string) {
+    if (action === "post_api" || action === "post_api_again" || (action === "retry" && row.via === "api")) return void this.openApiPost()
+    if (action === "connect_api") return this.set({ dialog: { kind: "youtube_api", connect: true } })
     const ext = this.bridge.view<ExtensionView>("extension")
-    if ((action === "post_again" || action === "retry") && ext && ext.state !== "off" && ext.problem) return this.set({ dialog: { kind: "extension", from: "post" } })
+    const handsOver = action === "post_again" || action === "retry"
+    if (handsOver && ext && ext.state !== "off" && ext.problem) return this.set({ dialog: { kind: "extension", from: "post" } })
     if (action === "post_again") return void this.openPost([row.key])
     this.bridge.send("post_action", row.job ?? row.key, action)
   }
@@ -294,6 +322,8 @@ export class DashState {
         return void this.openDialog("disconnect", b.call("disconnect_info", args[0]))
       case "extension":
         return this.set({ dialog: { kind: "extension" } })
+      case "youtube_api":
+        return this.set({ dialog: { kind: "youtube_api" } })
       case "close_drawer":
         return this.toggleDrawer(false)
       case "refresh":

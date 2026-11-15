@@ -2,11 +2,15 @@
 // post stands on each platform, with what can be done about it, and Post…, which asks first (PostDialog: each
 // platform's exact text, its account, what stops it) and then hands the posts to the extension through a page in your
 // browser. The extension itself (ExtensionDialog: its state, the browsers it's connected in, connecting and
-// disconnecting one, the steps that set it up) and its one line on the Accounts tab (ExtensionStrip).
+// disconnecting one, the steps that set it up) and its one line on the Accounts tab (ExtensionStrip). YouTube's own
+// API, a second way to post there, is YouTubeApi.tsx: its line sits above Post…, and its buttons on the YouTube row
+// are drawn here like any other row's.
 //
 // dashboard/posting_tab.py sends the "posting" and "extension" views and writes their words. Nothing here posts by
-// itself: a post starts with your press in the question, and ends at the platform's own Post button. The extension
-// is optional, and everything on the Publish tab's By hand rows works without it.
+// itself: a post starts with your press in the question, and ends at the platform's own Post button. The question's
+// "Stop before the Post button" switch, off, is one of three things the extension wants before it presses that
+// button: Press Post for me on in its own settings, and your yes for that post in the browser, are the other two.
+// The extension is optional, and everything on the Publish tab's By hand rows works without it.
 
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/react"
@@ -21,6 +25,7 @@ import { Fitted } from "../ui/Line"
 import { DialogButtons, Modal, modalRoom, Panel, Scroll, toasts, useWidth, Wrapped } from "../ui/Panels"
 import { useDash, type PostData } from "./state"
 import type { ExtensionInstall, ExtensionView, FilesView, PlatformInfo, PostInfoPlatform, PostingRow, PostingView } from "./types"
+import { ApiLine } from "./YouTubeApi"
 
 /** A line from the Python side as parts for a narrow place: its first piece always, the rest while there's room. Every
  * piece opens the extension's dialog when clicked. */
@@ -36,8 +41,9 @@ const HINT_BUTTONS = 24 // columns Set it up and Hide take beside the hint, with
 const POST_BUTTON = 11 // ... Post… and the gap after it
 const BROWSERS_BUTTON = 15 // ... and Browsers…, with the gap before it
 
-/** POST, on the Publish tab: the picked video's review, a row for each connected platform, then Post… with the
- * extension's state beside it, and while the extension isn't set up one line that says it exists. */
+/** POST, on the Publish tab: the picked video's review, a row for each connected platform, the line for YouTube's own
+ * API (YouTubeApi.tsx: one quiet button until it is set up), then Post… with the extension's state beside it, and
+ * while the extension isn't set up one line that says it exists. */
 export function PostBlock() {
   const s = useDash()
   const v = useView<PostingView>(s.bridge, "posting")
@@ -77,7 +83,7 @@ export function PostBlock() {
         <text fg={DASH.text} attributes={TextAttributes.BOLD} wrapMode="none" flexShrink={0}>
           {"POST  "}
         </text>
-        <Wrapped segs={head} />
+        <Wrapped segs={head} width={Math.max(width - 6, 0)} />
       </box>
       {(v?.rows ?? []).map((row) => (
         <PostRow key={row.key} row={row} labels={v!.labels} nameWidth={nameWidth} room={width - nameWidth} />
@@ -88,7 +94,9 @@ export function PostBlock() {
           <Button id="post-accounts" label="Open Accounts" onPress={() => s.setTab("accounts")} />
         </box>
       ) : null}
-      <box flexDirection="row" marginTop={1} flexShrink={0} gap={2}>
+      {/* (the row above Post…: empty, as it was, unless this channel can post through YouTube's API) */}
+      <ApiLine rows={v?.rows ?? []} />
+      <box flexDirection="row" flexShrink={0} gap={2}>
         <Button id="post-go" label="Post…" variant="primary" disabled={!enabled} onPress={press} />
         {stuck || problem || !fits ? <Wrapped segs={stuck || problem ? [[stuck || problem, DASH.warn]] : line.slice(0, 1)} /> : <Fitted parts={foldable(line)} flexGrow={1} />}
         {/* the extension's dialog, for the keyboard too (its line is a click away already) */}
@@ -108,11 +116,14 @@ export function PostBlock() {
 
 /** One platform: its name, where its post stands in the Python side's words, and a button for each thing that can be
  * done about it: at the end of the line while it all fits in one (room: the columns after the name), else under the
- * words, which then wrap under themselves. */
+ * words, which then wrap under themselves. A button says its words (labels), never an action's own name: one the
+ * Python side sent no words for isn't drawn. On a row whose video is up on YouTube while this window is connected to
+ * YouTube's API (row.api.force), one more button asks about posting it there again that way. */
 function PostRow({ row, labels, nameWidth, room }: { row: PostingRow; labels: Record<string, string>; nameWidth: number; room: number }) {
   const s = useDash()
-  const label = (action: string) => labels[action] ?? action
-  const buttons = row.actions.reduce((n, a) => n + cellLen(label(a)) + 5, 0) // each with its ends and the gap before it
+  const actions = [...row.actions, ...(row.api?.force ? ["post_api_again"] : [])].filter((a) => labels[a])
+  const label = (action: string) => labels[action]!
+  const buttons = actions.reduce((n, a) => n + cellLen(label(a)) + 5, 0) // each with its ends and the gap before it
   const beside = segsLen(row.line) + buttons <= room
   return (
     <box flexDirection="row" flexShrink={0}>
@@ -121,11 +132,14 @@ function PostRow({ row, labels, nameWidth, room }: { row: PostingRow; labels: Re
       </text>
       <box flexDirection={beside ? "row" : "column"} flexGrow={1} flexShrink={1} minWidth={0}>
         <box flexDirection="row" flexGrow={beside ? 1 : 0} flexShrink={beside ? 1 : 0}>
-          <Wrapped segs={row.line} />
+          {/* (under the name, the words have the row's measured width: see Wrapped) */}
+          <Wrapped segs={row.line} width={beside ? undefined : Math.max(room, 0)} />
         </box>
-        {row.actions.length ? (
-          <box flexDirection="row" height={1} flexShrink={0} gap={1}>
-            {row.actions.map((action) => (
+        {actions.length ? (
+          // (under the words they go on under themselves where the row is too narrow for all of them: a posted
+          // YouTube row has three, and the third was cut off in a window 100 columns wide)
+          <box flexDirection="row" flexWrap={beside ? "no-wrap" : "wrap"} flexShrink={0} columnGap={1}>
+            {actions.map((action) => (
               <Button key={action} id={`post-${row.key}-${action}`} label={label(action)} onPress={() => s.postAction(row, action)} />
             ))}
           </box>
@@ -148,7 +162,8 @@ const labelWidth = (platforms: PostInfoPlatform[]) => Math.max(0, ...platforms.f
 
 /** Post…: the video and its review, what happens next in a sentence, then each platform with its tick box, its account
  * and the exact text for each of its boxes (or why it can't go). Start hands the ticked ones to the extension, through
- * a page ReelForge opens in your browser. Nothing is posted here: the extension fills in each upload page and stops. */
+ * a page ReelForge opens in your browser. Nothing is posted here: the extension fills in each upload page and stops,
+ * unless you flip the switch here and also say yes on that page (the sentence under the video says which it is). */
 export function PostDialog({ data, close }: { data: PostData; close: () => void }) {
   const s = useDash()
   const { info, only } = data
@@ -402,8 +417,10 @@ export function ExtensionDialog({ from, close }: { from?: "post"; close: () => v
                   {b.old ? <span fg={DASH.bad}>{" · needs an update"}</span> : null}
                 </text>
                 {leaving === b.install ? (
+                  // Keep it comes up where Disconnect was, as wide as it, and the red button beside it. In that place
+                  // the red one took the second click of a double click on Disconnect, and the browser was
+                  // disconnected before the question under its name could be read.
                   <>
-                    <Button id={`ext-keep-${i}`} label="Keep it" autoFocus onPress={() => setLeaving(null)} />
                     <Button
                       id={`ext-drop-${i}`}
                       label="Disconnect"
@@ -413,6 +430,7 @@ export function ExtensionDialog({ from, close }: { from?: "post"; close: () => v
                         s.bridge.send("unpair_extension", b.install)
                       }}
                     />
+                    <Button id={`ext-keep-${i}`} label="Keep it" minWidth={14} autoFocus onPress={() => setLeaving(null)} />
                   </>
                 ) : (
                   <Button id={`ext-disconnect-${i}`} label="Disconnect" onPress={() => setLeaving(b.install)} />

@@ -1,7 +1,8 @@
 // Dialogs over the window: how ReelForge works, typing in stats, removing a video, which video a post is, making an
 // account (or the channel's Gmail), disconnecting one, logging ReelForge's browser out of one, the stats from before a
-// handle changed, the question before a post and the browser extension (Posting.tsx), the profile button's menu and
-// deleting a profile (Profiles.tsx), and the Settings tab's (Settings.tsx).
+// handle changed, the question before a post and the browser extension (Posting.tsx), the connection to YouTube's own
+// API and the question before a post through it (YouTubeApi.tsx), the profile button's menu and deleting a profile
+// (Profiles.tsx), and the Settings tab's (Settings.tsx).
 
 import { TextAttributes } from "@opentui/core"
 import { useState } from "react"
@@ -16,6 +17,7 @@ import { ExtensionDialog, PostDialog } from "./Posting"
 import { DeleteProfile, ProfileMenu } from "./Profiles"
 import { DiscardProfile, FactoryReset, MoveFolder, Uninstall } from "./Settings"
 import { PUBLISH_KEY, useDash, type EpisodeData, type LogData, type SignupData } from "./state"
+import { ApiDialog, ApiPostDialog } from "./YouTubeApi"
 
 export function Dialogs() {
   const s = useDash()
@@ -31,6 +33,8 @@ export function Dialogs() {
   if (d.kind === "handle_change") return <HandleChange data={d.data} close={close} />
   if (d.kind === "post") return <PostDialog data={d.data} close={close} />
   if (d.kind === "extension") return <ExtensionDialog from={d.from} close={close} />
+  if (d.kind === "youtube_api") return <ApiDialog connect={d.connect} close={close} />
+  if (d.kind === "api_post") return <ApiPostDialog data={d.data} close={close} />
   if (d.kind === "profiles") return <ProfileMenu data={d.data} close={close} />
   if (d.kind === "delete_profile") return <DeleteProfile data={d.data} close={close} />
   if (d.kind === "discard_profile") return <DiscardProfile data={d.data} close={close} />

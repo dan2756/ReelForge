@@ -43,7 +43,7 @@ The window finds the kit's Python by itself (`REELFORGE_PYTHON`, else `../.venv`
 | `src/main.tsx` | Starts the renderer and the Python side, mounts the window or the first-run screens, quits cleanly |
 | `src/root.tsx` | The window round the profiles (one per channel): switching starts a Python side on the profile picked (`REELFORGE_PROFILE`) and lets the old one finish; New profile shows the channel's questions inside the window |
 | `src/bridge.ts` | The link to `studio/bridge.py`: calls, replies and views |
-| `src/dashboard/` | The ReelForge window: `App.tsx` (the header with its sliding tab marker, the green Publish button, the bell, the status bar, keys), a file per tab, `Drawer.tsx`, `Dialogs.tsx`, `Profiles.tsx` (the profile button and its menu), `Posting.tsx` (where each post stands on the Publish tab, the question before a post, and the browser extension's dialog) |
+| `src/dashboard/` | The ReelForge window: `App.tsx` (the header with its sliding tab marker, the green Publish button, the bell, the status bar, keys), a file per tab, `Drawer.tsx`, `Dialogs.tsx`, `Profiles.tsx` (the profile button and its menu), `Posting.tsx` (where each post stands on the Publish tab, the question before a post, and the browser extension's dialog), `YouTubeApi.tsx` (posting to YouTube through its own API: its line on the Publish tab, the connection's dialog, the question before a post) |
 | `src/setup/` | The first-run screens (`App.tsx`), the channel's questions (`Onboard.tsx`) and the steps, logo and mascot round them (`Frame.tsx`) |
 | `src/theme.ts` | The colours, and `restyle`: the Python side's colours mapped to them as its messages arrive |
 | `src/ui/` | The pieces: buttons, tables and lists, charts, fields, panels, dialogs, pop-ups, block art (the big numbers, sparklines, the bell), the mascot (`Mascot.tsx`; his frames in `mascot/`, copied from `../assets/mascot/opentui`), and `Motion.tsx` (counting up, growing in, sliding, fading) |
@@ -76,6 +76,28 @@ it), u opens Publish (the green button at the right of the header), r / R refres
 the profile menu and ? the help, except while a text field has the keyboard; Esc leaves the field, closes a dialog
 or the drawer. Ctrl+Q quits. The chips on a line (a chart's ranges and its key, Show on the Videos tab, Remove,
 Disconnect, Mark all read) and a table's headings are still mouse only.
+
+## Posting to YouTube through its API
+
+YouTube has a second way to post, its own API ([docs/YOUTUBE-API.md](../docs/YOUTUBE-API.md) is the page for the
+person; the Python side is `dashboard/youtube_api_tab.py`). In the window it is `src/dashboard/YouTubeApi.tsx`:
+
+- **YouTube API…**, on the Publish tab in the row above Post…, opens the connection's dialog. With no client
+  file given yet, that button is all there is. The dialog takes the path of the client file from the person's own
+  Google Cloud project (**Connect with this file**). Later it has **Connect**, **Disconnect** (which asks first)
+  and the two choices for posts to come: who can see a new post, and the made-for-kids answer.
+- Every window connects again when it opens: the sign-in is kept by the window's Python side and never in a file.
+  Until then the YouTube row has **Connect API**, which opens the dialog and Google's page in one press.
+- **Post with API…** on the YouTube row opens a question built from `youtube_api_info`: exactly what will be
+  sent, and who can see this one post. Its **Post to YouTube** calls `post_with_api` with what the question showed
+  (the video, its file's SHA-256 and the made-for-kids answer), and the Python side starts nothing when one of
+  them is another by then.
+- No press on a row uploads anything. A row whose try through the API ended without a post has Post with API…
+  again and no Try again: a new try is a new question, about the form and the choices as they are then.
+
+Its tests (`test/youtube_api.test.tsx`) run against a stand-in for Google that listens inside the Python side
+(`test/youtube_api_preload.py`). Nothing in them reaches Google, and this way of posting has never been run
+against YouTube itself: the window says so wherever it offers a post.
 
 ## Small windows, and nothing to show yet
 

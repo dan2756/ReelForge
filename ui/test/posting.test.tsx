@@ -83,13 +83,14 @@ async function until(h: Headless, ok: () => boolean) {
   for (let i = 0; i < 30 && !ok(); i++) await h.settle(200)
 }
 
-/** A platform's row on the Publish tab: the line that starts with its name, and the ones under it up to the next. */
+/** A platform's row on the Publish tab: the line that starts with its name, and the ones under it up to the next (or,
+ * under the last platform's, up to the row for YouTube's API, whose button is at its right-hand end). */
 function row(h: Headless, name: string): string {
   const rows = frame(h).split("\n")
   const at = rows.findIndex((r) => new RegExp(`┃ ${name} +[○●✓×?]`).test(r))
   if (at < 0) return ""
   const text = (r: string) => r.slice(r.lastIndexOf("┃") + 1).replace(/[█▀▄]\s*$/, "").trim() // (less the scrollbar)
-  const next = rows.findIndex((r, i) => i > at && /┃ (\S|$)/.test(r.slice(r.lastIndexOf("┃"))))
+  const next = rows.findIndex((r, i) => i > at && (/┃ (\S|$)/.test(r.slice(r.lastIndexOf("┃"))) || r.includes("YouTube API…")))
   return rows.slice(at, next < 0 ? at + 4 : next).map(text).join(" ").trim()
 }
 
@@ -163,6 +164,32 @@ describe("where each post stands", () => {
     await clickText(h, "▐ Open ▌", 3)
     await until(h, () => listed("opened.txt").length > 0)
     expect(listed("opened.txt")).toEqual(["https://example.invalid/instagram/1"])
+  })
+
+  test("a row whose words wrap keeps every letter, whatever length its lines come to", async () => {
+    // The form scrolls, and a text in a scrolling area is laid out a column or two wider than it has: a line that
+    // came to exactly that width lost its last letter at the form's edge ("ReelForg sent no answer").
+    const h = await kit({ extension: "on" })
+    const view = posting(h)
+    for (let n = 70; n <= 90; n++) {
+      const said = `✓ posted ${"x".repeat(n - 19)} ReelForge sent no answer to that, because you haven't given one, so this is your channel's own setting.`
+      h.bridge.emit("posting", { ...view, rows: view.rows.map((r) => (r.key === "youtube" ? { ...r, state: "posted", line: [[said, ""]], actions: ["open_post", "post_again"] } : r)) })
+      await h.settle(120)
+      expect(row(h, "YouTube")).toContain(said)
+    }
+    // The review's own line beside POST wraps the same way.
+    const head = () => {
+      const rows = frame(h).split("\n")
+      const at = rows.findIndex((r) => r.includes("┃ POST  "))
+      const text = (r: string) => r.slice(r.lastIndexOf("┃") + 1).replace(/[█▀▄]\s*$/, "").trim()
+      return rows.slice(at, rows.findIndex((r) => /┃ TikTok +[○●✓×?]/.test(r))).map(text).join(" ").replace(/\s+/g, " ")
+    }
+    for (let n = 70; n <= 90; n++) {
+      const said = `! ${"x".repeat(n - 12)} ReelForge has to see a review that says APPROVED for this cut before it posts it.`
+      h.bridge.emit("posting", { ...view, review: { state: "unreviewed", line: [[said, ""]] } })
+      await h.settle(120)
+      expect(head()).toBe(`POST ${said}`)
+    }
   })
 
   test("everything that starts a post shows in a window 120 columns by 30 rows", async () => {
@@ -292,6 +319,26 @@ describe("Post…", () => {
     expect(frame(h)).toContain("▐ Start 3 posts ▌") // the other three: X only when you tick it
   })
 
+  test("a Post again that fails leaves a post a stats read found standing: its row says posted, not failed", async () => {
+    const h = await kit({ extension: "on", spotted: { instagram: 2100 } })
+    await clickText(h, "Post again…", 2)
+    await until(h, () => frame(h).includes("POST THIS VIDEO"))
+    await clickText(h, "Start 1 post", 2)
+    await until(h, () => state(h, "instagram") === "queued")
+    await h.bridge.call("test_extension", "instagram", ["opening", "failed"])
+    await until(h, () => state(h, "instagram") === "spotted")
+    // The video is up there, whatever became of the second try: the row goes by the post, with its own buttons.
+    expect(state(h, "instagram")).toBe("spotted")
+    expect(row(h, "Instagram")).toMatch(/✓ posted +2\.10K views, 24h ago/)
+    expect(row(h, "Instagram")).toMatch(/▐ Open ▌ ▐ Post again… ▌/)
+    expect(row(h, "Instagram")).not.toContain("failed")
+    expect(row(h, "Instagram")).not.toContain("Try again")
+    expect(frame(h)).toContain("Instagram ✓") // its by-hand button says so too
+    await clickText(h, "▐ Post… ▌", 3)
+    await until(h, () => frame(h).includes("POST THIS VIDEO"))
+    expect(dialog(h)).toContain("○ Instagram @me Already posted: ReelForge found this video's post there. Tick it to post there again.")
+  })
+
   test("the question opens with the keyboard on Cancel, and Enter twice on Start is one yes", async () => {
     const h = await kit({ extension: "on" })
     await clickText(h, "▐ Post… ▌", 3)
@@ -372,11 +419,12 @@ describe("Post…", () => {
     expect(dialog(h)).toContain("Not checked by ReelForge: this video didn't come from the pipeline.")
     expect(dialog(h)).toContain("Stop before the Post button")
     expect(dialog(h)).toContain("You check it and press Post.") // as it starts: you press it
-    expect(dialog(h)).not.toContain("the extension presses Post too")
+    expect(dialog(h)).not.toContain("Yes, press Post for me")
     const [x, y] = find(h, "Stop before the Post button")!
     await h.t.mockMouse.click(x + 31, y) // its switch
     await h.settle(300)
-    expect(dialog(h)).toContain("Where you switched on Press Post for me in the extension's settings, the extension presses Post too. Everywhere else, and always on X, you check it and press Post.")
+    // The switch alone presses nothing: the extension's own setting and your click for this post in the browser too.
+    expect(dialog(h)).toContain("The extension presses Post only where Press Post for me is on in its settings, and after you click Yes, press Post for me on ReelForge's own page, which opens first. Never on X. Otherwise you press Post.")
     await clickText(h, "✓  YouTube", 1) // TikTok and X will do
     await clickText(h, "✓  Instagram", 1)
     expect(dialog(h)).toContain("Stop before the Post button") // still: TikTok is ticked
@@ -384,6 +432,24 @@ describe("Post…", () => {
     await until(h, () => listed("opened.txt").length > 0 && !frame(h).includes("POST THIS VIDEO"))
     // What the page in the browser is told about the two posts: the press is allowed on TikTok, and never on X.
     expect(await pressFor(listed("opened.txt")[0]!)).toEqual({ tiktok: true, x: false })
+  })
+
+  test("in a window 80 columns by 24 rows the question keeps its platforms in view with that switch flipped", async () => {
+    // What the extension wants before it presses took six rows of that window, which left none for the platforms: two
+    // of them were drawn over each other in the row that was there. It is three rows now.
+    const h = await kit({ extension: "on", jobs: { tiktok: ["ready", "posted"] } }, [80, 24])
+    const clip = h.bridge.view<{ items: { id: string }[] }>("files")!.items.find((i) => i.id.endsWith("clip.mp4"))! // (below the two videos the list has room for)
+    await h.bridge.call("pick_file", clip.id)
+    await until(h, () => posting(h).video?.name === "clip.mp4")
+    h.t.mockInput.pressKey("\u001b[6~") // Page Down, to POST
+    await h.settle(400)
+    await clickText(h, "▐ Post… ▌", 3)
+    await until(h, () => frame(h).includes("POST THIS VIDEO"))
+    const [x, y] = find(h, "Stop before the Post button")!
+    await h.t.mockMouse.click(x + 31, y) // its switch
+    await h.settle(300)
+    for (const text of ["Never on X. Otherwise you press Post.", "✓  TikTok     @me", "Caption      Clip #fyp #whatif #weather", "Stop before the Post button", "▐ Cancel ▌", "▐ Start 4 posts ▌"])
+      expect(frame(h)).toContain(text)
   })
 
   test("with that switch left alone, Post is pressed for you nowhere, also where Press Post for me is unlocked", async () => {
@@ -507,8 +573,20 @@ describe("the extension's dialog", () => {
     expect(store()).toBe(1) // asked, not done
     await clickText(h, "Keep it", 2)
     expect(dialog(h)).not.toContain("Disconnect Chrome on this PC?")
+    // A double click on Disconnect, on any column of it, asks and then lands on Keep it, which comes up in its place.
+    // The red Disconnect came up there, and the browser was disconnected before the question could be read.
+    const at = find(h, "▐ Disconnect ▌")!
+    for (const dx of [0, 6, 13]) {
+      await h.t.mockMouse.click(at[0] + dx, at[1])
+      await h.settle(150)
+      expect(dialog(h)).toContain("Disconnect Chrome on this PC?")
+      await h.t.mockMouse.click(at[0] + dx, at[1])
+      await h.settle(400)
+      expect([dx, store(), dialog(h).includes("Disconnect Chrome on this PC?")]).toEqual([dx, 1, false])
+    }
     await clickText(h, "▐ Disconnect ▌", 3)
-    await clickText(h, "▐ Disconnect ▌", 3) // the red one, in its place now
+    expect(frame(h)).toMatch(/▐ Disconnect ▌ ▐  Keep it   ▌/) // as wide as the button it takes the place of
+    await clickText(h, "▐ Disconnect ▌", 3) // the red one, beside Keep it
     await until(h, () => store() === 0)
     expect(store()).toBe(0)
     await until(h, () => frame(h).includes("SET IT UP, ONCE"))
