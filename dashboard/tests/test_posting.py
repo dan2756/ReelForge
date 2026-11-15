@@ -466,6 +466,16 @@ class Moving(LedgerTest):
         moved = posting.advance(job["id"], "filling", install=CHROME)
         self.assertEqual((moved["step"], moved["progress"], moved["detail"]), (None, None, None))
 
+    def test_how_the_extension_found_its_way_is_kept_in_the_log_and_nowhere_else(self):
+        job = self.walk(self.job(), "opening")
+        logged = len(self.events(job))
+        now = posting.advance(job["id"], "filling", install=CHROME, step="fill_caption",
+                              strategy="caption=role,post=text")
+        self.assertEqual((now["step"], now["detail"]), ("fill_caption", None))  # the row says nothing of it
+        self.assertEqual(self.events(job)[logged:], [("filling", "fill_caption", None),
+                                                     ("filling", "fill_caption", "found by caption=role,post=text")])
+        self.assertEqual(posting.get(job["id"])["detail"], None)
+
     def test_no_such_job(self):
         self.refused("not_found", posting.advance, "pj_none", "opening")
         self.refused("not_found", posting.claim, "pj_none", CHROME)
@@ -784,6 +794,37 @@ class Standing(LedgerTest):
         self.walk(live, *STEPS, "posted")
         again = self.job(force=["tiktok"])
         self.assertEqual(posting.for_files([self.video])[self.video]["tiktok"]["id"], again["id"])  # not the old one
+
+    def test_a_job_and_a_post_a_read_found_together(self):
+        post = {"published_at": "2026-11-15T12:00:00+00:00"}
+        before, after = {"created_at": "2026-11-15T11:00:00+00:00"}, {"created_at": "2026-11-15T13:00:00+00:00"}
+        for job, found, stands in ((None, None, "none"), (None, post, "spotted"),
+                                   ({**before, "state": "uploading"}, post, "uploading"),  # a live job has the say
+                                   ({**before, "state": "posted"}, post, "posted"),
+                                   ({**before, "state": "failed"}, post, "spotted"),  # it failed, then went up by hand
+                                   ({**after, "state": "failed"}, post, "failed"),    # a new try since, which failed
+                                   ({**after, "state": "cancelled"}, None, "cancelled")):
+            self.assertEqual(posting.standing(job, found), stands, (job, found))
+
+    def test_the_posts_a_read_has_filed_under_a_videos_episode(self):
+        self.assertEqual(posting.spotted("ep01.mp4"), {})
+        job = self.job()
+        self.assertEqual(posting.spotted("ep01.mp4"), {})
+        for post_id, when in (("yt-2", "2026-11-15T13:00:00+00:00"), ("yt-1", "2026-11-15T12:00:00+00:00")):
+            db.record_snapshot("youtube", Account("@me", 1), [Post(post_id, CAPTION, f"https://y/{post_id}", when)])
+            db.link_post("youtube", post_id, job["episode_id"])
+        db.add_post("x", "manual-7", job["episode_id"], CAPTION, None)  # numbers typed in: nobody found a post
+        found = posting.spotted("ep01.mp4")
+        self.assertEqual(list(found), ["youtube"])
+        first = found["youtube"]
+        self.assertEqual((first["post_id"], first["url"]), ("yt-1", "https://y/yt-1"))  # its first there
+
+    def test_why_a_job_failed_in_words(self):
+        job = {"error_message": None, "error_code": "not_signed_in"}
+        self.assertEqual(posting.failure(job, "TikTok"), "sign in to TikTok in that browser, then try again")
+        self.assertEqual(posting.failure({**job, "error_message": "TikTok said no"}, "TikTok"), "TikTok said no")
+        self.assertEqual(posting.failure({**job, "error_code": "new_code"}, "TikTok"), "new_code")
+        self.assertEqual(posting.failure({**job, "error_code": None}, "TikTok"), "")
 
     def test_a_file_with_the_same_name_and_other_bytes_has_no_jobs(self):
         self.job()

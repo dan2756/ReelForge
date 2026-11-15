@@ -29,6 +29,7 @@ from studio.bridge import rpc
 
 from . import analytics, config, db, desktop, posting, videos
 from .analytics import fmt_ago, fmt_num
+from .posting import STEPS, TESTED, failure, standing
 from .view import BAD, GOOD, MUTED, TYPICAL, Text
 
 FAINT = "#5c6370"
@@ -36,9 +37,6 @@ AMBER = TYPICAL  # in progress, and anything waiting for you
 ON_WITHIN = timedelta(minutes=3)   # the extension counts as there while it has said so this recently
 QUIET_AFTER = timedelta(minutes=3)  # a job under way with no news for this long says so
 HINT = "extension_hint_dismissed"   # meta: you closed the "set up the extension" hint on the Publish tab
-# How far the extension's own tests go. Said wherever posting with it is offered.
-TESTED = "Tested against copies of the upload pages, not yet on the live sites: check each post before you press Post."
-
 # A job's state in a few words. An API upload has no extension to wait for.
 WORDS = {
     "queued": "waiting for the extension to pick it up", "claimed": "the extension has it",
@@ -48,28 +46,6 @@ WORDS = {
     "failed": "failed", "cancelled": "cancelled", "expired": "the extension didn't pick it up",
 }
 API_WORDS = {"queued": "about to start", "expired": "it never started"}
-# The step inside a state, as the extension names it.
-STEPS = {
-    "open_tab": "opening the tab", "signed_in": "checking you're signed in", "find_input": "finding the upload box",
-    "attach": "attaching the video", "upload": "uploading", "fill_title": "the title", "fill_caption": "the caption",
-    "audience": "the audience question", "visibility": "who can see it", "ready": "", "press": "",
-    "confirm": "waiting for the platform to say it's up",
-}
-# Why a job failed, when the extension gave a code and no sentence of its own. {name}: the platform.
-FAILURES = {
-    "extension_outdated": "the extension is older than this ReelForge: update it, then try again",
-    "app_unreachable": "the extension couldn't reach ReelForge",
-    "not_signed_in": "sign in to {name} in that browser, then try again",
-    "wrong_account": "that browser is signed in to another {name} account",
-    "hook_not_found": "{name} changed its page, so the extension lost its way: post this one by hand",
-    "challenge": "{name} is asking you to prove it's you: finish that in the tab",
-    "platform_error": "{name} showed an error",
-    "timeout": "nothing happened in time",
-    "tab_closed": "the tab was closed before it posted",
-    "press_rejected": "{name} didn't take the press: press Post yourself in the tab",
-    "changed": "the video file changed after you pressed Post here",
-    "unknown_outcome": "ReelForge can't tell whether it posted: check your profile there",
-}
 # The same in a word or two, for the POSTED line under the form.
 BRIEF = {"queued": "queued", "claimed": "starting", "opening": "opening", "uploading": "uploading",
          "filling": "filling in", "ready": "ready for you to press Post", "posting": "posting",
@@ -100,28 +76,11 @@ def read_store() -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def standing(job: dict | None, post: dict | None) -> str:
-    """Where a video stands on a platform, from its job (posting.current) and the post a stats read has filed under
-    its episode: "none", "spotted" (the read found it and no job says more), or the job's state. A live job has
-    the say; one that ended without a post only counts when it's newer than the post."""
-    if job and job["state"] in posting.LIVE:
-        return job["state"]
-    if post and not (job and job["created_at"] > (post["published_at"] or "")):
-        return "spotted"
-    return job["state"] if job else "none"
-
-
 def numbers(post: dict) -> str:
     """A post's views and age. One the extension reported has no numbers until the next stats read brings them."""
     if post["views"] is None:
         return f"{fmt_ago(post['published_at'])}, its numbers come with the next refresh"
     return f"{fmt_num(post['views'])} views, {fmt_ago(post['published_at'])}"
-
-
-def failure(job: dict, name: str) -> str:
-    """Why a job failed: the extension's own sentence, else ours for its code, else the code."""
-    return job["error_message"] or FAILURES.get(job["error_code"] or "", "").format(name=name) or \
-        job["error_code"] or ""
 
 
 def flag_style(color: str, state: str) -> str:

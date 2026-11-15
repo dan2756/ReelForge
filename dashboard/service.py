@@ -1639,7 +1639,7 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
     def update_posted(self) -> None:
         """Where the picked video is already up, or on its way with the extension, so you know which upload pages
         are left. done: up there (the platform's button gets its ✓). states: each platform's standing, see
-        posting_tab.standing."""
+        posting.standing."""
         out = Text()
         video = self.selected_file
         states = {}

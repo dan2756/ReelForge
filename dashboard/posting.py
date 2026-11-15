@@ -60,6 +60,32 @@ CHANGES = "post_changes"    # meta: a count of every write here, for a window to
 POST_ID = {"tiktok": r"\d{6,}", "instagram": r"\d{6,}", "x": r"\d{6,}", "youtube": r"[\w-]{11}"}
 
 
+# How far the extension's own tests go. Said wherever posting with it is offered: the window and the local page.
+TESTED = "Tested against copies of the upload pages, not yet on the live sites: check each post before you press Post."
+# The step inside a state, as the extension names it.
+STEPS = {
+    "open_tab": "opening the tab", "signed_in": "checking you're signed in", "find_input": "finding the upload box",
+    "attach": "attaching the video", "upload": "uploading", "fill_title": "the title", "fill_caption": "the caption",
+    "audience": "the audience question", "visibility": "who can see it", "ready": "", "press": "",
+    "confirm": "waiting for the platform to say it's up",
+}
+# Why a job failed, when the extension gave a code and no sentence of its own. {name}: the platform.
+FAILURES = {
+    "extension_outdated": "the extension is older than this ReelForge: update it, then try again",
+    "app_unreachable": "the extension couldn't reach ReelForge",
+    "not_signed_in": "sign in to {name} in that browser, then try again",
+    "wrong_account": "that browser is signed in to another {name} account",
+    "hook_not_found": "{name} changed its page, so the extension lost its way: post this one by hand",
+    "challenge": "{name} is asking you to prove it's you: finish that in the tab",
+    "platform_error": "{name} showed an error",
+    "timeout": "nothing happened in time",
+    "tab_closed": "the tab was closed before it posted",
+    "press_rejected": "{name} didn't take the press: press Post yourself in the tab",
+    "changed": "the video file changed after you pressed Post here",
+    "unknown_outcome": "ReelForge can't tell whether it posted: check your profile there",
+}
+
+
 class Refused(Exception):
     """A change the ledger doesn't allow. code is for the extension ("bad_transition", "already_claimed",
     "not_ready"...), the message a sentence for a person, job the row as it stands when there is one."""
@@ -121,8 +147,9 @@ def snapshot(item: PublishItem, platform: str) -> dict[str, str]:
     return {"caption": item.text_for(platform)}
 
 
-def _headline(text: dict) -> str:
-    """A snapshot's main line: the title, the caption or the X post."""
+def headline(text: dict) -> str:
+    """A snapshot's main line: the title, the caption or the X post. It is what the button that opens a platform's
+    upload page copies."""
     return text.get("title") or text.get("caption") or text.get("text") or ""
 
 
@@ -164,6 +191,19 @@ def current(jobs: list[dict]) -> dict[str, dict]:
     return out
 
 
+def spotted(name: str) -> dict[str, dict]:
+    """Platform -> the post a stats read has filed under this video file's episode (its first there). Typed-in
+    numbers aren't posts anyone found."""
+    episode = db.episode_for_video(name)
+    out: dict[str, dict] = {}
+    if episode:
+        with db.connect() as c:
+            for row in c.execute("SELECT platform, post_id, url, published_at FROM posts WHERE episode_id = ? "
+                                 "AND post_id NOT LIKE 'manual-%' ORDER BY published_at", (episode["id"],)):
+                out.setdefault(row["platform"], dict(row))
+    return out
+
+
 def for_files(paths: list[Path]) -> dict[Path, dict[str, dict]]:
     """Where each of these video files stands on each platform (see current). A job is looked up by the file's name
     first, so only a file that has jobs is ever hashed, and then it's a file ReelForge has hashed before."""
@@ -182,6 +222,23 @@ def for_files(paths: list[Path]) -> dict[Path, dict[str, dict]]:
                 continue
             out[path] = current([j for j in jobs if j["video_sha256"] == sha])
     return out
+
+
+def standing(job: dict | None, post: dict | None) -> str:
+    """Where a video stands on a platform, from its job (current) and the post a stats read has filed under its
+    episode: "none", "spotted" (the read found it and no job says more), or the job's state. A live job has the say;
+    one that ended without a post only counts when it's newer than the post."""
+    if job and job["state"] in LIVE:
+        return job["state"]
+    if post and not (job and job["created_at"] > (post["published_at"] or "")):
+        return "spotted"
+    return job["state"] if job else "none"
+
+
+def failure(job: dict, name: str) -> str:
+    """Why a job failed: the extension's own sentence, else ours for its code, else the code."""
+    return job["error_message"] or FAILURES.get(job["error_code"] or "", "").format(name=name) or \
+        job["error_code"] or ""
 
 
 def signature(conn: sqlite3.Connection | None = None) -> int:
@@ -264,7 +321,7 @@ def retry(job_id: str, cfg: dict, demo: bool = False) -> dict:
     if job is None or job["state"] not in FREE:
         raise Refused("bad_transition", "Only a post that failed, expired or was cancelled can be tried again.", job)
     text, platform = json.loads(job["text"]), job["platform"]
-    return _create(Path(job["video_path"]), {platform: text}, _headline(text), cfg, bool(job["press"]), (),
+    return _create(Path(job["video_path"]), {platform: text}, headline(text), cfg, bool(job["press"]), (),
                    {platform: job["via"]}, {platform: json.loads(job["options"])}, demo)
 
 
@@ -403,10 +460,12 @@ def allowed(old: str, new: str, by: str) -> bool:
 
 def advance(job_id: str, state: str, *, by: str = "extension", install: str | None = None, step: str | None = None,
             progress: float | None = None, detail: str | None = None, error_code: str | None = None,
-            error_message: str | None = None, post_id: str | None = None, url: str | None = None) -> dict:
+            error_message: str | None = None, post_id: str | None = None, url: str | None = None,
+            strategy: str | None = None) -> dict:
     """Move a job to a state (or say again where it is, with its step and progress). Returns the job as it is now.
-    Refused: no such job ("not_found"), another browser has it ("not_yours", with install), or not a move a job can
-    make ("bad_transition")."""
+    strategy: how the extension found what it was looking for on the page ("caption=role"), kept in the job's log
+    only. Refused: no such job ("not_found"), another browser has it ("not_yours", with install), or not a move a
+    job can make ("bad_transition")."""
     with db.connect() as c:
         c.execute("BEGIN IMMEDIATE")
         old = _locked(c, job_id)
@@ -416,6 +475,8 @@ def advance(job_id: str, state: str, *, by: str = "extension", install: str | No
             raise Refused("bad_transition", f"A post that is {old['state']} can't become {state}.", old)
         new = _write(c, old, state, by, step=step, progress=progress, detail=detail, error_code=error_code,
                      error_message=error_message, post_id=post_id, url=url)
+        if strategy:  # when a platform changes its page, this is where it shows first
+            _event(c, old["id"], new["updated_at"], new["state"], new["step"], f"found by {strategy}")
     return _settled(old, new, by)
 
 
@@ -594,7 +655,7 @@ def _settled(old: dict, new: dict, by: str) -> dict:
     off the page goes into the stats as this episode's, so it shows before the next read (which fills in its
     numbers and never files it anywhere else)."""
     if new["state"] == "posted" and new["post_id"] and not old["post_id"] and by != "reconcile":
-        db.add_post(new["platform"], new["post_id"], new["episode_id"], _headline(json.loads(new["text"])),
+        db.add_post(new["platform"], new["post_id"], new["episode_id"], headline(json.loads(new["text"])),
                     new["url"])
     if (new["state"], new["post_id"], new["url"]) != (old["state"], old["post_id"], old["url"]):
         db.bump()
