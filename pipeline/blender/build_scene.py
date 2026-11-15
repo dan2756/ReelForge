@@ -15,14 +15,15 @@ from pathlib import Path
 import bpy
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, str(HERE.parent))    # pipeline/, for framecache
+sys.path.insert(0, str(HERE))           # this folder first: the scene modules import each other by name
 
 import framecache  # noqa: E402
 import rf_common as rf  # noqa: E402
 
 ep_dir = Path(sys.argv[sys.argv.index("--") + 1]).resolve()
-spec = framecache.Recorder(json.loads((ep_dir / "episode.json").read_text(encoding="utf-8")))
+on_disk = (ep_dir / "episode.json").read_text(encoding="utf-8")
+spec = framecache.Recorder(json.loads(on_disk))
 build = ep_dir / "build"
 (build / "frames").mkdir(parents=True, exist_ok=True)
 # Until this build has finished there is no stamp: a build that stops halfway leaves an old scene.blend behind, and
@@ -42,6 +43,8 @@ series = effect.apply(spec, info)
 bpy.ops.wm.save_as_mainfile(filepath=str(build / "scene.blend"))
 sources = [__file__] + [m.__file__ for m in list(sys.modules.values())
                         if getattr(m, "__file__", None) and HERE in Path(m.__file__).resolve().parents]
+# The stamp is taken from episode.json as it is on disk, not from the dict the scene code was handed: a world or an
+# effect may fill in defaults there, and the stamp has to match what the render step reads back from the file.
 framecache.write_stamp(build / framecache.SCENE, framecache.scene_stamp(
-    spec, spec.read, HERE, sources, bpy.app.version_string, scene.render.engine))
+    json.loads(on_disk), spec.read, HERE, sources, bpy.app.version_string, scene.render.engine))
 print(f"[build_scene] saved {build / 'scene.blend'}")
