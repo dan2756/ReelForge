@@ -12,7 +12,7 @@ from unittest import mock
 import httpx
 
 from dashboard import db
-from dashboard.platforms import PlatformError, YouTube, public
+from dashboard.platforms import PlatformError, TikTok, YouTube, public
 
 AGAIN = "ReelForge tries again at the next refresh."
 CHANNEL = ('<link rel="canonical" href="https://www.youtube.com/channel/UC' + "a" * 22 + '">'
@@ -44,8 +44,9 @@ class YouTubePages(unittest.TestCase):
         def answer(request: httpx.Request) -> httpx.Response:
             url = str(request.url)
             asked.append(url)
-            kind, usual = ("feed", FEED) if "feeds/videos.xml" in url else ("shorts", SHORTS) if url.endswith("/shorts") \
-                else ("watch", WATCH) if "watch?v=" in url else ("channel", CHANNEL)
+            kind, usual = ("feed", FEED) if "feeds/videos.xml" in url else \
+                ("shorts", SHORTS) if url.endswith("/shorts") else \
+                ("watch", WATCH) if "watch?v=" in url else ("channel", CHANNEL)
             given = answers.get(url.rsplit("=", 1)[-1], answers.get(kind, usual))
             if isinstance(given, Exception):
                 raise given
@@ -150,6 +151,16 @@ class YouTubePages(unittest.TestCase):
         asked = self.site()
         YouTube({"handle": "@somechannel"}).fetch()
         self.assertEqual(self.watched(asked), OLDER[10:20])
+
+
+class Handles(unittest.TestCase):
+    def test_a_handle_that_would_change_the_address_counts_as_none(self):
+        """config.toml is edited by hand too. The handle goes into the addresses ReelForge opens, logged in."""
+        for typed, handle in (("@me", "me"), ("me.too_ok-1", "me.too_ok-1"), ("日本語", "日本語"), ("", ""),
+                              ("https://x.com/me", ""), ("x.com/me", ""), ("me?tab=1", ""), ("me#top", ""),
+                              ("me and you", ""), ("..", ""), ("me@evil.example", ""), ("a\\b", "")):
+            self.assertEqual(TikTok({"handle": typed}).public_handle, handle, typed)
+        self.assertFalse(YouTube({"handle": "youtube.com/@me"}).connected())
 
 
 if __name__ == "__main__":

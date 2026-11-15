@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,7 +55,8 @@ def explain(error: BaseException, name: str) -> str:
 
 def detail(error: BaseException) -> str:
     """An error as the log keeps it: its kind and its own words, on one line (browser errors run to many)."""
-    return f"{type(error).__name__}: " + " | ".join(line.strip() for line in str(error).splitlines()[:6] if line.strip())
+    lines = [line.strip() for line in str(error).splitlines()[:6] if line.strip()]
+    return f"{type(error).__name__}: " + " | ".join(lines)
 
 
 @dataclass
@@ -106,6 +108,9 @@ class PublishItem:
         return f"{self.title[:92].rstrip()} #shorts" if self.title else ""
 
 
+_NOT_A_HANDLE = re.compile(r"[\s/\\?#%&=:@\x00-\x1f\x7f]|^\.+$")  # (letters of any alphabet are fine: YouTube's)
+
+
 class Platform:
     key = ""
     name = ""
@@ -119,8 +124,12 @@ class Platform:
 
     @property
     def public_handle(self) -> str:
-        """The handle from config.toml, without the @."""
-        return str(self.cfg.get("handle", "")).strip().lstrip("@")
+        """The handle from config.toml, without the @. It goes into the addresses ReelForge opens (in a browser
+        that's logged in), so one that would change which page that is (a slash, a ?, a #, a space: a link pasted
+        into config.toml, say) counts as none. The platform then shows as not connected, and Connect on the Accounts
+        tab, which reads the handle out of a link, puts it right."""
+        handle = str(self.cfg.get("handle", "")).strip().lstrip("@")
+        return "" if _NOT_A_HANDLE.search(handle) else handle
 
     @property
     def logged_in(self) -> bool:
