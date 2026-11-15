@@ -102,6 +102,20 @@ export const tests = {
     equal(job.post_id, "FIXTUREvid01", "the video id found before the dialog closed")
   },
 
+  async "YouTube: publishing while the video is still going up is seen as posted, not as a page gone wrong"({ app, site, browser, video }) {
+    site.mode.youtube = "slow"
+    equal(await browser.pair(app), "ok", "pairing")
+    const made = app.createBatch(video(), ["youtube"])
+    await browser.post(app, made.batch)
+    const job = made.jobs[0]
+    // The extension is on the last screen, waiting for the upload. The person does not wait.
+    await until(() => `the wait for the upload (it is ${job.state} ${job.step})`, () => job.step === "upload" && job.events.some(event => event.step === "visibility"), 30000)
+    const tab = await browser.tab("studio.youtube.com")
+    await tab.locator("#done-button").click()
+    await until(() => `posted (it is ${job.state}: ${job.error_message})`, () => job.state === "posted" || job.state === "failed")
+    equal([job.state, job.post_id], ["posted", "FIXTUREvid01"], "state and video id")
+  },
+
   async "X: the composer closing after the person's press counts as posted, without a made-up id"({ app, site, browser, video }) {
     site.mode.x = "no_toast"
     const { job, tab } = await toReady({ app, browser }, "x", video())

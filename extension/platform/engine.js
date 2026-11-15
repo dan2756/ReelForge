@@ -225,10 +225,10 @@
   // is held back for a moment first, in case the page is still arriving and a better way is about to match.
   // The way that won is remembered. When none does, the failure says how many elements each one found.
   const GRACE = 1500
-  rf.find = async (name, { timeout } = {}) => {
+  rf.find = async name => {
     const hook = rf.sel.hooks[name]
     const ways = hook?.strategies || []
-    const wait = way => timeout || way.timeout_ms || hook.timeout_ms || 10000
+    const wait = way => way.timeout_ms || hook.timeout_ms || 10000
     const counts = ways.map(() => 0)
     const started = Date.now()
     let weaker = null

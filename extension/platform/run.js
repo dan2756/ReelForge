@@ -36,15 +36,19 @@ void (async () => {
 
   const handle = text => String(text || "").trim().replace(/^@/, "").toLowerCase()
 
+  // The post's address and id, where the page shows them. YouTube shows the link before the video is published
+  // and takes it away with the dialog, so what was seen once is kept.
+  const known = {}
   function postInfo() {
     const href = rf.probe("post_link")?.getAttribute("href")
-    let url
     try {
-      url = href ? new URL(href, location.href).href : undefined
+      if (href) known.url = new URL(href, location.href).href
     } catch {
-      url = undefined
+      // Not an address after all.
     }
-    return { url, post_id: rf.read("post_link") || undefined }
+    const id = rf.read("post_link")
+    if (id) known.post_id = id
+    return { ...known }
   }
 
   async function posted() {
@@ -89,17 +93,16 @@ void (async () => {
     return Date.now() - goneSince >= 2000
   }
 
-  // Watches for the platform's own sign that the post went out. A sign that is already showing before anyone
-  // has pressed anything cannot be trusted on this page, and is then left out.
-  function sent(trustSign) {
-    return rf.waitFor(() => (trustSign && rf.sign("success")) || formGone(), { timeout: 46 * 60 * 1000, pace: 500 })
-  }
+  // The platform's own sign that the post went out. If it is already showing when the page is ready and nobody
+  // has pressed anything, it is not a sign of posting on this page at all, and is ignored from then on.
+  let signBroken = false
+  const sent = () => (!signBroken && rf.sign("success")) || formGone()
 
   async function watch() {
     rf.phase = "watch"
     noticePress()
     // The wait is a little longer than the 45 minutes ReelForge itself waits on a ready post.
-    await sent(!rf.sign("success"))
+    await rf.waitFor(sent, { timeout: 46 * 60 * 1000, pace: 500 })
     await posted()
   }
 
@@ -132,7 +135,7 @@ void (async () => {
     await rf.report({ step: "confirm" })
     if (asking() && !rf.sign("success")) rf.say(`${P} is asking you something`, "warn", "Answer it in this tab. ReelForge will not.")
     try {
-      await rf.waitFor(() => rf.sign("success") || formGone(), { timeout: 5 * 60 * 1000, pace: 500 })
+      await rf.waitFor(sent, { timeout: 5 * 60 * 1000, pace: 500 })
     } catch (error) {
       if (error.code !== "timeout") throw error
       throw new rf.Stop("unknown_outcome", `Post was pressed on ${P} and no confirmation was seen. Check your profile before you post again.`, { state: "unknown", step: "confirm" })
@@ -172,10 +175,19 @@ void (async () => {
       throw new rf.Stop("hook_not_found", `${P}'s page did not take the video. You can add it by hand in this tab.`, { detail: "hook=file_input files not set" })
     }
     rf.phase = "filled"
+    noticePress()
 
     const end = (await flow.fill(job)) || {}
+    // The person may have been quicker than the page: YouTube lets a video be published while it is still
+    // going up. A form that is gone by now was either sent (a press was seen) or closed.
+    const form = rf.sel.success?.gone_after_press
+    if (form && !rf.probe(form)) {
+      if (pressed) return posted()
+      throw new rf.Stop("tab_closed", `${P}'s upload form was closed before it was ready, and ReelForge saw no press of ${flow.button}. Nothing should have been posted.`)
+    }
     const button = end.hold ? rf.probe(end.hold) : await rf.find(flow.final)
     if (button) rf.outline(button)
+    if (!pressed && rf.sign("success")) signBroken = true
     const hint = end.more || (flow.button === "Post" ? "Nothing is posted until you do." : `On ${P} the button says ${flow.button}.`)
     rf.say("Check it, then press Post", "ready", hint)
     await rf.report({ state: "ready", step: "ready", detail: end.detail || (rf.fallback ? `${P}'s page has changed a little; still working` : undefined), ...postInfo() })

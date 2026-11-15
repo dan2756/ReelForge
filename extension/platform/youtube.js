@@ -14,7 +14,7 @@
 
     async fill(job) {
       await rf.step("uploading", "upload", "YouTube is taking the video in")
-      await rf.find("title", { timeout: 2 * 60 * 1000 })
+      // The title box arrives once YouTube has started on the file, which can take a while for a big one.
       await rf.fill("fill_title", "title", job.text.title, "Filling in the title")
       const description = await rf.fill("fill_caption", "description", job.text.description, "Filling in the description")
       // A hashtag picker opened by the description would sit on top of the buttons.
@@ -59,12 +59,13 @@
         await rf.waitFor(() => {
           const percent = Number(rf.read("progress"))
           if (percent > 0 && percent <= 100) rf.progress("filling", "upload", percent / 100)
-          return rf.probe("upload_done")
+          // YouTube lets a video be published while it is still going up. Then the dialog goes, and so does
+          // this wait: what happened is worked out by the caller.
+          return rf.probe("upload_done") || !rf.probe("upload_dialog")
         }, { timeout: 30 * 60 * 1000, step: "upload" })
         return { detail: `Visibility: ${VISIBILITY[chosen]}` }
       }
       return { detail: `Visibility: ${VISIBILITY[chosen]}`, noPress: "ReelForge could not see whether the upload had finished." }
     },
-
   }
 })()
