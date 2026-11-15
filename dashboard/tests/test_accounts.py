@@ -330,6 +330,31 @@ class WindowTest(unittest.TestCase):
             self.assertNotIn("Also holds stats", plain(panel["body"]))
             self.assertEqual([p["post_id"] for p in w.svc.posts], ["mine1"])
 
+    def test_the_dialog_still_asks_once_the_old_readings_are_thinned_away(self):
+        """The old handle's readings of the account go with time (db.compact keeps one a day, then one a week). Its
+        videos don't, so the panel and the dialog are still there, and say what is."""
+        self.forget("youtube", "instagram", "x")
+        every = self.real_platforms({"tiktok": "@mine"})
+        old = db.latest_accounts()["tiktok"]["handle"]
+        before = len(db.all_posts())
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()):
+            w = self.open(every, demo_mode=False)
+            soon = (analytics.now() + timedelta(minutes=1)).isoformat(timespec="seconds")
+            db.record_snapshot("tiktok", Account("@mine", 120), [Post("mine1", "My own video", None, db.now_iso())],
+                               soon)
+            with db.connect() as c:
+                c.execute("DELETE FROM account_stats WHERE platform = 'tiktok' AND handle = ?", (old,))
+            w.call("reload")
+            self.assertEqual(self.panel(w, "tiktok")["old_handles"], [old])
+            note = plain(w.call("handle_change_info", "tiktok")["note"])
+            self.assertIn(f"What it read then is still here: {before} videos that @mine doesn't have.", note)
+            w.forget()
+            w.call("forget_handle_stats", "tiktok")
+            self.assertTrue(w.until(lambda: any(t.startswith(f"Removed: {before} videos. The copy from before is")
+                                                for t in w.toasts())), w.toasts())
+            self.assertEqual([p["post_id"] for p in db.all_posts()], ["mine1"])
+            self.assertEqual(self.panel(w, "tiktok")["old_handles"], [])
+
     def test_keeping_the_stats_from_before_a_handle_changed(self):
         self.forget("youtube", "instagram", "x")
         every = self.real_platforms({"tiktok": "@mine"})

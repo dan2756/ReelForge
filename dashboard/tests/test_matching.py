@@ -575,10 +575,14 @@ class HandleTest(DbTest):
     def test_keeping_them_makes_them_this_accounts(self):
         self.typo_then_mine()
         self.read("@me", self.mine, 120, 120)
-        self.assertEqual(db.keep_old_handle("tiktok"), 2)
+        self.assertTrue(db.keep_old_handle("tiktok"))
         self.assertEqual((db.old_handles("tiktok"), db.handle_change("tiktok")), ([], None))
         self.assertEqual(len(self.stored()), 5)
-        self.assertEqual(db.keep_old_handle("tiktok"), 0)
+        with db.connect() as c:  # the readings under the old handle are this account's now
+            self.assertEqual({r[0] for r in c.execute("SELECT handle FROM account_stats")}, {"@me"})
+        self.assertFalse(db.keep_old_handle("tiktok"))
+        self.assertIsNone(self.read("@me", self.mine, 121, 150))  # settled: nothing more is asked
+        self.assertEqual(db.old_handles("tiktok"), [])
 
     def test_back_to_the_right_handle_after_a_wrong_one(self):
         """@me for a while, @mrbest by mistake, @me again: only what was read as @mrbest can be forgotten."""
@@ -596,11 +600,139 @@ class HandleTest(DbTest):
     def test_numbers_you_typed_in_are_never_forgotten(self):
         eid = db.create_episode("My video", video("ep01_mine"), at(0))
         db.add_post("x", f"manual-{eid}", eid, "My video", None, at(0))
+        self.read("@oldme", [post("old1", "Their video", 0, views=9)], 10, 30, platform="x")
         self.read("@oldme", [post(f"manual-{eid}", "My video", 0, views=40)], 10, 60, platform="x")
         self.assertEqual(self.read("@me", [post("x1", "Another video", 5, views=7)], 12, 120, platform="x"), "@oldme")
-        self.assertEqual(db.handle_change("x")["posts"], [])
+        self.assertEqual(db.handle_change("x")["posts"], ["old1"])
         db.forget_old_handle("x")
         self.assertEqual(self.stored("x"), [f"manual-{eid}", "x1"])
+
+    def test_typed_in_numbers_under_a_corrected_handle_ask_nothing(self):
+        """Instagram, never logged in, its numbers typed in: putting its handle right is no other account. (It
+        used to copy the store and say the stats hold both accounts.)"""
+        eid = db.create_episode("My video", video("ep01_mine"), at(0))
+        db.add_post("instagram", f"manual-{eid}", eid, "My video", None, at(0))
+        typed = lambda n: [post(f"manual-{eid}", "My video", 0, views=n)]  # noqa: E731
+        self.read("@my.name", typed(40), 10, 60, platform="instagram")
+        self.assertIsNone(self.read("@my_name", typed(50), 11, 120, platform="instagram"))
+        self.assertEqual((db.old_handles("instagram"), db.handle_change("instagram"), self.copies()), ([], None, []))
+        # Logged in later, and read: still nothing of the old handle's to tell apart.
+        self.assertIsNone(self.read("@my_name", [post("ig1", "My video", 0, views=60)], 12, 180, platform="instagram"))
+        self.assertEqual((db.old_handles("instagram"), self.copies()), ([], []))
+
+    def test_a_read_with_nothing_to_compare_decides_nothing(self):
+        """A renamed account whose first read under the new name brings no videos (TikTok's totals alone): it used
+        to be taken for another account there and then, with a copy and a notification, and stay that way."""
+        mine = [post("a", "A", 0, views=10), post("b", "B", 1, views=20)]
+        self.read("@oldname", mine, 100, 60)
+        self.read("@oldname", mine, 100, 90)
+        self.assertIsNone(self.read("@newname", [], 100, 120))  # only the totals: can't say
+        self.assertEqual((db.old_handles("tiktok"), db.handle_change("tiktok"), self.copies()), ([], None, []))
+        self.assertIsNone(self.read("@newname", [], 100, 130))
+        self.assertIsNone(self.read("@newname", mine, 101, 150))  # the same videos: a new name
+        self.assertEqual((db.old_handles("tiktok"), db.handle_change("tiktok"), self.copies()), ([], None, []))
+        self.assertIsNone(db.get_meta(db.HANDLES, {}).get("tiktok"))  # nothing left to look out for
+        with db.connect() as c:
+            self.assertEqual({r[0] for r in c.execute("SELECT handle FROM account_stats")}, {"@newname"})
+
+    def test_another_account_is_said_by_the_first_read_that_can_tell(self):
+        self.typo_then_mine()
+        self.assertIsNone(self.read("@me", [], 120, 120))  # only the totals
+        self.assertEqual((db.old_handles("tiktok"), self.copies()), ([], []))
+        self.assertEqual(self.read("@me", self.mine, 120, 150), "@mrbest")  # videos, none of them @mrbest's
+        self.assertEqual((db.old_handles("tiktok"), len(self.copies())), (["@mrbest"], 1))
+        self.assertEqual(db.handle_change("tiktok")["posts"], ["big0", "big1", "big2"])
+        db.forget_old_handle("tiktok")
+        self.assertEqual(self.stored(), ["mine1", "mine2"])
+        # The reading from before the videos came carried @mrbest's total on: that went too.
+        self.assertEqual([(r["followers"], r["views"]) for r in db.account_series("tiktok", "")],
+                         [(120, 0), (120, 800)])
+
+    def test_a_new_name_found_out_later_takes_the_question_back(self):
+        """A read that showed none of the old handle's videos (a page of new ones only), then one that does: it
+        was a new name after all."""
+        mine = [post("a", "A", 0, views=10), post("b", "B", 1, views=20)]
+        self.read("@oldname", mine, 100, 60)
+        self.assertEqual(self.read("@newname", [post("c", "C", 100, views=1)], 100, 120), "@oldname")
+        notify.handle_changed("tiktok", "TikTok", "@oldname", "@newname")
+        self.assertEqual(db.old_handles("tiktok"), ["@oldname"])
+        self.assertIsNone(self.read("@newname", [*mine, post("c", "C", 100, views=2)], 100, 150))
+        self.assertEqual((db.old_handles("tiktok"), db.handle_change("tiktok")), ([], None))
+        self.assertEqual([n for n in notify.recent() if (n["key"] or "").startswith("handle:")], [])
+        with db.connect() as c:
+            self.assertEqual({r[0] for r in c.execute("SELECT handle FROM account_stats")}, {"@newname"})
+        self.assertEqual(self.stored(), ["a", "b", "c"])
+
+    def test_handles_mixed_in_the_store_from_before_are_left_alone(self):
+        """A store that already holds readings under two handles (a rename from months ago, before ReelForge
+        looked at handles at all): nothing says whose posts were whose, so nothing is asked and nothing copied."""
+        with db.connect() as c:
+            c.executemany("INSERT INTO account_stats (platform, ts, handle, followers, views) VALUES (?,?,?,?,?)",
+                          [("youtube", at(60 * i), "@oldname" if i < 5 else "@newname", 100 + i, 100)
+                           for i in range(10)])
+            c.execute("""INSERT INTO posts (platform, post_id, title, published_at, last_ts, views)
+                         VALUES ('youtube', 'v1', 'V', ?, ?, 100)""", (at(0), at(540)))
+        self.assertEqual(db.old_handles("youtube"), [])
+        self.assertIsNone(self.read("@newname", [post("v1", "V", 0, views=101)], 110, 600, platform="youtube"))
+        self.assertEqual((db.old_handles("youtube"), db.handle_change("youtube"), self.copies()), ([], None, []))
+        self.assertEqual(db.forget_old_handle("youtube"), None)
+        self.assertEqual(self.stored("youtube"), ["v1"])
+
+    def long_ago(self, platform: str, reads: list[tuple[datetime, str, list[str]]]) -> None:
+        """Reads at real times in the past (compact goes by today's date): (when, handle, the ids of the posts,
+        all uploaded long before)."""
+        iso = lambda t: t.isoformat(timespec="seconds")  # noqa: E731
+        up = iso(reads[0][0] - timedelta(days=300))
+        for when, handle, ids in reads:
+            account = SimpleNamespace(handle=handle, followers=100, views=None, likes=None, posts=None)
+            db.record_snapshot(platform, account, [SimpleNamespace(
+                post_id=i, title=i, url=None, published_at=up, views=1000, likes=1, comments=None, shares=None,
+                saves=None) for i in ids], iso(when))
+
+    def test_thinned_history_never_costs_this_account_a_post(self):
+        """@wrong for a week, the handle put right on a Wednesday, and one of @me's own posts read for two more
+        days only (it left its page). Thinned to one reading a week, the times said that post was last read while
+        the handle was still @wrong, and Forget removed it with the other account's."""
+        now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        monday = (now - timedelta(days=now.weekday(), weeks=13)).replace(hour=10)
+        wrong, mine = ["W1", "W2"], ["M1", "M2"]
+        self.long_ago("x", [(monday - timedelta(days=4), "@wrong", wrong), (monday, "@wrong", wrong),
+                            (monday + timedelta(days=1), "@wrong", wrong),
+                            (monday + timedelta(days=2), "@me", [*mine, "M_left"]),
+                            (monday + timedelta(days=3), "@me", [*mine, "M_left"]),
+                            *((monday + timedelta(days=5 + 7 * week), "@me", mine) for week in range(13))])
+        self.assertEqual(db.handle_change("x")["posts"], wrong)
+        self.assertGreater(db.compact(min_hours=0), 0)  # thinned: M_left's last reading has none of @me's with it
+        found = db.handle_change("x")
+        self.assertEqual((found["old"], found["posts"]), (["@wrong"], wrong))
+        self.assertEqual(db.forget_old_handle("x")["posts"], 2)
+        self.assertEqual(self.stored("x"), ["M1", "M2", "M_left"])
+        with db.connect() as c:
+            self.assertEqual({r[0] for r in c.execute("SELECT handle FROM account_stats")}, {"@me"})
+
+    def test_the_question_outlives_the_old_handles_readings(self):
+        """A mistyped handle put right the same day, and nothing said for a month: thinning leaves that day one
+        reading of the account, the right handle's. The old one was then lost sight of, with its videos still in
+        the totals and no way left to take them out."""
+        now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        day = (now - timedelta(days=30)).replace(hour=9)
+        self.long_ago("tiktok", [(day, "@mrbest", ["big1", "big2"]),
+                                 (day + timedelta(minutes=30), "@mrbest", ["big1", "big2"]),
+                                 (day + timedelta(hours=1), "@me", ["mine1"]),
+                                 (day + timedelta(hours=2), "@me", ["mine1"]), (now, "@me", ["mine1"])])
+        db.compact(min_hours=0)
+        with db.connect() as c:
+            self.assertEqual({r[0] for r in c.execute("SELECT handle FROM account_stats")}, {"@me"})
+        self.assertEqual(db.old_handles("tiktok"), ["@mrbest"])
+        found = db.handle_change("tiktok")
+        self.assertEqual((found["posts"], found["rows"]), (["big1", "big2"], []))
+        self.assertEqual(db.parse(found["first"]), day)  # when it was read is still known, for the dialog
+        self.assertEqual(db.latest_accounts()["tiktok"]["views"], 3000)
+        gone = db.forget_old_handle("tiktok")
+        self.assertEqual((gone["posts"], gone["readings"]), (2, 0))
+        self.assertEqual(self.stored(), ["mine1"])
+        self.assertEqual({r["views"] for r in db.account_series("tiktok", "")}, {1000})
+        self.assertEqual(db.old_handles("tiktok"), [])
 
     def test_a_refresh_says_so_once_and_the_note_leads_to_accounts(self):
         from dashboard import sync

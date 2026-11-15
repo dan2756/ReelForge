@@ -2092,12 +2092,14 @@ class Dashboard(StatsTab, SettingsTab, Service):
         first, last = (db.parse(found[k]).astimezone() for k in ("first", "last"))
         days = f"on {first:%b} {first.day}" if first.date() == last.date() else \
             f"from {first:%b} {first.day} to {last:%b} {last.day}"
-        videos = len(found["posts"])
+        readings, videos = len(found["rows"]), len(found["posts"])
+        # (Old readings of the account are thinned out with time, down to none: the videos stay until you say.)
+        here = f"{readings} reading{'' if readings == 1 else 's'} of the account and " if readings else ""
         note = Text()
         note.append(f"{p.name}  ", f"bold {p.color}")
         note.append(now, "bold")
         note.append(f"\n\nBefore, ReelForge read {p.name} as {old} ({days}). What it read then is still here: "
-                    f"{len(found['rows'])} readings of the account and {videos} video{'' if videos == 1 else 's'} "
+                    f"{here}{videos} video{'' if videos == 1 else 's'} "
                     f"that {now} doesn't have. They're on the Videos tab and count in {p.name}'s totals and "
                     "charts.", MUTED)
         note.append(f"\n\nIf {old} was a typo or someone else's account, forget its stats: ", MUTED)
@@ -2128,8 +2130,9 @@ class Dashboard(StatsTab, SettingsTab, Service):
 
     def handle_forgotten(self, p: Platform, gone: dict | None) -> None:
         if gone:
-            videos = f"{gone['posts']} video{'' if gone['posts'] == 1 else 's'}"
-            self.notify(f"{videos} and {gone['readings']} readings are gone. The copy from before is "
+            went = [f"{n} {what}{'' if n == 1 else 's'}" for n, what in ((gone["posts"], "video"),
+                                                                         (gone["readings"], "reading")) if n]
+            self.notify(f"Removed: {sync.listed(went or ['nothing'])}. The copy from before is "
                         f"{gone['backup'].name}, in {gone['backup'].parent}.",
                         title=f"Forgot {sync.listed(gone['old'])}'s {p.name} stats", timeout=15)
             self.tell_others()
