@@ -93,7 +93,7 @@ class Untar(unittest.TestCase):
         device = tarfile.TarInfo("kit/null")
         device.type = tarfile.CHRTYPE
         for old in PYTHONS:
-            for n in range(6):
+            for n in range(8):
                 box = self.dir / f"box-{old}-{n}"       # the archive, the folder it unpacks into, and nothing else
                 box.mkdir()
                 what, members = list({
@@ -102,6 +102,12 @@ class Untar(unittest.TestCase):
                     "a link out, then a file through it": [self.link("kit/up", "../.."), ("kit/up/outside.txt", "x")],
                     "a link to an absolute path": [self.link("kit/etc", str(box))],
                     "a hard link to a file outside": [self.link("kit/hard", "../outside.txt", hard=True)],
+                    # each of these links stays inside by where it's named, and leads out once the one before it
+                    # is there: kit/d/a is kit, so kit/d/a/b lands as kit/b, and so on up
+                    "links that lead out one after another, then a file through them": [
+                        self.link("kit/d/a", ".."), self.link("kit/d/a/b", ".."), self.link("kit/d/a/b/c", ".."),
+                        ("kit/d/a/b/c/outside.txt", "x")],
+                    "a link that leads out by way of another": [self.link("here", "."), self.link("up", "here/..")],
                     "a device": [device]}.items())[n]
                 with self.subTest(old_python=old, what=what):
                     bad = self.archive(("kit/ok.txt", "fine"), *members, name=f"{box.name}/bad.tar.gz")
@@ -118,7 +124,12 @@ class Untar(unittest.TestCase):
                         self.assertTrue(refused)
                         self.assertFalse((box / "out").exists())
                     else:      # Python's own filter refuses these too, or unpacks them inside the folder
-                        self.assertTrue(refused or what == "an absolute path", what)
+                        self.assertTrue(refused or what in ("an absolute path",
+                                                            "a link that leads out by way of another"), what)
+                        for folder, folders, files in os.walk(box / "out"):
+                            for name in folders + files:             # whatever it did unpack leads nowhere else
+                                real = os.path.realpath(os.path.join(folder, name))
+                                self.assertTrue(Path(real).is_relative_to(os.path.realpath(box / "out")), real)
 
     def test_an_update_on_linux_unpacks_on_the_old_python_too(self):
         root = self.dir / "ReelForge"
