@@ -775,6 +775,8 @@ class Dashboard(StatsTab, SettingsTab, Service):
         the notifications they bring and, the first time, how much changed since you last looked."""
         self.changes = max(self.changes, changes or 0)
         self.reload(data)
+        if self.tab == "publish":
+            self.scan_files()  # a video this read found posted, or one another window hid or posted
         self.celebrate()
         self.show_new_notes()
         if self.last_seen is not None:
@@ -827,8 +829,6 @@ class Dashboard(StatsTab, SettingsTab, Service):
         self.catching_up = False
         if data is not None and changes > self.changes:  # not older than what this window shows
             self.show_new_data(changes, data)
-            if self.tab == "publish":
-                self.scan_files()  # a video another window hid, or posted
 
     def compact_db(self) -> None:
         try:

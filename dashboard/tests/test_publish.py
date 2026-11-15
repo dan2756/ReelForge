@@ -10,9 +10,29 @@ from unittest import mock
 
 from dashboard import db, demo, desktop, sync, videos
 from dashboard.config import PLATFORM_KEYS
+from dashboard.platforms import Account, Platform, Post
 from dashboard.tests.window import Window, plain
 
 CAPTION, TAGS = "What if gravity doubled every second?", "#whatif #physics #gravity"
+
+
+class Reader(Platform):
+    """A platform whose stats read finds the posts it's given."""
+
+    def __init__(self, key: str, name: str, posts: list[Post] = ()):
+        super().__init__({"handle": "me"})
+        self.key, self.name, self.posts = key, name, list(posts)
+
+    @property
+    def stats_source(self) -> str | None:
+        return "public"
+
+    @property
+    def uses_browser(self) -> bool:
+        return False
+
+    def fetch(self):
+        return Account("@me", 1_000), self.posts
 
 
 class PublishTest(unittest.TestCase):
@@ -56,3 +76,17 @@ class Form(PublishTest):
         with mock.patch.object(videos, "X_TAGS", True):
             w.call("form_changed", CAPTION, TAGS)
         self.assertIn(f"{len(CAPTION)}/100", plain(w.view("preview")["caption"]))
+
+
+class Posted(PublishTest):
+    def test_the_list_marks_a_video_this_windows_own_read_finds_posted(self):
+        db.create_episode(CAPTION, str(self.video))
+        youtube = Reader("youtube", "YouTube")
+        w = self.window({"youtube": youtube})
+        self.assertEqual(plain(w.view("files")["items"][0]["lines"][0]), "  ep01.mp4")
+        youtube.posts = [Post("yt-1", f"{CAPTION} #shorts", "https://example.invalid/yt-1", db.now_iso(), views=5)]
+        w.forget()
+        w.call("refresh", True)
+        self.assertTrue(w.until(lambda: w.view("posted") and w.view("posted")["done"]["youtube"]))
+        self.assertTrue(w.sent("files"), "the video list wasn't sent again")
+        self.assertEqual(plain(w.view("files")["items"][0]["lines"][0]), "✓ ep01.mp4")
