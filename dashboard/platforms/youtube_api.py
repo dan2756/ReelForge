@@ -461,6 +461,7 @@ def read_client(path: Path) -> dict:
 
 class _Listener(HTTPServer):
     consent: "Consent"
+    allow_reuse_address = False  # the port is this try's alone (on Windows, reuse would let another program share it)
 
     def server_bind(self) -> None:
         socketserver.TCPServer.server_bind(self)  # (HTTPServer's own looks the computer's name up first)

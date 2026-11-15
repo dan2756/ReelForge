@@ -23,7 +23,9 @@ class Google:
     """Listening on a free port (base). What it is told to do:
 
     consent        "yes", "no" (you refuse on the consent page) or "other_state" (the answer that comes back
-                   carries a state the person's try didn't make)
+                   carries a state the person's try didn't make). As at Google, a yes gives a sign-in that lasts
+                   only when the page was asked for one (access_type=offline), and for a client that was allowed
+                   before only when the page was told to ask again (prompt=consent)
     lasts          seconds the sign-in lasts, if Google is to say so (a consent screen in Testing: 7 days)
     scope          the permission the token answer names (None: it names none)
     no_refresh     the token answer has no refresh token
@@ -63,6 +65,7 @@ class Google:
         self.starts: list[dict] = []         # each upload started: {"query", "headers", "body"}
         self.puts: list[dict] = []           # each piece or question: {"range", "length", "bearer"}
         self.codes: dict[str, dict] = {}
+        self.allowed: set[str] = set()       # the clients somebody said yes to before
         self.grants: dict[str, str] = {}     # refresh token -> the client it was given to
         self.access: set[str] = set()        # the access tokens that are good
         self.sessions: dict[str, dict] = {}  # id -> {"size", "data", "body", "video"}
@@ -158,8 +161,11 @@ class _Handler(BaseHTTPRequestHandler):
             back["error"] = "access_denied"
         else:
             code = "code-" + secrets.token_urlsafe(24)
+            lasting = query.get("access_type") == "offline" and (
+                query.get("prompt") == "consent" or query.get("client_id") not in g.allowed)
+            g.allowed.add(query.get("client_id"))
             g.codes[code] = {"challenge": query.get("code_challenge"), "redirect_uri": query.get("redirect_uri"),
-                             "client_id": query.get("client_id"), "used": False}
+                             "client_id": query.get("client_id"), "used": False, "lasting": lasting}
             back.update(code=code, scope=query.get("scope", ""))
         if g.consent == "other_state":
             back["state"] = "somebody-elses-state"
@@ -209,7 +215,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             code["used"] = True
             refresh = "refresh-" + secrets.token_urlsafe(24)
-            if not g.no_refresh:
+            lasting = code["lasting"] and not g.no_refresh
+            if lasting:
                 g.grants[refresh] = form["client_id"]
         elif form.get("grant_type") == "refresh_token":
             refresh = form.get("refresh_token", "")
@@ -225,7 +232,7 @@ class _Handler(BaseHTTPRequestHandler):
         if g.scope:
             answer["scope"] = g.scope
         if form["grant_type"] == "authorization_code":
-            if not g.no_refresh:
+            if lasting:
                 answer["refresh_token"] = refresh
             if g.lasts:
                 answer["refresh_token_expires_in"] = g.lasts

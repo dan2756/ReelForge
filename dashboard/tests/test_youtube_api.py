@@ -147,6 +147,8 @@ class Connecting(ApiTest):
                          (CLIENT_ID, "code", "S256"))
         self.assertRegex(asked["redirect_uri"], r"^http://127\.0\.0\.1:\d+$")
         self.assertEqual(asked["state"], consent.state)
+        # A sign-in that lasts, asked for anew each time: without both, Google gives none the second time.
+        self.assertEqual((asked["access_type"], asked["prompt"]), ("offline", "consent"))
         self.assertNotIn(consent.verifier, self.opened[0])  # only its SHA-256 goes to the consent page...
         (trade,) = self.google.token_calls
         proof = base64.urlsafe_b64encode(hashlib.sha256(trade["code_verifier"].encode()).digest()).rstrip(b"=")
@@ -210,6 +212,9 @@ class Connecting(ApiTest):
         with mock.patch.object(desktop, "open_url", lambda url: True):
             consent = youtube_api.connect(self.client_file)
         port = int(consent.redirect.rsplit(":", 1)[1])
+        # It listens on this computer only, on a port no other program can share.
+        self.assertEqual(consent.httpd.socket.getsockname(), ("127.0.0.1", port))
+        self.assertEqual(consent.httpd.socket.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR), 0)
         for path, host in (("/favicon.ico", f"127.0.0.1:{port}"), (f"/?state={consent.state}&code=x", "evil.example")):
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
             conn.putrequest("GET", path, skip_host=True)
@@ -291,6 +296,12 @@ class Connecting(ApiTest):
         self.assertEqual((said["state"], said["why"], said["privacy"], said["made_for_kids"]),
                          ("on", None, "unlisted", True))
         self.assertNotEqual(self.held(), first)
+
+    def test_every_connect_gets_a_sign_in_that_lasts(self):
+        for _ in range(3):  # (Google gives one a second time only to a page told to ask again)
+            self.assertTrue(self.connect().outcome["ok"])
+            self.reopen()
+        self.assertEqual(len(self.google.grants), 3)
 
     def test_how_long_the_sign_in_lasts_is_kept_when_google_says(self):
         self.connect()
