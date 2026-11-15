@@ -182,7 +182,9 @@ class Toasts {
     const severity = (["warning", "error"].includes(t.severity ?? "") ? t.severity : "information") as Toast["severity"]
     const ms = (t.timeout ?? 5) * 1000
     const toast: Toast = { id: this.next++, title: t.title ?? "", body: t.body ?? "", severity, until: Date.now() + ms, leaving: false }
-    this.list = [...this.list, toast].slice(-6)
+    // The same pop-up again while it still shows (a button pressed three times) takes its place: one, not a stack.
+    const same = (o: Toast) => o.title === toast.title && o.body === toast.body && o.severity === severity
+    this.list = [...this.list.filter((o) => !same(o)), toast].slice(-6)
     this.changed()
     setTimeout(() => this.leave(toast.id), Math.max(ms - FADE_MS, 0))
   }

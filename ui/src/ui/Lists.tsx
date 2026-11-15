@@ -256,6 +256,8 @@ export interface OptionListProps {
   /** No row backgrounds: only the lit edge marks the highlighted one. */
   flat?: boolean
   empty?: ReactNode
+  /** It has the keyboard as soon as it shows (a dialog's list). */
+  autoFocus?: boolean
 }
 
 export function OptionList(props: OptionListProps) {
@@ -283,6 +285,7 @@ export function OptionList(props: OptionListProps) {
   }
   const { ref, focused, focus } = useFocus(props.id, {
     disabled: !items.length, // (an empty list is no stop for Tab)
+    autoFocus: props.autoFocus,
     onKey: (key) => {
       if (isEnter(key) && props.selected) {
         props.onActivate?.(props.selected)

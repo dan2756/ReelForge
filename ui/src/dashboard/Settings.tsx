@@ -606,8 +606,8 @@ export function MoveFolder({ data, close }: { data: MoveData; close: () => void 
         </text>
       ) : null}
       <box flexDirection="row" justifyContent="flex-end" height={1} marginTop={2} flexShrink={0} gap={1}>
-        <Button id="move-cancel" label={data.problem ? "Close" : "Cancel"} onPress={close} />
-        {data.problem ? null : <Button id="move-go" label="Move ReelForge" variant="primary" onPress={go} />}
+        <Button id="move-cancel" label={data.problem ? "Close" : "Cancel"} autoFocus={Boolean(data.problem)} onPress={close} />
+        {data.problem ? null : <Button id="move-go" label="Move ReelForge" variant="primary" autoFocus onPress={go} />}
       </box>
     </Modal>
   )

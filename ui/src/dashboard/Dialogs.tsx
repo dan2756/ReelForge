@@ -151,7 +151,8 @@ function LogStats({ data, close }: { data: LogData; close: () => void }) {
           Videos show up here once you've uploaded them from the Publish tab.
         </text>
       )}
-      <Scroll maxHeight={15} flexShrink={1} scrollY>
+      {/* as tall as its rows, up to five of them: by itself a scrolling area takes all the height it can get */}
+      <Scroll maxHeight={Math.min(data.episodes.length * 3, 15)} flexShrink={1} scrollY>
         {data.episodes.map((e) => (
           <box key={e.id} flexDirection="row" height={3} flexShrink={0}>
             <box flexGrow={1} justifyContent="center">
@@ -169,7 +170,8 @@ function LogStats({ data, close }: { data: LogData; close: () => void }) {
         ))}
       </Scroll>
       {problem ? (
-        <text fg={DASH.warn} marginTop={1} flexShrink={0}>
+        // (what's wrong with what was typed is red everywhere: here, under an @handle, in first-time setup)
+        <text fg={DASH.bad} marginTop={1} wrapMode="word" flexShrink={0}>
           {problem}
         </text>
       ) : null}
@@ -221,6 +223,7 @@ function EpisodePicker({ data, close }: { data: EpisodeData; close: () => void }
           items={data.options}
           selected={selected}
           maxLines={16}
+          autoFocus
           onSelect={setSelected}
           onActivate={choose}
         />

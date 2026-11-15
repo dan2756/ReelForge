@@ -13,7 +13,7 @@ import { fmtNum, shortNum } from "../src/lib/format"
 import { cellLen, plain, segsLen, wrappedRows, type Parts } from "../src/lib/styled"
 import { PLATFORM, restyle, tone } from "../src/theme"
 import { bell, BELL_WIDTH, faceCells, faceWidth, sparkline, stackedSparkline } from "../src/ui/Graphics"
-import { inline, mdBlocks } from "../src/ui/Panels"
+import { inline, mdBlocks, toasts } from "../src/ui/Panels"
 
 const VALUES = { followers: 12_900, views: 1_234_567, likes: 98_765 }
 const CHANGES = { followers: 1_030, views: 19_400, likes: -40 }
@@ -224,6 +224,18 @@ describe("a notification's words in the drawer", () => {
       for (const line of lines) expect(cellLen(line)).toBeLessThanOrEqual(Math.max(width, 2)) // (it ran to twice the width)
       expect(lines.join("").replace(/\s/g, "")).toBe(wide.replace(/\s/g, "")) // and nothing is lost
     }
+  })
+})
+
+describe("pop-ups", () => {
+  test("the same one again takes the first one's place; a different one stacks under it", () => {
+    toasts.clear()
+    for (let i = 0; i < 3; i++) toasts.add({ title: "Copied", body: "The caption is on the clipboard.", timeout: 60 })
+    expect(toasts.get().length).toBe(1)
+    toasts.add({ title: "Copied", body: "The hashtags are on the clipboard.", timeout: 60 })
+    toasts.add({ title: "Copied", body: "The caption is on the clipboard.", severity: "warning", timeout: 60 })
+    expect(toasts.get().map((t) => t.body)).toEqual(["The caption is on the clipboard.", "The hashtags are on the clipboard.", "The caption is on the clipboard."])
+    toasts.clear()
   })
 })
 

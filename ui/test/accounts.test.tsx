@@ -111,6 +111,29 @@ describe("logging ReelForge's browser out", () => {
   })
 })
 
+describe("typing in stats", () => {
+  test("numbers ReelForge can't take are said in red under the boxes, as under an @handle; good ones are saved", async () => {
+    const h = await kit({ needs_login: ["x"] })
+    await clickText(h, "Type in stats", 2)
+    await until(h, () => frame(h).includes("LOG STATS"))
+    await h.t.mockInput.typeText("lots") // the followers box has the keyboard
+    await h.settle(200)
+    h.t.mockInput.pressKey("RETURN")
+    const problem = "Whole numbers only, please"
+    await until(h, () => frame(h).includes(problem))
+    const [, y] = find(h, problem)!
+    expect(hex(h.t.captureSpans().lines[y]!.spans.find((sp) => sp.text.includes(problem))!.fg)).toBe(DASH.bad)
+    for (let i = 0; i < 4; i++) h.t.mockInput.pressKey("BACKSPACE")
+    await h.t.mockInput.typeText("1,234")
+    await h.settle(200)
+    expect(find(h, "Cancel")![1] - find(h, "Followers")![1]).toBeLessThan(10) // no rows of nothing where videos would be
+    h.t.mockInput.pressKey("RETURN")
+    await until(h, () => !frame(h).includes("LOG STATS"))
+    expect(frame(h)).not.toContain("LOG STATS")
+    expect(frame(h)).not.toContain("Something went wrong")
+  })
+})
+
 describe("stats from before a handle changed", () => {
   const ASK = { was: { tiktok: "@oldname" } }
 

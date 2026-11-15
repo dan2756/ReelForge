@@ -95,6 +95,8 @@ export function Root({ sides, first, quit }: { sides: Sides; first: View; quit: 
   const nav: Nav = useMemo(
     () => ({
       profile: async (key: string, tab?: string) => {
+        // (a Python side takes a moment to start: say that the click was heard)
+        toasts.add({ body: "Opening that profile…", timeout: 2 })
         try {
           const next = await sides.open<Init>("dashboard", { tab, switched: true }, key)
           sides.adopt(next.bridge)
@@ -107,6 +109,7 @@ export function Root({ sides, first, quit }: { sides: Sides; first: View; quit: 
         if (view.kind !== "dashboard") return
         const here = view.init.profile.key
         const opts = { start: "onboard", new: mode === "new", embedded: true }
+        toasts.add({ body: "Opening the channel's questions…", timeout: 2 })
         try {
           const next = await sides.open<SetupInit>("setup", opts, here)
           sides.adopt(next.bridge)

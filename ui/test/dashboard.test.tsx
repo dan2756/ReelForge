@@ -547,6 +547,26 @@ describe("dialogs", () => {
     await press(h, "escape")
     expect(frame(h)).not.toContain("WHICH VIDEO IS THIS?")
   })
+
+  test("Fix episode opens with its list holding the keyboard: the arrows move, Enter picks", async () => {
+    const h = await window("videos")
+    await clickText(h, " Fix episode ", 2)
+    await until(h, "WHICH VIDEO IS THIS?")
+    /** The option the list's lit edge is on, inside the dialog. */
+    const lit = () => {
+      const lines = rows(h)
+      const top = lines.findIndex((r) => r.includes("WHICH VIDEO IS THIS?"))
+      return lines.slice(top).find((r) => r.includes("▌ "))?.trim() ?? ""
+    }
+    const first = lit()
+    expect(first).not.toBe("")
+    h.t.mockInput.pressArrow("down") // no click and no Tab first
+    await h.settle(300)
+    expect(lit()).not.toBe(first)
+    await press(h, "return")
+    await h.settle(500)
+    expect(frame(h)).not.toContain("WHICH VIDEO IS THIS?")
+  })
 })
 
 describe("profiles", () => {
@@ -626,6 +646,7 @@ describe("profiles", () => {
       await press(h, "p")
       expect(frame(h)).toContain("Beta")
       await press(h, "3") // 1 the ReelForge folder's own, 2 Alpha, 3 Beta
+      expect(frame(h)).toContain("Opening that profile…") // (its Python side takes a moment to start)
       for (let i = 0; i < 30 && !rows(h)[1]!.includes("Beta ▾"); i++) await h.settle(200)
       expect(rows(h)[1]).toContain("Beta ▾")
       expect(activeTab(h)).toBe("Accounts") // nothing connected there yet: where you connect one
