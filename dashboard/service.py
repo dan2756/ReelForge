@@ -1850,11 +1850,15 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
                 then = "" if p.public_stats else ", then log in once in ReelForge's own browser window"
                 if private is None:
                     private = signup.private_name(others) if signup is not None and others else ""
+                body = Text()
+                if p.refused_handle:  # a handle typed into config.toml that isn't one: say so, not just "off"
+                    body.append(f"config.toml has {p.refused_handle[:60]} as your {p.name} handle, which isn't one "
+                                "ReelForge can use, so it counts as none. ", TYPICAL)
+                body.append(f"Type your @handle and press Connect to see {p.name} in ReelForge{then}. No account "
+                            "yet? Sign up makes one" + (f", in a private {private} window." if private else "."),
+                            MUTED)
                 panel.update(
-                    status=Text("○ not connected", f"bold {MUTED}").json(), status_short=None,
-                    body=Text(f"Type your @handle and press Connect to see {p.name} in ReelForge{then}. No account "
-                              "yet? Sign up makes one" + (f", in a private {private} window." if private else "."),
-                              MUTED).json(),
+                    status=Text("○ not connected", f"bold {MUTED}").json(), status_short=None, body=body.json(),
                     note=Text(p.setup_note, MUTED).json(), signup=signup is not None)
                 panels.append(panel)
                 continue

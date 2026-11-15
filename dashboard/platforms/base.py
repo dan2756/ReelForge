@@ -6,6 +6,7 @@ import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import unquote
 
 import httpx
 
@@ -131,10 +132,20 @@ class Platform:
     def public_handle(self) -> str:
         """The handle from config.toml, without the @. It goes into the addresses ReelForge opens (in a browser
         that's logged in), so one that would change which page that is (a slash, a ?, a #, a space: a link pasted
-        into config.toml, say) counts as none. The platform then shows as not connected, and Connect on the Accounts
-        tab, which reads the handle out of a link, puts it right."""
-        handle = str(self.cfg.get("handle", "")).strip().lstrip("@")
+        into config.toml, say) counts as none. The platform then shows as not connected, and its panel on the
+        Accounts tab says why (refused_handle).
+
+        Two ways of writing a handle that name the same page are read as that handle: letters copied from the
+        address bar in their %-form (a YouTube handle in another alphabet: @%D0%BA%D0%B0... is @ка...), and a slash
+        after it (@name/). What a %-form stands for is checked like anything else, so %2F is still a slash."""
+        handle = unquote(str(self.cfg.get("handle", "")).strip().lstrip("@")).rstrip("/")
         return "" if _NOT_A_HANDLE.search(handle) else handle
+
+    @property
+    def refused_handle(self) -> str:
+        """What config.toml has for a handle, when it isn't one ReelForge can use (see public_handle); else ""."""
+        typed = str(self.cfg.get("handle", "")).strip()
+        return "" if self.public_handle else typed
 
     @property
     def logged_in(self) -> bool:

@@ -17,7 +17,7 @@ from unittest import mock
 import httpx
 
 from dashboard import config, db, sync
-from dashboard.platforms import Account, PlatformError, TikTok, YouTube, browser, public
+from dashboard.platforms import Account, PlatformError, TikTok, X, YouTube, browser, public
 
 AGAIN = "ReelForge tries again at the next refresh."
 CHANNEL = ('<link rel="canonical" href="https://www.youtube.com/channel/UC' + "a" * 22 + '">'
@@ -607,6 +607,21 @@ class Handles(unittest.TestCase):
                               ("me and you", ""), ("..", ""), ("me@evil.example", ""), ("a\\b", "")):
             self.assertEqual(TikTok({"handle": typed}).public_handle, handle, typed)
         self.assertFalse(YouTube({"handle": "youtube.com/@me"}).connected())
+
+    def test_a_handle_written_another_way_is_still_that_handle(self):
+        """A YouTube handle in another alphabet, copied from the address bar in its %-form, and a handle with a
+        slash after it: both name the page they always did, but counted as none once handles were checked, and
+        the platform dropped out of ReelForge without a word. What a %-form stands for is still checked."""
+        for typed, handle in (("@%D0%BA%D0%B0%D0%BD%D0%B0%D0%BB", "канал"), ("@me/", "me"), ("me%2Fabout", ""),
+                              ("me%3Ftab=1", ""), ("@%40me", ""), ("100%", ""), ("/", "")):
+            self.assertEqual(YouTube({"handle": typed}).public_handle, handle, typed)
+        channel = YouTube({"handle": "@%D0%BA%D0%B0%D0%BD%D0%B0%D0%BB"})
+        self.assertEqual((channel.handle, channel.connected(), channel.refused_handle), ("@канал", True, ""))
+        self.assertEqual(str(httpx.URL(f"https://www.youtube.com/@{channel.public_handle}")),
+                         "https://www.youtube.com/@%D0%BA%D0%B0%D0%BD%D0%B0%D0%BB")  # the page it always opened
+        # One that still counts as none is kept, to say on its Accounts panel what config.toml has.
+        self.assertEqual(X({"handle": " https://x.com/me?s=20 "}).refused_handle, "https://x.com/me?s=20")
+        self.assertEqual((X({"handle": "@me"}).refused_handle, X({}).refused_handle), ("", ""))
 
 
 if __name__ == "__main__":

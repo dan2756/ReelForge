@@ -470,6 +470,21 @@ class WindowTest(unittest.TestCase):
         self.assertIn("error: saving YouTube's handle: PermissionError: [Errno 13] Permission denied: 'config.toml'",
                       sync.log_path().read_text("utf-8"))
 
+    def test_a_handle_in_config_toml_that_isnt_one_is_said_on_its_panel(self):
+        """A link pasted into config.toml as a handle counts as none (Platform.public_handle). The platform used
+        to show as not connected and nothing said why."""
+        self.forget("youtube", "instagram", "x")
+        every = self.real_platforms({"tiktok": "@mine"})
+        every["youtube"].cfg["handle"] = "https://www.youtube.com/@mine/shorts"  # typed into config.toml by hand
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()):
+            w = self.open(every, demo_mode=False)
+            panel = self.panel(w, "youtube")
+            self.assertEqual(panel["state"], "off")
+            self.assertIn("config.toml has https://www.youtube.com/@mine/shorts as your YouTube handle, which isn't "
+                          "one ReelForge can use, so it counts as none. Type your @handle and press Connect",
+                          plain(panel["body"]))
+            self.assertNotIn("config.toml", plain(self.panel(w, "x")["body"]))  # no handle at all: nothing to say
+
     def test_a_typed_in_number_that_goes_down_is_asked_about_first(self):
         """Type in stats: a number lower than the one saved replaces it, so Save says so first and stores it when
         pressed again. A slip the wrong way (3,400 where 34,000 was meant) is seen before it costs anything."""
