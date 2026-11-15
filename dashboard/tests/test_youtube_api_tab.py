@@ -234,7 +234,8 @@ class Buttons(ApiPosting):
         w = self.window()
         w.call("youtube_api_disconnect")
         self.assertTrue(w.until(lambda: w.view("youtube_api")["state"] == "off"))
-        self.assertEqual(w.toasts()[-1], "Disconnected. ReelForge has forgotten the connection, and Google has ended it.")
+        self.assertEqual(w.toasts()[-1],
+                         "Disconnected. ReelForge has forgotten the connection, and Google has ended it.")
         self.assertEqual((self.google.grants, self.api_store.exists()), ({}, False))
         self.assertEqual(self.rows(w)["youtube"]["actions"], [])
         w.call("youtube_api_disconnect")
@@ -254,7 +255,8 @@ class Buttons(ApiPosting):
         self.assertIn("posts start as unlisted", plain(w.view("youtube_api")["line"]))
         self.assertEqual(w.call("youtube_api_info", CAPTION, TAGS)["send"]["privacy"], "unlisted")
         self.assertTrue(w.call("youtube_api_defaults", None, True)["made_for_kids"])
-        self.assertEqual([f["text"] for f in w.call("youtube_api_info", CAPTION, TAGS)["fields"][2:4]], ["Unlisted", "Yes"])
+        fields = w.call("youtube_api_info", CAPTION, TAGS)["fields"]
+        self.assertEqual([f["text"] for f in fields[2:4]], ["Unlisted", "Yes"])
         self.assertIsNone(w.call("youtube_api_defaults", "everyone"))
         self.assertEqual(w.toasts()[-1], "Choose private, unlisted or public.")
         job = self.posted(w)  # with nothing said for this post: your choices
@@ -375,7 +377,8 @@ class Posting(ApiPosting):
     def test_a_public_post_youtube_stored_as_asked_has_nothing_to_add(self):
         w = self.window()
         job = self.posted(w, "public")
-        self.assertEqual((job["state"], job["detail"], json.loads(job["options"])["privacy"]), ("posted", None, "public"))
+        self.assertEqual((job["state"], job["detail"], json.loads(job["options"])["privacy"]),
+                         ("posted", None, "public"))
         self.assertEqual(w.sent("toast")[-1]["body"], f"It is up. {LINK}")
 
     def test_what_the_read_back_says(self):
@@ -383,7 +386,8 @@ class Posting(ApiPosting):
         self.assertEqual(youtube_api_tab.read_back("private", False, made), "")  # as it was sent: nothing to say
         self.assertEqual(youtube_api_tab.read_back("unlisted", False, {**made, "privacy": "unlisted"}), "")
         self.assertIn("stored it as private, not unlisted", youtube_api_tab.read_back("unlisted", False, made))
-        self.assertIn("didn't say who can see it", youtube_api_tab.read_back("public", False, {**made, "privacy": None}))
+        unsaid = youtube_api_tab.read_back("public", False, {**made, "privacy": None})
+        self.assertEqual(unsaid, "YouTube didn't say who can see it: check that in YouTube Studio.")
         said = youtube_api_tab.read_back("public", False, {"privacy": "public", "made_for_kids": True})
         self.assertEqual(said, "YouTube has it as made for kids, which isn't what ReelForge sent. Check its audience "
                                "in YouTube Studio.")

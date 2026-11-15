@@ -196,7 +196,7 @@ def finish(job: dict, made: dict) -> dict | None:
     url = f"https://youtube.com/shorts/{made['id']}" if made["id"] else None
     note = read_back(options.get("privacy"), options.get("made_for_kids") is True, made)
     if not made["id"]:
-        note = ("YouTube took the video, but ReelForge couldn't read its id: find it in YouTube Studio. " + note).strip()
+        note = f"YouTube took the video, but ReelForge couldn't read its id: find it in YouTube Studio. {note}".strip()
     try:
         return posting.advance(job["id"], "posted", by="app", post_id=made["id"], url=url, detail=note or None,
                                step="confirm" if note else None)

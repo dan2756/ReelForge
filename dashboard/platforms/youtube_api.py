@@ -17,10 +17,10 @@ point ReelForge at the client file Google gave you. Then:
   disconnect  The file is forgotten here first, then Google is told to end the grant.
 
 What is kept: one file for each channel, data/youtube_api.json next to its stats (store_path), written whole and
-readable by you alone: the client's id and secret, the refresh token, your choices (who sees a post, the made-for-kids answer), the
-channel the last upload went to, and the session of an upload under way. None of it is ever printed, logged, put in
-a message or sent anywhere but the addresses below. A sign-in Google has ended (it does after seven days while your
-consent screen is in Testing) is "connect again", never something tried over and over.
+readable by you alone: the client's id and secret, the refresh token, your choices (who sees a post, the
+made-for-kids answer), the channel the last upload went to, and the session of an upload under way. None of it is
+ever printed, logged, put in a message or sent anywhere but the addresses below. A sign-in Google has ended (it does
+after seven days while your consent screen is in Testing) is "connect again", never something tried over and over.
 
 This was written from Google's published description of the API and tested against a stand-in for Google
 (dashboard/tests/test_youtube_api.py). It has never uploaded to Google itself: UNPROVEN says so wherever it shows.
@@ -834,11 +834,13 @@ def _made(data: dict) -> dict:
 
 # ---- the command
 
-USAGE = """reelforge youtube-api               where the connection to YouTube's API stands (optional: docs/YOUTUBE-API.md)
+USAGE = """reelforge youtube-api               where the connection to YouTube's API stands (it is optional)
 reelforge youtube-api connect FILE  connect with the client file from your own Google Cloud project: opens Google's
                                     consent page in your browser and waits for your answer there
                                     (without FILE: connect again with the client already on file)
 reelforge youtube-api disconnect    forget the connection and tell Google to end it
+
+docs/YOUTUBE-API.md says how to set it up, and what is and isn't known about it.
 
 None of these posts anything. A post starts when you press it in ReelForge's window."""
 

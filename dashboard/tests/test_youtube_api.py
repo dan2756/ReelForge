@@ -229,7 +229,8 @@ class Connecting(ApiTest):
 
     def test_a_file_that_is_not_a_desktop_client_says_which_file_and_why(self):
         missing = self.root / "nowhere.json"
-        self.assertIn(f"There is no file at {missing}", self.refused("client_file", youtube_api.connect, missing).message)
+        said = self.refused("client_file", youtube_api.connect, missing).message
+        self.assertEqual(said, f"There is no file at {missing}.")
         junk = self.root / "notes.txt"
         junk.write_text("my-password-is-hunter2", encoding="utf-8")
         said = self.refused("client_file", youtube_api.connect, junk).message
@@ -401,7 +402,8 @@ class Uploading(ApiTest):
             "snippet": {"title": "Café ✓ 日本 #shorts", "description": "#whatif #physics", "categoryId": "22"},
             "status": {"privacyStatus": "unlisted", "selfDeclaredMadeForKids": True}})
         self.assertEqual((start["headers"]["x-upload-content-length"], start["headers"]["x-upload-content-type"],
-                          start["headers"]["content-type"]), (str(SIZE), "video/mp4", "application/json; charset=UTF-8"))
+                          start["headers"]["content-type"]),
+                         (str(SIZE), "video/mp4", "application/json; charset=UTF-8"))
         with self.assertRaises(ValueError):  # never left to YouTube, whose own default is public
             self.upload("")
         self.assertEqual(len(self.google.starts), 1)
@@ -477,7 +479,8 @@ class Uploading(ApiTest):
         self.assertEqual(self.google.videos, [])
 
     def test_a_no_to_the_question_after_the_last_piece_is_still_unknown(self):
-        self.google.script = [None, None, None, "lost", (403, "quotaExceeded")]  # the video is up; the question isn't answered
+        # The video is up, and the question whether it is gets a "no" of its own.
+        self.google.script = [None, None, None, "lost", (403, "quotaExceeded")]
         with self.assertRaises(Unknown):
             self.upload()
         self.one_video()
@@ -683,7 +686,8 @@ class Store(ApiTest):
         self.assertEqual(youtube_api.status()["state"], "off")
         self.store.write_text('["a", "list"]', "utf-8")
         self.assertEqual(youtube_api.read_store(), {})
-        self.store.write_text(json.dumps({"client_id": "has a space", "client_secret": "x", "refresh_token": "y"}), "utf-8")
+        odd = {"client_id": "has a space", "client_secret": "x", "refresh_token": "y"}
+        self.store.write_text(json.dumps(odd), "utf-8")
         self.assertEqual(youtube_api.status()["state"], "off")  # nothing odd is ever put in a request
 
     def test_your_choices_start_safe_and_only_take_what_they_know(self):
@@ -883,7 +887,8 @@ class CommandLine(ApiTest):
 
     def test_no_word_starts_a_post(self):
         self.connect()
-        for words in (["post"], ["upload", str(self.video)], ["post", str(self.video), "--public"], ["connect", "a", "b"]):
+        for words in (["post"], ["upload", str(self.video)], ["post", str(self.video), "--public"],
+                      ["connect", "a", "b"]):
             code, said = self.run_main(*words)
             self.assertEqual(code, 2, words)
             self.assertIn("None of these posts anything.", said)
