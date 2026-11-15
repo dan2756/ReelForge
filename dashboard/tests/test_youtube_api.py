@@ -19,6 +19,7 @@ import socket
 import stat
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -688,6 +689,38 @@ class Store(ApiTest):
         ignored = (KIT / ".gitignore").read_text("utf-8").splitlines()
         for line in ("dashboard/data/", "profiles/", "client_secret*.json"):
             self.assertIn(line, ignored)  # neither the file nor the client file you downloaded is ever committed
+
+
+class Kept(unittest.TestCase):
+    """The file is yours: an update of ReelForge never replaces it, whichever channel's it is."""
+
+    def test_an_update_leaves_every_channels_connection_as_it_is(self):
+        from studio import update
+
+        mine = {"dashboard/data/youtube_api.json": '{"client_id": "mine", "refresh_token": "mine"}',
+                "profiles/cool-epic-facts/dashboard/data/youtube_api.json": '{"client_id": "the other channel\'s"}'}
+        for rel in (*mine, "dashboard/data/youtube_api.json.lock", "dashboard/data/youtube_api.upload.lock"):
+            self.assertTrue(update.kept(rel), rel)
+        self.assertFalse(update.kept("dashboard/platforms/youtube_api.py"))
+        self.assertFalse(update.kept("docs/YOUTUBE-API.md"))
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name) / "ReelForge"
+        for rel, text in {**mine, "studio/__init__.py": 'KIT_VERSION = "1.0.0"\n'}.items():
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(text, "utf-8")
+        archive = Path(tmp.name) / "ReelForge-1.1.0-Windows.zip"
+        with zipfile.ZipFile(archive, "w") as z:
+            for rel, text in {"studio/__init__.py": 'KIT_VERSION = "1.1.0"\n',
+                              "dashboard/platforms/youtube_api.py": "# new\n",
+                              "dashboard/data/youtube_api.json": '{"client_id": "the kit\'s"}'}.items():
+                z.writestr(f"ReelForge-1.1.0/{rel}", text)
+        work = Path(tmp.name) / "work"
+        work.mkdir()
+        update._copy_release(archive, root, work, lambda *a: None)
+        self.assertTrue((root / "dashboard/platforms/youtube_api.py").is_file())
+        for rel, text in mine.items():
+            self.assertEqual((root / rel).read_text("utf-8"), text, rel)
 
 
 class NothingSecretShows(ApiTest):
