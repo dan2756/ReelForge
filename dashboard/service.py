@@ -106,9 +106,15 @@ HELP = [
     ("Compare", "The platform scoreboard, or pick an episode to see the same video on every platform, each against "
                 "that platform's typical video. Newest, Oldest and Most views beside Episodes sort the list (Most "
                 "views adds up each episode's views on every platform).", "compare"),
-    ("Publish", "The green button at the top right opens it. Pick a video, check the caption, then open each upload "
-                f"page: ReelForge copies the right text, shows the file in {desktop.FILES}, and checks for the new "
-                "post 10 and 30 minutes later. Remove (or a right-click) hides a video or moves it to the "
+    ("Publish", "The green button at the top right opens it. Pick a video and check the caption. Under POST, a row "
+                "for each platform says where its post stands. Post… shows each platform's exact text and asks, "
+                "then opens each upload page in your browser, where ReelForge's browser extension attaches the "
+                "video and fills in the text: you check it and press Post there. Its row shows the post when the "
+                "extension reports it, or when a refresh finds it. The extension is optional, and "
+                "it is tested against copies of the upload pages, not yet on the live sites. Under BY HAND, each "
+                f"platform's button opens its upload page, copies the right text and shows the file in "
+                f"{desktop.FILES}, and ReelForge checks for the new post 10 and 30 minutes later. Remove "
+                "(or a right-click) hides a video or moves it to the "
                 f"{desktop.BIN}; Show hidden brings hidden ones back. Under the videos, Best time to post shows each "
                 "platform's part of the day whose videos got the most views in their first day, and when it next "
                 "comes round; it needs 2 videos a day old in each of 2 parts of the day, with one clearly "
@@ -118,7 +124,10 @@ HELP = [
                  "Sign up opens the platform's own sign-up page (with more than one profile, in a private window of "
                  "your browser, so your other channel stays logged in), and Disconnect hides one again (its stats "
                  "stay saved). Each panel says where that platform's stats come from and when they were last read; "
-                 "Type in stats lets you enter the numbers by hand for one ReelForge can't read yet.", "accounts"),
+                 "Type in stats lets you enter the numbers by hand for one ReelForge can't read yet, and Log out "
+                 "logs ReelForge's own browser out of Instagram or X. The line above the panels is the browser "
+                 "extension for Post…: it works in your everyday browser, whose sign-ins are apart from these "
+                 "accounts.", "accounts"),
     ("Updates", "Your version, what's new in the next one, and Update and restart: one click downloads it, puts it in "
                 "place (your channel, videos and stats stay as they are) and opens ReelForge again.", "updates"),
     ("Settings", "This channel's answers from first-time setup (Change your answers asks the questions again, and Copy "
@@ -138,11 +147,11 @@ HELP = [
               "each chart: every platform's number now, what it gained over the range and its share of the total. A "
               "stretch the computer was off for is filled in with an estimate, hatched, and the totals start once "
               "every platform you count has a first reading.", "totals"),
-    ("Notifications", "The bell at the top right opens the drawer: updates, milestones, badges, finished videos and "
+    ("Notifications", "The bell at the top right (or n) opens the drawer: updates, milestones, badges, finished videos and "
                       "log-ins that need you. A red dot on the bell means something's unread; click one to go "
-                      "to it, or the × at its right to delete it (Delete deletes the highlighted one), and Clear "
-                      "all deletes them all. The hourly background job (reelforge stats on) adds them while "
-                      "ReelForge is closed."),
+                      "to it (with the keyboard: the arrows, then Enter), or the × at its right to delete it "
+                      "(Delete or Backspace deletes the highlighted one), and Clear all deletes them all. The "
+                      "hourly background job (reelforge stats on) adds them while ReelForge is closed."),
     ("Profiles", "One profile for each channel you run, each with its own accounts, log-ins, stats, notifications, "
                  "Publish list and settings. The button with your channel's name at the top left switches between "
                  "them (a red dot on it: another profile has unread notifications), adds a new one (the same short "
@@ -158,11 +167,19 @@ HELP = [
                         "instead of starting another."),
     ("Badges", "Badges only ever compare you with yourself, from the numbers ReelForge has stored. Percentages need "
                "at least 10 videos or days to compare, and ties count against you, so a badge is always true."),
+    ("Small windows", "ReelForge fits a window of 80 columns by 24 rows. A tab that doesn't fit scrolls (the mouse "
+                      "wheel, or Page Up and Page Down), and on Publish the videos go above the form. In a narrow "
+                      "window Refresh, Help and Quit are the signs ↻ ? × at the top; narrower than 80 columns, ‹ or "
+                      "› at an end of the tabs means more of them are that way: click it, or press a tab's "
+                      "number."),
 ]
 KEYS = [("1-7", "switch tabs"), ("u", "open Publish (the green button at the top right)"),
         ("r / R", "refresh / force refresh"),
+        ("n", "open or close the notifications (the bell at the top right)"),
         ("p", "profiles: switch, add, change or delete one"),
-        ("Tab", "move between buttons, lists and fields (Enter presses, the arrows move through a list)"),
+        ("Tab", "move between buttons, lists and fields (Shift+Tab goes back, Enter presses, the arrows move "
+                "through a list); what it lands on scrolls into view"),
+        ("PgUp/PgDn", "scroll a tab or a dialog that is longer than the window"),
         ("Esc", "close the drawer or a dialog, or leave a text field"), ("Ctrl+Q", "quit")]
 
 
@@ -213,18 +230,20 @@ class Running:
 
 
 def table(columns: list[tuple[str, str, int]], rows: list[tuple[str | None, list]], sort: tuple | None = None,
-          bold_sorted_only: bool = False) -> dict:
+          bold_sorted_only: bool = False, empty: str = "") -> dict:
     """A table for the window: its columns (the sorted one with ▲ or ▼) and rows of cells, each row with the key the
-    window hands back when you pick it ("<platform>|<post id>")."""
+    window hands back when you pick it ("<platform>|<post id>"). empty: what the window says under the headings
+    while there are no rows (what goes here, and what to do to get one)."""
     cols = []
     for key, label, width in columns:
         arrow = (" ▼" if sort[1] else " ▲") if sort and key == sort[0] else ""
         style = "bold" if arrow or not bold_sorted_only else ""
         cols.append({"key": key, "label": Text(label + arrow, style).json(), "width": width,
                      "right": key in RIGHT})
-    return {"columns": cols, "rows": [{"key": k, "cells": [c if isinstance(c, list) else
-                                                             (c.json() if isinstance(c, Text) else Text(str(c)).json())
-                                                             for c in cells]} for k, cells in rows]}
+    return {"columns": cols, "empty": empty,
+            "rows": [{"key": k, "cells": [c if isinstance(c, list) else
+                                          (c.json() if isinstance(c, Text) else Text(str(c)).json())
+                                          for c in cells]} for k, cells in rows]}
 
 
 class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
@@ -1111,7 +1130,11 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
         cells = [(f"{p['platform']}|{p['post_id']}",
                   [tag(self.platforms[p["platform"]]), Text(name), Text(fmt_age(p["age_h"])), num(p["views"]),
                    _after(p, 12), score_text(p["score"])]) for name, p in rows]
-        self.emit("top", {"title": parts(title), **table([("platform", "", 4), *TOP_COLUMNS], cells, self.top_sort)})
+        empty = NOTHING_CONNECTED if not self.platforms else (
+            "No video is ranked yet. One shows up here once it has 50 views and ReelForge has read enough of your "
+            "videos to score it against your typical one.")
+        self.emit("top", {"title": parts(title),
+                          **table([("platform", "", 4), *TOP_COLUMNS], cells, self.top_sort, empty=empty)})
 
     def update_latest(self) -> None:
         """The newest video on every platform: how it's doing so far."""
@@ -1193,7 +1216,15 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
             self.video_key = select
         elif self.video_key not in keys:
             self.video_key = keys[0] if keys else None
-        self.emit("videos", {"hint": parts(hint), **table(VIDEO_COLUMNS, cells, self.sort, bold_sorted_only=True),
+        if not self.platforms:
+            empty = NOTHING_CONNECTED
+        elif self.filter:
+            empty = f"No videos read on {self.platforms[self.filter].name} yet. All shows the other platforms' videos."
+        else:
+            empty = ("No videos read yet. Post one from the Publish tab (u), and it shows up here at the next "
+                     "refresh (r).")
+        self.emit("videos", {"hint": parts(hint),
+                             **table(VIDEO_COLUMNS, cells, self.sort, bold_sorted_only=True, empty=empty),
                              "select": self.video_key, "focus": select is not None})
         self.update_video_detail()
 
@@ -1269,8 +1300,11 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
         post = self._post_for(self.video_key)
         self.update_video_badges(post)
         if not post:
-            self.emit("detail", {"key": None, "title": Text("VIEWS SINCE POSTING", "bold").json(),
-                                 "empty": "Pick a video above to see its views against your typical video's."})
+            # (with no video in the table there is nothing to pick: say what will be here instead)
+            empty = ("Pick a video above to see its views against your typical video's." if self.posts else
+                     "A video's views since it went up show here, against your typical video's, once there is one "
+                     "above.")
+            self.emit("detail", {"key": None, "title": Text("VIEWS SINCE POSTING", "bold").json(), "empty": empty})
             return
         p = self.platforms[post["platform"]]
         xs, ys = analytics.post_curve(post, self.parsed)
@@ -1826,7 +1860,9 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
                                 Text(u["video"] or ""), mark, note]))
         columns = [("when", "When", 8), ("platform", "", 4), ("title", "Video", 26), ("mark", "", 2),
                    ("note", "Post", 64)]
-        self.emit("uploads", {"heading": Text("RECENT UPLOADS", "bold").json(), **table(columns, rows)})
+        empty = ("Nothing yet. A post you start, with Post… or a platform's button under BY HAND, is listed here "
+                 "with where it stands.")
+        self.emit("uploads", {"heading": Text("RECENT UPLOADS", "bold").json(), **table(columns, rows, empty=empty)})
 
     # --- accounts -------------------------------------------------------------------------
 

@@ -11,7 +11,7 @@ changes: it only swaps what ReelForge would find here for the same things on a f
     its charts show an estimate, hatched.
   - A sign-up guide's button, Open profile and every other link open nothing: no browser ever opens from a picture
     or a test (a test that sets REELFORGE_OPENED to a file finds the pages listed there), and a second channel's
-    private window is always Chrome's.
+    private window is always Chrome's. Nor does a file manager open to show a video's file ("reveal <name>" there).
   - Nor does a Copy button touch this computer's clipboard (a test that sets REELFORGE_COPIED to a file finds what
     was copied there).
 """
@@ -137,6 +137,8 @@ def _no_browser() -> None:
         return True  # as a browser that opened would answer
 
     desktop.open_url = opened
+    # ... and no file manager: an upload button would show the video's file in one.
+    desktop.reveal = lambda path: opened(f"reveal {pathlib.Path(path).name}") and None
 
 
 def _no_clipboard() -> None:

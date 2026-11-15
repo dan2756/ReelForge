@@ -6,7 +6,7 @@ import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testin
 import { createRoot } from "@opentui/react"
 import type { Bridge } from "../src/bridge"
 import type { Init } from "../src/dashboard/types"
-import { Root, Sides } from "../src/root"
+import { RENDERER, Root, Sides } from "../src/root"
 import { SetupApp, type SetupInit } from "../src/setup/App"
 
 export interface Headless {
@@ -31,7 +31,7 @@ export async function headless(
   const opened = await sides.open<Init | SetupInit>(screen, options)
   const bridge = opened.bridge
   sides.adopt(bridge)
-  const t = await createTestRenderer({ width, height })
+  const t = await createTestRenderer({ ...RENDERER, width, height }) // as the real window's: Ctrl+C is a key, not the end
   const exits: { code: number; result?: object }[] = []
   const quit = (code = 0, result?: object) => void exits.push({ code, result })
   const root = createRoot(t.renderer)

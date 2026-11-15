@@ -1,17 +1,18 @@
 // The notifications drawer: it slides in from the right over the tab, under the bell. Newest first, each with its
 // unread dot and icon, its title, the start of its body and how long ago, and a small × on its right that deletes it
-// (red under the mouse). Click one to go to what it's about; Delete deletes the highlighted one; Mark all read and
-// Clear all are at the top.
+// (red under the mouse). Click one to go to what it's about (with the keyboard: the arrows, then Enter); Delete (or
+// Backspace, a Mac's delete) deletes the highlighted one; Mark all read and Clear all are at the top.
 
 import { TextAttributes, type Renderable } from "@opentui/core"
 import { useState } from "react"
 import { useView } from "../bridge"
-import { segsLen, type Segs } from "../lib/styled"
+import { cellLen, plain, segsLen, truncate, type Segs } from "../lib/styled"
 import { DASH, mix } from "../theme"
 import { Line } from "../ui/Line"
 import { OptionList, type Option } from "../ui/Lists"
 import { Asleep } from "../ui/Mascot"
 import { MOTION, useTween } from "../ui/Motion"
+import { Reading } from "../ui/Panels"
 import { TOP_ROWS, useDash } from "./state"
 import type { NotesView } from "./types"
 
@@ -19,21 +20,23 @@ export const DRAWER_WIDTH = 52
 const BODY_LINES = 3 // a notification shows at most this many lines of its body
 const X = 3 // the ×'s column, and a space either side
 
-/** Plain text wrapped at spaces to `width` columns (a word longer than that is cut). */
+/** Plain text wrapped at spaces to `width` columns (a word longer than that is cut). Columns, not characters: a
+ * title in Chinese or with an emoji in it takes two for each of those, and would run past the drawer's edge. */
 export function wrap(text: string, width: number): string[] {
   const out: string[] = []
   for (const para of text.split("\n")) {
     let line = ""
     for (const word of para.split(/\s+/).filter(Boolean)) {
       if (!line) line = word
-      else if (line.length + 1 + word.length <= width) line += " " + word
+      else if (cellLen(line) + 1 + cellLen(word) <= width) line += " " + word
       else {
         out.push(line)
         line = word
       }
-      while (line.length > width) {
-        out.push(line.slice(0, width))
-        line = line.slice(width)
+      while (cellLen(line) > width) {
+        const head = plain(truncate([[line]], width)) || [...line][0]! // (a column narrower than one wide character)
+        out.push(head)
+        line = line.slice(head.length)
       }
     }
     out.push(line)
@@ -86,7 +89,12 @@ function Notes() {
     ]
     return { id: String(n.id), lines }
   })
-  const del = (id: string) => s.bridge.send("delete_note", Number(id))
+  const del = (id: string) => {
+    // the highlight moves on to the one after it (or before, at the end), so Delete again deletes that one
+    const at = items.findIndex((it) => it.id === id)
+    if (s.note === id) s.set({ note: items[at + 1]?.id ?? items[at - 1]?.id ?? null })
+    s.bridge.send("delete_note", Number(id))
+  }
   return (
     <box
       flexDirection="column"
@@ -98,6 +106,11 @@ function Notes() {
         setWidth(this.width - 3)
       }}
     >
+      {notes ? null : (
+        <box marginTop={1} flexShrink={0}>
+          <Reading what="your notifications" inside />
+        </box>
+      )}
       <box flexDirection="row" height={1} marginTop={1} flexShrink={0}>
         <box flexGrow={1}>
           <Line segs={notes?.head} />
@@ -112,6 +125,7 @@ function Notes() {
         items={items}
         spaced
         selected={s.note}
+        clickOpens
         bg={bg}
         onSelect={(id) => s.set({ note: id })}
         onActivate={(id) => s.bridge.send("open_note", Number(id))}

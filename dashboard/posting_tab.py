@@ -6,10 +6,12 @@ A mixin of the window's service (dashboard/service.py). Two views:
 
   posting     for the video picked on the Publish tab: where its review stands, whether the extension is there,
               whether Post can be pressed (and why not), and a row per connected platform with its state, a line
-              of words, and what can be done about it (retry, cancel, mark_posted, not_posted, open_post, post_again)
+              of words, and what can be done about it (retry, cancel, mark_posted, not_posted, open_post, post_again,
+              each with the words for its button)
   extension   the extension itself: off (never connected), waiting (connected, not heard from lately), on, or old
-              (it and ReelForge are different versions of the link between them), the browsers it is connected in,
-              and where its folder is
+              (it and ReelForge are different versions of the link between them), the browsers it is connected in
+              and what each was last seen signed in to, where its folder is, the steps to set it up, and why this
+              window can't reach it when it can't
 
 and the calls behind the buttons: post_info (what the question before a post shows), post_with_extension (your
 yes), post_action (a row's button), pair_extension (connect a browser), unpair_extension (disconnect one),
@@ -35,7 +37,7 @@ from . import analytics, db, desktop, extension_api, posting, videos
 from .analytics import fmt_ago, fmt_num
 from .platforms import PublishItem
 from .posting import STEPS, TESTED, failure, standing
-from .view import BAD, GOOD, MUTED, TYPICAL, Text
+from .view import BAD, GOOD, MUTED, TYPICAL, Text, parts
 
 FAINT = "#5c6370"
 AMBER = TYPICAL  # in progress, and anything waiting for you
@@ -68,6 +70,28 @@ ACTIONS = {
 }
 # What each platform's text is called in its own boxes, for the question before a post.
 FIELDS = {"title": "Title", "description": "Description", "caption": "Caption", "text": "Post"}
+# What the button for each of a row's actions says. Short: a row that is posted keeps its two beside its numbers.
+LABELS = {"retry": "Try again", "cancel": "Cancel", "mark_posted": "It's posted", "not_posted": "It didn't post",
+          "open_post": "Open", "post_again": "Post again…"}
+# Setting the extension up, once (docs/EXTENSION.md says the same at more length).
+SETUP = (
+    "Open your browser's extensions page: type chrome://extensions in the address bar. In Edge it is "
+    "edge://extensions, in Brave brave://extensions.",
+    "Switch on Developer mode, at the top right of that page.",
+    "Press Load unpacked and pick the extension folder inside your ReelForge folder. Show the extension folder "
+    "shows it and copies its path.",
+    "Press Connect a browser. A ReelForge page opens in your browser and the extension connects there by itself.",
+)
+# Under the connected browsers. The extension works in your everyday browser, and ReelForge's own log-ins (for
+# reading stats) are in its own: neither says anything about the other.
+SIGNED_NOTE = ("That is what the extension saw in each browser. It is apart from the accounts connected on the Accounts "
+               "tab, which ReelForge reads your stats from.")
+# What happens after your yes to the question before a post: as it is asked, and with "stop before posting" off.
+HOW = ("ReelForge opens each upload page in your browser, attaches the video and fills in the text. You check it "
+       "and press Post.")
+HOW_PRESS = ("ReelForge opens each upload page in your browser, attaches the video and fills in the text. Where you "
+             "switched on Press Post for me in the extension's settings, the extension presses Post too. Everywhere "
+             "else, and always on X, you check it and press Post.")
 
 
 def numbers(post: dict) -> str:
@@ -75,6 +99,21 @@ def numbers(post: dict) -> str:
     if post["views"] is None:
         return f"{fmt_ago(post['published_at'])}, its numbers come with the next refresh"
     return f"{fmt_num(post['views'])} views, {fmt_ago(post['published_at'])}"
+
+
+def signed_in(accounts: dict, names: dict[str, str]) -> str:
+    """What a browser was last seen signed in to, in a line: the extension's word about its own browser. It says
+    nothing about the accounts connected in ReelForge, which read stats through ReelForge's own browser."""
+    said = []
+    for key, name in names.items():
+        seen = accounts.get(key)
+        if not isinstance(seen, dict) or seen.get("signed_in") is None:
+            continue  # the extension hasn't looked there yet
+        handle = seen.get("handle")
+        said.append(f"{name} {handle if isinstance(handle, str) and handle else 'yes'}" if seen["signed_in"] else
+                    f"{name} no")
+    return "signed in there: " + " · ".join(said) if said else \
+        "It hasn't said yet which accounts that browser is signed in to: it looks when you post."
 
 
 def flag_style(color: str, state: str) -> str:
@@ -87,11 +126,14 @@ def flag_style(color: str, state: str) -> str:
     return f"bold {BAD}" if state == "failed" else "#3a4049"
 
 
-def state_line(job: dict | None, post: dict | None, name: str) -> Text:
-    """A platform's row on the posting view: its state in words, with what the extension last said."""
+def state_line(job: dict | None, post: dict | None, name: str, opened: str | None = None) -> Text:
+    """A platform's row on the posting view: its state in words, with what the extension last said. opened: when
+    its upload page was last opened by hand for this video, which is all ReelForge knows of a post made that way
+    until a stats read finds it."""
     state = standing(job, post)
     if state == "none":
-        return Text("○ not posted", FAINT)
+        out = Text("○ not posted", FAINT)
+        return out.append(f"  upload page opened {fmt_ago(opened)}, not spotted yet", MUTED) if opened else out
     if state == "spotted" or (state == "posted" and post):
         return Text("✓ posted", f"bold {GOOD}").append("  " + numbers(post), MUTED)
     words = {**WORDS, **(API_WORDS if job["via"] == "api" else {})}[state]
@@ -189,9 +231,13 @@ class PostingTab:
                              "seen": fmt_ago(p.get("last_seen")) if seen else "never",
                              "on": bool(seen and now - seen <= ON_WITHIN),
                              "old": theirs != posting.PROTOCOL, "at": seen, "protocol": theirs,
+                             # When it connected. The same browser connecting again keeps its place in the list
+                             # and gets a new time: how the window's dialog knows to stop waiting for it.
+                             "paired": str(p.get("paired_at") or ""),
                              # What that browser was last seen signed in to. It is the extension's word about its
                              # own browser, and says nothing about the accounts connected in ReelForge.
                              "accounts": p.get("accounts") if isinstance(p.get("accounts"), dict) else {}})
+            installs[-1]["signed"] = signed_in(installs[-1]["accounts"], {k: q.name for k, q in self.every.items()})
         installs.sort(key=lambda i: (i["at"] is not None, i["at"]), reverse=True)  # the one heard from last, first
         theirs = installs[0]["protocol"] if installs else None
         for i in installs:
@@ -225,11 +271,20 @@ class PostingTab:
             lines.append(Text(self.extension_problem, AMBER))
         if not self.demo:
             lines.append(Text(TESTED, MUTED))
+        # The Publish tab's one line about it while it isn't set up, under the line that says so: what it does, and
+        # that nobody needs it. The middle part is the one a narrow window keeps, so it says by itself how far that
+        # has been tested (TESTED, in full, is in the dialog Set it up opens), in few enough words to show beside
+        # the line's two buttons in a window 120 columns wide.
+        hint = parts([(Text("Optional. ", MUTED), 1), (Text("Fills in upload pages (tested on copies).", MUTED), 0),
+                      (Text(" You check each one and press Post.", MUTED), 2)])
         self.emit("extension", {
             "state": status["state"], "line": status["line"].json(), "lines": [t.json() for t in lines],
             "installs": status["installs"], "port": self.extension_port, "protocol": posting.PROTOCOL,
             "folder": str(folder), "folder_there": folder.is_dir(),
             "hint_dismissed": bool(self._safe(lambda: db.get_meta(HINT, False), False)),
+            "hint": hint, "steps": list(SETUP), "signed_note": SIGNED_NOTE,
+            # Why this window can't hand a post to the extension, whatever is connected ("": it can).
+            "problem": "" if self.demo else self.extension_problem,
         })
 
     def follow_extension(self) -> None:
@@ -251,20 +306,26 @@ class PostingTab:
         extension = self.extension_status()
         view = {"video": None, "review": {"state": "none", "line": []},
                 "extension": {"state": extension["state"], "line": extension["line"].json()},
-                "can_post": False, "why": "Pick a video on the left first.", "rows": []}
+                "can_post": False, "why": "Pick a video on the left first.", "setup": False, "rows": [],
+                "labels": LABELS}
         if video is None:
             self.emit("posting", view)
             return
         review = self.review_of(video, fresh)
         jobs = self._safe(lambda: posting.for_files([video]).get(video, {}), {})
         posts = self.spotted_posts(video)
+        opened: dict[str, str] = {}  # platform -> when its upload page was last opened by hand for this video
+        for u in self._safe(db.uploads, []):  # (newest first)
+            if u["status"] == "manual" and (u["video"] or "").lower() == video.name.lower():
+                opened.setdefault(u["platform"], u["ts"])
         rows = []
         for p in self.platforms.values():
             job, post = jobs.get(p.key), posts.get(p.key)
             state = standing(job, post)
             url = (job["url"] if job and state == job["state"] else None) or (post["url"] if post else None)
             rows.append({"key": p.key, "name": p.name, "color": p.color, "state": state,
-                         "line": state_line(job, post, p.name).json(), "busy": state in BUSY, "url": url,
+                         "line": state_line(job, post, p.name, opened.get(p.key)).json(), "busy": state in BUSY,
+                         "url": url,
                          "job": job["id"] if job and state == job["state"] else None,
                          "actions": [a for a in ACTIONS[state] if a != "open_post" or url]})
         self.api_rows(rows, jobs, posts)  # what posting through YouTube's own API adds (youtube_api_tab.py)
@@ -273,7 +334,9 @@ class PostingTab:
         why = self.cant_post(video, review, extension, rows)
         view.update(video={"path": str(video), "name": video.name},
                     review={"state": review["state"], "line": Text(mark + review["line"], style).json()},
-                    can_post=not why, why=why, rows=rows)
+                    can_post=not why, why=why, rows=rows,
+                    # Only the extension is in the way: Post explains how to set it up instead of being greyed out.
+                    setup=bool(why) and why == self.extension_needed(extension))
         self.emit("posting", view)
 
     def cant_post(self, video: Path, review: dict, extension: dict, rows: list[dict]) -> str:
@@ -303,6 +366,13 @@ class PostingTab:
         if extension["state"] == "old":
             return extension.get("why") or "Update the browser extension first."
         return ""
+
+    def cant_hand_over(self) -> str:
+        """Why no post can be handed to the extension from this window now ("": one can): no browser is connected,
+        the extension needs an update, or this window isn't listening for it, so there is no page to open. Asked
+        before any job is made: one made first would only be called off again, and a Post again would have set the
+        post that is up aside for it."""
+        return self.extension_needed(self.extension_status()) or self.extension_problem
 
     # --- keeping it current ------------------------------------------------------------------------
 
@@ -381,22 +451,31 @@ class PostingTab:
         return {"video": {"path": str(video), "name": video.name,
                           "size": f"{video.stat().st_size / 1024 / 1024:.1f} MB"},
                 "review": look["review"], "extension": {"state": extension["state"], "line": extension["line"].json()},
-                "platforms": platforms, "can_post": not why, "why": why, "stop_before": True, "note": TESTED}
+                "platforms": platforms, "can_post": not why, "why": why, "stop_before": True, "note": TESTED,
+                "how": HOW, "how_press": HOW_PRESS}
 
     @rpc
     def post_with_extension(self, platforms: list[str], caption: str, tags: str, stop_before: bool = True,
-                            force: list[str] | None = None) -> dict | None:
+                            force: list[str] | None = None, video: str | None = None) -> dict | None:
         """Your yes to the question: a job for each ticked platform (posting.create_batch), then the local page that
         hands them to the extension. stop_before: the extension stops at the platform's own Post button (off only
         where post_info said press is available). force: the platforms to post to again although the video is up
-        there. Returns {"batch", "jobs": [{"id", "platform"}], "blocked": [...], "opened"}; None when there was
+        there. video: the file the question was about (post_info's video.path), which the window sends back.
+        Returns {"batch", "jobs": [{"id", "platform"}], "blocked": [...], "opened"}; None when there was
         nothing to start from."""
         if self.demo:
             self.notify("Demo mode: nothing is posted.", timeout=4)
             return None
         if not self._picked():
             return None
-        needed = self.extension_needed(self.extension_status())
+        if video is not None and Path(video) != self.selected_file:
+            # The picked video changed under the question (it was hidden or removed in another window, or its file
+            # went): a yes to that one must never post this one, with that one's caption.
+            self.notify(f"The question was about {Path(video).name}, and {self.selected_file.name} is the picked "
+                        "video now. Press Post… again to post this one.", title="Nothing was started",
+                        severity="warning", timeout=12)
+            return None
+        needed = self.cant_hand_over()
         ticked = [k for k in platforms or [] if k in self.platforms]
         if needed or not ticked:
             self.notify(needed or "Tick a platform to post to first.", severity="warning", timeout=8)
@@ -430,7 +509,7 @@ class PostingTab:
                 why = "ReelForge couldn't open your browser" if self.extension_server is not None else \
                     "ReelForge isn't listening for the extension in this window"
                 self.notify(f"{why}, so it couldn't open the posting page and nothing was started. The buttons "
-                            "under UPLOAD still open each platform's page for you to post by hand.",
+                            "under BY HAND still open each platform's page for you to post by hand.",
                             title="Nothing was posted", severity="warning", timeout=15)
         self.picked_review = None
         self.jobs_changed(everywhere=True)
@@ -497,7 +576,7 @@ class PostingTab:
     @rpc
     def pair_extension(self) -> bool:
         """Connect a browser: open the local page the extension pairs on. With no extension in that browser yet,
-        the page says how to add it. True when a browser opened."""
+        the page says how to add it. True when a browser opened (the window then says it is waiting for it)."""
         if self.demo:
             self.notify("The demo doesn't use the browser extension.", timeout=4)
             return False
@@ -508,8 +587,9 @@ class PostingTab:
             return False
         url = server.pair_url()
         if desktop.open_url(url):
-            self.notify("A ReelForge page is opening in your browser: the extension connects there. No extension "
-                        "yet? The page says how to add it.", title="Connecting your browser", timeout=12)
+            # No pop-up: the extension's dialog, which is what asks, says in a line of its own that it is waiting for
+            # the page that opened. A pop-up saying the same sat on the dialog's buttons for twelve seconds, Post…
+            # among them once the browser had connected.
             return True
         self.copy_text(url)
         self.notify("ReelForge couldn't open your browser. The page's address is copied: paste it into the browser "
@@ -573,7 +653,7 @@ class PostingTab:
         if self.demo:
             self.notify("Demo mode: nothing is posted.", timeout=4)
             return
-        needed = self.extension_needed(self.extension_status()) if action in ("post_again", "retry") else ""
+        needed = self.cant_hand_over() if action in ("post_again", "retry") else ""
         if needed:
             self.notify(needed, severity="warning", timeout=8)
             return

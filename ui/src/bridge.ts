@@ -135,9 +135,25 @@ export class Bridge {
     })
   }
 
-  /** A call whose answer nobody waits for (a button press): a failure shows up in the log. */
+  /** A call whose answer nobody waits for (a button press): a failure shows up as a pop-up. */
   send(method: string, ...args: unknown[]): void {
-    this.call(method, ...args).catch((e) => this.emit("toast", { title: "Something went wrong", body: String(e?.message ?? e), severity: "error", timeout: 8 }))
+    this.call(method, ...args).catch((e) => this.failed(e))
+  }
+
+  /** A call whose answer is waited for by something that has no use for an error (a dialog about to open): a failure
+   * shows up as the same pop-up, and the answer is null. */
+  async ask<T = any>(method: string, ...args: unknown[]): Promise<T | null> {
+    try {
+      return await this.call<T>(method, ...args)
+    } catch (e) {
+      this.failed(e)
+      return null
+    }
+  }
+
+  /** Say that a call failed: never a silent nothing. */
+  failed(e: unknown) {
+    this.emit("toast", { title: "Something went wrong", body: String((e as Error)?.message ?? e), severity: "error", timeout: 8 })
   }
 
   on(event: string, fn: Handler): () => void {

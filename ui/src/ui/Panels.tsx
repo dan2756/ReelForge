@@ -2,9 +2,10 @@
 // the corner (they slide in and fade out), and a little Markdown (release notes and the review in first-time setup).
 
 import { TextAttributes, type Renderable, type ScrollBoxRenderable } from "@opentui/core"
-import { forwardRef, useEffect, useState, useSyncExternalStore, type ReactNode } from "react"
-import { FocusScope, useTheme } from "../lib/focus"
-import { parseStyle, type Segs } from "../lib/styled"
+import { useTerminalDimensions } from "@opentui/react"
+import { forwardRef, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
+import { FocusScope, ScopeContext, useFocusManager, useTheme } from "../lib/focus"
+import { lines, parseStyle, plain, wrappedRows, type Segs } from "../lib/styled"
 import { mix, PICKED } from "../theme"
 import { useProgress, useTween } from "./Motion"
 
@@ -156,6 +157,40 @@ export function Modal({
   )
 }
 
+/** A dialog's width inside its border and padding (Modal), in a window this wide. */
+export const modalRoom = (width: number, windowWidth: number) => Math.min(width, Math.floor(windowWidth * 0.95)) - 8
+
+/** What a dialog says: lines of styled text, each wrapping to the dialog's width, in a scrolling area exactly as tall
+ * as they are. In a window too short for all of the dialog they scroll and its buttons stay in view. (Left to shrink
+ * instead, the lines were drawn over each other: "Which video is this?" in a window 24 rows tall.) width: the
+ * dialog's, as given to Modal. */
+export function Note({ segs, width = 100 }: { segs: Segs; width?: number }) {
+  const room = modalRoom(width, useTerminalDimensions().width) - 1 // a column kept free beside the scrollbar
+  const rows = lines(segs)
+  return (
+    <Scroll maxHeight={rows.reduce((n, l) => n + wrappedRows(plain(l), room), 0)} flexShrink={1} scrollY>
+      <box flexDirection="column" flexShrink={0} paddingRight={1}>
+        {rows.map((l, i) => (
+          <box key={i} flexDirection="row" flexShrink={0}>
+            <Wrapped segs={l.length ? l : [[" ", ""]]} />
+          </box>
+        ))}
+      </box>
+    </Scroll>
+  )
+}
+
+/** A dialog's buttons, the same in every dialog: at its foot, at the right, the way out first (Cancel, Close, Back:
+ * the one that has the keyboard where the other one can't be undone) and the button that does what the dialog is for
+ * last. */
+export function DialogButtons({ children }: { children: ReactNode }) {
+  return (
+    <box flexDirection="row" justifyContent="flex-end" height={1} marginTop={2} flexShrink={0} gap={1}>
+      {children}
+    </box>
+  )
+}
+
 // ---------------------------------------------------------------- pop-ups
 
 export interface Toast {
@@ -182,7 +217,9 @@ class Toasts {
     const severity = (["warning", "error"].includes(t.severity ?? "") ? t.severity : "information") as Toast["severity"]
     const ms = (t.timeout ?? 5) * 1000
     const toast: Toast = { id: this.next++, title: t.title ?? "", body: t.body ?? "", severity, until: Date.now() + ms, leaving: false }
-    this.list = [...this.list, toast].slice(-6)
+    // The same pop-up again while it still shows (a button pressed three times) takes its place: one, not a stack.
+    const same = (o: Toast) => o.title === toast.title && o.body === toast.body && o.severity === severity
+    this.list = [...this.list.filter((o) => !same(o)), toast].slice(-6)
     this.changed()
     setTimeout(() => this.leave(toast.id), Math.max(ms - FADE_MS, 0))
   }
@@ -403,8 +440,9 @@ export function Markdown({ text, heading, spaced }: { text: string; heading?: st
 
 /** Styled text that wraps at spaces to its width. */
 export function Wrapped({ segs, flexGrow = 1 }: { segs: Segs; flexGrow?: number }) {
+  const theme = useTheme()
   return (
-    <text wrapMode="word" flexGrow={flexGrow} flexShrink={1}>
+    <text fg={theme.text} wrapMode="word" flexGrow={flexGrow} flexShrink={1}>
       {segs.map((s, i) => {
         const st = parseStyle(s[1])
         return (
@@ -414,6 +452,33 @@ export function Wrapped({ segs, flexGrow = 1 }: { segs: Segs; flexGrow?: number 
         )
       })}
     </text>
+  )
+}
+
+/** How long a view may take before Reading says something is wrong (a test shortens it). */
+export const READING = { lateMs: 10_000 }
+
+/** What a tab shows until its view arrives from the Python side: one quiet line saying what is being read (never an
+ * empty table or a chart with nothing in it, which read as "you have none"). A view that still hasn't come after ten
+ * seconds isn't coming by itself: the Python side tripped over making it, and said so in a pop-up that has gone by
+ * now. The line then says that it is taking too long, and what to do. inside: in a panel or the drawer, which have
+ * their own space round it (by itself it sits where a tab's first panel would). */
+export function Reading({ what, inside }: { what: string; inside?: boolean }) {
+  const theme = useTheme()
+  const [late, setLate] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setLate(true), READING.lateMs)
+    return () => clearTimeout(t)
+  }, [])
+  return (
+    <box flexDirection="column" marginTop={inside ? 0 : 1} paddingLeft={inside ? 0 : 1} paddingRight={1} flexShrink={0}>
+      <text fg={theme.muted} wrapMode="none">{`Reading ${what}…`}</text>
+      {late ? (
+        <text fg={theme.warn} wrapMode="word">
+          This is taking longer than it should. Press r to read again, or open another tab and come back. If it stays like this, close ReelForge and run: reelforge doctor
+        </text>
+      ) : null}
+    </box>
   )
 }
 
@@ -439,7 +504,8 @@ export function useTick(on: boolean, ms = 120): number {
   return tick
 }
 
-/** A scrolling area (the mouse wheel scrolls it), with a thin scrollbar in the window's colours. */
+/** A scrolling area, with a thin scrollbar in the window's colours: the mouse wheel scrolls it, Tab brings the control
+ * it lands on into view, and Page Up and Page Down scroll it from the keyboard (lib/focus.tsx). */
 export const Scroll = forwardRef<
   ScrollBoxRenderable,
   {
@@ -453,10 +519,18 @@ export const Scroll = forwardRef<
   }
 >(function Scroll(p, ref) {
   const theme = useTheme()
+  const fm = useFocusManager()
+  const scope = useContext(ScopeContext)
+  const own = useRef<ScrollBoxRenderable | null>(null)
+  useEffect(() => (own.current ? fm.addScroll(own.current, scope) : undefined), [fm, scope])
   const bar = { trackOptions: { foregroundColor: mix(theme.bg, theme.muted, 0.35), backgroundColor: mix(theme.bg, theme.surface, 0.5) } }
   return (
     <scrollbox
-      ref={ref}
+      ref={(node: ScrollBoxRenderable | null) => {
+        own.current = node
+        if (typeof ref === "function") ref(node)
+        else if (ref) ref.current = node
+      }}
       flexGrow={p.flexGrow}
       flexShrink={p.flexShrink ?? 1}
       height={p.height}

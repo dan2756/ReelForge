@@ -11,7 +11,7 @@ import { useFocusManager, useTheme } from "../lib/focus"
 import { Button } from "../ui/Button"
 import { CheckList, RadioSet, Switch, TextBox, TextField } from "../ui/Fields"
 import { Mascot, MASCOT_BODY } from "../ui/Mascot"
-import { Markdown, Modal, Scroll } from "../ui/Panels"
+import { DialogButtons, Markdown, Modal, Scroll } from "../ui/Panels"
 import type { SetupProps } from "./App"
 import { Frame, frameLayout } from "./Frame"
 
@@ -85,10 +85,13 @@ export function Onboard({ bridge, init, quit, onDone }: SetupProps & { onDone: (
 
   useEffect(() => {
     void (async () => {
-      const start = await bridge.call<{ steps: [string, string][]; side?: string; create?: string }>("onboard_start")
+      // A call that fails says so in a pop-up (Bridge.ask), and this screen keeps what it had.
+      const start = await bridge.ask<{ steps: [string, string][]; side?: string; create?: string }>("onboard_start")
+      if (!start) return
       setSteps(start.steps)
       setLabels((l) => ({ side: start.side ?? l.side, create: start.create ?? l.create }))
-      show(await bridge.call<Step>("onboard_step", 0))
+      const first = await bridge.ask<Step>("onboard_step", 0)
+      if (first) show(first)
     })()
   }, [bridge])
 
@@ -104,7 +107,7 @@ export function Onboard({ bridge, init, quit, onDone }: SetupProps & { onDone: (
   const change = async (key: string, value: unknown) => {
     setRaws((r) => ({ ...r, [key]: value }))
     setErrors((e) => ({ ...e, [key]: "" }))
-    const res = await bridge.call<{ fields: Field[] } | null>("onboard_change", key, value)
+    const res = await bridge.ask<{ fields: Field[] } | null>("onboard_change", key, value)
     if (!res) return
     setStep((s) => (s ? { ...s, fields: res.fields } : s))
     // A new format brings its own suggestions for the questions you haven't typed in.
@@ -120,17 +123,19 @@ export function Onboard({ bridge, init, quit, onDone }: SetupProps & { onDone: (
     if (!step) return
     if (step.key === "review") {
       setStatus("Writing your studio…")
-      const res = await bridge.call<{ ok: boolean; status?: string; review?: string; detail?: string }>("onboard_create")
+      const res = await bridge.ask<{ ok: boolean; status?: string; review?: string; detail?: string }>("onboard_create")
+      if (!res) return setStatus("")
       if (res.ok) return onDone()
       setStatus(res.status ?? "")
       if (res.review) setStep({ ...step, review: res.review })
       if (res.detail) setDetail(res.detail)
       return
     }
-    const res = await bridge.call<{ ok: boolean; step?: Step; errors?: Record<string, string>; first?: string; status?: string }>(
+    const res = await bridge.ask<{ ok: boolean; step?: Step; errors?: Record<string, string>; first?: string; status?: string }>(
       "onboard_next",
       raws,
     )
+    if (!res) return
     if (res.ok && res.step) return show(res.step)
     setErrors(res.errors ?? {})
     setStatus(res.status ?? "")
@@ -141,12 +146,12 @@ export function Onboard({ bridge, init, quit, onDone }: SetupProps & { onDone: (
   }
 
   const back = async () => {
-    const s = await bridge.call<Step | null>("onboard_back", raws)
+    const s = await bridge.ask<Step | null>("onboard_back", raws)
     if (s) show(s)
   }
 
   /** A platform's sign-up guide (or the Gmail one, "gmail"); the handle you type there goes into its box here. */
-  const signUp = async (key: string) => setGuide(await bridge.call<Guide>("signup_guide", key))
+  const signUp = async (key: string) => setGuide(await bridge.ask<Guide>("signup_guide", key))
   const signedUp = (handle: string | null) => {
     const key = guide?.key
     setGuide(null)
@@ -253,10 +258,10 @@ export function Onboard({ bridge, init, quit, onDone }: SetupProps & { onDone: (
       {leaving ? (
         <Modal name="quit" title="Leave without saving?" width={60}>
           <text flexShrink={0}>Your answers so far won't be saved.</text>
-          <box flexDirection="row" height={1} marginTop={2} gap={2} flexShrink={0}>
-            <Button id="stay" label="Keep going" variant="primary" autoFocus onPress={() => setLeaving(false)} />
+          <DialogButtons>
+            <Button id="stay" label="Keep going" autoFocus onPress={() => setLeaving(false)} />
             <Button id="leave" label="Leave" variant="error" onPress={() => quit(0)} />
-          </box>
+          </DialogButtons>
         </Modal>
       ) : null}
     </Frame>
@@ -371,13 +376,19 @@ function SignupGuide({
     }
   })
   const open = async () => {
-    const said = await bridge.call<string | null>("open_signup", guide.key)
+    let said: string | null
+    try {
+      said = await bridge.call<string | null>("open_signup", guide.key)
+    } catch (e) {
+      return bridge.failed(e) // nothing opened, so nothing here says it did
+    }
     setOpened(said || "Opened in your browser. Come back here when you're done.")
     setTimeout(() => focus.focus(guide.account ? "guide-handle" : "guide-done"), 30)
   }
   const done = async (typed = handle) => {
     if (!guide.account) return onDone(null)
-    const res = await bridge.call<{ handle?: string; error?: string }>("signup_handle", typed)
+    const res = await bridge.ask<{ handle?: string; error?: string }>("signup_handle", typed)
+    if (!res) return
     if (res.error) setProblem(res.error)
     else onDone(res.handle ?? "")
   }
@@ -419,10 +430,10 @@ function SignupGuide({
           ) : null}
         </>
       ) : null}
-      <box flexDirection="row" height={1} marginTop={2} gap={2} flexShrink={0}>
-        <Button id="guide-done" label="Done" variant="primary" onPress={() => void done()} />
+      <DialogButtons>
         <Button id="guide-back" label="Back" onPress={() => onDone(null)} />
-      </box>
+        <Button id="guide-done" label="Done" variant="primary" onPress={() => void done()} />
+      </DialogButtons>
     </Modal>
   )
 }

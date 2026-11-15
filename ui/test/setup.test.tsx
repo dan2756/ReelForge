@@ -4,7 +4,7 @@
 // side's steps are tested in tests/test_setup_service.py.)
 
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { headless, type Headless } from "../scripts/headless"
@@ -53,6 +53,46 @@ describe("the tools", () => {
     await press(h, "ESCAPE")
     expect(h.exits).toEqual([{ code: 0, result: undefined }])
   })
+
+  test("while the downloads screen is working, Esc and Ctrl+C ask before stopping; once it's done, Esc leaves", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "reelforge-setup-"))
+    try {
+      open = await headless("setup", { start: "tools", preview: true }, 120, 40, {
+        REELFORGE_BRIDGE_PRELOAD: join(ROOT, "ui", "test", "slow_setup_preload.py"),
+        REELFORGE_TEST_HOLD: join(tmp, "go"),
+      })
+      const h = open
+      await h.settle(2000)
+      for (let i = 0; i < 40 && !find(h, "Desktop shortcut"); i++) await h.settle(100)
+      await clickText(h, "Skip for now", 2)
+      for (let i = 0; i < 40 && !find(h, "Checking everything"); i++) await h.settle(100)
+      expect(frame(h)).toContain("Working…") // its one button, which can't be pressed yet
+      await press(h, "ESCAPE")
+      expect(frame(h)).toContain("Stop setting up?")
+      expect(h.exits).toEqual([])
+      await press(h, "RETURN") // Keep going has the keyboard
+      expect(frame(h)).not.toContain("Stop setting up?")
+      expect(h.exits).toEqual([])
+      h.t.mockInput.pressCtrlC()
+      await h.settle(300)
+      expect(frame(h)).toContain("Stop setting up?")
+      await clickText(h, "▐ Stop ▌", 3)
+      expect(h.exits).toEqual([{ code: 0, result: undefined }])
+      // (a test's window stays open after it asks to close) Once everything is done there is nothing to ask about.
+      await press(h, "ESCAPE")
+      writeFileSync(join(tmp, "go"), "")
+      for (let i = 0; i < 80 && !find(h, "Health check"); i++) await h.settle(100)
+      expect(frame(h)).toContain("Health check")
+      expect(frame(h)).not.toContain("Stop setting up?")
+      await press(h, "ESCAPE")
+      expect(frame(h)).not.toContain("Stop setting up?")
+      expect(h.exits.length).toBe(2)
+    } finally {
+      await open?.close()
+      open = null
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
 })
 
 describe("onboarding", () => {
@@ -89,6 +129,7 @@ describe("onboarding", () => {
     await clickText(h, "No account? Sign up", 2) // TikTok's, the first
     expect(frame(h)).toContain("Make your TikTok account")
     expect(frame(h)).toContain("Pick a username that matches your channel")
+    expect(frame(h)).toMatch(/▐ Back ▌ ▐ Done ▌ +│/) // the way out first, Done last, at the right
     await press(h, "TAB") // from the button that opens the page to the box for the handle
     await h.t.mockInput.typeText("not a handle!")
     await press(h, "RETURN")
@@ -125,6 +166,10 @@ describe("onboarding", () => {
     const h = await screen("onboard", [140, 46])
     await press(h, "ESCAPE")
     expect(frame(h)).toContain("Leave without saving?")
+    // its buttons as in every dialog: at the right of its foot, the way out first, what the dialog is for last
+    const row = frame(h).split("\n").find((r) => r.includes("▐ Keep going ▌"))!
+    expect(row).toMatch(/▐ Keep going ▌ ▐ Leave ▌ +│/)
+    expect(row.indexOf("▐ Keep going ▌")).toBeGreaterThan(row.indexOf("│") + 20)
     await clickText(h, "Keep going", 2)
     expect(frame(h)).not.toContain("Leave without saving?")
     expect(h.exits).toEqual([])

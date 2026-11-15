@@ -87,6 +87,25 @@ class View(PostingTest):
                          [(key, name, "none", False, None, None, []) for key, name in NAMES.items()])
         self.assertEqual(plain(view["rows"][0]["line"]), "○ not posted")
 
+    def test_every_action_a_row_can_offer_has_the_words_for_its_button(self):
+        w = self.window()
+        labels = w.view("posting")["labels"]
+        self.assertEqual({a for acts in posting_tab.ACTIONS.values() for a in acts}, set(labels))
+        self.assertEqual((labels["mark_posted"], labels["not_posted"], labels["retry"]),
+                         ("It's posted", "It didn't post", "Try again"))
+
+    def test_an_upload_page_opened_by_hand_shows_on_its_row_until_the_post_is_spotted(self):
+        w = self.window()
+        w.call("open_upload", "tiktok", CAPTION, TAGS)
+        rows = self.rows(w)
+        self.assertEqual(plain(rows["tiktok"]["line"]), "○ not posted  upload page opened 0m ago, not spotted yet")
+        self.assertEqual((rows["tiktok"]["state"], rows["tiktok"]["actions"]), ("none", []))  # nothing to wait for
+        self.assertEqual(plain(rows["youtube"]["line"]), "○ not posted")
+        other = self.root / "videos" / "ep02.mp4"  # another video's row says nothing of it
+        other.write_bytes(b"second")
+        w.call("pick_file", str(other))
+        self.assertEqual(plain(self.rows(w)["tiktok"]["line"]), "○ not posted")
+
     def test_picking_a_video_sends_its_view(self):
         other = self.root / "videos" / "ep02.mp4"
         other.write_bytes(b"second")
@@ -109,6 +128,20 @@ class View(PostingTest):
         self.assertIsNone(self.post(w))
         self.assertEqual(w.toasts(), ["Connect the browser extension first."])
         self.assertEqual(posting.recent(), [])
+
+    def test_setup_says_when_only_the_extension_is_in_the_way(self):
+        """The window's Post button then explains how to set the extension up, instead of being greyed out."""
+        w = self.window(connect=False)
+        self.assertTrue(w.view("posting")["setup"])
+        self.extension()
+        w.svc.update_posting()
+        view = w.view("posting")
+        self.assertEqual((view["can_post"], view["setup"]), (True, False))  # nothing is in the way
+        self.store.unlink()
+        self.video.unlink()  # something else is: setting the extension up wouldn't help
+        w.svc.update_posting()
+        view = w.view("posting")
+        self.assertEqual((view["can_post"], view["setup"]), (False, False))
 
     def test_the_demo_never_posts(self):
         self.extension()
@@ -161,6 +194,11 @@ class Question(PostingTest):
         self.assertEqual(info["video"]["name"], "ep01.mp4")
         self.assertEqual(info["review"]["state"], "none")
         self.assertIn("not yet on the live sites", info["note"])
+        # What happens next, in one sentence: you press Post. With "stop before posting" off, where the extension
+        # may press it, and never on X.
+        self.assertEqual(info["how"], "ReelForge opens each upload page in your browser, attaches the video and fills "
+                                      "in the text. You check it and press Post.")
+        self.assertIn("always on X, you check it and press Post", info["how_press"])
         by = {p["key"]: p for p in info["platforms"]}
         self.assertEqual(list(by), list(NAMES))
         self.assertEqual(by["youtube"]["text"], {"title": f"{CAPTION} #shorts", "description": TAGS})
@@ -231,6 +269,29 @@ class Posting(PostingTest):
         notes = [plain(r["cells"][4]) for r in w.view("uploads")["rows"]]
         self.assertEqual(notes, ["waiting for the extension to pick it up"] * 2)
 
+    def test_a_yes_to_a_question_about_another_video_than_the_picked_one_starts_nothing(self):
+        """The window sends back the video its question showed. The list picks another by itself when that one
+        leaves it (hidden in another window, here): a yes must not post the new pick with the old one's caption."""
+        other = self.root / "videos" / "ep02.mp4"
+        other.write_bytes(b"second")
+        w = self.window()
+        w.call("pick_file", str(other))
+        asked = w.call("post_info", "The second video", TAGS)["video"]["path"]
+        self.assertEqual(asked, str(other))
+        db.set_meta("hidden_videos", [str(other)])  # what another window's Hide writes
+        w.call("scan_files")                        # ... and what this window does when it sees the change
+        self.assertEqual(w.view("posting")["video"]["name"], "ep01.mp4")
+        made = w.call("post_with_extension", ["tiktok"], "The second video", TAGS, True, None, asked)
+        self.assertIsNone(made)
+        toast = w.sent("toast")[-1]
+        self.assertEqual((toast["title"], toast["severity"]), ("Nothing was started", "warning"))
+        self.assertIn("The question was about ep02.mp4, and ep01.mp4 is the picked video now.", toast["body"])
+        self.assertEqual((posting.recent(), self.pages, db.uploads()), ([], [], []))
+        # The same yes about the video that is picked goes ahead.
+        made = w.call("post_with_extension", ["tiktok"], CAPTION, TAGS, True, None, str(self.video))
+        self.assertEqual([(j["platform"], posting.get(j["id"])["video"]) for j in made["jobs"]],
+                         [("tiktok", "ep01.mp4")])
+
     def test_stop_before_posting_off_is_kept_on_the_job_and_never_for_x(self):
         w = self.window()
         made = self.post(w, "tiktok", "x", stop_before=False)
@@ -246,7 +307,7 @@ class Posting(PostingTest):
         self.assertEqual(db.uploads(), [])  # no page opened: nothing for a later post to be filed under
         toast = w.sent("toast")[-1]
         self.assertEqual((toast["title"], toast["severity"]), ("Nothing was posted", "warning"))
-        self.assertIn("by hand", toast["body"])
+        self.assertIn("The buttons under BY HAND still open each platform's page", toast["body"])  # the tab's heading
         self.assertEqual(self.rows(w)["tiktok"]["actions"], ["retry"])
         self.page_opens = True  # nothing stands in the way of the next try
         self.assertEqual(len(self.post(w, "tiktok", "youtube")["jobs"]), 2)
@@ -258,6 +319,34 @@ class Posting(PostingTest):
         self.assertEqual((made["opened"], made["jobs"]), (False, []))
         self.assertIn("couldn't open the posting page", w.toasts()[-1])
         self.assertEqual([j["state"] for j in posting.recent()], ["cancelled"])
+
+    def test_a_window_that_is_not_listening_says_why_before_any_job_is_made(self):
+        """With no local server there is no page to hand a batch over on. Post, Post again and Try again say so
+        first: a job made and called off at once left a "cancelled" row, and a Post again set the post that is up
+        aside for it."""
+        w = self.window()
+        (posted,) = self.post(w)["jobs"]
+        self.work(posted["id"], "ready", "posted", url=TIKTOK_URL)
+        (failed,) = self.post(w, "youtube")["jobs"]
+        self.work(failed["id"], "opening", "failed", error_code="timeout")
+        before = [(j["id"], j["state"], j["superseded"]) for j in posting.recent()]
+        pages = list(self.pages)
+        w.svc.extension_problem = "ReelForge isn't listening for the extension here (it is switched off)."
+        w.forget()
+        self.assertIsNone(self.post(w, "instagram"))
+        self.assertIsNone(self.post(w, force=["tiktok"]))
+        w.call("post_action", posted["id"], "post_again")
+        w.call("post_action", failed["id"], "retry")
+        self.assertEqual(w.toasts(), [w.svc.extension_problem] * 4)
+        self.assertEqual([(j["id"], j["state"], j["superseded"]) for j in posting.recent()], before)
+        self.assertEqual(self.pages, pages)
+        w.svc.update_posting()
+        rows = self.rows(w)
+        self.assertEqual((rows["tiktok"]["state"], rows["youtube"]["state"], rows["instagram"]["state"]),
+                         ("posted", "failed", "none"))
+        # What needs no page still works: your word on a post, and opening one.
+        w.call("post_action", posted["id"], "open_post")
+        self.assertEqual(self.opened, [TIKTOK_URL])
 
     def test_a_second_press_for_the_same_video_and_platform_is_refused(self):
         w = self.window()
@@ -474,6 +563,26 @@ class Spotted(PostingTest):
         self.assertEqual(posting.get(first["id"])["superseded"], 1)
         self.assertEqual(self.rows(w)["tiktok"]["job"], second["id"])
 
+    def test_a_post_again_that_ends_without_a_post_leaves_the_post_standing(self):
+        """Post again sets the posted job aside for the new try. When that try is called off, or the page for the
+        extension never opens, ReelForge must not forget the post that is up: the row says posted again, and a
+        plain Post is refused there as before."""
+        w = self.window()
+        (first,) = self.post(w)["jobs"]
+        self.work(first["id"], "ready", "posted", url=TIKTOK_URL)
+        (second,) = self.post(w, force=["tiktok"])["jobs"]
+        w.call("post_action", second["id"], "cancel")
+        row = self.rows(w)["tiktok"]
+        self.assertEqual((row["state"], row["job"], row["actions"]),
+                         ("posted", first["id"], ["open_post", "post_again"]))
+        by = {p["key"]: p for p in w.call("post_info", CAPTION, TAGS)["platforms"]}
+        self.assertEqual((by["tiktok"]["blocked"]["reason"], by["tiktok"]["again"]), ("posted", True))
+        self.assertEqual(self.post(w)["jobs"], [])  # not without saying again
+        self.page_opens = False
+        self.assertEqual(self.post(w, force=["tiktok"])["jobs"], [])  # made, then called off: no page opened
+        self.assertEqual(self.rows(w)["tiktok"]["state"], "posted")
+        self.assertEqual(self.post(w)["jobs"], [])
+
 
 class ExtensionView(PostingTest):
     def view(self, w: Window) -> dict:
@@ -492,9 +601,32 @@ class ExtensionView(PostingTest):
         said = " ".join(plain(line) for line in view["lines"])
         self.assertIn("You check it and press Post", said)
         self.assertIn("not yet on the live sites", said)  # never more than the tests have shown
+        # The Publish tab's one line about it (a narrow window keeps the part ranked 0), and the steps to set it up.
+        self.assertEqual([(plain(text), rank) for text, rank in view["hint"]],
+                         [("Optional. ", 1), ("Fills in upload pages (tested on copies).", 0),
+                          (" You check each one and press Post.", 2)])
+        # What a narrow window keeps says by itself how far the extension is tested, and still fits beside the two
+        # buttons in a window 120 columns wide (43 columns there).
+        kept = "".join(plain(text) for text, rank in view["hint"] if rank == 0)
+        self.assertIn("tested on copies", kept)
+        self.assertLessEqual(cell_len(kept), 43)
+        self.assertEqual(len(view["steps"]), 4)
+        self.assertIn("chrome://extensions", view["steps"][0])
+        self.assertIn("Load unpacked", view["steps"][2])
+        self.assertIn("Connect a browser", view["steps"][3])
         w.call("dismiss_extension_hint")
         self.assertTrue(w.view("extension")["hint_dismissed"])
         self.assertTrue(db.get_meta(posting_tab.HINT))
+
+    def test_a_window_that_is_not_listening_says_why_on_its_own(self):
+        """problem: what the window shows beside Post, since no post can be handed over from this window."""
+        w = self.window()
+        w.svc.extension_problem = "ReelForge isn't listening for the extension here (it is switched off)."
+        view = self.view(w)
+        self.assertEqual(view["problem"], w.svc.extension_problem)
+        self.assertIn(view["problem"], [plain(line) for line in view["lines"]])
+        w.svc.extension_problem = ""
+        self.assertEqual(self.view(w)["problem"], "")
 
     def test_connected_and_heard_from_just_now(self):
         self.extension(seen_minutes_ago=0.2)
@@ -507,6 +639,10 @@ class ExtensionView(PostingTest):
         self.assertEqual((install["install"], install["name"], install["version"], install["on"]),
                          (CHROME, "Chrome on this PC", "0.1.0", True))
         self.assertNotIn("token_sha256", install)  # nothing of the secret goes to the window
+        # When it connected goes along: the same browser connecting again is the same row with a new time.
+        self.assertEqual(install["paired"], json.loads(self.store.read_text(encoding="utf-8"))["paired"][0]["paired_at"])
+        self.extension(seen_minutes_ago=0, paired_at="2026-11-15T10:00:00+00:00")
+        self.assertEqual(self.view(w)["installs"][0]["paired"], "2026-11-15T10:00:00+00:00")
 
     def test_connected_but_quiet_is_waiting_and_post_still_works(self):
         self.extension(seen_minutes_ago=30)
@@ -547,6 +683,18 @@ class ExtensionView(PostingTest):
         w = self.window()
         (install,) = self.view(w)["installs"]
         self.assertEqual(install["accounts"], {"tiktok": {"signed_in": True, "handle": "@me"}})
+        self.assertEqual(install["signed"], "signed in there: TikTok @me")
+        self.assertIn("apart from the accounts connected on the Accounts tab", w.view("extension")["signed_note"])
+
+    def test_what_a_browser_is_signed_in_to_reads_as_a_line(self):
+        names = {"tiktok": "TikTok", "youtube": "YouTube", "instagram": "Instagram", "x": "X"}
+        said = posting_tab.signed_in({"tiktok": {"signed_in": True, "handle": "@me"},
+                                      "youtube": {"signed_in": True, "handle": None},
+                                      "instagram": {"signed_in": False, "handle": None},
+                                      "x": {"signed_in": None, "handle": None}, "junk": "x"}, names)
+        self.assertEqual(said, "signed in there: TikTok @me · YouTube yes · Instagram no")  # X: not looked at yet
+        self.assertIn("It hasn't said yet", posting_tab.signed_in({}, names))
+        self.assertIn("It hasn't said yet", posting_tab.signed_in({"x": "junk"}, names))
 
     def test_a_browser_that_connects_while_the_window_is_open_shows_within_a_second(self):
         w = self.window(connect=False)

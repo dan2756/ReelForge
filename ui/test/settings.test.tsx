@@ -15,6 +15,7 @@ import { clickText, find } from "../scripts/shots"
 import { ROOT } from "../src/bridge"
 import { typedMatches } from "../src/dashboard/Settings"
 import { TAB_NAMES } from "../src/dashboard/state"
+import { DASH } from "../src/theme"
 import { toasts } from "../src/ui/Panels"
 
 const PRELOAD = { REELFORGE_BRIDGE_PRELOAD: join(ROOT, "scripts", "shots_preload.py") }
@@ -81,6 +82,23 @@ describe("the Settings tab", () => {
       await open?.close()
       open = null
       toasts.clear()
+    }
+  })
+
+  test("in an 80-column window what a row under On this computer says wraps, where it was cut off at its button", async () => {
+    const h = await window([80, 90])
+    expect(frame(h)).toContain("ON THIS COMPUTER")
+    // what the rows say, without the switch or button at the right of each (from column 46)
+    const said = frame(h).split("\n").map((r) => [...r].slice(2, 46).join("").trim()).join(" ").replace(/\s+/g, " ")
+    expect(said).toContain("on: your stats update every hour, even with ReelForge closed") // (it ended "... even with R")
+    expect(said).toContain("open ReelForge without typing a command")
+    expect(frame(h)).toContain("Turn off") // its button, still in full beside it
+    // however many lines a row takes, it has a line of space over it and its button beside its name
+    const lines = frame(h).split("\n")
+    for (const name of ["The reelforge command", "ReelForge's icon", "ReelForge's folder", "Restart ReelForge"]) {
+      const y = lines.findIndex((r) => r.includes(name))
+      expect(lines[y - 1]!.replace(/[┃\s]/g, "")).toBe("")
+      expect(lines[y]).toMatch(/▐.+▌/)
     }
   })
 
@@ -239,7 +257,7 @@ describe("the tab order", () => {
     expect(help.indexOf("Accounts (2)")).toBeLessThan(help.indexOf("Videos (3)"))
     expect(help).not.toContain("Publish (")
     const [x, y] = find(h, "Overview (1)")! // down the help to Publish, after the tabs, with its key
-    for (let i = 0; i < 30 && !frame(h).includes("The green button at the top right opens it."); i++) {
+    for (let i = 0; i < 80 && !frame(h).includes("The green button at the top right opens it."); i++) {
       await h.t.mockMouse.scroll(x + 2, y + 2, "down")
       await h.settle(100)
     }
@@ -510,6 +528,31 @@ describe("Background refresh on a channel that's set up", () => {
     await until(h, "on: your stats update every hour, even with ReelForge closed")
     expect(job()).toBe("on")
     expect(frame(h)).not.toContain("turning it")
+  })
+
+  test("a problem with the hourly job's last read is drawn as a warning, and can be read to its end", async () => {
+    // (ui/test/posting_preload.py: the same channel, with the hourly job's last read marked as having had a problem)
+    tmp = mkdtempSync(join(tmpdir(), "reelforge-job-"))
+    const h = (open = await headless("dashboard", { tab: "settings" }, 84, 66, {
+      REELFORGE_BRIDGE_PRELOAD: join(ROOT, "ui", "test", "posting_preload.py"),
+      REELFORGE_TEST_ROOT: tmp,
+      REELFORGE_TEST_POSTING: JSON.stringify({ job_problem: true }),
+    }))
+    await until(h, "had a problem (see data/refresh.log)")
+    const hex = (c: { toInts(): [number, number, number, number] }) => "#" + c.toInts().slice(0, 3).map((v) => v.toString(16).padStart(2, "0")).join("")
+    /** The colour of the text on the row that has these words. */
+    const colour = (words: string) => {
+      const y = find(h, words)![1]
+      return hex(h.t.captureSpans().lines[y]!.spans.find((sp) => sp.text.includes(words.slice(0, 12)))!.fg)
+    }
+    expect(colour("its last read, 0m ago, had a problem")).toBe(DASH.warn)
+    expect(colour("closes ReelForge and opens it again")).toBe(DASH.muted) // a row with nothing wrong
+    // In a window too narrow for it, the warning goes on under itself instead of being cut at the panel's edge.
+    const rows = frame(h).split("\n")
+    const y = find(h, "its last read, 0m ago, had a problem (see data/refresh.log)")![1]
+    expect(rows[y - 1]).toContain("Background refresh")
+    expect(rows[y + 1]).toContain("STUDIO_DRY_SYSTEM)") // its end, on the next row
+    expect(colour("STUDIO_DRY_SYSTEM)")).toBe(DASH.warn)
   })
 })
 

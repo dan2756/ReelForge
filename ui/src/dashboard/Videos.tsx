@@ -10,7 +10,7 @@ import { Chart } from "../ui/Chart"
 import { BadgeLine, Fitted } from "../ui/Line"
 import { DASH } from "../theme"
 import { Table } from "../ui/Lists"
-import { Panel } from "../ui/Panels"
+import { Panel, Reading } from "../ui/Panels"
 import { useDash } from "./state"
 import { hoursTitle } from "./titles"
 import type { DetailView, TableView } from "./types"
@@ -21,7 +21,11 @@ export function Videos() {
   const videos = useView<TableView>(s.bridge, "videos")
   const badges = useView<{ line: Parts }>(s.bridge, "video_badges")
   useEffect(() => {
-    if (!videos) return
+    // Only a view that has just arrived says which row to highlight. Coming back to the tab shows the one sent last
+    // time again, and the highlight has moved since: taking its row a second time put the highlight back on the old
+    // row, over the chart of the new one (and took the keyboard again).
+    if (!videos || videos === s.videosApplied) return
+    s.videosApplied = videos
     if (videos.select !== undefined && videos.select !== s.video) s.set({ video: videos.select ?? null })
     if (videos.focus) setTimeout(() => focus.focus("videos-table"), 30)
   }, [videos])
@@ -29,11 +33,13 @@ export function Videos() {
     s.set({ video: key })
     s.bridge.send("video_highlighted", key)
   }
+  if (!videos) return <Reading what="your videos" />
   return (
     <box flexDirection="column" flexGrow={1} marginTop={1} gap={1}>
       <Panel flexGrow={1} minHeight={8}>
-        <box height={1} marginBottom={1} flexShrink={0}>
-          <Fitted parts={videos?.hint} base={DASH.faint} />
+        {/* Show, then Open post, Fix episode and Export CSV: on a second row where one can't hold them */}
+        <box flexDirection="column" marginBottom={1} flexShrink={0}>
+          <Fitted parts={videos.hint} base={DASH.faint} rows />
         </box>
         <Table
           id="videos-table"

@@ -207,6 +207,92 @@ export interface PreviewView {
   rows: { name: string; color: string; text: string }[]
 }
 
+/** Where the picked video's post stands on one platform (dashboard/posting_tab.py): none (nothing yet), spotted (a
+ * stats read found the post) or its job's state, in a line of words, with what can be done about it. */
+export interface PostingRow {
+  key: string
+  name: string
+  color: string
+  state: string
+  line: Segs
+  busy: boolean // ReelForge or the extension is at work on it
+  url: string | null
+  job: string | null
+  actions: string[] // retry, cancel, mark_posted, not_posted, open_post, post_again
+}
+
+/** off: no browser is connected; waiting: one is, and hasn't been heard from lately (it wakes when a post starts); on;
+ * old: it and ReelForge speak different versions of the link between them. */
+export type ExtensionState = "off" | "waiting" | "on" | "old"
+
+/** Posting the picked video (the "posting" view): its review, a row for each connected platform, and whether Post
+ * can be pressed. setup: only the extension is in the way, so Post explains how to set it up. */
+export interface PostingView {
+  video: { path: string; name: string } | null
+  review: { state: string; line: Segs }
+  extension: { state: ExtensionState; line: Segs }
+  can_post: boolean
+  why: string
+  setup: boolean
+  rows: PostingRow[]
+  labels: Record<string, string> // the words for each action's button
+}
+
+/** A browser the extension is connected in. signed: what it was last seen signed in to, in the extension's words about
+ * its own browser (never the accounts connected in ReelForge). */
+export interface ExtensionInstall {
+  install: string
+  name: string
+  version: string
+  paired: string // when it connected: new when the same browser connects again
+  seen: string
+  on: boolean
+  old: boolean
+  signed: string
+}
+
+/** The browser extension (the "extension" view). */
+export interface ExtensionView {
+  state: ExtensionState
+  line: Segs
+  lines: Segs[] // what it is, why this window isn't listening for it, how far it has been tested
+  installs: ExtensionInstall[]
+  port: number | null // null: this window isn't listening for it
+  folder: string
+  folder_there: boolean
+  hint_dismissed: boolean
+  hint: Parts // the Publish tab's one line about it while it isn't set up
+  steps: string[] // setting it up, once
+  signed_note: string // whose word "signed in there" is, under the connected browsers
+  problem: string // why this window can't hand a post to it ("" when it can)
+}
+
+/** One platform in the question before a post (post_info): the exact text for each of its boxes, the account, and
+ * what stops it if anything does. again: it is up there already, and can be posted again when ticked. press: the
+ * extension may press Post there, once "stop before posting" is switched off. */
+export interface PostInfoPlatform {
+  key: string
+  name: string
+  color: string
+  handle: string
+  fields: { label: string; text: string }[]
+  blocked: { reason: string; message: string; url?: string } | null
+  again: boolean
+  press: boolean
+}
+
+export interface PostInfo {
+  video: { path: string; name: string; size: string }
+  review: { state: string; line: string }
+  extension: { state: ExtensionState; line: Segs }
+  platforms: PostInfoPlatform[]
+  can_post: boolean
+  why: string
+  note: string // how far posting with the extension has been tested
+  how: string // what happens next, in a sentence
+  how_press: string // ... with "stop before posting" switched off
+}
+
 /** One platform on the Accounts tab: on (connected), login (its handle is in, waiting for the one log-in) or off
  * (not connected: a box for its @handle, Connect and Sign up). */
 export interface AccountPanelView {
@@ -222,6 +308,8 @@ export interface AccountPanelView {
   signup?: boolean
   logs_in?: boolean
   login_label?: string
+  logs_out?: boolean // ReelForge's own browser is logged in to it: Log out
+  old_handles?: string[] // it also holds stats read under these handles, from before the handle changed
   profile_disabled?: boolean
   refresh_disabled?: boolean
   show_log?: boolean

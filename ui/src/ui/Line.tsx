@@ -3,11 +3,12 @@
 
 import { TextAttributes, type Renderable } from "@opentui/core"
 import { createContext, useContext, useState, type ReactNode } from "react"
-import { fit } from "../lib/fit"
+import { fit, fitRows } from "../lib/fit"
+import { useTheme } from "../lib/focus"
 import { cellLen, lines, parseStyle, type Action, type Parts, type Segs } from "../lib/styled"
 import { mix } from "../theme"
 
-/** What clicking a chip or a key does: the app runs the action (dashboard/actions.ts). */
+/** What clicking a chip or a key does: the app runs the action (DashState.run, in dashboard/state.tsx). */
 export const ActionContext = createContext<(action: Action) => void>(() => {})
 
 export function useAction() {
@@ -24,9 +25,12 @@ interface LineProps {
   bg?: string
 }
 
-/** One line of styled text; a segment with an action is a button. */
+/** One line of styled text; a segment with an action is a button. Text with no colour of its own (a heading the
+ * Python side sends as just "bold", a table's cell) is the window's text colour: left to the renderer it came out
+ * a whiter white than every heading the window draws itself. */
 export function Line({ segs, base, width, flexGrow, flexShrink, bg }: LineProps) {
   const run = useAction()
+  const theme = useTheme()
   const [hover, setHover] = useState<number | null>(null)
   const list = segs ?? []
   const clickable = list.some((s) => s[2])
@@ -41,6 +45,7 @@ export function Line({ segs, base, width, flexGrow, flexShrink, bg }: LineProps)
   }
   return (
     <text
+      fg={theme.text}
       width={width}
       flexGrow={flexGrow}
       flexShrink={flexShrink ?? 0}
@@ -99,21 +104,40 @@ export function Lines({ segs, base, bg }: { segs: Segs | undefined; base?: strin
   )
 }
 
-/** Parts fitted to the width this gets: the least important go first when it's narrow (lib/fit.ts). */
+/** Parts fitted to the width this gets: the least important go first when it's narrow (lib/fit.ts). rows: the parts
+ * that always show go on under themselves when one row can't hold them (fitRows), so this can be more than a row
+ * tall. */
 export function Fitted({
   parts,
   base,
   flexGrow = 0,
   right,
+  rows,
 }: {
   parts: Parts | undefined
   base?: string
   flexGrow?: number
   /** Also fitted, kept at the right-hand end. */
   right?: Segs
+  rows?: boolean
 }) {
   const [width, setWidth] = useState(0)
   const room = Math.max(width - (right ? cellLen(right.map((s) => s[0]).join("")) + 1 : 0), 1)
+  if (rows)
+    return (
+      <box
+        flexDirection="column"
+        flexShrink={0}
+        minWidth={1}
+        onSizeChange={function (this: Renderable) {
+          setWidth(this.width)
+        }}
+      >
+        {(width ? fitRows(parts ?? [], room) : [[]]).map((row, i) => (
+          <Line key={i} segs={row} base={base} />
+        ))}
+      </box>
+    )
   return (
     <box
       flexDirection="row"

@@ -4,7 +4,7 @@
 import { createContext, useContext, useSyncExternalStore } from "react"
 import type { Bridge } from "../bridge"
 import type { Action } from "../lib/styled"
-import type { Init, ProfilesMenu } from "./types"
+import type { ExtensionView, Init, PostInfo, PostingRow, ProfilesMenu } from "./types"
 
 /** Rows above a tab's own: the header (3) and the hairline under it. */
 export const TOP_ROWS = 4
@@ -44,7 +44,11 @@ export type Dialog =
   | { kind: "remove"; data: { path: string; note: import("../lib/styled").Segs; bin: string } }
   | { kind: "episode"; data: EpisodeData }
   | { kind: "signup"; data: SignupData }
-  | { kind: "disconnect"; data: { key: string; title: string; note: import("../lib/styled").Segs } }
+  | { kind: "disconnect"; data: { key: string; title: string; note: import("../lib/styled").Segs; logged_in?: boolean } }
+  | { kind: "logout"; data: { key: string; title: string; note: import("../lib/styled").Segs; button: string } }
+  | { kind: "handle_change"; data: { key: string; title: string; note: import("../lib/styled").Segs; forget: string; keep: string } }
+  | { kind: "post"; data: PostData }
+  | { kind: "extension"; from?: "post" } // from: Post was pressed with no extension set up, so by hand is offered too
   | { kind: "profiles"; data: ProfilesMenu }
   | { kind: "delete_profile"; data: import("./Profiles").DeleteProfileData }
   | { kind: "discard_profile"; data: import("./Settings").DeletedProfile & { bin: string } }
@@ -73,6 +77,14 @@ export interface SignupData {
   account: boolean
 }
 
+/** The question before a post: what post_info said, and for Post again on a platform's row, that platform alone. */
+export interface PostData {
+  info: PostInfo
+  caption: string // the form as it was asked about: exactly what the question shows is what gets posted
+  tags: string
+  only?: string[]
+}
+
 export interface LogData {
   platforms: { key: string; name: string }[]
   start: string
@@ -96,10 +108,16 @@ export class DashState {
   picked: string | null = null // a card or account panel framed for a few seconds (a clicked notification)
   top: string | null = null // the highlighted row in Top performers
   video: string | null = null // ... on the Videos tab
+  videosApplied: unknown = null // the "videos" view whose row that tab has taken already (Videos.tsx)
+  profileButton: import("@opentui/core").Renderable | null = null // the header's profile button: its menu opens under it
   compareRow: string | null = null // ... in the Compare table
   note: string | null = null // the highlighted notification
   caption = ""
   tags = ""
+  /** The picked video (its path) with its caption and hashtags as the Python side last sent them, and what you
+   * changed them to for each video, with what they were changed from: see formArrived. */
+  private formSent = { file: "", caption: "", tags: "" }
+  private edits: Record<string, { from: { caption: string; tags: string }; caption: string; tags: string }> = {}
   handles: Record<string, string> = {} // what's typed into each unconnected platform's @handle box
   handleErrors: Record<string, string> = {} // ... and what's wrong with it
   private listeners = new Set<() => void>()
@@ -116,6 +134,33 @@ export class DashState {
     this.order = tabOrder(init.order)
     this.drawer = init.drawer
     this.tags = init.default_tags
+    // The picked video's caption, when the Python side has sent it already (the window drawn again on the same one).
+    const form = bridge.view<{ file?: string; caption?: string; tags?: string }>("form")
+    if (form) {
+      this.caption = form.caption ?? ""
+      this.tags = form.tags ?? ""
+      this.formSent = { file: form.file ?? "", caption: this.caption, tags: this.tags }
+    }
+  }
+
+  /** A video was picked: its caption and hashtags, as written with the video. What you typed for it earlier comes
+   * back instead, as long as its own words are still the ones you changed (a new render brings a new caption, and
+   * that one wins): picking another video and coming back used to throw your words away. */
+  formArrived(file: string, caption: string, tags: string) {
+    this.formSent = { file, caption, tags }
+    const mine = this.edits[file]
+    if (mine && mine.from.caption === caption && mine.from.tags === tags) {
+      this.set({ caption: mine.caption, tags: mine.tags })
+      this.bridge.send("form_changed", mine.caption, mine.tags) // the preview follows
+    } else this.set({ caption, tags })
+  }
+
+  /** You typed in the Publish form: the preview follows, and the words are kept for this video while the window is
+   * open. */
+  formTyped(caption: string, tags: string) {
+    this.set({ caption, tags })
+    if (this.formSent.file) this.edits[this.formSent.file] = { from: this.formSent, caption, tags }
+    this.bridge.send("form_changed", caption, tags)
   }
 
   subscribe = (fn: () => void) => {
@@ -155,7 +200,7 @@ export class DashState {
 
   /** Connect a platform with the @handle typed for it: what's wrong with it shows under its box. */
   async connect(key: string, typed: string) {
-    const error = await this.bridge.call<string | null>("connect", key, typed)
+    const error = await this.bridge.ask<string | null>("connect", key, typed)
     this.set({ handles: { ...this.handles, [key]: typed }, handleErrors: { ...this.handleErrors, [key]: error ?? "" } })
   }
 
@@ -182,12 +227,52 @@ export class DashState {
     if (key !== this.init.profile.key) this.nav.profile(key, this.tab)
   }
 
+  /** Open a dialog on what the Python side says about it. Nothing to say (it has said why in a pop-up): no dialog. A
+   * call that failed is a pop-up too, never a silent nothing. */
   async openDialog(
-    kind: "log" | "remove" | "episode" | "signup" | "disconnect" | "profiles" | "delete_profile" | "factory_reset" | "uninstall" | "move_folder",
+    kind:
+      | "log"
+      | "remove"
+      | "episode"
+      | "signup"
+      | "disconnect"
+      | "logout"
+      | "handle_change"
+      | "post"
+      | "profiles"
+      | "delete_profile"
+      | "factory_reset"
+      | "uninstall"
+      | "move_folder",
     call: Promise<any>,
   ) {
-    const data = await call
+    let data
+    try {
+      data = await call
+    } catch (e) {
+      return this.bridge.failed(e)
+    }
     if (data) this.set({ dialog: { kind, data } as Dialog })
+  }
+
+  /** Post…: the question before a post, with each platform's exact text as the form has it now. only: Post again on a
+   * platform's row, which asks about that platform alone. */
+  openPost(only?: string[]): Promise<void> {
+    const { caption, tags } = this
+    return this.openDialog(
+      "post",
+      this.bridge.call<PostInfo | null>("post_info", caption, tags).then((info) => (info ? { info, caption, tags, only } : null)),
+    )
+  }
+
+  /** A button on a platform's posting row. Posting again asks first, since the video is already up there. A window
+   * that can't hand a post to the extension (it isn't listening for it) says why instead, with by hand beside it, as
+   * Post… does: Post again and Try again would start something that is called off at once. */
+  postAction(row: PostingRow, action: string) {
+    const ext = this.bridge.view<ExtensionView>("extension")
+    if ((action === "post_again" || action === "retry") && ext && ext.state !== "off" && ext.problem) return this.set({ dialog: { kind: "extension", from: "post" } })
+    if (action === "post_again") return void this.openPost([row.key])
+    this.bridge.send("post_action", row.job ?? row.key, action)
   }
 
   /** What a chip or a chart key does when clicked. */
@@ -207,6 +292,8 @@ export class DashState {
         return void this.openDialog("signup", b.call("signup_guide", "gmail"))
       case "disconnect":
         return void this.openDialog("disconnect", b.call("disconnect_info", args[0]))
+      case "extension":
+        return this.set({ dialog: { kind: "extension" } })
       case "close_drawer":
         return this.toggleDrawer(false)
       case "refresh":

@@ -3,15 +3,18 @@
 // palette (src/dashboard/cards.ts, src/lib/fit.ts, src/ui/Graphics.tsx, src/ui/Panels.tsx, src/theme.ts).
 
 import { describe, expect, test } from "bun:test"
+import { headerFit, tabWindow } from "../src/dashboard/App"
+import { wrap } from "../src/dashboard/Drawer"
 import { cardLines, wrapLines } from "../src/dashboard/cards"
 import { metricTitle, pickVariant } from "../src/dashboard/titles"
 import type { MetricView, Variant } from "../src/dashboard/types"
-import { fit } from "../src/lib/fit"
+import { fit, fitRows } from "../src/lib/fit"
 import { fmtNum, shortNum } from "../src/lib/format"
-import { plain, segsLen, type Parts } from "../src/lib/styled"
+import { cellLen, plain, segsLen, wrappedRows, type Parts } from "../src/lib/styled"
 import { PLATFORM, restyle, tone } from "../src/theme"
 import { bell, BELL_WIDTH, faceCells, faceWidth, sparkline, stackedSparkline } from "../src/ui/Graphics"
-import { inline, mdBlocks } from "../src/ui/Panels"
+import { stretched } from "../src/ui/Lists"
+import { inline, mdBlocks, toasts } from "../src/ui/Panels"
 
 const VALUES = { followers: 12_900, views: 1_234_567, likes: 98_765 }
 const CHANGES = { followers: 1_030, views: 19_400, likes: -40 }
@@ -41,6 +44,8 @@ describe("cards", () => {
     expect(lines(24)[0]).toBe("12.9K followers +1.03K") // the " 24h" goes first
     expect(lines(21)).toEqual(["12.9K followers +1K", "1.23M views     +19K", "98.8K likes     −40"])
     expect(lines(13)).toEqual(["13K followers", "1.2M views", "99K likes"]) // labels outlast the changes
+    // a column short for "followers": views and likes keep their names (an 80-column window's tiles are this wide)
+    expect(cardLines({ followers: 2_540, views: 596_000, likes: 29_100 }, {}, 13).map(plain)).toEqual(["2.5K", "596K views", " 29K likes"])
     expect(lines(5)).toEqual([" 13K", "1.2M", " 99K"])
   })
 
@@ -57,6 +62,29 @@ describe("cards", () => {
     ]
     expect(plain(fit(parts, 30))).toBe("LIKES  198.6K total   ")
     expect(plain(fit(parts, 12))).toBe("LIKES  ") // not "LIKES  198.6"
+  })
+})
+
+describe("a line of chips and a table in a narrow window", () => {
+  test("the chips that always show go on a second row before any of them is left out", () => {
+    const parts: Parts = [
+      [[["SHOW  All   TikTok   YouTube   Instagram   X    ", ""]], 0],
+      [[["Open post   Fix episode   Export CSV", ""]], 0],
+      [[["    36 videos · click a header to sort", ""]], 1],
+    ]
+    expect(fitRows(parts, 130).map(plain)).toEqual(["SHOW  All   TikTok   YouTube   Instagram   X    Open post   Fix episode   Export CSV    36 videos · click a header to sort"])
+    expect(fitRows(parts, 100).map(plain)).toEqual(["SHOW  All   TikTok   YouTube   Instagram   X    Open post   Fix episode   Export CSV"]) // the hint goes first
+    expect(fitRows(parts, 76).map(plain)).toEqual(["SHOW  All   TikTok   YouTube   Instagram   X    ", "Open post   Fix episode   Export CSV"])
+    expect(plain(fit(parts, 76))).not.toContain("Export CSV") // (one row left them out)
+  })
+
+  test("the title column gives way so more of the numbers show, down to a width that still reads", () => {
+    const columns = [["platform", 4], ["title", 44], ["views", 8], ["score", 6]].map(([key, width]) => ({ key: key as string, label: [], width: width as number, right: false }))
+    const title = (width: number) => stretched(columns, width, "title").find((c) => c.key === "title")!.width
+    expect(title(100)).toBe(44 + 100 - 71) // room to spare: the title takes it
+    expect(title(71)).toBe(44)
+    expect(title(60)).toBe(33) // too narrow: it gives up what the numbers need
+    expect(title(30)).toBe(24) // but stays readable
   })
 })
 
@@ -180,6 +208,63 @@ describe("block art", () => {
   })
 })
 
+describe("the header in a narrow window", () => {
+  const TABS = ["Overview", "Videos", "Compare", "Stats", "Accounts", "Settings", "Updates ●"].map((t) => t.length)
+  const tabsW = (gap: number) => TABS.reduce((n, w) => n + w, 0) + gap * (TABS.length - 1)
+
+  test("one row while it fits; narrower, the profile button and the signs go over the tabs, which keep the row", () => {
+    expect(headerFit(100, "Night Physics", 9, tabsW).stacked).toBeFalsy()
+    const at80 = headerFit(80, "Night Physics", 9, tabsW)
+    expect(at80.stacked).toBe(true)
+    expect(at80.tabsRoom).toBeGreaterThanOrEqual(tabsW(at80.gap)) // an 80-column terminal shows every tab
+    for (let width = 30; width < 100; width++) {
+      const fit = headerFit(width, "Night Physics", 9, tabsW, 2)
+      if (fit.stacked) expect(fit.nameRoom).toBeGreaterThanOrEqual(1)
+    }
+  })
+
+  test("too narrow for every tab: whole names only, the open one always among them, and room for ‹ and ›", () => {
+    const shown = (open: number, room: number) => tabWindow(TABS, 1, open, room)
+    const used = ([a, b]: [number, number]) => TABS.slice(a, b + 1).reduce((n, w) => n + w, 0) + (b - a) + (a > 0 ? 2 : 0) + (b < TABS.length - 1 ? 2 : 0)
+    expect(shown(0, 57)).toEqual([0, 6]) // they all fit
+    expect(shown(0, 38)).toEqual([0, 3]) // Overview Videos Compare Stats ›
+    expect(shown(5, 38)).toEqual([2, 5]) // ‹ Compare Stats Accounts Settings ›
+    expect(shown(6, 38)).toEqual([3, 6]) // ‹ Stats Accounts Settings Updates ●
+    expect(shown(-1, 38)).toEqual([0, 3]) // Publish is open: from the first one
+    for (let room = 14; room <= 57; room++)
+      for (let open = 0; open < TABS.length; open++) {
+        const [a, b] = shown(open, room)
+        expect(a).toBeLessThanOrEqual(open)
+        expect(b).toBeGreaterThanOrEqual(open)
+        expect(used([a, b])).toBeLessThanOrEqual(room)
+      }
+  })
+})
+
+describe("a notification's words in the drawer", () => {
+  test("wrap to the drawer's columns, counting wide characters as the two they take", () => {
+    expect(wrap("A video passed 100K views on TikTok", 20)).toEqual(["A video passed 100K", "views on TikTok"])
+    const wide = "もし世界中の人が同時にジャンプしたら？ 🎬🎬🎬🎬🎬🎬🎬🎬🎬🎬🎬🎬🎬🎬 What if everyone jumped?"
+    for (const width of [1, 2, 9, 20, 43]) {
+      const lines = wrap(wide, width)
+      for (const line of lines) expect(cellLen(line)).toBeLessThanOrEqual(Math.max(width, 2)) // (it ran to twice the width)
+      expect(lines.join("").replace(/\s/g, "")).toBe(wide.replace(/\s/g, "")) // and nothing is lost
+    }
+  })
+})
+
+describe("pop-ups", () => {
+  test("the same one again takes the first one's place; a different one stacks under it", () => {
+    toasts.clear()
+    for (let i = 0; i < 3; i++) toasts.add({ title: "Copied", body: "The caption is on the clipboard.", timeout: 60 })
+    expect(toasts.get().length).toBe(1)
+    toasts.add({ title: "Copied", body: "The hashtags are on the clipboard.", timeout: 60 })
+    toasts.add({ title: "Copied", body: "The caption is on the clipboard.", severity: "warning", timeout: 60 })
+    expect(toasts.get().map((t) => t.body)).toEqual(["The caption is on the clipboard.", "The hashtags are on the clipboard.", "The caption is on the clipboard."])
+    toasts.clear()
+  })
+})
+
 describe("the palette", () => {
   test("the Python side's colours, in styles and on their own, come out in the window's", () => {
     expect(tone("#ff4040")).toBe(PLATFORM.youtube!) // YouTube's red
@@ -188,5 +273,17 @@ describe("the palette", () => {
     const msg = JSON.parse('{"d": {"color": "#FF4040", "caption": "#fyp #ff4040ish #facade"}}', restyle)
     expect(msg.d.color).toBe(PLATFORM.youtube!)
     expect(msg.d.caption).toBe("#fyp #ff4040ish #facade") // a hashtag is never a colour
+  })
+})
+
+describe("wrapped text", () => {
+  test("the rows a text takes at a width, as it wraps at its spaces", () => {
+    expect(wrappedRows("", 10)).toBe(1)
+    expect(wrappedRows("one two", 10)).toBe(1)
+    expect(wrappedRows("one two three", 10)).toBe(2) // "one two" / "three"
+    expect(wrappedRows("one two three four five", 9)).toBe(3) // "one two" / "three" / "four five"
+    expect(wrappedRows("exactly-10 and more", 10)).toBe(2)
+    expect(wrappedRows("a-word-wider-than-the-width", 10)).toBe(3) // it breaks inside
+    expect(wrappedRows("anything", 0)).toBe(8) // never less than a column
   })
 })

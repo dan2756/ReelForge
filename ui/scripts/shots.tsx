@@ -107,8 +107,7 @@ async function clickAVideoNote(h: Headless) {
   const notes = h.bridge.view<{ items: { title: [string, string][] }[] }>("notes")
   const title = notes?.items.map((n) => n.title.map((s) => s[0]).join("")).find((t) => /^(Taking off|A video passed)/.test(t))
   if (!title) throw new Error("no notification about a video")
-  await clickText(h, title.slice(0, 20), 2) // highlights it
-  await clickText(h, title.slice(0, 20), 2) // opens it
+  await clickText(h, title.slice(0, 20), 2) // opens what it's about
   await h.settle(1000)
 }
 
