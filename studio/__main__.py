@@ -161,8 +161,10 @@ def onboard(argv: list[str], *, preserve_settings: bool = False) -> int:
         try:
             written = generate.write_all(answers, target)
         except Exception as e:
-            if target is not None:      # the new profile never got its files: its folder goes again, so the same
-                shutil.rmtree(target.folder, ignore_errors=True)   # command works once the answers are fixed
+            # A new profile that never got its files: its folder goes again, so the same command works once the
+            # answers are fixed (left there, the folder had the channel's name taken).
+            if target is not None:
+                shutil.rmtree(target.folder, ignore_errors=True)
             if not isinstance(e, ValueError):
                 raise
             print(e)
@@ -499,13 +501,13 @@ def main(argv: list[str] | None = None) -> int:
     from . import settings as S
 
     try:
-        return run(argv)
+        return dispatch(argv)
     except S.SettingsError as e:
         print(e)
         return 1
 
 
-def run(argv: list[str] | None = None) -> int:
+def dispatch(argv: list[str] | None = None) -> int:
     try:
         sys.stdout.reconfigure(line_buffering=True)    # keep our lines in order with the tools' output in logs
     except (AttributeError, ValueError):

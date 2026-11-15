@@ -390,9 +390,9 @@ def write_all(answers: dict, profile=None) -> list[Path]:
         out(log, render("production-log.md.j2", context(a, s, "claude", w.profile)))
     from . import dashboard_config
     config = dashboard_config.rendered(s, w.profile)
-
     # Every file is rendered and checked by now, so whatever stops this (answers to fix, a typo in the dashboard's
     # config.toml, notes too long for Codex) has stopped it above, with every file still as it was.
+
     # A copy of the bible as it was, when it changes (its first lines carry today's date: that alone is no change).
     if old is not None and old.split("-->", 1)[-1] != bible.split("-->", 1)[-1]:
         P.write_atomic(w.backups / f"channel-bible.{dt.datetime.now():%Y%m%d-%H%M%S}.md", old)

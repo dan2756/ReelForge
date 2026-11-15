@@ -90,8 +90,10 @@ def install_bun(progress=None) -> Path:
         inner = next(n for n in z.namelist() if n.endswith("/" + exe) or n == exe)
         BUN_DIR.mkdir(parents=True, exist_ok=True)
         dest = BUN_DIR / exe
-        part = dest.with_name(exe + ".part")   # whole or not at all: bun_path() takes whatever is at dest for Bun,
-        try:                                   # so a copy cut short would never be downloaded again
+        # Beside its place first, then renamed into it: bun_path() takes whatever is at dest for Bun, so a copy
+        # cut short there would be "Bun" for good and never be downloaded again.
+        part = dest.with_name(exe + ".part")
+        try:
             with z.open(inner) as src, part.open("wb") as out:
                 shutil.copyfileobj(src, out)
             if not WINDOWS:

@@ -243,6 +243,13 @@ class InstallTest(unittest.TestCase):
         self.assertEqual([c[:2] for c in self.ran], [["-m", "pip"], ["-m", "studio.ui"]])   # the window's still done
         # still out of step, which is what the next start goes by (bin/reelforge.py, tests/test_studio.py)
         self.assertEqual((self.root / ".venv" / "installed.txt").read_text(encoding="utf-8"), "a\n")
+        # a copy with no .venv of its own (a git copy run with another Python) has no setup to do it: it says how
+        (self.root / ".venv" / "installed.txt").unlink()
+        with mock.patch.object(update.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "")), \
+                self.assertRaises(update.UpdateError) as stopped:
+            update._after(self.root, "another requirements.txt", lambda *a: None, print)
+        self.assertIn("-m pip install -r requirements.txt", str(stopped.exception))
+        self.assertNotIn("setup starts", str(stopped.exception))
 
     def test_a_release_without_checksums_isnt_installed(self):
         archive = self.dir / "ReelForge-9.0.0-Linux.tar.gz"

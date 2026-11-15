@@ -406,9 +406,10 @@ def _after(root: Path, requirements_before: str, progress: Progress, log: Callab
     if res.returncode != 0:
         log("Updated, but the window's packages didn't install; ReelForge tries again when it opens.")
     if not installed:   # said once the window's packages are in; the next start finds the Python ones out of step
+        how = ("Close ReelForge and open it again: setup starts and installs them." if _stamp(root).exists() else
+               f"Install them with: {py} -m pip install -r requirements.txt")   # no .venv of its own to repair
         raise UpdateError("The new version's files are in place, but its Python packages didn't install (are you "
-                          "online?). Close ReelForge and open it again: setup starts and installs them.",
-                          partial=True)
+                          f"online?). {how}", partial=True)
     if (root / "my-studio" / "studio.toml").exists() or any((root / "profiles").glob("*/my-studio/studio.toml")):
         progress("Rewriting CLAUDE.md and AGENTS.md", 0, 0)
         env = {k: v for k, v in os.environ.items() if k != "REELFORGE_PROFILE"}  # every profile's, not just this one's
