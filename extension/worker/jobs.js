@@ -95,7 +95,7 @@ export async function orphans() {
   for (const [id, entry] of Object.entries(held)) {
     if (await getJob(id)) continue
     const p = platformName(entry.platform)
-    const pressed = entry.state === "posting" || (entry.state === "ready" && entry.pressed)
+    const pressed = entry.state === "posting" || entry.pressed
     const body = pressed
       ? { install, state: "unknown", error_code: "unknown_outcome", error_message: `The browser was closed after Post was pressed on ${p}, before any confirmation. Check your profile before you post again.` }
       : { install, state: "failed", error_code: "tab_closed", error_message: `The browser was closed, or the extension reloaded, ${entry.state === "ready" ? "before Post was pressed" : "before the post was ready"}. Nothing was posted.` }
@@ -188,15 +188,19 @@ async function inject(job) {
   }
 }
 
+// Post was pressed, by ReelForge or by the person. The person's press can come before the page is called
+// ready: the video only has to be on it (YouTube publishes while a video is still going up).
+const wasPressed = job => job.state === "posting" || job.pressedByPerson === true
+
 // The job's tab is showing something the script cannot run on.
 function leftPage(job, code, message) {
-  if (job.state === "posting" || (job.state === "ready" && job.pressedByPerson)) return unsure(job)
+  if (wasPressed(job)) return unsure(job)
   if (job.state === "ready") return finish(job.id, "failed", "tab_closed", "The upload page was left before Post was pressed. Nothing was posted.")
   return finish(job.id, "failed", code, message)
 }
 
 function tabGone(job) {
-  if (job.state === "posting" || (job.state === "ready" && job.pressedByPerson)) return unsure(job)
+  if (wasPressed(job)) return unsure(job)
   const when = job.state === "ready" ? "before Post was pressed" : "before the post was ready"
   return finish(job.id, "failed", "tab_closed", `The tab was closed ${when}. Nothing was posted.`)
 }
@@ -238,15 +242,19 @@ async function withApp(job, call) {
 async function flush(job) {
   const install = await app.install()
   while (job.outbox.length) {
+    let res
     try {
-      await withApp(job, found => app.api(found, `/v1/jobs/${job.id}/event`, { method: "POST", body: { install, ...job.outbox[0] } }))
+      res = await withApp(job, found => app.api(found, `/v1/jobs/${job.id}/event`, { method: "POST", body: { install, ...job.outbox[0] } }))
     } catch {
       job.offline = true
       return
     }
+    job.offline = false
+    // ReelForge is there but could not take it just now (its database was busy, or something went wrong
+    // inside): the report waits here for the next tick, like one that found nobody.
+    if (res.status >= 500) return
     // A refusal is not sent again: the app sees this job differently (cancelled in the window, say), and the
     // next tick takes its word for it.
-    job.offline = false
     job.outbox.shift()
   }
 }
