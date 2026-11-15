@@ -6,10 +6,12 @@ A mixin of the window's service (dashboard/service.py). Two views:
 
   posting     for the video picked on the Publish tab: where its review stands, whether the extension is there,
               whether Post can be pressed (and why not), and a row per connected platform with its state, a line
-              of words, and what can be done about it (retry, cancel, mark_posted, not_posted, open_post, post_again)
+              of words, and what can be done about it (retry, cancel, mark_posted, not_posted, open_post, post_again,
+              each with the words for its button)
   extension   the extension itself: off (never connected), waiting (connected, not heard from lately), on, or old
-              (it and ReelForge are different versions of the link between them), the browsers it is connected in,
-              and where its folder is
+              (it and ReelForge are different versions of the link between them), the browsers it is connected in
+              and what each was last seen signed in to, where its folder is, the steps to set it up, and why this
+              window can't reach it when it can't
 
 and the calls behind the buttons: post_info (what the question before a post shows), post_with_extension (your
 yes), post_action (a row's button), pair_extension (connect a browser), unpair_extension (disconnect one),
@@ -35,7 +37,7 @@ from . import analytics, db, desktop, extension_api, posting, videos
 from .analytics import fmt_ago, fmt_num
 from .platforms import PublishItem
 from .posting import STEPS, TESTED, failure, standing
-from .view import BAD, GOOD, MUTED, TYPICAL, Text
+from .view import BAD, GOOD, MUTED, TYPICAL, Text, parts
 
 FAINT = "#5c6370"
 AMBER = TYPICAL  # in progress, and anything waiting for you
@@ -64,6 +66,24 @@ ACTIONS = {
 }
 # What each platform's text is called in its own boxes, for the question before a post.
 FIELDS = {"title": "Title", "description": "Description", "caption": "Caption", "text": "Post"}
+# What the button for each of a row's actions says.
+LABELS = {"retry": "Try again", "cancel": "Cancel", "mark_posted": "It's posted", "not_posted": "It didn't post",
+          "open_post": "Open post", "post_again": "Post again…"}
+# Setting the extension up, once (docs/EXTENSION.md says the same at more length).
+SETUP = (
+    "Open your browser's extensions page: type chrome://extensions in the address bar (edge://extensions in Edge, "
+    "brave://extensions in Brave).",
+    "Switch on Developer mode, at the top right of that page.",
+    "Press Load unpacked and pick the extension folder inside your ReelForge folder. Show the extension folder "
+    "shows it and copies its path.",
+    "Press Connect a browser. A ReelForge page opens in your browser and the extension connects there by itself.",
+)
+# What happens after your yes to the question before a post: as it is asked, and with "stop before posting" off.
+HOW = ("ReelForge opens each upload page in your browser, attaches the video and fills in the text. You check it "
+       "and press Post.")
+HOW_PRESS = ("ReelForge opens each upload page in your browser, attaches the video and fills in the text. Where you "
+             "switched on Press Post for me in the extension's settings, the extension presses Post too. Everywhere "
+             "else, and always on X, you check it and press Post.")
 
 
 def numbers(post: dict) -> str:
@@ -71,6 +91,21 @@ def numbers(post: dict) -> str:
     if post["views"] is None:
         return f"{fmt_ago(post['published_at'])}, its numbers come with the next refresh"
     return f"{fmt_num(post['views'])} views, {fmt_ago(post['published_at'])}"
+
+
+def signed_in(accounts: dict, names: dict[str, str]) -> str:
+    """What a browser was last seen signed in to, in a line: the extension's word about its own browser. It says
+    nothing about the accounts connected in ReelForge, which read stats through ReelForge's own browser."""
+    said = []
+    for key, name in names.items():
+        seen = accounts.get(key)
+        if not isinstance(seen, dict) or seen.get("signed_in") is None:
+            continue  # the extension hasn't looked there yet
+        handle = seen.get("handle")
+        said.append(f"{name} {handle if isinstance(handle, str) and handle else 'yes'}" if seen["signed_in"] else
+                    f"{name} no")
+    return "signed in there: " + " · ".join(said) if said else \
+        "It hasn't said yet which accounts that browser is signed in to: it looks when you post."
 
 
 def flag_style(color: str, state: str) -> str:
@@ -185,6 +220,7 @@ class PostingTab:
                              # What that browser was last seen signed in to. It is the extension's word about its
                              # own browser, and says nothing about the accounts connected in ReelForge.
                              "accounts": p.get("accounts") if isinstance(p.get("accounts"), dict) else {}})
+            installs[-1]["signed"] = signed_in(installs[-1]["accounts"], {k: q.name for k, q in self.every.items()})
         installs.sort(key=lambda i: (i["at"] is not None, i["at"]), reverse=True)  # the one heard from last, first
         theirs = installs[0]["protocol"] if installs else None
         for i in installs:
@@ -218,11 +254,17 @@ class PostingTab:
             lines.append(Text(self.extension_problem, AMBER))
         if not self.demo:
             lines.append(Text(TESTED, MUTED))
+        # The Publish tab's one line about it while it isn't set up: what it is, and that nobody needs it.
+        hint = parts([(Text("Optional. ", MUTED), 0),
+                      (Text("The browser extension fills in each upload page for you.", MUTED), 1)])
         self.emit("extension", {
             "state": status["state"], "line": status["line"].json(), "lines": [t.json() for t in lines],
             "installs": status["installs"], "port": self.extension_port, "protocol": posting.PROTOCOL,
             "folder": str(folder), "folder_there": folder.is_dir(),
             "hint_dismissed": bool(self._safe(lambda: db.get_meta(HINT, False), False)),
+            "hint": hint, "steps": list(SETUP),
+            # Why this window can't hand a post to the extension, whatever is connected ("": it can).
+            "problem": "" if self.demo else self.extension_problem,
         })
 
     def follow_extension(self) -> None:
@@ -244,7 +286,8 @@ class PostingTab:
         extension = self.extension_status()
         view = {"video": None, "review": {"state": "none", "line": []},
                 "extension": {"state": extension["state"], "line": extension["line"].json()},
-                "can_post": False, "why": "Pick a video on the left first.", "rows": []}
+                "can_post": False, "why": "Pick a video on the left first.", "setup": False, "rows": [],
+                "labels": LABELS}
         if video is None:
             self.emit("posting", view)
             return
@@ -265,7 +308,9 @@ class PostingTab:
         why = self.cant_post(video, review, extension, rows)
         view.update(video={"path": str(video), "name": video.name},
                     review={"state": review["state"], "line": Text(mark + review["line"], style).json()},
-                    can_post=not why, why=why, rows=rows)
+                    can_post=not why, why=why, rows=rows,
+                    # Only the extension is in the way: Post explains how to set it up instead of being greyed out.
+                    setup=bool(why) and why == self.extension_needed(extension))
         self.emit("posting", view)
 
     def cant_post(self, video: Path, review: dict, extension: dict, rows: list[dict]) -> str:
@@ -368,7 +413,8 @@ class PostingTab:
         return {"video": {"path": str(video), "name": video.name,
                           "size": f"{video.stat().st_size / 1024 / 1024:.1f} MB"},
                 "review": look["review"], "extension": {"state": extension["state"], "line": extension["line"].json()},
-                "platforms": platforms, "can_post": not why, "why": why, "stop_before": True, "note": TESTED}
+                "platforms": platforms, "can_post": not why, "why": why, "stop_before": True, "note": TESTED,
+                "how": HOW, "how_press": HOW_PRESS}
 
     @rpc
     def post_with_extension(self, platforms: list[str], caption: str, tags: str, stop_before: bool = True,

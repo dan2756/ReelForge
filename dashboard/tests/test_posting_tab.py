@@ -87,6 +87,13 @@ class View(PostingTest):
                          [(key, name, "none", False, None, None, []) for key, name in NAMES.items()])
         self.assertEqual(plain(view["rows"][0]["line"]), "○ not posted")
 
+    def test_every_action_a_row_can_offer_has_the_words_for_its_button(self):
+        w = self.window()
+        labels = w.view("posting")["labels"]
+        self.assertEqual({a for acts in posting_tab.ACTIONS.values() for a in acts}, set(labels))
+        self.assertEqual((labels["mark_posted"], labels["not_posted"], labels["retry"]),
+                         ("It's posted", "It didn't post", "Try again"))
+
     def test_picking_a_video_sends_its_view(self):
         other = self.root / "videos" / "ep02.mp4"
         other.write_bytes(b"second")
@@ -109,6 +116,20 @@ class View(PostingTest):
         self.assertIsNone(self.post(w))
         self.assertEqual(w.toasts(), ["Connect the browser extension first."])
         self.assertEqual(posting.recent(), [])
+
+    def test_setup_says_when_only_the_extension_is_in_the_way(self):
+        """The window's Post button then explains how to set the extension up, instead of being greyed out."""
+        w = self.window(connect=False)
+        self.assertTrue(w.view("posting")["setup"])
+        self.extension()
+        w.svc.update_posting()
+        view = w.view("posting")
+        self.assertEqual((view["can_post"], view["setup"]), (True, False))  # nothing is in the way
+        self.store.unlink()
+        self.video.unlink()  # something else is: setting the extension up wouldn't help
+        w.svc.update_posting()
+        view = w.view("posting")
+        self.assertEqual((view["can_post"], view["setup"]), (False, False))
 
     def test_the_demo_never_posts(self):
         self.extension()
@@ -161,6 +182,11 @@ class Question(PostingTest):
         self.assertEqual(info["video"]["name"], "ep01.mp4")
         self.assertEqual(info["review"]["state"], "none")
         self.assertIn("not yet on the live sites", info["note"])
+        # What happens next, in one sentence: you press Post. With "stop before posting" off, where the extension
+        # may press it, and never on X.
+        self.assertEqual(info["how"], "ReelForge opens each upload page in your browser, attaches the video and fills "
+                                      "in the text. You check it and press Post.")
+        self.assertIn("always on X, you check it and press Post", info["how_press"])
         by = {p["key"]: p for p in info["platforms"]}
         self.assertEqual(list(by), list(NAMES))
         self.assertEqual(by["youtube"]["text"], {"title": f"{CAPTION} #shorts", "description": TAGS})
@@ -492,9 +518,26 @@ class ExtensionView(PostingTest):
         said = " ".join(plain(line) for line in view["lines"])
         self.assertIn("You check it and press Post", said)
         self.assertIn("not yet on the live sites", said)  # never more than the tests have shown
+        # The Publish tab's one line about it, the least needed part last, and the steps to set it up.
+        self.assertEqual([(plain(text), rank) for text, rank in view["hint"]],
+                         [("Optional. ", 0), ("The browser extension fills in each upload page for you.", 1)])
+        self.assertEqual(len(view["steps"]), 4)
+        self.assertIn("chrome://extensions", view["steps"][0])
+        self.assertIn("Load unpacked", view["steps"][2])
+        self.assertIn("Connect a browser", view["steps"][3])
         w.call("dismiss_extension_hint")
         self.assertTrue(w.view("extension")["hint_dismissed"])
         self.assertTrue(db.get_meta(posting_tab.HINT))
+
+    def test_a_window_that_is_not_listening_says_why_on_its_own(self):
+        """problem: what the window shows beside Post, since no post can be handed over from this window."""
+        w = self.window()
+        w.svc.extension_problem = "ReelForge isn't listening for the extension here (it is switched off)."
+        view = self.view(w)
+        self.assertEqual(view["problem"], w.svc.extension_problem)
+        self.assertIn(view["problem"], [plain(line) for line in view["lines"]])
+        w.svc.extension_problem = ""
+        self.assertEqual(self.view(w)["problem"], "")
 
     def test_connected_and_heard_from_just_now(self):
         self.extension(seen_minutes_ago=0.2)
@@ -547,6 +590,17 @@ class ExtensionView(PostingTest):
         w = self.window()
         (install,) = self.view(w)["installs"]
         self.assertEqual(install["accounts"], {"tiktok": {"signed_in": True, "handle": "@me"}})
+        self.assertEqual(install["signed"], "signed in there: TikTok @me")
+
+    def test_what_a_browser_is_signed_in_to_reads_as_a_line(self):
+        names = {"tiktok": "TikTok", "youtube": "YouTube", "instagram": "Instagram", "x": "X"}
+        said = posting_tab.signed_in({"tiktok": {"signed_in": True, "handle": "@me"},
+                                      "youtube": {"signed_in": True, "handle": None},
+                                      "instagram": {"signed_in": False, "handle": None},
+                                      "x": {"signed_in": None, "handle": None}, "junk": "x"}, names)
+        self.assertEqual(said, "signed in there: TikTok @me · YouTube yes · Instagram no")  # X: not looked at yet
+        self.assertIn("It hasn't said yet", posting_tab.signed_in({}, names))
+        self.assertIn("It hasn't said yet", posting_tab.signed_in({"x": "junk"}, names))
 
     def test_a_browser_that_connects_while_the_window_is_open_shows_within_a_second(self):
         w = self.window(connect=False)
