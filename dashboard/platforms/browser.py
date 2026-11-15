@@ -16,6 +16,7 @@ import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime
+from urllib.parse import urlsplit
 
 from studio import browsers
 
@@ -23,7 +24,11 @@ from .. import config
 from .base import Account, PlatformError, Post, detail, first_line
 
 LOGIN_URLS = {"instagram": "https://www.instagram.com/accounts/login/", "x": "https://x.com/i/flow/login"}
+HOME_URLS = {"instagram": "https://www.instagram.com/", "x": "https://x.com/home"}
 SESSION_COOKIES = {"instagram": ("instagram.com", "sessionid"), "x": ("x.com", "auth_token")}
+# Each site's own pages that mean "not logged in" and "prove it's you", by the leading parts of their path.
+LOGIN_PAGES = {"instagram": ("accounts/login",), "x": ("login", "i/flow")}
+CHECK_PAGES = {"instagram": ("challenge", "checkpoint"), "x": ()}
 
 _lock = threading.Lock()  # a browser profile can only be open once at a time
 
@@ -69,6 +74,8 @@ def forget(platform: str) -> None:
 
 @contextmanager
 def _browser(headless: bool = True):
+    """ReelForge's browser, open on its own profile: in the background for a read (headless), or with a window for
+    a log-in."""
     if not available():
         raise PlatformError("Browser stats need Playwright: run setup again to install it.")
     b = chosen()
@@ -96,6 +103,9 @@ def _browser(headless: bool = True):
                 if busy and attempt < 7:
                     time.sleep(2.5)
                     continue
+                if busy and not headless:  # a log-in: nothing tries it again by itself
+                    raise PlatformError("ReelForge's browser is busy reading stats right now. Press Log in again in "
+                                        "a moment.") from e
                 if busy:
                     raise PlatformError("ReelForge's browser was busy with another read; it tries again next "
                                         "refresh.") from e
@@ -110,26 +120,88 @@ def _browser(headless: bool = True):
             ctx.close()
 
 
+def _on_site(host: str, site: str) -> bool:
+    """Whether a cookie's domain (".instagram.com", "www.instagram.com") is the site or part of it. Not any domain
+    that merely contains its name (x.com is in dropbox.com)."""
+    host = host.lstrip(".").lower()
+    return host == site or host.endswith("." + site)
+
+
 def _has_session(ctx, platform: str) -> bool:
-    domain, name = SESSION_COOKIES[platform]
-    return any(c["name"] == name and domain in c["domain"] for c in ctx.cookies())
+    site, name = SESSION_COOKIES[platform]
+    return any(c["name"] == name and _on_site(c["domain"], site) for c in ctx.cookies())
+
+
+def _at(url: str, handle: str, *pages: str) -> bool:
+    """Whether an address is one of a site's own pages ("accounts/login", "challenge"): its path starts with that
+    page's whole parts. A profile whose handle only starts the same way (x.com/loginvideos,
+    instagram.com/challengeaccepted/reels/) isn't one, and neither is the profile itself."""
+    parts = [part for part in urlsplit(url).path.split("/") if part]
+    if handle and parts and parts[0].lower() == handle.lower():
+        return False
+    return any(parts[:len(want)] == want for want in (page.split("/") for page in pages))
+
+
+def _gone(error: Exception) -> bool:
+    """Whether an error is the browser's own (Playwright's): during a log-in that means its window was closed."""
+    return type(error).__module__.startswith("playwright")
+
+
+SETTLED = 5  # seconds a site has to stay clear of its login and check pages before a second log-in counts as done
 
 
 def login(platform: str, timeout: float = 600) -> None:
-    """Open a visible window of ReelForge's browser on the platform's login page and wait until you've logged in."""
+    """Open a visible window of ReelForge's browser for you to log in to the platform, and wait until you have.
+
+    Not logged in there yet: the site's login page, until it has set its session cookie. Logged in already (Log in
+    again, because the site wants to check it's you, or showed its login page all the same): the site itself, for
+    you to do what it asks. That's done once it has shown its login or check page and then stayed clear of them
+    for a few seconds, or when you close the window still logged in. (The window used to close by itself after 3
+    seconds whenever the cookie was there, before you could do anything.)
+    """
     with _browser(headless=False) as ctx:
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        page.goto(LOGIN_URLS[platform])
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if _has_session(ctx, platform):
-                page.wait_for_timeout(3000)  # let the site finish setting cookies
-                config.set_token(f"browser:{platform}", {"since": time.time()})
-                return
-            if not ctx.pages:
-                break  # you closed the window
-            time.sleep(1)
-    raise PlatformError("The login window closed before you finished logging in.")
+        had = has = False  # logged in when the window opened, and when last looked
+        ended = "closed"
+        try:
+            had = has = _has_session(ctx, platform)
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            try:
+                page.goto(HOME_URLS[platform] if had else LOGIN_URLS[platform], wait_until="domcontentloaded",
+                          timeout=45000)
+            except Exception as e:
+                if not _gone(e) or type(e).__name__ == "TargetClosedError":
+                    raise
+                if type(e).__name__ != "TimeoutError":  # (a slow page is still a page to log in on)
+                    raise PlatformError(f"{NAMES[platform]}'s page didn't open in ReelForge's browser (is this "
+                                        "computer online?). Press Log in to try again.") from e
+            asked, clear = False, 0  # the site showed a login or check page; seconds it has been clear of them since
+            ended, deadline = "late", time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if not ctx.pages:  # you closed the window (where that leaves the browser running)
+                    ended = "closed"
+                    break
+                has = _has_session(ctx, platform)
+                if has and not had:
+                    page.wait_for_timeout(3000)  # let the site finish setting cookies
+                    ended = "done"
+                    break
+                if had and any(_at(p.url, "", *LOGIN_PAGES[platform], *CHECK_PAGES[platform]) for p in ctx.pages):
+                    asked, clear = True, 0
+                elif had and asked and has:
+                    clear += 1
+                    if clear >= SETTLED:
+                        ended = "done"
+                        break
+                time.sleep(1)
+        except Exception as e:  # closing the last window ends the browser on Windows and Linux: every call fails
+            if not _gone(e):
+                raise
+            ended = "closed"
+    if ended != "done" and not (had and has):  # (a window closed or left open while still logged in counts as done)
+        raise PlatformError("The login window closed before you finished logging in." if ended == "closed" else
+                            f"The login window was open for {timeout / 60:.0f} minutes without a log-in, so ReelForge "
+                            "closed it. Press Log in to try again.")
+    config.set_token(f"browser:{platform}", {"since": time.time()})
 
 
 NAMES = {"instagram": "Instagram", "x": "X"}
@@ -290,14 +362,14 @@ def instagram(handle: str) -> tuple[Account, list[Post]]:
             if got["PolarisProfilePageContentQuery"] and got["PolarisProfileReelsTabContentQuery"]:
                 break
         # The Reels tab carries no captions; the profile's main grid does.
-        if "/accounts/login" not in page.url and not got["PolarisProfilePostsQuery"]:
+        if not _at(page.url, handle, *LOGIN_PAGES["instagram"]) and not got["PolarisProfilePostsQuery"]:
             page.goto(f"https://www.instagram.com/{handle}/", wait_until="domcontentloaded", timeout=45000)
             for _ in range(10):
                 page.wait_for_timeout(1000)
                 if got["PolarisProfilePostsQuery"]:
                     break
-        on_login_page = "/accounts/login" in page.url
-        challenge = "/challenge" in page.url or "/checkpoint" in page.url
+        on_login_page = _at(page.url, handle, *LOGIN_PAGES["instagram"])
+        challenge = _at(page.url, handle, *CHECK_PAGES["instagram"])
     if challenge:
         raise PlatformError("Instagram wants to check it's you: press Log in again on the Accounts tab and "
                             "follow its steps in the window that opens.")
@@ -386,7 +458,7 @@ def x(handle: str) -> tuple[Account, list[Post]]:
         if timeline_loaded():
             page.mouse.wheel(0, 6000)  # one scroll loads the next ~20 posts
             page.wait_for_timeout(2500)
-        on_login_page = "/login" in page.url or "/i/flow" in page.url
+        on_login_page = _at(page.url, handle, *LOGIN_PAGES["x"])
 
     if on_login_page:
         raise _sent_to_login("x")

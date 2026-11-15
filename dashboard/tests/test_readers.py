@@ -285,6 +285,76 @@ class BrowserTest(unittest.TestCase):
         return str(caught.exception)
 
 
+class LogIn(BrowserTest):
+    """browser.login: the window stays until the log-in is really done, and closing it is never an error from the
+    browser's insides."""
+
+    CHALLENGE = "https://www.instagram.com/challenge/?next=%2F"
+
+    def test_a_first_log_in_ends_once_the_site_has_set_its_cookie(self):
+        self.window = w = Window(self.clock)
+        self.clock.at(20, lambda: w.jar.append(SESSION["instagram"]))
+        browser.login("instagram")
+        self.assertEqual((self.windows, w.opened), ([False], [browser.LOGIN_URLS["instagram"]]))
+        self.assertEqual(self.clock.now, 23)  # 20 seconds to log in, 3 for the site to finish
+        self.assertEqual(config.get_token("browser:instagram"), {"since": self.clock.time()})
+
+    def test_log_in_again_waits_while_the_site_checks_its_you(self):
+        """Logged in already, and Instagram wants to check it's you: the window used to close after 3 seconds,
+        before anything could be done in it. Now it opens Instagram itself and stays until the check is passed."""
+        config.set_token("browser:instagram", {"since": 1.0, "misses": 1})
+        self.window = w = Window(self.clock, [SESSION["instagram"]],
+                                 site=lambda url: (self.CHALLENGE, [], ""))  # where Instagram sends you
+        self.clock.at(40, lambda: setattr(w.pages[0], "url", "https://www.instagram.com/"))  # you passed it
+        browser.login("instagram")
+        self.assertEqual(w.opened, [browser.HOME_URLS["instagram"]])  # not the login page: you're logged in
+        self.assertTrue(40 < self.clock.now <= 40 + browser.SETTLED, self.clock.now)  # once it has stayed clear
+        self.assertEqual(config.get_token("browser:instagram"), {"since": self.clock.time()})  # no misses left
+
+    def test_log_in_again_on_a_site_that_asks_nothing_stays_until_you_close_it(self):
+        self.window = w = Window(self.clock, [SESSION["x"]])
+        self.clock.at(90, lambda: setattr(w, "gone", True))  # you looked around and closed the window
+        browser.login("x")
+        self.assertEqual((w.opened, self.clock.now), ([browser.HOME_URLS["x"]], 90))
+        self.assertIsNotNone(config.get_token("browser:x"))  # still logged in: that's a log-in
+
+    def test_closing_the_window_before_logging_in_says_so(self):
+        """It used to say "TargetClosedError: BrowserContext.cookies: Target page, context or browser has been
+        closed"."""
+        closed = "The login window closed before you finished logging in."
+        self.window = w = Window(self.clock)
+        self.clock.at(7, lambda: setattr(w, "gone", True))  # the browser went with its last window
+        self.assertEqual(self.said(lambda: browser.login("instagram")), closed)
+        self.window = w = Window(self.clock)
+        self.clock.at(self.clock.now + 7, w.pages.clear)  # the window went, the browser stayed (macOS)
+        self.assertEqual(self.said(lambda: browser.login("instagram")), closed)
+        self.window = w = Window(self.clock, [SESSION["instagram"]])  # logged out in the window, then closed it
+        self.clock.at(self.clock.now + 5, w.jar.clear)
+        self.clock.at(self.clock.now + 9, lambda: setattr(w, "gone", True))
+        self.assertEqual(self.said(lambda: browser.login("instagram")), closed)
+        self.assertIsNone(config.get_token("browser:instagram"))
+
+    def test_a_window_left_open_says_how_long_it_waited(self):
+        self.window = Window(self.clock)
+        self.assertEqual(self.said(lambda: browser.login("x", timeout=600)),
+                         "The login window was open for 10 minutes without a log-in, so ReelForge closed it. Press "
+                         "Log in to try again.")
+        self.assertIsNone(config.get_token("browser:x"))
+
+    def test_a_page_that_doesnt_open_says_so_and_a_slow_one_is_waited_for(self):
+        self.window = w = Window(self.clock)
+        w.wont_open = NavigationError("Page.goto: net::ERR_INTERNET_DISCONNECTED at https://x.com/i/flow/login\n"
+                                      "Call log:")
+        self.assertEqual(self.said(lambda: browser.login("x")),
+                         "X's page didn't open in ReelForge's browser (is this computer online?). Press Log in to "
+                         "try again.")
+        self.window = w = Window(self.clock)
+        w.wont_open = BrowserTimeout("Page.goto: Timeout 45000ms exceeded.")
+        self.clock.at(self.clock.now + 30, lambda: w.jar.append(SESSION["x"]))  # it loaded in the end
+        browser.login("x")
+        self.assertIsNotNone(config.get_token("browser:x"))
+
+
 def x_site(lands: str | None = None, tweets: list | None = None):
     """A healthy, logged-in X for any handle (or one that sends the page to `lands`)."""
     tweet = {"id_str": "9", "full_text": "a video post", "user_id_str": "1",
@@ -308,6 +378,44 @@ def instagram_site(lands: str | None = None, items: list | None = None):
                   "PolarisProfilePageContentQuery"),
             Reply(url, media, "PolarisProfileReelsTabContentQuery"), Reply(url, media, "PolarisProfilePostsQuery")], ""
     return site
+
+
+class SitePages(BrowserTest):
+    """Whether a read ended on the site's login or "check it's you" page goes by the page's path, part by part: a
+    handle that starts with login, challenge or checkpoint used to count as one, so it could never be read."""
+
+    def test_a_handle_that_starts_like_a_site_page_is_read(self):
+        for handle in ("renderedwrong", "loginvideos", "login_fan", "i"):
+            config.set_token("browser:x", {"since": 1.0})
+            self.window = Window(self.clock, [SESSION["x"]], x_site())
+            account, posts = browser.x(handle)
+            self.assertEqual((account.handle, account.followers, [p.post_id for p in posts]), (f"@{handle}", 5, ["9"]))
+            self.assertEqual(config.get_token("browser:x"), {"since": 1.0})  # no strike against the log-in
+        for handle in ("renderedwrong", "challengeaccepted", "checkpointcharlie"):
+            self.window = Window(self.clock, [SESSION["instagram"]], instagram_site())
+            account, posts = browser.instagram(handle)
+            self.assertEqual((account.followers, [p.url for p in posts]), (7, ["https://www.instagram.com/reel/AbC/"]))
+
+    def test_the_sites_own_pages_still_count(self):
+        config.set_token("browser:x", {"since": 1.0})
+        for lands in ("https://x.com/i/flow/login?redirect_after_login=%2Floginvideos", "https://x.com/login"):
+            self.window = Window(self.clock, [SESSION["x"]], x_site(lands))
+            self.assertIn("X showed ReelForge's browser its login page", self.said(lambda: browser.x("loginvideos")))
+            config.set_token("browser:x", {"since": 1.0})
+        for lands in ("https://www.instagram.com/challenge/?next=/me/", "https://www.instagram.com/checkpoint/1/"):
+            self.window = Window(self.clock, [SESSION["instagram"]], instagram_site(lands))
+            self.assertIn("Instagram wants to check it's you", self.said(lambda: browser.instagram("me")))
+        config.set_token("browser:instagram", {"since": 1.0})
+        self.window = Window(self.clock, [SESSION["instagram"]],
+                             instagram_site("https://www.instagram.com/accounts/login/?next=%2Fme%2F"))
+        self.assertIn("showed ReelForge's browser its login page", self.said(lambda: browser.instagram("me")))
+        self.assertEqual(config.get_token("browser:instagram")["misses"], 1)
+
+    def test_a_cookie_is_the_sites_only_on_the_site(self):
+        for domain, ours in ((".x.com", True), ("x.com", True), ("api.x.com", True), (".dropbox.com", False),
+                             ("netflix.com", False), (".notx.com", False)):
+            self.assertEqual(browser._has_session(Window(self.clock, [{"name": "auth_token", "domain": domain}]), "x"),
+                             ours, domain)
 
 
 class OddItems(BrowserTest):

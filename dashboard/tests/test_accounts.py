@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+import threading
 import unittest
 from datetime import timedelta
 from pathlib import Path
@@ -291,6 +292,35 @@ class WindowTest(unittest.TestCase):
         body = plain(self.panel(w, "tiktok")["body"])
         self.assertIn("last read failed: TikTok couldn't be reached", body)
         self.assertNotIn(said, body)
+
+    def test_a_log_in_the_browser_couldnt_do_is_said_plainly(self):
+        """It says so in a sentence, and the error's own words go to the log. And a second press of Log in while the
+        window is open doesn't queue another window behind it."""
+        every = self.real_platforms({"instagram": "@mine"})
+        started, finish = threading.Event(), threading.Event()
+
+        def login(key: str) -> None:
+            started.set()
+            finish.wait(10)
+            raise RuntimeError("Target crashed\nCall log:\n  - navigating to login")
+
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()), \
+                mock.patch.object(browser, "login", login):
+            w = self.open(every, demo_mode=False)
+            w.call("login", "instagram")
+            self.assertTrue(started.wait(10))
+            w.forget()
+            w.call("login", "instagram")  # pressed again, the window still open
+            self.assertEqual(w.toasts(), ["ReelForge's browser window is already open for Instagram. Finish there, or "
+                                          "close that window first."])
+            finish.set()
+            self.assertTrue(w.until(lambda: any(t["title"] == "Instagram not logged in" for t in w.sent("toast"))))
+            self.assertIn("ReelForge's browser window didn't work for the log-in. Try again in a moment; "
+                          "data/refresh.log says what stopped it.", w.toasts())
+            self.assertEqual(w.svc.logging_in, "")
+            self.assertNotIn("Target crashed", str(w.loop.events))
+        self.assertIn("error: the log-in in ReelForge's browser: RuntimeError: Target crashed | Call log: | "
+                      "- navigating to login", sync.log_path().read_text("utf-8"))
 
     def test_another_window_connecting_shows_here(self):
         """Every ReelForge window follows a platform connected (or disconnected) in another one."""

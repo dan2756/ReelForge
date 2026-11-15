@@ -22,7 +22,7 @@ from studio.bridge import Loop, Service, rpc
 
 from . import analytics, badges, besttime, config, db, desktop, notify, sync, tabs, trends, videos
 from .analytics import fmt_age, fmt_ago, fmt_clock, fmt_delta, fmt_hours, fmt_num, fmt_pct
-from .platforms import Platform, PlatformError, PublishItem, browser, connected
+from .platforms import Platform, PlatformError, PublishItem, browser, connected, detail
 from .settings_tab import SettingsTab
 from .stats_tab import StatsTab
 from .platforms.base import Account, Post
@@ -1898,11 +1898,17 @@ class Dashboard(StatsTab, SettingsTab, Service):
                 "series": [{"key": p.key, "name": p.name, "color": p.color, "xs": xs, "ys": ys, "style": "area",
                             "est": est}]}
 
+    logging_in = ""  # the platform whose log-in window is open ("" for none): ReelForge's browser has one window
+
     @rpc
     def login(self, key: str) -> None:
         p = self.every[key]
         if not p.public_handle:
             self.notify(f"Connect {p.name} with your @handle first.", severity="warning")
+            return
+        if self.logging_in:  # a second press would only queue another window behind the open one
+            self.notify(f"ReelForge's browser window is already open for {self.every[self.logging_in].name}. Finish "
+                        "there, or close that window first.", severity="warning", timeout=8)
             return
         self.loop.run_worker(self._browser_login, p, group="login")
 
@@ -1925,17 +1931,30 @@ class Dashboard(StatsTab, SettingsTab, Service):
     def _browser_login(self, p: Platform) -> None:
         window = f"{'An' if browser.NAME == 'Edge' else 'A'} {browser.NAME} window"
         self.loop.call_soon(self.notify, f"{window} is opening (if ReelForge is reading stats right now, as soon as "
-                                         f"that's done). Log in to {p.name} there; ReelForge carries on by itself "
-                                         "once you're in.", f"Log in to {p.name}", "information", 15)
+                                         f"that's done). Log in to {p.name} there, or do what it asks; ReelForge "
+                                         "carries on by itself once you're in, or when you close the window.",
+                            f"Log in to {p.name}", "information", 15)
+        self.logging_in = p.key
         try:
             browser.login(p.key)
         except Exception as e:
-            msg = str(e) if isinstance(e, PlatformError) else f"{type(e).__name__}: {e}"
-            self.loop.call_soon(self.notify, msg, f"{p.name} not logged in", "error", 15)
+            self.loop.call_soon(self.notify, self._browser_trouble(e, "log-in"), f"{p.name} not logged in", "error", 15)
             return
+        finally:
+            self.logging_in = ""
         self.loop.call_soon(self.notify, f"Logged in to {p.name}. Reading your stats now…")
         self.loop.call_soon(self.follow_connections)  # connected now, if it was waiting for this
         self.loop.call_soon(self.run_refresh, True, True, p.key)
+
+    @staticmethod
+    def _browser_trouble(error: Exception, what: str) -> str:
+        """Why a log-in or log-out in ReelForge's browser didn't happen, in a sentence: the browser module's own
+        when it gave one, else that it didn't work, with the error's own words kept in data/refresh.log."""
+        if isinstance(error, PlatformError):
+            return str(error)
+        sync.log([f"error: the {what} in ReelForge's browser: {detail(error)}"])
+        return (f"ReelForge's browser window didn't work for the {what}. Try again in a moment; data/refresh.log "
+                "says what stopped it.")
 
     # --- connecting and disconnecting -------------------------------------------------------
 
