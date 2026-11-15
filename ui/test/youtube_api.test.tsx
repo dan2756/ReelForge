@@ -129,6 +129,13 @@ async function ask(h: Headless, button = "Post with API…") {
   await until(h, () => frame(h).includes("POST TO YOUTUBE THROUGH ITS API"))
 }
 
+/** The question's yes, and the question gone again: it stays up for a moment after the answer (for the second click of
+ * a double click), over the rows the test reads next. */
+async function yes(h: Headless, button = "Post to YouTube") {
+  await clickText(h, button, 2)
+  await until(h, () => !frame(h).includes("POST TO YOUTUBE THROUGH ITS API"))
+}
+
 describe("a channel that never used YouTube's API", () => {
   test("has one quiet button for it above Post…, nothing on the YouTube row, and the tab is no taller", async () => {
     const h = await kit({}, [120, 30])
@@ -398,14 +405,14 @@ describe("the question before a post", () => {
     await ask(h)
     expect(dialog(h)).toContain("clip.mp4 0.0 MB")
     writeFileSync(posting(h).video!.path, "another cut, saved over the one the question is about")
-    await clickText(h, "Post to YouTube", 2)
+    await yes(h)
     await until(h, () => popups().length > 0 && !frame(h).includes("POST TO YOUTUBE THROUGH ITS API"))
     expect(popups()).toEqual(["Nothing was started: clip.mp4 changed after the question was shown: it is another file now, so nothing was sent. Check the video, then press Post with API… again."])
     expect([jobsMade(), (await google(h)).starts]).toEqual([0, []])
     // Asked again, the question is about the file that is there now, and its yes posts that one.
     toasts.clear()
     await ask(h)
-    await clickText(h, "Post to YouTube", 2)
+    await yes(h)
     await until(h, () => youtube(h).state === "posted")
     expect([jobsMade(), (await google(h)).videos.length, popups()]).toEqual([1, 1, []])
   })
@@ -429,7 +436,7 @@ describe("a post through the API", () => {
   test("goes from your yes to uploading with its percent, the last piece, and posted with its link", async () => {
     const h = await kit({ api: { client: "on", kids: false, hold: 1 } })
     await ask(h)
-    await clickText(h, "Post to YouTube", 2)
+    await yes(h)
     await until(h, () => youtube(h).state === "uploading" && row(h).includes("44%"))
     expect(frame(h)).not.toContain("POST TO YOUTUBE THROUGH ITS API")
     // One piece of three is up (the video is nine bytes, a piece four), and the second waits for this test.
@@ -510,12 +517,12 @@ describe("a post through the API", () => {
   test("a Post it again that YouTube refuses is said in a pop-up, because the row still says posted", async () => {
     const h = await kit({ api: { client: "on", kids: false } })
     await ask(h)
-    await clickText(h, "Post to YouTube", 2)
+    await yes(h)
     await until(h, () => youtube(h).state === "posted")
     expect(popups()).toEqual([]) // the row said that one
     await google(h, "tell", { start_script: [[403, "quotaExceeded"]] })
     await ask(h, "Again with API…")
-    await clickText(h, "Post it again", 2)
+    await yes(h, "Post it again")
     await until(h, () => popups().length > 0)
     expect(popups()).toEqual(["YouTube: not posted: Your Google Cloud project has used up today's YouTube API allowance. It starts again at midnight Pacific time. Nothing was posted."])
     // The first one is still up, so its row says posted again, and nothing of the try that failed.
@@ -540,7 +547,7 @@ describe("a post through the API", () => {
     expect(dialog(h)).toContain("▐ Starting… ▌")
     h.bridge.ask = answer
     send()
-    await until(h, () => youtube(h).state === "posted")
+    await until(h, () => youtube(h).state === "posted" && !frame(h).includes("POST TO YOUTUBE THROUGH ITS API"))
     expect((await google(h)).starts[0]!.status.privacyStatus).toBe("public") // what you chose is what was sent
     expect(row(h)).toContain("✓ posted")
     expect(row(h)).toContain("YouTube stored it as private, not public as you chose. Change who can see it in YouTube Studio.")
@@ -554,7 +561,7 @@ describe("a post through the API", () => {
     const h = await kit({ api: { client: "on", google: { channel_kids: true } } })
     await ask(h)
     expect(dialog(h)).toContain("Made for kids Not sent: you haven't answered, so your channel's own setting applies")
-    await clickText(h, "Post to YouTube", 2)
+    await yes(h)
     await until(h, () => youtube(h).state === "posted")
     expect((await google(h)).starts[0]!.status).toEqual({ privacyStatus: "private" }) // no answer was sent
     expect(row(h)).toContain("YouTube has it as made for kids. ReelForge sent no answer to that, because you haven't given one, so this is your channel's own setting. Check its audience in YouTube Studio.")
@@ -564,7 +571,7 @@ describe("a post through the API", () => {
     const h = await kit({ extension: "on", api: { client: "on", kids: false, google: { start_script: [[403, "quotaExceeded"]] } } })
     await ask(h)
     await clickText(h, "○ Public", 2) // for this one post
-    await clickText(h, "Post to YouTube", 2)
+    await yes(h)
     await until(h, () => youtube(h).state === "failed")
     const why = "Your Google Cloud project has used up today's YouTube API allowance. It starts again at midnight Pacific time. Nothing was posted."
     expect(row(h)).toContain(`× failed: ${why}`)
@@ -601,7 +608,7 @@ describe("a post through the API", () => {
     await ask(h)
     expect(dialog(h)).toContain("Title What if hail tripled every 3 seconds? #shorts")
     expect(dialog(h)).toContain("Who can see it ▐ ● Private ▌ ○ Unlisted ○ Public Made for kids Yes")
-    await clickText(h, "Post to YouTube", 2)
+    await yes(h)
     await until(h, () => youtube(h).state === "posted")
     expect(row(h)).toContain("✓ posted")
     const sent = await google(h)
@@ -612,7 +619,7 @@ describe("a post through the API", () => {
   test("whose last piece got no answer is not sure it posted, and takes your word either way", async () => {
     const h = await kit({ api: { client: "on", kids: false, google: { script: [null, null, "lost"], then: "drop" } } })
     await ask(h)
-    await clickText(h, "Post to YouTube", 2)
+    await yes(h)
     await until(h, () => youtube(h).state === "unknown")
     expect(row(h)).toContain("? did it post? ReelForge lost track: check YouTube Studio before trying again")
     expect(row(h)).toMatch(/▐ It's posted ▌ ▐ It didn't post ▌$/) // and no Try again: the video may be up
@@ -623,7 +630,7 @@ describe("a post through the API", () => {
     // Once more, lost the same way, and this time you find it in YouTube Studio.
     await google(h, "tell", { script: [null, null, "lost"], then: "drop" })
     await ask(h)
-    await clickText(h, "Post to YouTube", 2)
+    await yes(h)
     await until(h, () => youtube(h).state === "unknown")
     await clickText(h, "It's posted", 2)
     await until(h, () => youtube(h).state === "posted")
@@ -634,12 +641,12 @@ describe("a post through the API", () => {
   test("can be cancelled while it uploads, and a second video waits its turn", async () => {
     const h = await kit({ api: { client: "on", kids: false, hold: 0 } })
     await ask(h)
-    await clickText(h, "Post to YouTube", 2)
+    await yes(h)
     await until(h, () => youtube(h).state === "uploading")
     await clickText(h, "clip.mp4", 2)
     await until(h, () => posting(h).video?.name === "clip.mp4")
     await ask(h)
-    await clickText(h, "Post to YouTube", 2)
+    await yes(h)
     await until(h, () => youtube(h).state === "queued")
     expect(row(h)).toMatch(/^YouTube ● waiting its turn up to ten minutes, while another video uploads ▐ Cancel ▌$/)
     await clickText(h, "▐ Cancel ▌", 3)
@@ -662,7 +669,7 @@ describe("a window opened afterwards", () => {
   test("is not connected: it offers Connect, its Post starts nothing, and the post that is up still shows", async () => {
     let h = await kit({ api: { client: "on", kids: false } })
     await ask(h)
-    await clickText(h, "Post to YouTube", 2)
+    await yes(h)
     await until(h, () => youtube(h).state === "posted")
     await h.close()
     toasts.clear()
@@ -700,7 +707,7 @@ describe("a window opened afterwards", () => {
     const h = await kit({ api: { client: "on", kids: false } })
     await google(h, "end_grant") // Google ends the sign-in: revoked there, or its seven days are up
     await ask(h)
-    await clickText(h, "Post to YouTube", 2)
+    await yes(h)
     await until(h, () => youtube(h).state === "failed")
     const why = "YouTube's sign-in has run out or was taken back at Google. Connect again. While your Google Cloud consent screen is in Testing, Google ends it after 7 days."
     expect(row(h)).toContain(`× failed: ${why} Nothing was posted.`)
@@ -927,7 +934,7 @@ describe("when something goes wrong, or the window is small", () => {
     h = await kit({ api: { client: "on", kids: false } }, [100, 30])
     expect(frame(h)).toMatch(/┃ ● YouTube API connected +YouTube API… +$/m)
     await ask(h)
-    await clickText(h, "Post to YouTube", 2)
+    await yes(h)
     await until(h, () => youtube(h).state === "posted")
     for (const button of ["▐ Open ▌", "▐ Post again… ▌", "▐ Again with API… ▌"]) expect(frame(h)).toContain(button)
     expect(row(h)).toMatch(/It is private, as you chose\. Change it in YouTube Studio\. ▐ Open ▌ ▐ Post again… ▌ ▐ Again with API… ▌$/)
