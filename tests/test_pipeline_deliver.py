@@ -86,6 +86,57 @@ class ReviewGate(Episode):
             self.deliver()
 
 
+class Clean(Episode):
+    """clean deletes the render files, which only the delivered cut can spare."""
+
+    def setUp(self):
+        super().setUp()
+        for folder in ("frames", "stills", "preview"):
+            (self.build / folder).mkdir()
+            (self.build / folder / "f_0001.jpg").write_bytes(b"\xff\xd8 a frame \xff\xd9")
+        (self.build / "scene.blend").write_bytes(b"BLENDER")
+
+    def clean(self):
+        with redirect_stdout(io.StringIO()):
+            make_episode.clean(self.spec, self.build)
+
+    def left(self):
+        return sorted(p.name for p in self.build.iterdir())
+
+    def test_the_render_files_go_once_this_cut_is_delivered(self):
+        self.cut(b"first cut", 1_000_000)
+        with self.assertRaisesRegex(SystemExit, "clean: the video isn't in 'completed videos' yet; deliver first"):
+            self.clean()
+        self.review("APPROVED", 1_000_600)
+        self.deliver()
+        self.clean()
+        self.assertEqual(self.left(), ["qa", "scene.blend"])
+
+    def test_a_remake_keeps_its_frames_until_it_is_delivered(self):
+        """A remake keeps its id, so the earlier cut is already in completed videos. That copy says nothing about
+        the frames of the cut being made now."""
+        self.cut(b"first cut", 1_000_000)
+        self.review("APPROVED", 1_000_600)
+        self.deliver()
+        self.cut(b"the remake, not delivered yet", 2_000_000)
+        with self.assertRaisesRegex(SystemExit, "clean: the copy in 'completed videos' is an earlier cut.*"
+                                                "Deliver this one first"):
+            self.clean()
+        self.assertEqual(self.left(), ["frames", "preview", "qa", "scene.blend", "stills"])
+        self.review("APPROVED", 2_000_600)
+        self.deliver()
+        self.clean()
+        self.assertEqual(self.left(), ["qa", "scene.blend"])
+
+    def test_a_drive_that_rounds_times_does_not_make_the_delivered_copy_an_earlier_cut(self):
+        self.cut(b"first cut", 1_000_001.7)
+        self.review("APPROVED", 1_000_600)
+        self.deliver()
+        os.utime(self.delivered(), (1_000_000, 1_000_000))      # FAT keeps times to the nearest two seconds
+        self.clean()
+        self.assertEqual(self.left(), ["qa", "scene.blend"])
+
+
 class Status(Episode):
     """make_episode.py <episode> --status: one line for each place there used to be to look."""
 

@@ -120,6 +120,8 @@ Three checks only warn, to say where your review should look: frames that pop (o
 frames either side of them), a story line on screen across a cut, and the subject mostly behind the HUD or a line.
 
 `deliver` also refuses when the video is newer than `build/qa/review.md`: that review is of an earlier cut.
+`clean` refuses while the copy in `completed videos` is an earlier cut than `final/<id>.mp4`, as it is for a remake
+that is not delivered yet: the frames on disk are then the new cut's.
 
 ## Captions
 

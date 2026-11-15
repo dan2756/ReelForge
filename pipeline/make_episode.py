@@ -214,11 +214,25 @@ def deliver(spec, final, build):
     print(f"  delivered {sum(f.exists() for f in files)} files to {dst}")
 
 
+def same_cut(copy, video):
+    """Is the copy in 'completed videos' this video? deliver copies the file with its time, so the size and the time
+    tell (to two seconds: some drives store times no finer). A remake keeps its id, and then the copy is the cut
+    from before until the new one is delivered."""
+    if not video.exists():
+        return False
+    there, here = copy.stat(), video.stat()
+    return there.st_size == here.st_size and abs(there.st_mtime - here.st_mtime) <= 2
+
+
 def clean(spec, build):
     """Delete the bulky render frames/stills/previews once the video is safely in 'completed videos'."""
     copy = completed_dir(spec) / f"{spec['id']}.mp4"
     if not copy.exists():
         raise SystemExit("clean: the video isn't in 'completed videos' yet; deliver first")
+    video = build.parent / "final" / copy.name
+    if video.exists() and not same_cut(copy, video):
+        raise SystemExit("clean: the copy in 'completed videos' is an earlier cut, and the frames here are of the "
+                         "one that is not delivered yet. Deliver this one first.")
     freed = 0
     for sub in ("frames", "stills", "preview"):
         d = build / sub
@@ -447,9 +461,7 @@ def status(ep, spec):
     copy = completed_dir(spec) / video_file.name
     delivered = "no"
     if copy.exists():
-        same = video_file.exists() and (copy.stat().st_size, int(copy.stat().st_mtime)) == \
-            (video_file.stat().st_size, int(video_file.stat().st_mtime))
-        delivered = f"yes, in completed videos/{copy.parent.name}/" if same else \
+        delivered = f"yes, in completed videos/{copy.parent.name}/" if same_cut(copy, video_file) else \
             f"an earlier cut is in completed videos/{copy.parent.name}/, this one is not"
 
     rows = [("built", built), ("frames", frames), ("audio", audio), ("video", video), ("QA", qa_line),
