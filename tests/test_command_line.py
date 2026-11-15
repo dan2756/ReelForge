@@ -2,6 +2,7 @@
 the next command new-episode gives for a channel you added, and publish-check on an episode.json with a typo."""
 
 import io
+import os
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -17,7 +18,8 @@ class Commands(Scratch):
     def setUp(self):
         super().setUp()
         for patch in (mock.patch("studio.reset.finish_pending", return_value=None),
-                      mock.patch("studio.move.finish_leftover")):
+                      mock.patch("studio.move.finish_leftover"),
+                      mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"})):
             patch.start()
             self.addCleanup(patch.stop)
 

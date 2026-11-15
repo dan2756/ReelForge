@@ -61,7 +61,7 @@ def saved_answers(profile=None) -> dict | None:
     if not path.exists():
         return None
     try:
-        return {k: v for k, v in json.loads(path.read_text(encoding="utf-8")).items()
+        return {k: v for k, v in json.loads(path.read_text(encoding="utf-8-sig")).items()
                 if k in BY_KEY or k.startswith("_")}
     except ValueError:
         return None

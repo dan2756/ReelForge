@@ -365,7 +365,7 @@ def write_all(answers: dict, profile=None) -> list[Path]:
         a.pop(key, None)
     if not a.get("_created") and w.answers.exists():   # keep the original creation date across re-runs
         try:
-            a["_created"] = json.loads(w.answers.read_text(encoding="utf-8")).get("_created")
+            a["_created"] = json.loads(w.answers.read_text(encoding="utf-8-sig")).get("_created")
         except ValueError:
             pass
     # The answers file is often the one being read (my-studio/answers.json), with no date yet: today, then.
@@ -418,7 +418,7 @@ def write_guides(profile=None, *, saved_settings: bool = False) -> list[Path]:
     settings and account edits. Nothing for a profile not set up yet."""
     w = _where(profile)
     try:
-        a, problems = validate(json.loads(w.answers.read_text(encoding="utf-8")))
+        a, problems = validate(json.loads(w.answers.read_text(encoding="utf-8-sig")))
     except (OSError, ValueError):
         return []
     if problems:
@@ -452,7 +452,7 @@ def set_account(platform: str, handle: str) -> list[Path]:
     if not P.ANSWERS.exists():
         return dashboard_config.set_handle(platform, handle)
     try:
-        a = json.loads(P.ANSWERS.read_text(encoding="utf-8"))
+        a = json.loads(P.ANSWERS.read_text(encoding="utf-8-sig"))
     except ValueError:
         return dashboard_config.set_handle(platform, handle)   # unreadable answers: leave them for onboarding
     # The handles connected in the dashboard are the ones that count (someone may have typed one into its settings).

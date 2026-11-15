@@ -4,13 +4,14 @@ needs the settings says so in one line. In a scratch ReelForge folder."""
 
 import io
 import json
+import os
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
 from studio import browsers, doctor, profiles, settings, tools
 from studio import paths as P
-from studio.__main__ import main
+from studio.__main__ import main, onboard
 
 from test_profiles import ANSWERS, Scratch
 
@@ -46,7 +47,7 @@ class Loading(Scratch):
         self.onboard_main()
         P.SETTINGS.write_text(BROKEN["an unfinished string"][0], encoding="utf-8")
         with redirect_stdout(io.StringIO()):
-            self.assertEqual(main(["channel", "--regenerate"]), 0)
+            self.assertEqual(onboard(["--regenerate"]), 0)
         self.assertEqual(settings.load()["channel"]["name"], "Night Physics")
 
 
@@ -56,6 +57,7 @@ class Commands(Scratch):
         self.onboard_main()
         for patch in (mock.patch("studio.reset.finish_pending", return_value=None),
                       mock.patch("studio.move.finish_leftover"),
+                      mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}),
                       # doctor's other checks, without starting Blender, Bun or a browser search
                       mock.patch.object(doctor, "window_check", lambda r, fix: r.add(doctor.OK, "Window", "")),
                       mock.patch.object(tools, "find_blender", return_value=None),

@@ -141,7 +141,7 @@ class CheckedFirst(Scratch):
         self.assertIn(str(cfg), str(raised.exception))
         src = self.root / "answers.json"
         src.write_text(json.dumps(changed), encoding="utf-8")
-        with redirect_stdout(io.StringIO()) as out:
+        with redirect_stdout(io.StringIO()) as out, mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}):
             self.assertEqual(onboard(["--answers", str(src)]), 1)
         self.assertIn(f"{cfg} has a typo (", out.getvalue())
 

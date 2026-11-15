@@ -4,6 +4,7 @@ them, and reelforge channel --answers in a scratch ReelForge folder."""
 
 import io
 import json
+import os
 import tomllib
 import unittest
 from contextlib import redirect_stdout
@@ -43,7 +44,16 @@ class Lists(Scratch):
         self.assertNotIn('["', bible)
 
 
-class Nulls(Scratch):
+class Dry(Scratch):
+    """The same scratch folder for the tests that run the reelforge channel command itself: whatever it would do to
+    this computer after writing the files (the hourly stats job) is left undone."""
+
+    def setUp(self):
+        super().setUp()
+        os.environ["STUDIO_DRY_SYSTEM"] = "1"
+
+
+class Nulls(Dry):
     def test_null_is_an_answer_not_given_so_its_default_applies(self):
         a, problems = questions.validate({**ANSWERS, "platforms": None, "tone": None, "hud": None,
                                           "max_hashtags": None, "custom_format": None, "style_notes": None})
@@ -76,7 +86,48 @@ class Nulls(Scratch):
         self.assertNotIn("Traceback", out.getvalue())
 
 
-class NewProfile(Scratch):
+class ByteOrderMark(Dry):
+    """answers.json saved by Notepad on older Windows, or by PowerShell 5's -Encoding UTF8, starts with a byte-order
+    mark. reelforge channel --answers always read it; the other readers took the file for unreadable."""
+
+    def setUp(self):
+        super().setUp()
+        self.onboard_main()
+        P.ANSWERS.write_bytes(b"\xef\xbb\xbf" + P.ANSWERS.read_bytes())
+
+    def test_an_update_still_writes_your_ais_notes_again(self):
+        notes = P.ROOT / "CLAUDE.md"
+        notes.write_text("an older version's notes", encoding="utf-8")
+        self.assertEqual(generate.write_guides(saved_settings=True), [notes, P.ROOT / "AGENTS.md"])
+        self.assertIn("Night Physics", notes.read_text(encoding="utf-8"))
+
+    def test_connecting_an_account_still_goes_into_your_answers(self):
+        generate.set_account("youtube", "@nightphysics")
+        self.assertEqual(json.loads(P.ANSWERS.read_text(encoding="utf-8"))["handle_youtube"], "@nightphysics")
+        self.assertIn("YouTube Shorts (@nightphysics)", P.BIBLE.read_text(encoding="utf-8"))
+
+    def test_the_questions_start_from_your_earlier_answers(self):
+        from studio.setup_service import saved_answers
+
+        self.assertEqual(saved_answers()["channel_name"], "Night Physics")
+        asked = []
+
+        def ask(prior):
+            asked.append(prior)
+            return prior
+
+        with mock.patch("studio.onboard_cli.ask", ask), mock.patch("sys.stdin.isatty", lambda: True), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(onboard(["--plain"]), 0)
+        self.assertEqual(asked[0]["channel_name"], "Night Physics")
+        P.ANSWERS.write_text("{not json", encoding="utf-8")          # unreadable: asked from the defaults
+        with mock.patch("studio.onboard_cli.ask", lambda prior: asked.append(prior) or dict(ANSWERS)), \
+                mock.patch("sys.stdin.isatty", lambda: True), redirect_stdout(io.StringIO()):
+            self.assertEqual(onboard(["--plain"]), 0)
+        self.assertIsNone(asked[1])
+
+
+class NewProfile(Dry):
     def new(self, answers: dict) -> tuple[int, str]:
         src = self.root / "new.json"
         src.write_text(json.dumps(answers), encoding="utf-8")
