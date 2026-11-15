@@ -3,6 +3,7 @@
 // A post started here goes through two screens before anything opens: choose the platforms, then read the
 // exact text and the account for each one. Only the second screen's button opens the upload pages.
 import { PLATFORMS, PRESS_PLATFORMS, platformName, isFinal, advice, stateLine } from "../shared/consts.js"
+import { h } from "../shared/dom.js"
 
 const main = document.getElementById("main")
 const pill = document.getElementById("status")
@@ -19,23 +20,14 @@ let drawn = ""
 
 // ---- small pieces --------------------------------------------------------------------------------------------
 
-function h(tag, props = {}, ...kids) {
-  const el = document.createElement(tag)
-  for (const [name, value] of Object.entries(props)) {
-    if (value == null || value === false) continue
-    if (name === "class") el.className = value
-    else if (name === "text") el.textContent = value
-    else if (name === "data") Object.assign(el.dataset, value)
-    else if (name.startsWith("on")) el.addEventListener(name.slice(2), value)
-    else el.setAttribute(name, value === true ? "" : value)
-  }
-  for (const kid of kids.flat(3)) if (kid != null && kid !== false) el.append(kid)
-  return el
+// A button that shows it is working and cannot be pressed twice.
+function button(label, key, action, kind = "", off = false) {
+  return h("button", { type: "button", class: kind, data: { key }, disabled: off || busy !== "", text: busy === key ? "Working" : label, onclick: () => run(key, action) })
 }
 
-// A button that shows it is working and cannot be pressed twice.
-function button(label, key, action, kind = "") {
-  return h("button", { type: "button", class: kind, data: { key }, disabled: busy !== "", text: busy === key ? "Working" : label, onclick: () => run(key, action) })
+// A link to a post. Only a web address is ever made into a link: the address comes from a platform's page.
+function postLink(url) {
+  return /^https:\/\//.test(url || "") ? h("p", { class: "small" }, h("a", { href: url, target: "_blank", rel: "noreferrer", text: "Open the post" })) : null
 }
 
 async function run(key, action) {
@@ -157,7 +149,7 @@ function jobCard(job) {
   } else if (isFinal(job.state)) {
     body = [
       h("p", { text: stateLine(job) }),
-      job.url ? h("p", { class: "small" }, h("a", { href: job.url, target: "_blank", rel: "noreferrer", text: "Open the post" })) : null,
+      postLink(job.url),
     ]
     actions = [button("Dismiss", `dismiss:${job.id}`, () => ask("ui.dismiss", { job: job.id }))]
   } else {
@@ -261,7 +253,7 @@ function choose() {
         // Kept until it is confirmed or cancelled: a popup closes whenever the person clicks elsewhere.
         await session.set({ pending })
         view = { name: "confirm", ...pending, jobs: answer.jobs, blocked: answer.blocked }
-      }, "primary"),
+      }, "primary", !picked.length),
       button("Back", "back", async () => { view = { name: "home" } }),
     ),
   )
@@ -279,7 +271,7 @@ function confirm() {
     mine.length ? h("p", { class: "soft", text: "This is exactly what goes in the boxes. Check it and the account." }) : null,
     view.blocked.map(item => h("div", { class: "notice", data: { blocked: item.platform } },
       h("p", { text: `${platformName(item.platform)}: ${item.message || item.reason}` }),
-      item.url ? h("p", { class: "small" }, h("a", { href: item.url, target: "_blank", rel: "noreferrer", text: "Open the post" })) : null)),
+      postLink(item.url))),
     view.jobs.map(job => h("div", { class: "panel stack tight", data: { confirm: job.platform } },
       h("div", { class: "row" }, h("h3", { class: "grow", text: platformName(job.platform) }),
         h("span", { class: "small soft", text: job.handle ? `as ${job.handle}` : "no account set in ReelForge" })),

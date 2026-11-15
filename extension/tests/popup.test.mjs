@@ -76,8 +76,10 @@ export const tests = {
     await popup.locator(`[data-video="${film.id}"]`).getByRole("button", { name: "Post" }).click()
     await until("the choose screen", () => popup.locator("[data-screen=choose]").count())
     equal(app.jobs.size, 0, "jobs before anything is confirmed")
-    await popup.getByLabel("Instagram").uncheck()
-    await popup.getByLabel("YouTube").uncheck()
+    const pick = platform => popup.locator(`[data-key="pick:${platform}"]`)
+    for (const platform of ["tiktok", "youtube", "instagram", "x"]) await pick(platform).uncheck()
+    ok(await popup.getByRole("button", { name: "Continue" }).isDisabled(), "Continue is off with nothing chosen")
+    for (const platform of ["tiktok", "x"]) await pick(platform).check()
     await popup.getByRole("button", { name: "Continue" }).click()
     await until("the confirm screen", () => popup.locator("[data-screen=confirm]").count())
     // The batch exists now, but nothing is claimed and no tab is open until the person has read it.

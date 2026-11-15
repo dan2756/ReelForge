@@ -3,25 +3,13 @@
 // The switches live in this browser only (chrome.storage.local). ReelForge on the computer cannot read or set
 // them, so nothing but a person on this page can turn the press on.
 import { PLATFORMS, PRESS_PLATFORMS } from "../shared/consts.js"
+import { h } from "../shared/dom.js"
 
 const ask = (t, more = {}) => chrome.runtime.sendMessage({ t, ...more }).catch(() => null)
 const $ = id => document.getElementById(id)
 
 let ui = null
 let drawn = ""
-
-function h(tag, props = {}, ...kids) {
-  const el = document.createElement(tag)
-  for (const [name, value] of Object.entries(props)) {
-    if (value == null || value === false) continue
-    if (name === "class") el.className = value
-    else if (name === "text") el.textContent = value
-    else if (name.startsWith("on")) el.addEventListener(name.slice(2), value)
-    else el.setAttribute(name, value === true ? "" : value)
-  }
-  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid)
-  return el
-}
 
 // Why a switch cannot be turned on right now, or "" when it can.
 function locked(platform) {
