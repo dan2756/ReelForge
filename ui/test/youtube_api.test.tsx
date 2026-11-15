@@ -151,7 +151,7 @@ describe("a channel that never used YouTube's API", () => {
       "○ YouTube API not connected",
       "Optional. It posts to YouTube through Google's own API, with a Google Cloud project you make yourself. docs/YOUTUBE-API.md has the steps.",
       UNPROVEN,
-      "CLIENT FILE The client file you downloaded from your Google Cloud project (client_secret_....json): type or paste where it is.",
+      "CLIENT FILE Type or paste where the client file is that you downloaded from your Google Cloud project. Its name starts with client_secret_ and ends in .json.",
       "▐ Connect with this file ▌",
       "Guide: docs/YOUTUBE-API.md",
       "▐ Close ▌",

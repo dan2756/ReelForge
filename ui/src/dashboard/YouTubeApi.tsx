@@ -108,13 +108,14 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
   // "Not answered" is there until you answer: an answer can be changed, and not taken back.
   const kidsOptions: [string, string][] = [...(api.made_for_kids === null ? ([["", "Not answered"]] as [string, string][]) : []), ["no", "No"], ["yes", "Yes"]]
   // The rows of the part that scrolls, as it will wrap, so it is as tall as what's in it and no taller.
-  const room = modalRoom(WIDTH, width) - 1
+  // (room: two columns short of the dialog's, for the scrollbar and a column of air beside it)
+  const room = modalRoom(WIDTH, width) - 2
+  const choices = api.client && !api.wants_file // (a client Google no longer knows: the file first)
   const stacked = room < CHOICE * 2 + 2 // the two choices one under the other
   const choiceRows = (options: number) => 1 + options
   const bodyRows =
     api.lines.reduce((n, l) => n + wrappedRows(plain(l), room), api.lines.length ? 1 : 0) +
-    (api.wants_file ? 2 + wrappedRows(api.words.file, room) + 3 : 0) +
-    (api.client ? 2 + (stacked ? choiceRows(3) + 1 + choiceRows(kidsOptions.length) : choiceRows(3)) + 1 + wrappedRows(api.words.start_as, room) + wrappedRows(api.words.kids, room) : 0)
+    (choices ? 2 + (stacked ? choiceRows(3) + 1 + choiceRows(kidsOptions.length) : choiceRows(3)) + 1 + wrappedRows(api.words.start_as, room) + wrappedRows(api.words.kids, room) : 0)
   return (
     <Modal name="youtube-api" title="YOUTUBE API" width={WIDTH}>
       <box flexDirection="row" flexShrink={0}>
@@ -125,42 +126,16 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
           <Wrapped segs={[[api.words.waiting, DASH.warn]]} />
         </box>
       ) : null}
-      {/* Everything that scrolls, in a window too short for all of it, so the buttons under it always show. Its words
-          are given their width (room), a column short of the dialog's for the scrollbar: see Wrapped. */}
+      {/* What scrolls, in a window too short for all of it, so that the box for the file, what it is for and the
+          buttons always show. Its words are given their width (room): see Wrapped. */}
       <Scroll maxHeight={bodyRows} flexShrink={1} scrollY>
-        <box flexDirection="column" flexShrink={0} paddingRight={1}>
+        <box flexDirection="column" flexShrink={0} paddingRight={2}>
           {api.lines.map((l, i) => (
             <box key={i} flexDirection="row" flexShrink={0} marginTop={i ? 0 : 1}>
               <Wrapped segs={l} width={room} />
             </box>
           ))}
-          {api.wants_file ? (
-            <>
-              <text fg={DASH.text} attributes={TextAttributes.BOLD} marginTop={1} flexShrink={0}>
-                CLIENT FILE
-              </text>
-              <box flexDirection="row" flexShrink={0}>
-                <Wrapped segs={[[api.words.file, DASH.muted]]} width={room} />
-              </box>
-              <box flexDirection="row" height={3} flexShrink={0} gap={1} alignItems="center">
-                <TextField
-                  id="api-file"
-                  flexGrow={1}
-                  value={path}
-                  bad={bad}
-                  autoFocus
-                  placeholder="/path/to/client_secret_….json"
-                  onChange={(v) => {
-                    setPath(v)
-                    setBad(false)
-                  }}
-                  onSubmit={(typed) => withFile(typed)}
-                />
-                <Button id="api-file-connect" label="Connect with this file" variant="primary" disabled={busy} onPress={() => withFile()} />
-              </box>
-            </>
-          ) : null}
-          {api.client ? (
+          {choices ? (
             <>
               <text fg={DASH.text} attributes={TextAttributes.BOLD} marginTop={1} flexShrink={0}>
                 FOR POSTS TO COME
@@ -181,6 +156,34 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
           ) : null}
         </box>
       </Scroll>
+      {api.wants_file ? (
+        <box flexDirection="column" marginTop={1} flexShrink={0}>
+          <text fg={DASH.text} attributes={TextAttributes.BOLD} flexShrink={0}>
+            CLIENT FILE
+          </text>
+          <box flexDirection="row" flexShrink={0}>
+            <Wrapped segs={[[api.words.file, DASH.muted]]} />
+          </box>
+        </box>
+      ) : null}
+      {api.wants_file ? (
+        <box flexDirection="row" height={3} flexShrink={0} gap={1} alignItems="center">
+          <TextField
+            id="api-file"
+            flexGrow={1}
+            value={path}
+            bad={bad}
+            autoFocus
+            placeholder="/path/to/client_secret_….json"
+            onChange={(v) => {
+              setPath(v)
+              setBad(false)
+            }}
+            onSubmit={(typed) => withFile(typed)}
+          />
+          <Button id="api-file-connect" label="Connect with this file" variant="primary" disabled={busy} onPress={() => withFile()} />
+        </box>
+      ) : null}
       {leaving ? (
         <box flexDirection="row" marginTop={1} flexShrink={0}>
           <Wrapped segs={[[api.words.leave, DASH.warn]]} />
@@ -267,7 +270,7 @@ export function ApiPostDialog({ data, close }: { data: ApiPostData; close: () =>
   const again = info.force && info.blocked ? `${info.blocked.message} ${info.again}` : ""
   const labels = Math.max(0, ...info.fields.map((f) => cellLen(f.label))) + 2
   // The rows of what will be sent, as they will wrap, so their scrolling area is as tall as they are and no taller.
-  const room = modalRoom(100, useTerminalDimensions().width) - 1
+  const room = modalRoom(100, useTerminalDimensions().width) - 2
   const rows =
     info.fields.reduce((n, f) => n + (f.key === "privacy" && ok ? info.privacies.length : wrappedRows(f.text, room - labels)), 0) + (info.fields.length ? 1 + wrappedRows(info.left, room) : 0)
   return (
@@ -293,7 +296,7 @@ export function ApiPostDialog({ data, close }: { data: ApiPostData; close: () =>
         </>
       ) : null}
       <Scroll maxHeight={rows} flexShrink={1} scrollY>
-        <box flexDirection="column" flexShrink={0} paddingRight={1}>
+        <box flexDirection="column" flexShrink={0} paddingRight={2}>
           {info.fields.map((f) => (
             <box key={f.key} flexDirection="row" flexShrink={0}>
               <text fg={DASH.faint} width={labels} flexShrink={0} wrapMode="none">

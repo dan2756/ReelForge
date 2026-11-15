@@ -231,7 +231,7 @@ class View(ApiPosting):
         words = w.view("youtube_api")["words"]
         self.assertEqual(set(words), {"caveat", "file", "waiting", "leave", "start_as", "kids"})
         self.assertEqual((words["caveat"], words["file"]), ("", youtube_api_tab.FILE))  # no post on offer yet
-        self.assertIn("client_secret_....json", words["file"])
+        self.assertIn("Its name starts with client_secret_ and ends in .json.", words["file"])
         self.assertTrue(w.view("youtube_api")["wants_file"])  # nothing to connect with yet
         self.assertIn("You have ten minutes", words["waiting"])
         self.assertEqual(youtube_api.CONSENT_FOR, 10 * 60)  # (the ten minutes that sentence promises)

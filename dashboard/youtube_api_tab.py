@@ -59,11 +59,13 @@ PRIVATE = "It is private, as you chose. Change who can see it in YouTube Studio 
 # On the Publish tab's one line, while a post is on offer there. Short: it has to fit beside "● YouTube API connected"
 # and the line's button in a window 120 columns wide. The question before a post says it in full (UNPROVEN).
 CAVEAT = "tested on a stand-in only"
-FILE = ("The client file you downloaded from your Google Cloud project (client_secret_....json): type or paste where "
-        "it is. ReelForge keeps the client's id and its secret from it, then opens Google's consent page.")
+# (No brackets in these: the window's word wrap breaks a line right after an opening one.)
+FILE = ("Type or paste where the client file is that you downloaded from your Google Cloud project. Its name starts "
+        "with client_secret_ and ends in .json. ReelForge keeps the client's id and its secret from it, then opens "
+        "Google's consent page.")
 GONE_FILE = ("Google no longer knows the client on file. Type or paste where the client file of one that exists in "
-             "your Google Cloud project is (client_secret_....json). ReelForge keeps its id and its secret, then opens "
-             "Google's consent page.")
+             "your Google Cloud project is. Its name starts with client_secret_ and ends in .json. ReelForge keeps "
+             "its id and its secret, then opens Google's consent page.")
 WAITING = ("Google's consent page is open in your browser. Pick the Google account your channel belongs to and "
            "allow ReelForge to upload videos. Google says it hasn't verified the app: the app is your own Google "
            "Cloud project. You have ten minutes, and the browser has to be on this computer. After that, connect "
