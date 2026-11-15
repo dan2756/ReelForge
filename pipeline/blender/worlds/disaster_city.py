@@ -36,6 +36,7 @@ coast), and the helper key "sky_nodes" (names above).
 """
 import math
 import random
+from collections import ChainMap
 
 import bpy
 from mathutils import Matrix
@@ -318,7 +319,9 @@ def build(spec):
     look.init_haze(scene, sun_dir, dist=haze_m, hmax=0.85, col=(0.70, 0.76, 0.85), sun_col=(1.0, 0.86, 0.66))
     cam_spec = W["camera"]
     build_lens = float(W.get("build_lens_mm", min(cam_spec["lens_mm"], 13.0)))
-    info = cb.build(dict(spec, world=dict(W, camera=dict(cam_spec, lens_mm=build_lens))))   # wide enough to look round
+    # wide enough to look round. A ChainMap, not a copy of the spec: build_scene.py notes which keys the scene reads
+    # (the frames' stamp), and a copy would read them all, story lines and sound cues included.
+    info = cb.build(ChainMap({"world": dict(W, camera=dict(cam_spec, lens_mm=build_lens))}, spec))
     info["camera"].data.lens = cam_spec["lens_mm"]
     S = W.get("sky", {})
     world = make_sky(scene, sun_dir, S.get("horizon", HORIZON), S.get("mid", MID), S.get("zenith", ZENITH))
