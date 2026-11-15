@@ -44,7 +44,9 @@ export type Dialog =
   | { kind: "remove"; data: { path: string; note: import("../lib/styled").Segs; bin: string } }
   | { kind: "episode"; data: EpisodeData }
   | { kind: "signup"; data: SignupData }
-  | { kind: "disconnect"; data: { key: string; title: string; note: import("../lib/styled").Segs } }
+  | { kind: "disconnect"; data: { key: string; title: string; note: import("../lib/styled").Segs; logged_in?: boolean } }
+  | { kind: "logout"; data: { key: string; title: string; note: import("../lib/styled").Segs; button: string } }
+  | { kind: "handle_change"; data: { key: string; title: string; note: import("../lib/styled").Segs; forget: string; keep: string } }
   | { kind: "post"; data: PostData }
   | { kind: "extension"; from?: "post" } // from: Post was pressed with no extension set up, so by hand is offered too
   | { kind: "profiles"; data: ProfilesMenu }
@@ -207,6 +209,8 @@ export class DashState {
       | "episode"
       | "signup"
       | "disconnect"
+      | "logout"
+      | "handle_change"
       | "post"
       | "profiles"
       | "delete_profile"

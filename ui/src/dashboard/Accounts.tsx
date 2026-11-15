@@ -1,7 +1,7 @@
 // The Accounts tab: connect the platforms you post to (ReelForge shows only the connected ones everywhere else), and
-// for each connected one where its stats come from, how fresh they are, its log-in / profile / refresh buttons, and
-// its followers over the time ReelForge has been reading them. Above them, one line for the browser extension
-// (Posting.tsx): it posts from your everyday browser, which is apart from these accounts.
+// for each connected one where its stats come from, how fresh they are, its log-in / log-out / profile / refresh
+// buttons, and its followers over the time ReelForge has been reading them. Above them, one line for the browser
+// extension (Posting.tsx): it posts from your everyday browser, which is apart from these accounts.
 
 import { TextAttributes, type Renderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/react"
@@ -170,9 +170,11 @@ function Connected({ panel: p }: { panel: AccountPanelView }) {
       ...(guess && value !== null && value !== undefined ? ([["  estimated", DASH.muted]] as Segs) : []),
     ]
   }
+  const was = p.old_handles ?? []
   return (
     <>
-      <box flexDirection="row" height={1} marginTop={1} flexShrink={0}>
+      {/* on one row while they fit, else on under themselves: a short window never loses a button */}
+      <box flexDirection="row" flexWrap="wrap" marginTop={1} flexShrink={0}>
         {p.logs_in ? (
           <Button id={`login-${p.key}`} label={p.login_label ?? "Log in"} variant="primary" marginRight={1} onPress={() => s.bridge.send("login", p.key)} />
         ) : null}
@@ -194,6 +196,18 @@ function Connected({ panel: p }: { panel: AccountPanelView }) {
             label="Type in stats"
             marginRight={1}
             onPress={() => void s.openDialog("log", s.bridge.call("log_stats", p.key))}
+          />
+        ) : null}
+        {p.logs_out ? (
+          <Button id={`logout-${p.key}`} label="Log out" marginRight={1} onPress={() => void s.openDialog("logout", s.bridge.call("logout_info", p.key))} />
+        ) : null}
+        {was.length ? (
+          // Stats read under another @handle before: keep them or forget them (the panel's amber line says they're there)
+          <Button
+            id={`was-${p.key}`}
+            label={`Stats from ${was[0]}${was.length > 1 ? ` +${was.length - 1}` : ""}…`}
+            marginRight={1}
+            onPress={() => void s.openDialog("handle_change", s.bridge.call("handle_change_info", p.key))}
           />
         ) : null}
       </box>

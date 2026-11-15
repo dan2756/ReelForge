@@ -1,10 +1,11 @@
 // Dialogs over the window: how ReelForge works, typing in stats, removing a video, which video a post is, making an
-// account (or the channel's Gmail), disconnecting one, the question before a post and the browser extension
-// (Posting.tsx), the profile button's menu and deleting a profile (Profiles.tsx), and the Settings tab's (Settings.tsx).
+// account (or the channel's Gmail), disconnecting one, logging ReelForge's browser out of one, the stats from before a
+// handle changed, the question before a post and the browser extension (Posting.tsx), the profile button's menu and
+// deleting a profile (Profiles.tsx), and the Settings tab's (Settings.tsx).
 
 import { TextAttributes } from "@opentui/core"
 import { useState } from "react"
-import { lines } from "../lib/styled"
+import { lines, type Segs } from "../lib/styled"
 import { DASH } from "../theme"
 import { Button } from "../ui/Button"
 import { RadioSet, TextField } from "../ui/Fields"
@@ -26,6 +27,8 @@ export function Dialogs() {
   if (d.kind === "remove") return <Remove data={d.data} close={close} />
   if (d.kind === "signup") return <SignUp data={d.data} close={close} />
   if (d.kind === "disconnect") return <Disconnect data={d.data} close={close} />
+  if (d.kind === "logout") return <LogOut data={d.data} close={close} />
+  if (d.kind === "handle_change") return <HandleChange data={d.data} close={close} />
   if (d.kind === "post") return <PostDialog data={d.data} close={close} />
   if (d.kind === "extension") return <ExtensionDialog from={d.from} close={close} />
   if (d.kind === "profiles") return <ProfileMenu data={d.data} close={close} />
@@ -292,9 +295,15 @@ function SignUp({ data, close }: { data: SignupData; close: () => void }) {
   )
 }
 
-/** Are you sure? Disconnecting a platform hides it everywhere in ReelForge and stops its reads; its stats stay. */
-function Disconnect({ data, close }: { data: { key: string; title: string; note: import("../lib/styled").Segs }; close: () => void }) {
+/** Are you sure? Disconnecting a platform hides it everywhere in ReelForge and stops its reads; its stats stay. While
+ * ReelForge's own browser is logged in to it (Instagram, X), that log-in stays too unless you pick Disconnect and log
+ * out. */
+function Disconnect({ data, close }: { data: { key: string; title: string; note: Segs; logged_in?: boolean }; close: () => void }) {
   const s = useDash()
+  const go = (logout: boolean) => {
+    close()
+    s.bridge.send("disconnect", data.key, logout)
+  }
   return (
     <Modal name="disconnect" title={data.title}>
       {lines(data.note).map((l, i) => (
@@ -302,15 +311,60 @@ function Disconnect({ data, close }: { data: { key: string; title: string; note:
       ))}
       <Buttons>
         <Button id="dc-cancel" label="Cancel" autoFocus onPress={close} />
+        {data.logged_in ? <Button id="disconnect-logout" label="Disconnect and log out" variant="error" onPress={() => go(true)} /> : null}
+        <Button id="disconnect" label="Disconnect" variant="error" onPress={() => go(false)} />
+      </Buttons>
+    </Modal>
+  )
+}
+
+/** Are you sure? Logging ReelForge's own browser out of a platform removes the log-in it keeps on this computer. The
+ * platform stays connected with its stats, and isn't read again until you log in. */
+function LogOut({ data, close }: { data: { key: string; title: string; note: Segs; button: string }; close: () => void }) {
+  const s = useDash()
+  return (
+    <Modal name="logout" title={data.title}>
+      {lines(data.note).map((l, i) => (
+        <Wrapped key={i} segs={l.length ? l : [[" ", ""]]} flexGrow={0} />
+      ))}
+      <Buttons>
+        <Button id="lo-cancel" label="Cancel" autoFocus onPress={close} />
         <Button
-          id="disconnect"
-          label="Disconnect"
+          id="logout"
+          label={data.button}
           variant="error"
           onPress={() => {
             close()
-            s.bridge.send("disconnect", data.key)
+            s.bridge.send("logout", data.key)
           }}
         />
+      </Buttons>
+    </Modal>
+  )
+}
+
+/** A platform whose stats were read under another @handle before: keep those stats (the account was renamed), or
+ * forget them (a typo, or someone else's account). Forgetting removes readings and videos, after a copy of the stats
+ * database is saved, so it's the red button and Cancel has the keyboard. */
+function HandleChange({ data, close }: { data: { key: string; title: string; note: Segs; forget: string; keep: string }; close: () => void }) {
+  const s = useDash()
+  const keep = () => {
+    close()
+    s.bridge.send("keep_handle_stats", data.key)
+  }
+  const forget = () => {
+    close()
+    s.bridge.send("forget_handle_stats", data.key)
+  }
+  return (
+    <Modal name="handle-change" title={data.title}>
+      {lines(data.note).map((l, i) => (
+        <Wrapped key={i} segs={l.length ? l : [[" ", ""]]} flexGrow={0} />
+      ))}
+      <Buttons>
+        <Button id="hc-cancel" label="Cancel" autoFocus onPress={close} />
+        <Button id="hc-keep" label={data.keep} onPress={keep} />
+        <Button id="hc-forget" label={data.forget} variant="error" onPress={forget} />
       </Buttons>
     </Modal>
   )
