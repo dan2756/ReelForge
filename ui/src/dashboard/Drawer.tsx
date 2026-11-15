@@ -1,7 +1,7 @@
 // The notifications drawer: it slides in from the right over the tab, under the bell. Newest first, each with its
 // unread dot and icon, its title, the start of its body and how long ago, and a small × on its right that deletes it
-// (red under the mouse). Click one to go to what it's about; Delete deletes the highlighted one; Mark all read and
-// Clear all are at the top.
+// (red under the mouse). Click one to go to what it's about (with the keyboard: the arrows, then Enter); Delete (or
+// Backspace, a Mac's delete) deletes the highlighted one; Mark all read and Clear all are at the top.
 
 import { TextAttributes, type Renderable } from "@opentui/core"
 import { useState } from "react"
@@ -88,7 +88,12 @@ function Notes() {
     ]
     return { id: String(n.id), lines }
   })
-  const del = (id: string) => s.bridge.send("delete_note", Number(id))
+  const del = (id: string) => {
+    // the highlight moves on to the one after it (or before, at the end), so Delete again deletes that one
+    const at = items.findIndex((it) => it.id === id)
+    if (s.note === id) s.set({ note: items[at + 1]?.id ?? items[at - 1]?.id ?? null })
+    s.bridge.send("delete_note", Number(id))
+  }
   return (
     <box
       flexDirection="column"
@@ -114,6 +119,7 @@ function Notes() {
         items={items}
         spaced
         selected={s.note}
+        clickOpens
         bg={bg}
         onSelect={(id) => s.set({ note: id })}
         onActivate={(id) => s.bridge.send("open_note", Number(id))}

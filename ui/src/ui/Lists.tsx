@@ -232,6 +232,8 @@ export interface OptionListProps {
   selected?: string | null
   onSelect?: (id: string) => void
   onActivate?: (id: string) => void
+  /** One click on an option opens it (a notification); otherwise the first click highlights it and a second opens. */
+  clickOpens?: boolean
   onMenu?: (id: string) => void
   /** Drawn at the right of each option, in the middle of its height (a notification's ×). */
   aside?: (item: Option, lines: number) => ReactNode
@@ -277,7 +279,7 @@ export function OptionList(props: OptionListProps) {
         props.onActivate?.(props.selected)
         return true
       }
-      if (key.name === "delete" && props.selected && props.onDelete) {
+      if ((key.name === "delete" || key.name === "backspace") && props.selected && props.onDelete) { // (a Mac's delete is backspace)
         props.onDelete(props.selected)
         return true
       }
@@ -343,8 +345,8 @@ export function OptionList(props: OptionListProps) {
                   return
                 }
                 if (e.button !== 0) return
-                if (it.id === props.selected) props.onActivate?.(it.id)
-                else pick(at)
+                if (it.id !== props.selected) pick(at)
+                if (it.id === props.selected || props.clickOpens) props.onActivate?.(it.id)
               }}
             >
               <box flexDirection="row" backgroundColor={bg}>

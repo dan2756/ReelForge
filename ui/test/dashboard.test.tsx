@@ -471,9 +471,20 @@ describe("badges", () => {
 
 describe("the drawer", () => {
   const noteTitles = (h: Headless) => h.bridge.view<{ items: { title: [string, string][] }[] }>("notes")!.items.map((n) => n.title.map((s) => s[0]).join(""))
+  // The same four notifications at any hour (ui/test/notes_preload.py): the demo's own depend on the clock, and a
+  // test that counted on their order failed at some hours of the day.
+  const NOTES = ["A new video is ready to post", "A video passed 100K views on TikTok", /^ReelForge \S+ is out$/, "TikTok passed 10K followers"]
+
+  async function drawer(): Promise<Headless> {
+    open = await headless("dashboard", { demo: true, only_demos: true, tab: "overview", drawer: true }, 180, 50, {
+      REELFORGE_BRIDGE_PRELOAD: join(ROOT, "ui", "test", "notes_preload.py"),
+    })
+    await open.settle(2500)
+    return open
+  }
 
   test("a notification's × deletes it without opening it", async () => {
-    const h = await window("overview", [180, 50], true)
+    const h = await drawer()
     const before = noteTitles(h)
     const at = find(h, before[0]!.slice(0, 20))!
     await h.t.mockMouse.click([...rows(h)[at[1]]!].lastIndexOf("×"), at[1]) // its × (beside its title)
@@ -483,20 +494,35 @@ describe("the drawer", () => {
   })
 
   test("Delete deletes the highlighted one; a click opens what it's about", async () => {
-    const h = await window("overview", [180, 50], true)
+    const h = await drawer()
     const before = noteTitles(h)
-    await clickText(h, before[1]!.slice(0, 20), 2) // highlights it
+    expect(before.length).toBe(NOTES.length)
+    before.forEach((title, i) => expect(title).toMatch(NOTES[i]!))
+    const gone = async (n: number) => {
+      for (let i = 0; i < 25 && noteTitles(h).length !== n; i++) await h.settle(200)
+    }
+    h.bridge.emit("focus", { id: "notes" }) // the list has the keyboard
+    await h.settle(200)
+    h.t.mockInput.pressKey("HOME")
+    await h.settle(200)
+    for (let i = 0; i < 2; i++) {
+      h.t.mockInput.pressArrow("down") // the highlight, down to the update's
+      await h.settle(200)
+    }
     await press(h, "delete")
-    expect(noteTitles(h)).toEqual([before[0]!, ...before.slice(2)])
-    const video = noteTitles(h).find((t) => /^(Taking off|A video passed)/.test(t))!
-    await clickText(h, video.slice(0, 20), 2)
-    await clickText(h, video.slice(0, 20), 2)
-    await h.settle(500)
+    await gone(3)
+    expect(noteTitles(h)).toEqual([before[0]!, before[1]!, before[3]!])
+    expect(activeTab(h)).toBe("Overview") // deleted, not opened
+    h.t.mockInput.pressKey("BACKSPACE") // a Mac's delete key: the highlight moved on to the next one, which goes too
+    await gone(2)
+    expect(noteTitles(h)).toEqual([before[0]!, before[1]!])
+    await clickText(h, "A video passed 100K", 2) // one click goes to what it's about
+    for (let i = 0; i < 25 && activeTab(h) !== "Videos"; i++) await h.settle(200)
     expect(activeTab(h)).toBe("Videos")
   })
 
   test("Esc closes it", async () => {
-    const h = await window("overview", [180, 50], true)
+    const h = await drawer()
     await press(h, "escape")
     expect(frame(h)).not.toContain("NOTIFICATIONS")
   })
