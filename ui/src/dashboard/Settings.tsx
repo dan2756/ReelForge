@@ -25,6 +25,7 @@ export interface ComputerRow {
   value: string
   button: string
   switch?: boolean // a switch in place of the button: Background refresh, where this window can change it
+  problem?: boolean // Background refresh: its value starts with what went wrong (the hourly job's last read, the daily backup)
   move?: string // ReelForge's folder: Move… beside its Open button, when it isn't in a folder of its own and can go there
 }
 
@@ -354,13 +355,15 @@ function Computer({ v }: { v: SettingsView }) {
     if (v.computer) setFlipped({})
   }, [v.computer])
   const width = Math.max(RESTART.length, ...(rows ?? []).map((row) => row.button.length)) + 4
-  const item = (key: string, label: string, value: string, good: boolean, control: ReactNode) => (
-    <box key={key} flexDirection="row" height={3} flexShrink={0} alignItems="center" gap={1}>
-      <box flexDirection="column" flexGrow={1} flexShrink={1} justifyContent="center">
+  // tone: green for what's on, grey for what's off, and amber for a row that says something went wrong: that one is
+  // read to its end, so it wraps where the others are cut at the panel's edge.
+  const item = (key: string, label: string, value: string, tone: "good" | "warn" | "plain", control: ReactNode) => (
+    <box key={key} flexDirection="row" height={tone === "warn" ? undefined : 3} minHeight={3} flexShrink={0} alignItems="center" gap={1}>
+      <box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} justifyContent="center">
         <text attributes={TextAttributes.BOLD} wrapMode="none">
           {label}
         </text>
-        <text fg={good ? DASH.good : DASH.muted} wrapMode="none">
+        <text fg={tone === "good" ? DASH.good : tone === "warn" ? DASH.warn : DASH.muted} wrapMode={tone === "warn" ? "word" : "none"}>
           {value}
         </text>
       </box>
@@ -396,14 +399,15 @@ function Computer({ v }: { v: SettingsView }) {
         rows.map((row) => {
           const on = flipped[row.key] ?? row.on
           const value = row.key in flipped ? (on ? "turning it on…" : "turning it off…") : row.value
-          return item(row.key, row.label, value, on && !(row.key in flipped), control(row, on))
+          const tone = row.key in flipped ? "plain" : row.problem ? "warn" : on ? "good" : "plain"
+          return item(row.key, row.label, value, tone, control(row, on))
         })
       )}
       {item(
         "restart",
         "Restart ReelForge",
         "closes ReelForge and opens it again",
-        false,
+        "plain",
         <Button id="settings-restart" label={RESTART} minWidth={width} flexShrink={0} onPress={() => s.bridge.send("restart")} />,
       )}
     </Panel>
