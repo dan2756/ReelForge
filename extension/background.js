@@ -61,7 +61,7 @@ const routes = {
   },
   // The script in a tab this worker opened for a job.
   tab: {
-    "job.hello": (message, from) => jobs.tabHello(from.tab.id),
+    "job.hello": (message, from) => jobs.tabHello(from.tab.id, from.url),
     "job.alive": (message, from) => jobs.tabAlive(from.tab.id),
     "job.event": (message, from) => jobs.tabEvent(from.tab.id, message),
     "job.press": (message, from) => jobs.tabPress(from.tab.id),

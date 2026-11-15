@@ -171,6 +171,13 @@ async function onTabRemoved(tabId) {
 // Puts the platform script in the job's tab. It runs again after every full page load there (YouTube's upload
 // address redirects into Studio), and the script itself refuses to start twice in one document.
 async function inject(job) {
+  const p = platformName(job.platform)
+  // Only into a page of the job's own platform. This extension can also see the other three platforms and
+  // ReelForge's own pages, and a job's tab that was taken to one of those gets no script: the script would
+  // be handed the job's text and video there. (An address this extension may not see reads as none, and the
+  // browser refuses the script by itself.)
+  const now = await chrome.tabs.get(job.tabId).catch(() => null)
+  if (now?.url && !allowedPage(job.platform, now.url)) return leftPage(job, "tab_closed", `This tab left ${p} before the post was ready. Nothing was posted.`)
   try {
     await chrome.scripting.executeScript({ target: { tabId: job.tabId }, files: SCRIPTS(job.platform) })
   } catch (error) {
@@ -368,12 +375,14 @@ async function startJob(found, id, front) {
   await remember(job)
   listenToTabs()
   await settle()
-  if (!PLATFORMS[job.platform] || !allowedPage(job.platform, claimed.upload_url) || !(job.video.size > 0)) {
+  // The one address this extension opens for a platform is its own. ReelForge names it too, and a ReelForge
+  // that names another is one this extension does not know.
+  if (!PLATFORMS[job.platform] || claimed.upload_url !== PLATFORMS[job.platform].upload || !(job.video.size > 0)) {
     await finish(id, "failed", "extension_outdated", "ReelForge asked for something this extension does not know. Reload the extension from your ReelForge folder.", "open_tab")
     return false
   }
   // The first tab of a batch comes to the front; the others load behind it.
-  const tab = await chrome.tabs.create({ url: claimed.upload_url, active: front }).catch(() => null)
+  const tab = await chrome.tabs.create({ url: PLATFORMS[job.platform].upload, active: front }).catch(() => null)
   if (!tab) {
     await finish(id, "failed", "tab_closed", "The browser could not open a tab for this post. Nothing was posted.", "open_tab")
     return false
@@ -393,8 +402,11 @@ async function pressSwitch(platform) {
   return PRESS_PLATFORMS.includes(platform) && press[platform] === true
 }
 
-// The script in a job's tab asks who it is working for. A tab with no live job gets no answer and does nothing.
-export async function tabHello(tabId) {
+// The script in a job's tab asks who it is working for. A tab with no live job gets no answer and does nothing,
+// and so does a page that is not on the job's own platform: the answer carries the job's text.
+export async function tabHello(tabId, url) {
+  const held = await jobOfTab(tabId)
+  if (!held || !allowedPage(held.platform, url)) return { ok: false }
   const job = await patchLive(tabId, { touched: Date.now() })
   if (!job) return { ok: false }
   return {
