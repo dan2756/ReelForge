@@ -745,6 +745,25 @@ describe("profiles", () => {
     }
   })
 
+  test("in a window 24 rows tall a sign-up dialog keeps its handle box and its buttons inside it: the steps scroll", async () => {
+    // TikTok's, Instagram's and X's are a row taller than such a window takes. Nothing in them could give way, so
+    // Cancel and Connect were drawn on the dialog's bottom border.
+    const h = await window("accounts", [180, 50], false, { unconnected: ["tiktok", "youtube", "instagram", "x"] })
+    await clickText(h, " Sign up → ", 2) // TikTok's
+    await until(h, "MAKE YOUR TIKTOK ACCOUNT")
+    expect(frame(h)).toContain("4. Type your @handle below and press Connect.") // all of it, where there is room
+    for (const [w, rows] of [[80, 24], [100, 24], [120, 24], [80, 26]] as const) {
+      h.t.resize(w, rows)
+      await h.settle(500)
+      const lines = frame(h).split("\n")
+      for (const text of ["MAKE YOUR TIKTOK ACCOUNT", "Sign up on TikTok", "▐ Open TikTok sign-up → ▌", "Your @handle", "@yourname"]) expect(frame(h)).toContain(text)
+      expect(lines.find((r) => r.includes("▐ Cancel ▌"))).toMatch(/│ +▐ Cancel ▌ ▐ Connect ▌ +│/) // inside, not on the border
+      const handle = lines.findIndex((r) => r.includes("Your @handle"))
+      expect(lines[handle - 1]).toMatch(/│ +│/) // its own row, with the empty one above it: nothing drawn over it
+      expect(lines[handle - 2]).toContain("▐ Open TikTok sign-up → ▌")
+    }
+  })
+
   test("a second channel's Sign up opens its page in a private window, so the other channel stays logged in", async () => {
     const tmp = mkdtempSync(join(tmpdir(), "reelforge-profiles-"))
     try {

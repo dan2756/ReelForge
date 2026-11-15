@@ -5,13 +5,14 @@
 // (Profiles.tsx), and the Settings tab's (Settings.tsx).
 
 import { TextAttributes } from "@opentui/core"
+import { useTerminalDimensions } from "@opentui/react"
 import { useState } from "react"
-import type { Segs } from "../lib/styled"
+import { wrappedRows, type Segs } from "../lib/styled"
 import { DASH } from "../theme"
 import { Button } from "../ui/Button"
 import { RadioSet, TextField } from "../ui/Fields"
 import { OptionList } from "../ui/Lists"
-import { DialogButtons, Modal, Note, Scroll } from "../ui/Panels"
+import { DialogButtons, Modal, modalRoom, Note, Scroll } from "../ui/Panels"
 import { useFocusManager } from "../lib/focus"
 import { ExtensionDialog, PostDialog } from "./Posting"
 import { DeleteProfile, ProfileMenu } from "./Profiles"
@@ -264,23 +265,32 @@ function SignUp({ data, close }: { data: SignupData; close: () => void }) {
     close()
     void s.connect(data.key, typed)
   }
+  // The reason and the steps, as many rows as they wrap to. In a window too short for the whole dialog (three of the
+  // four are a row taller than a window 24 rows tall takes) they scroll, and the button, the box for the handle and
+  // the dialog's own buttons keep their rows. With nothing to give way, those were drawn on the dialog's border.
+  const room = modalRoom(84, useTerminalDimensions().width) - 1 // a column kept free beside the scrollbar
+  const rows = wrappedRows(data.why, room) + 1 + data.steps.reduce((n, step) => n + wrappedRows(step, room - 4), 0)
   return (
     <Modal name="signup" title={data.title} width={84}>
-      <text fg={DASH.muted} wrapMode="word" flexShrink={0}>
-        {data.why}
-      </text>
-      <box flexDirection="column" marginTop={1} flexShrink={0}>
-        {data.steps.map((step, i) => (
-          <box key={i} flexDirection="row" flexShrink={0}>
-            <text attributes={TextAttributes.BOLD} width={4} flexShrink={0}>
-              {`${i + 1}.`.padStart(3)}
-            </text>
-            <text wrapMode="word" flexGrow={1} flexShrink={1}>
-              {step}
-            </text>
+      <Scroll maxHeight={rows} flexShrink={1} scrollY>
+        <box flexDirection="column" flexShrink={0} paddingRight={1}>
+          <text fg={DASH.muted} wrapMode="word" flexShrink={0}>
+            {data.why}
+          </text>
+          <box flexDirection="column" marginTop={1} flexShrink={0}>
+            {data.steps.map((step, i) => (
+              <box key={i} flexDirection="row" flexShrink={0}>
+                <text attributes={TextAttributes.BOLD} width={4} flexShrink={0}>
+                  {`${i + 1}.`.padStart(3)}
+                </text>
+                <text wrapMode="word" flexGrow={1} flexShrink={1}>
+                  {step}
+                </text>
+              </box>
+            ))}
           </box>
-        ))}
-      </box>
+        </box>
+      </Scroll>
       <box flexDirection="row" height={1} marginTop={1} marginLeft={4} flexShrink={0}>
         <Button id="su-open" label={data.button} variant="primary" autoFocus onPress={() => void open()} />
       </box>
