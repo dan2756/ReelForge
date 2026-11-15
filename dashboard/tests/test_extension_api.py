@@ -1559,5 +1559,50 @@ class CommandLine(ApiTest):
         self.assertIn(extension_api.USAGE, out.getvalue())
         self.assertIn(f"id         {extension_api.EXTENSION_ID}", out.getvalue())
 
+
+class DoctorRow(ApiTest):
+    """doctor's "Browser extension" row: fine or a warning, never a failure (the extension is optional)."""
+
+    def row(self) -> tuple[str, str, str]:
+        report = doctor.Report(quiet=True)
+        doctor.extension_check(report)
+        (row,) = report.rows
+        self.assertFalse(report.failed)
+        return row
+
+    def test_all_is_well(self):
+        self.assertEqual(self.row(), (doctor.OK, "Browser extension",
+                                      "in extension/, not connected yet (optional: reelforge extension pair)"))
+        self.pair()
+        self.assertEqual(self.row()[2], "in extension/, connected in 1 browser")
+        self.pair(EDGE)
+        self.assertEqual(self.row()[2], "in extension/, connected in 2 browsers")
+
+    def test_what_is_wrong_is_a_warning_that_says_what_to_do(self):
+        other = KEY.replace("MIIBIjAN", "MIIBIjAM")
+        (self.folder / "manifest.json").write_text(json.dumps({"key": other}), "utf-8")
+        status, _, said = self.row()
+        self.assertEqual(status, doctor.WARN)
+        self.assertIn(f"not {extension_api.EXTENSION_ID}, the one ReelForge lets in", said)
+        (self.folder / "manifest.json").write_text(json.dumps({"name": "no key"}), "utf-8")
+        self.assertIn("depend on where the folder is", self.row()[2])
+        for broken in ("{not json", json.dumps({"key": "not base64!"})):
+            (self.folder / "manifest.json").write_text(broken, "utf-8")
+            self.assertEqual(self.row()[0], doctor.WARN)
+        (self.folder / "manifest.json").unlink()
+        status, _, said = self.row()
+        self.assertEqual(status, doctor.WARN)
+        self.assertIn("Posting by hand works without it", said)
+
+    def test_a_connections_file_that_cannot_be_read_is_a_warning(self):
+        self.store.write_text("{not json", "utf-8")
+        status, _, said = self.row()
+        self.assertEqual(status, doctor.WARN)
+        self.assertIn("reelforge extension pair", said)
+
+    def test_whatever_else_goes_wrong_is_a_warning_too(self):
+        with mock.patch.object(extension_api, "check", side_effect=RuntimeError("boom")):
+            self.assertEqual(self.row(), (doctor.WARN, "Browser extension", "couldn't be checked (RuntimeError: boom)"))
+
 if __name__ == "__main__":
     unittest.main()

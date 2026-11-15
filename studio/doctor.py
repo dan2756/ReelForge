@@ -84,6 +84,19 @@ def window_check(r: Report, fix: str) -> None:
         r.add(FAIL, "Window", f"Bun {version}, but OpenTUI isn't installed: {fix}")
 
 
+def extension_check(r: Report) -> None:
+    """The browser extension that fills in upload pages (docs/EXTENSION.md): its folder is here with the id
+    ReelForge lets in, and the file of connected browsers can be read. It is optional, so the worst this row ever
+    is, is a warning."""
+    try:
+        from dashboard import extension_api
+
+        fine, said = extension_api.check()
+        r.add(OK if fine else WARN, "Browser extension", said)
+    except Exception as e:  # the window's own packages are missing, say: the rows above have that
+        r.add(WARN, "Browser extension", f"couldn't be checked ({type(e).__name__}: {e})")
+
+
 def checks(render_test: bool = False, quiet: bool = False) -> Report:
     """Every check, as a Report (printed line by line unless quiet)."""
     r = Report(quiet)
@@ -187,6 +200,8 @@ def checks(render_test: bool = False, quiet: bool = False) -> Report:
         r.add(WARN if unset else OK, "Profiles", f"{len(more) + 1} channels: " +
               ", ".join(p.name for p in profiles.every()) +
               (f" ({', '.join(unset)} not set up yet: its Settings in the profile menu)" if unset else ""))
+
+    extension_check(r)
 
     if render_test and not r.failed:
         render_check(r)
