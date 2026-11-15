@@ -379,9 +379,9 @@ class YouTubeApiTab:
                   {"label": "Who can see it", "text": WHO[send["privacy"]]},
                   {"label": "Made for kids", "text": "Yes" if send["made_for_kids"] else "No"},
                   {"label": "Category", "text": "People & Blogs"}]
-        if out["state"] != "on":
-            why = AGAIN[youtube_api.status()["why"] or "grant"] if out["state"] == "again" else \
-                "Connect YouTube's API first."
+        said = youtube_api.status()  # (the view may say "connecting" over a connection that is good)
+        if said["state"] != "on":
+            why = AGAIN[said["why"]] if said["state"] == "again" else "Connect YouTube's API first."
         elif look["review"]["state"] not in videos.POSTABLE:
             why = look["review"]["line"]
         elif block and not again:

@@ -36,6 +36,7 @@ CLIENT_SECRET = "GOCSPX-client-secret-of-the-test"
 BYTES = bytes(range(256)) * 14  # 3,584 bytes: four pieces of a thousand
 SIZE = len(BYTES)
 STORE_PATH = youtube_api.store_path  # the real one: every test here keeps its file in a scratch folder instead
+PIECE = youtube_api.CHUNK            # the real size of a piece (the tests send pieces of a thousand bytes)
 
 
 def google_for(test: unittest.TestCase, root: Path) -> Google:
@@ -383,6 +384,14 @@ class Uploading(ApiTest):
         self.assertEqual(self.events, [("started", 0), ("progress", 1000), ("progress", 2000), ("progress", 3000),
                                        ("last", 3)])
         self.assertEqual(self.pauses, [])
+
+    def test_a_video_smaller_than_one_piece_is_its_own_last_piece(self):
+        with mock.patch.object(youtube_api, "CHUNK", PIECE):
+            made = self.upload()
+        self.assertEqual(self.ranges(), [f"bytes 0-{SIZE - 1}/{SIZE}"])
+        self.assertEqual(self.events, [("started", 0), ("last", 0)])  # the ledger hears before anything goes
+        self.assertEqual((made["id"], bytes(self.one_video()["data"])), ("vid00000001", BYTES))
+        self.assertEqual((PIECE > SIZE, PIECE % (256 * 1024)), (True, 0))  # a multiple of 256 KiB, as YouTube asks
 
     def test_who_can_see_it_and_the_kids_answer_always_go_with_it_and_are_asked_back(self):
         self.upload("unlisted", title="Café ✓ 日本 #shorts", made_for_kids=True)
