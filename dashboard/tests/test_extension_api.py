@@ -1313,6 +1313,15 @@ class WindowServes(PostingTest):
         self.assertEqual(w.view("posting")["video"]["name"], "ep01.mp4")
         self.assertEqual(ask(w.svc.extension_port, "GET", "/v1/hello").json["demo"], False)
 
+    def test_a_connected_extension_stays_green_between_two_of_its_hellos(self):
+        # With nothing to post, the extension says hello every five minutes.
+        for minutes, state in ((0.2, "on"), (6, "on"), (10, "on"), (12, "waiting"), (600, "waiting")):
+            self.extension(seen_minutes_ago=minutes)
+            w = self.serving(connect=False)
+            w.svc.update_extension()
+            self.assertEqual(w.view("extension")["state"], state, minutes)
+            w.close()
+
     def test_the_window_starts_whatever_the_connections_file_holds(self):
         # The file can be edited by hand (extension_ids). A time without its zone, a name that isn't text: the
         # window starts all the same, with its first refresh, its timers and its once-a-second look.

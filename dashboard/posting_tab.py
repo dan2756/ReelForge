@@ -39,7 +39,9 @@ from .view import BAD, GOOD, MUTED, TYPICAL, Text
 
 FAINT = "#5c6370"
 AMBER = TYPICAL  # in progress, and anything waiting for you
-ON_WITHIN = timedelta(minutes=3)   # the extension counts as there while it has said so this recently
+# The extension counts as there while it has said so this recently. With nothing to post it says hello every five
+# minutes (extension/worker/jobs.js), so this is a little over two of those: one that got lost doesn't turn it amber.
+ON_WITHIN = timedelta(minutes=11)
 QUIET_AFTER = timedelta(minutes=3)  # a job under way with no news for this long says so
 HINT = "extension_hint_dismissed"   # meta: you closed the "set up the extension" hint on the Publish tab
 # A job's state in a few words. An API upload has no extension to wait for.
