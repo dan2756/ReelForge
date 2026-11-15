@@ -585,14 +585,19 @@ def _correct_typed(db: sqlite3.Connection, platform: str, posts: list) -> None:
 
     Readings from before the slip stay as they are. Every earlier reading above the new number used to come down,
     so a number typed too low by mistake (3400 for 34000) flattened the video's whole history and the account's;
-    now it costs the newest step at most."""
+    now it costs the newest step at most. The window asks before it stores a number lower than the one saved
+    (Dashboard.save_logged_stats), so that step is replaced with your say."""
+    typed_only = not db.execute("SELECT 1 FROM posts WHERE platform = ? AND post_id NOT LIKE 'manual-%' LIMIT 1",
+                                (platform,)).fetchone()
     for p in posts:
-        slip, saved = None, []  # the number being put right, and the readings it was saved in (newest first)
+        # the number being put right, the readings it was saved in (newest first), and when the one before was
+        slip, saved, before = None, [], ""
         for row in db.execute("""SELECT rowid, ts, views FROM post_stats WHERE platform = ? AND post_id = ?
                                  ORDER BY ts DESC, rowid DESC""", (platform, p.post_id)):
             if slip is None and p.views is not None and (row["views"] or 0) > p.views:
                 slip = row["views"]
             if slip is None or row["views"] != slip:
+                before = row["ts"]
                 break
             saved.append(row)
         for row in saved:
@@ -600,6 +605,20 @@ def _correct_typed(db: sqlite3.Connection, platform: str, posts: list) -> None:
             # (the reading of the account saved with it, in the same second: the sum of the typed-in numbers then)
             db.execute("UPDATE account_stats SET views = MAX(views - ?, 0) WHERE platform = ? AND ts = ?",
                        (slip - p.views, platform, row["ts"]))
+        if saved and typed_only:
+            # A Save from the same hours, whose reading of the video has been thinned out since (compact keeps the
+            # last one per three hours, per day, then per week, and the account's readings go later than a
+            # video's), has only the account's reading left, and that one still held the slip: it comes down to
+            # the total put right just after it. Nothing from before the reading the slip followed is touched,
+            # nor from more than a week before the slip's first reading left (no video's readings are kept
+            # further apart than that).
+            first = saved[-1]["ts"]
+            week = (parse(first) - timedelta(days=7)).isoformat(timespec="seconds")
+            db.execute("""UPDATE account_stats SET views = (SELECT views FROM account_stats
+                                                           WHERE platform = :p AND ts = :first)
+                          WHERE platform = :p AND ts > :after AND ts < :first
+                            AND views > (SELECT views FROM account_stats WHERE platform = :p AND ts = :first)""",
+                       {"p": platform, "first": first, "after": max(before, week)})
 
 
 def latest_accounts() -> dict[str, sqlite3.Row]:

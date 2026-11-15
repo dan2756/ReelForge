@@ -610,6 +610,29 @@ class TypedInTest(DbTest):
                          [10_900, 20_900, 30_900, 4_300, 4_300, 34_900])
         self.assertEqual(db.latest_accounts()["instagram"]["views"], 34_900)
 
+    def test_a_slip_put_right_days_later_leaves_the_accounts_total_too(self):
+        """A slip saved twice within minutes (the second Save was for the other video) and put right days later. By
+        then the video keeps one reading from those hours and the account both (db.compact thins the account's
+        later), and the account's other one kept the slip, so its chart did. A Save from the same hours that was
+        right stays as it is."""
+        kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
+        jump = db.create_episode(REAL["jump"][0], video(REAL["jump"][1]), at(-50))
+        now = datetime.now(timezone.utc).replace(second=0, microsecond=0)  # (compact goes by today's date)
+        day = (now - timedelta(days=5)).replace(hour=10, minute=0)
+        minutes = lambda when: (when - T0).total_seconds() / 60  # noqa: E731
+        for platform, first in (("x", 34_000), ("instagram", 3_100)):
+            self.typed(platform, {kite: 3_000, jump: 100}, minutes(day - timedelta(days=3)))
+            self.typed(platform, {kite: first, jump: 100}, minutes(day))  # on X the slip, on Instagram the right one
+            self.typed(platform, {kite: 34_000, jump: 150}, minutes(day + timedelta(minutes=2)))
+        db.compact(min_hours=0)
+        for platform, first in (("x", 34_100), ("instagram", 3_200)):
+            self.assertEqual(self.readings(platform, f"manual-{kite}"), [3_000, 34_000])  # one left from those hours
+            self.assertEqual([r["views"] for r in db.account_series(platform, "")], [3_100, first, 34_150])
+            self.typed(platform, {kite: 3_400, jump: 150}, minutes(now))
+            self.assertEqual(self.readings(platform, f"manual-{kite}"), [3_000, 3_400, 3_400])
+        self.assertEqual([r["views"] for r in db.account_series("x", "")], [3_100, 3_550, 3_550, 3_550])
+        self.assertEqual([r["views"] for r in db.account_series("instagram", "")], [3_100, 3_200, 3_550, 3_550])
+
     def test_putting_a_typed_in_number_right_leaves_read_numbers_alone(self):
         kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
         read("x", [post("1234", "something else", 0, views=9000)], minutes=30)  # read while X was logged in
