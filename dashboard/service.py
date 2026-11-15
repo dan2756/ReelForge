@@ -1535,6 +1535,9 @@ class Dashboard(StatsTab, SettingsTab, Service):
             db.set_meta("hidden_videos", sorted({*hidden, str(path)}))
             self.notify(f"{path.name} hidden. Show hidden (top of the list) brings it back.")
         elif choice == "recycle":
+            if self.demo:  # the demo lists your real videos beside its made-up stats: they stay where they are
+                self.notify(f"Demo mode: {path.name} stays where it is.", timeout=4)
+                return
             sidecar = path.with_suffix(".json")
             if not desktop.recycle(path):
                 self.notify(f"Couldn't move {path.name} to the {desktop.BIN} (is it open somewhere?).", severity="error")

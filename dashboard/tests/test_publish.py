@@ -78,6 +78,25 @@ class Form(PublishTest):
         self.assertIn(f"{len(CAPTION)}/100", plain(w.view("preview")["caption"]))
 
 
+class Remove(PublishTest):
+    def test_the_demo_never_moves_a_real_video_to_the_bin(self):
+        w = self.window()  # the tests' window is the demo
+        with mock.patch.object(desktop, "recycle") as recycle:
+            w.call("remove_video", str(self.video), "recycle")
+            recycle.assert_not_called()
+            self.assertTrue(any("Demo mode" in t for t in w.toasts()))
+            self.assertEqual(len(w.view("files")["items"]), 1)
+            w.svc.demo = False  # your own window still does
+            w.call("remove_video", str(self.video), "recycle")
+            recycle.assert_called_once_with(self.video)
+
+    def test_the_demo_can_still_hide_one_from_its_list(self):
+        w = self.window()
+        w.call("remove_video", str(self.video), "hide")
+        self.assertEqual(w.view("files")["items"], [])
+        self.assertTrue(self.video.exists())
+
+
 class Posted(PublishTest):
     def test_the_list_marks_a_video_this_windows_own_read_finds_posted(self):
         db.create_episode(CAPTION, str(self.video))
