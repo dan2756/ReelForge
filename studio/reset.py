@@ -183,8 +183,8 @@ def browsers_connected() -> int:
     there is no such file or it can't be read. Only the number is used: nothing in the file is ever shown."""
     try:
         store = json.loads((ROOT / "dashboard" / "data" / "extension.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return 0
+    except Exception:   # whatever is wrong with it (brackets nested too deep is a RecursionError, not a ValueError):
+        return 0        # a move, a reset and an uninstall count the browsers before anything else, and must go on
     listed = store.get("paired") if isinstance(store, dict) else None
     return len([b for b in listed if isinstance(b, dict)]) if isinstance(listed, list) else 0
 

@@ -295,10 +295,12 @@ class WithABrowserConnected(ResetScratch):
         self.assertNotIn("extension", self.reset_command())
         # ... and a connections file with nobody in it, or one that can't be read, connects nothing
         store = self.root / "dashboard" / "data" / "extension.json"
-        for text in ('{"app_id": "x", "paired": []}', '{"paired": "chrome"}', "[]", "{not json"):
+        # (brackets nested too deep for json to follow raise a RecursionError, which stopped all three commands)
+        for text in ('{"app_id": "x", "paired": []}', '{"paired": "chrome"}', "[]", "{not json", "[" * 200_000):
             store.parent.mkdir(parents=True, exist_ok=True)
             store.write_text(text, encoding="utf-8")
-            self.assertEqual(reset.browsers_connected(), 0, text)
+            self.assertEqual(reset.browsers_connected(), 0, text[:40])
+        self.assertNotIn("extension", reset.uninstall_info()["system"])
 
 
 class Uninstall(ResetScratch):
