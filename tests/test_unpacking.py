@@ -45,7 +45,9 @@ class Untar(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp.cleanup)
-        self.dir = Path(tmp.name)
+        # In its real spelling: the tests below compare where a link leads (os.path.realpath) with this folder,
+        # and tempfile names it through a link on macOS (/var) and by its short name on Windows (RUNNER~1)
+        self.dir = Path(tmp.name).resolve()
         self.out = self.dir / "out"
 
     def archive(self, *members, name="a.tar.gz") -> Path:
