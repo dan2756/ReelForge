@@ -650,11 +650,11 @@ describe("when something goes wrong, or the window is small", () => {
   })
 
   test("in a window 80 columns by 24 rows both dialogs keep their buttons in view, and Tab reaches every control", async () => {
-    const h = await kit({ api: { client: true } }, [80, 24])
+    const h = await kit({ api: { client: true, consent: "later" } }, [80, 24])
     h.t.mockInput.pressKey("\u001b[6~") // Page Down: POST is below the videos in a narrow window
     await h.settle(400)
     await openApi(h)
-    for (const text of ["YOUTUBE API", "○ YouTube API: not connected in this window", "▐ Disconnect ▌", "▐ Close ▌", "▐ Connect ▌"]) expect(frame(h)).toContain(text)
+    for (const text of ["YOUTUBE API", "○ YouTube API: not connected in this window", "Guide: docs/YOUTUBE-API.md", "▐ Disconnect ▌", "▐ Close ▌", "▐ Connect ▌"]) expect(frame(h)).toContain(text)
     expect(focused(h)).toBe("Connect")
     // Tab goes round: the two choices, each of their options (scrolled into view), then the buttons.
     const seen: string[] = []
@@ -666,6 +666,10 @@ describe("when something goes wrong, or the window is small", () => {
     expect(seen).toEqual(["● Private", "○ Unlisted", "○ Public", "● Not answered", "○ No", "○ Yes", "Disconnect", "Close", "Connect"])
     expect(frame(h)).toContain("▐ Connect ▌")
     h.t.mockInput.pressKey("RETURN")
+    await until(h, () => api(h).state === "connecting")
+    // While Google's page waits: what it is waiting for, and the way out, with where the guide is still whole.
+    for (const text of ["● Waiting for your answer on Google's page", "You have ten minutes", "Guide: docs/YOUTUBE-API.md", "▐ Close ▌", "▐ Open Google's page again ▌"]) expect(frame(h)).toContain(text)
+    await google(h, "answer", "yes")
     await until(h, () => api(h).state === "on")
     expect(popups()).toEqual([]) // nothing over the dialog's buttons
     h.t.mockInput.pressKey("ESCAPE")
@@ -678,6 +682,29 @@ describe("when something goes wrong, or the window is small", () => {
     await h.settle(400)
     expect(frame(h)).not.toContain("POST TO YOUTUBE THROUGH ITS API")
     expect(jobsMade()).toBe(0)
+  })
+
+  test("in a window 80 columns by 24 rows the box for the client file and Close show, also while Google's page waits", async () => {
+    const h = await kit({ api: { consent: "later" } }, [80, 24])
+    h.t.mockInput.pressKey("\u001b[6~")
+    await h.settle(400)
+    await openApi(h)
+    // The introduction scrolls. The box, what it is for and the buttons don't.
+    for (const text of ["CLIENT FILE", "Type or paste where the client file is", "/path/to/client_secret_….json", "▐ Connect with this file ▌", "Guide: docs/YOUTUBE-API.md", "▐ Close ▌"])
+      expect(frame(h)).toContain(text)
+    await h.t.mockInput.typeText(join(tmp, "client_secret_test.json"))
+    await h.settle(200)
+    h.t.mockInput.pressKey("RETURN")
+    await until(h, () => api(h).state === "connecting")
+    for (const text of ["● Waiting for your answer on Google's page", "You have ten minutes", "▐ Connect with this file ▌", "Guide: docs/YOUTUBE-API.md", "▐ Close ▌"]) expect(frame(h)).toContain(text)
+    h.t.mockInput.pressKey("ESCAPE") // out of the box
+    h.t.mockInput.pressKey("ESCAPE") // and out of the dialog: Google's page can still be answered
+    await h.settle(400)
+    expect(frame(h)).not.toContain("YOUTUBE API ")
+    expect(frame(h)).toContain("● Waiting for your answer on Google's page")
+    await google(h, "answer", "yes")
+    await until(h, () => youtube(h).actions.includes("post_api"))
+    expect(frame(h)).toContain("● YouTube API connected")
   })
 
   test("in a window 100 columns by 30 rows the line keeps to whole words, and a posted row keeps its three buttons whole", async () => {

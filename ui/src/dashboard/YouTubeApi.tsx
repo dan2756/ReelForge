@@ -159,7 +159,9 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
           ) : null}
         </box>
       </Scroll>
-      {api.wants_file ? (
+      {/* (while Google's page is waiting, the box alone: what it is for was read on the way here, and with it the
+          dialog's buttons no longer fit in a window 24 rows tall) */}
+      {api.wants_file && !waiting ? (
         <box flexDirection="column" marginTop={1} flexShrink={0}>
           <text fg={DASH.text} attributes={TextAttributes.BOLD} flexShrink={0}>
             CLIENT FILE
@@ -211,7 +213,9 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
           </>
         ) : (
           <>
-            {api.client ? <Button id="api-disconnect" label="Disconnect" onPress={() => setLeaving(true)} /> : null}
+            {/* (not while Google's page is waiting: one thing at a time, and with it where the guide is no longer
+                fits beside the buttons in a window 80 columns wide) */}
+            {api.client && !waiting ? <Button id="api-disconnect" label="Disconnect" onPress={() => setLeaving(true)} /> : null}
             <Button id="api-close" label="Close" autoFocus={on || waiting} onPress={close} />
             {api.client && !on && !api.wants_file ? (
               <Button id="api-connect" label={waiting ? "Open Google's page again" : "Connect"} variant="primary" autoFocus={!waiting} disabled={busy} onPress={() => void connect("")} />
