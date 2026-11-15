@@ -111,7 +111,11 @@ def find(cfg: dict) -> list[Path]:
     found: list[Path] = []
     folder = config.videos_dir(cfg)
     try:
-        folder.mkdir(parents=True, exist_ok=True)
+        # Made when it isn't there yet. Not once the ReelForge folder has gone from under this process, though (the
+        # hourly stats read, finishing as its folder is moved): the folders on the way to it would put a stub of
+        # the old ReelForge folder back.
+        if config.APP_DIR.is_dir():
+            folder.mkdir(parents=True, exist_ok=True)
         found += [f for f in folder.iterdir() if f.suffix.lower() in VIDEO_EXTS]
     except OSError:
         pass  # e.g. a drive that isn't plugged in: list what the other folders have

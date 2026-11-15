@@ -46,6 +46,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"reelforge doesn't know {args.what!r}. Use: {USAGE}")
         return 2
 
+    if word == "refresh" and _moved_away():
+        return 1  # nothing to read into, and nowhere to say so
+
     try:
         cfg = config.load_config()
     except config.ConfigError as e:
@@ -154,6 +157,13 @@ def refresh_profiles(demo: bool = False) -> int:
         except subprocess.TimeoutExpired:
             code = max(code, 1)
     return code
+
+
+def _moved_away() -> bool:
+    """Whether the ReelForge folder has gone from under this read since it was started: reelforge move renamed it, or
+    it was uninstalled, in the moment the hourly job began. From then on the read would work by the folder's old
+    name, with nothing there to read into, so it stops instead."""
+    return not (config.APP_DIR / "__main__.py").is_file()
 
 
 def job_stopped(why: str) -> None:
