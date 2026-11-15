@@ -144,6 +144,27 @@ export const tests = {
     await popup.close()
   },
 
+  async "with no post under way, the person's own tabs do not wake the worker"({ browser }) {
+    const page = await browser.popup()
+    await sleep(800)
+    const session = await browser.context.newCDPSession(page)
+    const statuses = []
+    session.on("ServiceWorker.workerVersionUpdated", event => statuses.push(...event.versions.map(version => version.runningStatus)))
+    await session.send("ServiceWorker.enable")
+    // Leave the extension's own page, so nothing of the extension's is open and talking to the worker.
+    await page.goto("about:blank")
+    await session.send("ServiceWorker.stopAllWorkers")
+    await until("the worker to stop", () => statuses.at(-1) === "stopped")
+    statuses.length = 0
+    const other = await browser.context.newPage()
+    await other.goto("https://x.com/compose/post")
+    await other.goto("https://www.tiktok.com/login")
+    await other.close()
+    await sleep(1500)
+    equal(statuses, [], "worker starts while an ordinary tab opened, moved and closed")
+    equal(await other.isClosed(), true, "the tab was really closed")
+  },
+
   async "a post ended in ReelForge stops the tab's work"(t) {
     const { job, tab } = await toReady(t, "tiktok", t.video())
     // The person cancels it in the window.

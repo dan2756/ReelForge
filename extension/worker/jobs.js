@@ -191,17 +191,16 @@ async function withApp(job, call) {
 async function flush(job) {
   const install = await app.install()
   while (job.outbox.length) {
-    let res
     try {
-      res = await withApp(job, found => app.api(found, `/v1/jobs/${job.id}/event`, { method: "POST", body: { install, ...job.outbox[0] } }))
+      await withApp(job, found => app.api(found, `/v1/jobs/${job.id}/event`, { method: "POST", body: { install, ...job.outbox[0] } }))
     } catch {
       job.offline = true
       return
     }
+    // A refusal is not sent again: the app sees this job differently (cancelled in the window, say), and the
+    // next tick takes its word for it.
     job.offline = false
     job.outbox.shift()
-    // The app sees this job differently (cancelled in the window, say). The next tick takes its word.
-    if (!res.ok) job.sync = true
   }
 }
 
@@ -211,7 +210,8 @@ export function report(id, event) {
   return locked(id, async () => {
     const job = await getJob(id)
     if (!job || isFinal(job.state)) return { ok: false, stop: true }
-    const state = event.state || job.state
+    // A job is "claimed" only for the moment before its tab opens; the app hears of it as "opening" from then on.
+    const state = event.state || (job.state === "claimed" ? "opening" : job.state)
     if (!isFinal(state) && rank(state) < rank(job.state)) return { ok: true }
     const wire = { state }
     for (const field of ["step", "progress", "detail", "error_code", "error_message", "post_id", "url", "strategy"]) {
@@ -359,7 +359,7 @@ export async function tabEvent(tabId, message) {
   const change = {}
   if (message.attached === true) change.attached = true
   if (message.pressedByPerson === true) change.pressedByPerson = true
-  if (message.paused) change.paused = { code: "wrong_account", seen: short(message.paused.seen, 60), expected: job.handle }
+  if (message.paused) change.paused = { code: "wrong_account", seen: short(message.paused.seen, 60), expected: job.handle, at: Date.now() }
   if (Object.keys(change).length) await patch(job.id, change)
   if (message.account) await app.sawAccount(job.platform, message.account.signed_in === true, short(message.account.handle, 60))
   if (message.state !== undefined && !TAB_STATES.includes(message.state)) return { ok: false }
@@ -381,8 +381,13 @@ export async function tabPress(tabId) {
   const no = (error, message) => ({ ok: false, error, message })
   if (!job || job.state !== "ready") return no("not_ready", "This post is not ready to be pressed.")
   if (!job.press || !(await pressSwitch(job.platform))) return no("press_not_allowed", "Press Post for me is off for this post.")
-  if (job.pressAsked) return no("already_pressed", "Post was already pressed for this job.")
-  await patch(job.id, { pressAsked: true })
+  const first = await locked(job.id, async () => {
+    const fresh = await getJob(job.id)
+    if (!fresh || fresh.pressAsked) return false
+    await save({ ...fresh, pressAsked: true })
+    return true
+  })
+  if (!first) return no("already_pressed", "Post was already pressed for this job.")
   let res
   try {
     res = await withApp(job, async found => app.api(found, `/v1/jobs/${job.id}/press`, { method: "POST", body: { install: await app.install() } }))
@@ -500,10 +505,8 @@ async function watch(job, now) {
   const tab = await chrome.tabs.get(job.tabId).catch(() => null)
   if (!tab) return tabGone(job)
   if (job.paused) {
-    if (now - job.touched > PAUSE_LIMIT) await finish(job.id, "failed", "wrong_account", `Nobody said whether to post to ${p} as ${job.paused.seen}. Nothing was posted.`, "signed_in")
-    return
-  }
-  if (job.state === "posting") {
+    if (now - job.paused.at > PAUSE_LIMIT) await finish(job.id, "failed", "wrong_account", `Nobody said whether to post to ${p} as ${job.paused.seen}. Nothing was posted.`, "signed_in")
+  } else if (job.state === "posting") {
     if (now - (job.pressedAt || job.touched) > CONFIRM_LIMIT) await unsure(job)
   } else if (job.state === "ready") {
     if (now - (job.readyAt || job.touched) > READY_LIMIT) {
@@ -544,7 +547,6 @@ async function sync(job) {
       await stopTab(fresh, "This post was ended in ReelForge.")
       return
     }
-    fresh.sync = false
     await save(fresh)
   })
 }
