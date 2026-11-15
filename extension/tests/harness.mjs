@@ -118,6 +118,20 @@ export async function launch(site, profile = mkdtempSync(join(tmpdir(), "reelfor
       return (await browser.storage())[`job:${jobId}`] || null
     },
 
+    // A call to ReelForge with this browser's own token, made from one of the extension's pages: the same
+    // origin and the same token as the worker's calls. For asking ReelForge what the extension never asks.
+    async call(port, path, body) {
+      const page = context.pages().find(p => p.url().startsWith(`chrome-extension://${EXTENSION_ID}/`)) || await browser.popup()
+      return page.evaluate(async ([port, path, body]) => {
+        const { tokens = {} } = await chrome.storage.local.get("tokens")
+        const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+          method: body ? "POST" : "GET", body: body ? JSON.stringify(body) : undefined,
+          headers: { "X-ReelForge-Token": Object.values(tokens)[0] || "", ...(body ? { "Content-Type": "application/json" } : {}) },
+        })
+        return { status: response.status, data: await response.json().catch(() => null) }
+      }, [port, path, body])
+    },
+
     // Stops the service worker the way Chrome does when it has been idle. The next event starts a new one.
     async stopWorker() {
       const page = context.pages().find(p => p.url().startsWith(`chrome-extension://${EXTENSION_ID}/`)) || await browser.popup()

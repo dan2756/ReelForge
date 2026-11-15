@@ -1,4 +1,4 @@
-// The extension's tests:  node extension/tests/run.mjs [words from a test's name]
+// The extension's tests:  node extension/tests/run.mjs [--stand-in | --real] [words from a test's name]
 //
 // They load the unpacked extension into headless Chromium (the copy Playwright ships; branded Chrome no longer
 // loads extensions from the command line), with a stand-in for the ReelForge app on 127.0.0.1 and copies of the
@@ -9,6 +9,9 @@
 // the stand-in (real.mjs, real_app.py), on a scratch channel. It needs the Python that has ReelForge's
 // packages: the ReelForge folder's own .venv, or the one REELFORGE_PYTHON names. Without one it is skipped,
 // and the run says so.
+//
+// --stand-in runs only the suites with the stand-in, --real only the one with the real server. A run that
+// was asked for tests and ran none fails, so --real without that Python is a failure, not a skip.
 import crypto from "node:crypto"
 import { FakeApp, PORTS } from "./fake_app.mjs"
 import { RealApp, python } from "./real.mjs"
@@ -16,7 +19,13 @@ import { FixtureSite } from "./site.mjs"
 import { launch, sleep } from "./harness.mjs"
 
 const suites = ["manifest", "bridges", "posting", "press", "failures", "recovery", "popup", "real"]
-const only = process.argv.slice(2).map(word => word.toLowerCase())
+const asked = process.argv.slice(2)
+const flags = asked.filter(word => word.startsWith("--"))
+const only = asked.filter(word => !word.startsWith("--")).map(word => word.toLowerCase())
+if (flags.some(flag => !["--stand-in", "--real"].includes(flag)) || flags.length > 1) {
+  console.error("Use: node extension/tests/run.mjs [--stand-in | --real] [words from a test's name]")
+  process.exit(2)
+}
 
 // ReelForge's ports must be free: a real ReelForge (or another run of these tests) would be found by the
 // extension under test and change what it does.
@@ -46,6 +55,7 @@ const started = Date.now()
 
 for (const suite of suites) {
   const { tests, real = false } = await import(`./${suite}.test.mjs`)
+  if (flags.length && real !== flags.includes("--real")) continue
   for (const [name, body] of Object.entries(tests)) {
     const title = `${suite}: ${name}`
     if (only.length && !only.every(word => title.toLowerCase().includes(word))) continue

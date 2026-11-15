@@ -1,6 +1,7 @@
 """ReelForge's real local server (dashboard.extension_api.Server) and its real ledger, on a scratch channel, for
 the extension's tests (real.mjs starts this and real.test.mjs drives it). The stats database, the connections
-file and the videos are in a folder made for the run. The clipboard, the file manager and the browser are
+file and the videos are in a folder made for the run: finished videos as the pipeline leaves them, with QA passed
+and an approved review, and all four platforms connected. The clipboard, the file manager and the browser are
 stand-ins that only note what they were asked for. Nothing of yours is read or written, and no site is reached.
 
 It prints one line of JSON when it listens, then answers each line of JSON on its standard input with one line:
@@ -28,6 +29,7 @@ sys.dont_write_bytecode = True
 from dashboard import db, desktop, extension_api, posting  # noqa: E402
 from dashboard.config import PLATFORM_KEYS  # noqa: E402
 from dashboard.platforms import Account, Platform  # noqa: E402
+from dashboard.tests.test_posting import approve  # noqa: E402  (QA and a review, as ReelForge's own tests write them)
 
 NAMES = {"tiktok": "TikTok", "youtube": "YouTube", "instagram": "Instagram", "x": "X"}
 CAPTION, TAGS = "What if hail doubled every 2 seconds?", "#whatif #hail"
@@ -87,6 +89,12 @@ def reporting(*args, **kw):
 
 posting.advance = reporting
 
+# A newer list of page hooks than the one packed with the extension, when a test hands one over: what a
+# ReelForge that was updated serves to an extension that has not been reloaded yet.
+newer: dict = {}
+packed = extension_api.selectors
+extension_api.selectors = lambda: newer or packed()
+
 
 def rows(sql: str, *args) -> list[dict]:
     with db.connect() as c:
@@ -110,12 +118,18 @@ def stop() -> bool:
     return True
 
 
-def video(name: str = "ep32_hail.mp4", size: int = 300 * 1024) -> dict:
-    """A finished video on the Publish list, with its caption and hashtags saved beside it."""
-    path = root / "videos" / name
+def video(name: str = "ep32_hail", size: int = 300 * 1024, caption: str = CAPTION,
+          review: str | None = "Every sheet looked at.\nAPPROVED") -> dict:
+    """A finished video from the pipeline on the Publish list: its episode folder with the hook line and the
+    hashtags, QA passed on this exact file, and a review written after it (None: no review yet)."""
+    episode = root / "episodes" / name
+    (episode / "final").mkdir(parents=True)
+    spec = {"id": name, "title": caption, "hashtags": [tag.lstrip("#") for tag in TAGS.split()]}
+    (episode / "episode.json").write_text(json.dumps(spec), "utf-8")
+    path = episode / "final" / f"{name}.mp4"
     path.write_bytes(os.urandom(size))
-    path.with_suffix(".json").write_text(json.dumps({"caption": CAPTION, "tags": TAGS}), "utf-8")
-    return {"path": str(path), "name": name, "size": size, "id": posting.digest(path)}
+    approve(episode, path, review)
+    return {"path": str(path), "name": path.name, "size": size, "id": posting.digest(path)}
 
 
 def batch(path: str, platforms: list[str], press: bool = False, force: list[str] | None = None) -> dict:
@@ -155,9 +169,18 @@ COMMANDS = {
     "job": lambda id: posting.get(id),
     "jobs": lambda: rows("SELECT * FROM post_jobs ORDER BY rowid"),
     "events": lambda id: [e["state"] for e in rows("SELECT state FROM post_events WHERE job = ? ORDER BY id", id)],
+    "log": lambda id: rows("SELECT state, step, detail FROM post_events WHERE job = ? ORDER BY id", id),
     "uploads": lambda: rows("SELECT platform, video, status FROM uploads ORDER BY id"),
     "posts": lambda: rows("SELECT platform, post_id, episode_id, link, url FROM posts"),
     "paired": lambda: [p.get("name") for p in extension_api.paired(extension_api.read_store())],
+    # The connected browsers as the connections file has them, without what is left of their tokens.
+    "browsers": lambda: [{k: v for k, v in p.items() if k != "token_sha256"}
+                         for p in extension_api.paired(extension_api.read_store())],
+    "forget": lambda install: extension_api.unpair(install),  # Disconnect in ReelForge's window
+    "selectors": lambda data: (newer.clear(), newer.update(data)) and True,
+    "protocol": lambda number: setattr(extension_api, "PROTOCOL", number) or True,
+    "demo": lambda on: setattr(app, "demo", on) or True,
+    "desk": lambda: {"opened": opened, "copied": copied},  # what the stand-in browser and clipboard were given
     "busy": lambda count: busy.__setitem__(0, count) or True,
     "expire": lambda: posting.expire_stale(),
     "replace": lambda path: Path(path).write_bytes(os.urandom(300 * 1024 + 7)) > 0,
