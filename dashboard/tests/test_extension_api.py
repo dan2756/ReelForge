@@ -1391,5 +1391,173 @@ class WindowServes(PostingTest):
         self.assertIn("has no extension folder yet", w.toasts()[-1])
         self.assertEqual(len(self.copied), 1)
 
+
+class CommandLine(ApiTest):
+    """reelforge extension [folder | pair | serve] (extension_api.main)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.server.stop()  # the commands start their own
+        (self.root / "config.toml").write_text('videos_dir = "videos"\n', "utf-8")
+        for patch in (mock.patch.object(config, "CONFIG_PATH", self.root / "config.toml", create=True),
+                      mock.patch.object(config, "DB_PATH", self.root / "stats.db", create=True),
+                      mock.patch.object(config, "HOME", self.root, create=True),
+                      mock.patch.dict(os.environ, {"REELFORGE_EXTENSION_PORT": "0"})):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def run_main(self, *argv: str) -> tuple[int, str]:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = extension_api.main(list(argv))
+        return code, out.getvalue()
+
+    def test_with_no_word_it_says_where_the_extension_stands(self):
+        code, said = self.run_main()
+        self.assertEqual(code, 0)
+        self.assertIn(f"folder     {self.folder}\n", said)
+        self.assertIn(f"id         {extension_api.EXTENSION_ID}", said)
+        self.assertIn("connected  no browser yet: reelforge extension pair connects one", said)
+        seen = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(timespec="seconds")
+        extension_api.change_store(lambda s: s["paired"].extend([
+            {"install": CHROME, "name": "Chrome on macOS", "version": "0.1.0", "last_seen": seen, "token_sha256": "ab"},
+            {"install": EDGE, "name": "Edge on Windows"}]))
+        code, said = self.run_main()
+        self.assertIn("connected  Chrome on macOS · v0.1.0 · last seen 5m ago", said)
+        self.assertIn("Edge on Windows · last seen never", said)
+        self.assertNotIn("ab", said.replace("able", "").replace("about", ""))  # nothing of a token's
+        (self.folder / "manifest.json").unlink()
+        code, said = self.run_main()
+        self.assertEqual(code, 0)
+        self.assertIn("(not there)", said)
+        self.assertIn("has no manifest.json that can be read", said)
+
+    def test_folder_prints_it_and_shows_it(self):
+        code, said = self.run_main("folder")
+        self.assertEqual((code, said, self.revealed), (0, f"{self.folder}\n", [self.folder]))
+        (self.folder / "manifest.json").unlink()
+        (self.folder / "selectors.json").unlink()
+        self.folder.rmdir()
+        code, said = self.run_main("folder")
+        self.assertEqual(code, 1)
+        self.assertIn("It isn't there", said)
+        self.assertEqual(len(self.revealed), 1)
+
+    def test_a_word_it_does_not_know_gets_the_usage(self):
+        code, said = self.run_main("post")
+        self.assertEqual(code, 2)
+        self.assertEqual(said, extension_api.USAGE + "\n")
+        self.assertEqual(self.run_main("--help"), (0, extension_api.USAGE + "\n"))
+        self.assertEqual(self.run_main("pair", "now")[0], 2)
+
+    def test_pair_serves_the_page_until_a_browser_has_connected(self):
+        def extension(url: str) -> bool:
+            """The browser opening the page, with the extension in it."""
+            self.opened.append(url)
+            port = int(url.split(":")[2].split("/")[0])
+
+            def connect() -> None:
+                secret = re.search(r'data-rf-secret="([^"]*)"', ask(port, "GET", url.split(str(port), 1)[1])
+                                   .body.decode()).group(1)
+                ask(port, "POST", "/v1/pair/claim", {"secret": secret, "install": CHROME, "name": "Chrome on macOS",
+                                                     "extension_version": "0.1.0", "protocol": 1}, origin=EXTENSION)
+
+            threading.Thread(target=connect).start()
+            return True
+
+        nap = time.sleep
+        with mock.patch.object(desktop, "open_url", extension), \
+                mock.patch.object(extension_api.time, "sleep", lambda s: nap(min(s, 0.05))):
+            code, said = self.run_main("pair")
+        self.assertEqual(code, 0, said)
+        self.assertIn("A ReelForge page is opening in your browser", said)
+        self.assertIn(self.opened[0], said)
+        self.assertIn("Connected: Chrome on macOS.", said)
+        self.assertEqual([p["name"] for p in self.paired()], ["Chrome on macOS"])
+        port = int(self.opened[0].split(":")[2].split("/")[0])
+        with self.assertRaises(OSError):  # and it stopped listening
+            ask(port, "GET", "/v1/hello")
+        self.assertEqual(posting.recent(), [])
+
+    def test_pair_gives_the_address_when_no_browser_opens_and_ctrl_c_changes_nothing(self):
+        self.browser = False
+        with mock.patch.object(extension_api.time, "sleep", side_effect=KeyboardInterrupt):
+            code, said = self.run_main("pair")
+        self.assertEqual(code, 1)
+        self.assertIn("ReelForge couldn't open your browser. Open this address in the browser that has the extension:"
+                      f"\n  {self.opened[0]}", said)
+        self.assertIn("Stopped. Nothing was connected.", said)
+        self.assertEqual(self.paired(), [])
+
+    def test_pair_gives_up_after_ten_minutes(self):
+        ticks = iter(range(0, 100_000, 400))
+        with mock.patch.object(extension_api, "clock", lambda: next(ticks)), \
+                mock.patch.object(extension_api.time, "sleep", lambda s: None):
+            code, said = self.run_main("pair")
+        self.assertEqual(code, 1)
+        self.assertIn("No browser connected in ten minutes", said)
+
+    def test_serve_listens_without_the_window_until_ctrl_c(self):
+        seen = {}
+
+        def a_while(seconds: float) -> None:
+            port = int(re.search(r"127\.0\.0\.1:(\d+)", out.getvalue()).group(1))
+            seen["hello"] = ask(port, "GET", "/v1/hello").json
+            seen["port"] = port
+            raise KeyboardInterrupt
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), mock.patch.object(extension_api.time, "sleep", a_while), \
+                mock.patch.object(config, "profile", lambda: None):
+            code = extension_api.main(["serve"])
+        self.assertEqual(code, 0)
+        self.assertIn("without ReelForge's window. Ctrl-C stops it.", out.getvalue())
+        self.assertEqual((seen["hello"]["app"], seen["hello"]["profile"]), ("reelforge", {"key": ".", "name": ""}))
+        with self.assertRaises(OSError):
+            ask(seen["port"], "GET", "/v1/hello")
+        self.assertEqual(posting.recent(), [])
+
+    def test_where_it_does_not_listen_it_says_so_and_writes_nothing(self):
+        self.store.unlink()
+        with mock.patch.dict(os.environ, {"REELFORGE_EXTENSION_PORT": "off"}), \
+                mock.patch.object(db, "init") as opened:
+            for word in ("pair", "serve"):
+                code, said = self.run_main(word)
+                self.assertEqual(code, 1)
+                self.assertIn("doesn't listen for the extension here", said)
+            self.assertFalse(extension_api.Server(self.app).start())
+        opened.assert_not_called()
+        self.assertEqual((self.opened, self.store.exists()), ([], False))
+
+    def test_every_port_taken_is_said_too(self):
+        taken = socket.socket()
+        taken.bind(("127.0.0.1", 0))
+        taken.listen(1)
+        self.addCleanup(taken.close)
+        with mock.patch.dict(os.environ, {"REELFORGE_EXTENSION_PORT": str(taken.getsockname()[1])}):
+            code, said = self.run_main("serve")
+        self.assertEqual(code, 1)
+        self.assertIn("couldn't listen for the extension", said)
+
+    def test_no_command_starts_a_post(self):
+        # A post starts with the person's press in the window or in the extension's popup, and nowhere else.
+        for fn in (extension_api.main, extension_api.status, extension_api._serving, extension_api.check):
+            source = inspect.getsource(fn)
+            for word in ("create_batch", "retry(", "advance(", "claim(", "grant_press"):
+                self.assertNotIn(word, source, fn.__name__)
+        self.assertIn("None of these starts a post", extension_api.USAGE)
+
+    def test_the_reelforge_command_knows_it(self):
+        from studio.__main__ import __doc__ as usage
+        from studio.__main__ import main
+
+        self.assertIn("reelforge extension [folder|pair|serve]", usage)
+        out = io.StringIO()
+        with mock.patch("studio.reset.finish_pending", return_value=None), contextlib.redirect_stdout(out):
+            self.assertEqual(main(["extension", "nope"]), 2)
+            self.assertEqual(main(["extension"]), 0)
+        self.assertIn(extension_api.USAGE, out.getvalue())
+        self.assertIn(f"id         {extension_api.EXTENSION_ID}", out.getvalue())
+
 if __name__ == "__main__":
     unittest.main()

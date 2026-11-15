@@ -23,6 +23,8 @@ Who gets in:
 A request runs on a thread of its own with a socket timeout, so a slow or stuck client holds up nothing. Whatever
 changes a job goes through dashboard/posting.py; the window then hears of it (App.changed) and every other window
 sees the change in the database.
+
+  python -m studio extension            where the extension stands (main, at the end of this file)
 """
 
 from __future__ import annotations
@@ -1029,3 +1031,143 @@ def accounts(said) -> dict:
                             "handle": line(seen.get("handle"), 64)}
     return out
 
+
+# ---- the command line and doctor
+
+def check() -> tuple[bool, str]:
+    """For doctor and the command line: (whether all is well, a sentence). The extension is optional, so the worst
+    this ever is, is a warning."""
+    where = folder()
+    try:
+        found = manifest_id(where)
+    except (OSError, ValueError):
+        return False, (f"{where} has no manifest.json that can be read, so there is no extension to load. Update "
+                       "ReelForge (its Updates tab) to get it. Posting by hand works without it.")
+    if found != EXTENSION_ID:
+        return False, (f"extension/manifest.json makes the extension's id {found or 'depend on where the folder is'}"
+                       f", not {EXTENSION_ID}, the one ReelForge lets in. Update ReelForge to get the folder as it "
+                       "ships.")
+    path = store_path()
+    if path.exists():
+        try:
+            store = json.loads(path.read_text("utf-8"))
+            if not isinstance(store, dict):
+                raise ValueError("it isn't a list of connections")
+        except (OSError, ValueError) as e:
+            return False, (f"{path} can't be read ({e}), so no browser counts as connected. Connect yours again: "
+                           "reelforge extension pair")
+    n = len(paired(read_store()))
+    return True, f"in extension/, " + (f"connected in {n} browser{'s' if n != 1 else ''}" if n else
+                                       "not connected yet (optional: reelforge extension pair)")
+
+
+USAGE = """reelforge extension            where the browser extension stands: its folder, its id, the browsers connected
+reelforge extension folder     print its folder and show it in the file manager (the one to Load unpacked)
+reelforge extension pair       connect a browser: opens the pair page and waits until the extension has connected
+reelforge extension serve      listen for the extension without ReelForge's window, until Ctrl-C
+
+None of these starts a post. A post starts when you press Post in ReelForge's window or in the extension."""
+
+
+def status() -> int:
+    from .analytics import fmt_ago
+
+    ok, said = check()
+    where = folder()
+    print("ReelForge's browser extension (optional: it fills in each platform's upload page for you)")
+    print(f"  folder     {where}" + ("" if (where / "manifest.json").is_file() else "  (not there)"))
+    print(f"  id         {EXTENSION_ID}")
+    browsers = paired(read_store())
+    for i, p in enumerate(browsers):
+        seen = fmt_ago(p.get("last_seen")) if isinstance(p.get("last_seen"), str) else "never"
+        version = f" · v{p['version']}" if p.get("version") else ""
+        label = "connected " if i == 0 else " " * 10
+        print(f"  {label} {p.get('name') or 'A browser'}{version} · last seen {seen}")
+    if not browsers:
+        print("  connected  no browser yet: reelforge extension pair connects one")
+    if not ok:
+        print(f"\n{said}")
+    print("\ndocs/EXTENSION.md says how to set it up and what it does.")
+    return 0
+
+
+def _serving() -> Server | None:
+    """A server for this profile without the window, listening; None (with the reason printed) when it can't."""
+    if not ports_here():
+        print("ReelForge doesn't listen for the extension here (STUDIO_DRY_SYSTEM or REELFORGE_EXTENSION_PORT).")
+        return None
+    try:
+        cfg = config.load_config()
+    except config.ConfigError as e:
+        print(f"ReelForge can't start: {e}")
+        return None
+    db.init(config.DB_PATH)
+    server = Server(App(cfg, build(cfg)))
+    if not server.start():
+        print(f"ReelForge couldn't listen for the extension: every port from {server.ports[0]} to "
+              f"{server.ports[-1]} on this computer is taken, or {store_path()} can't be written.")
+        return None
+    return server
+
+
+def main(argv: list[str]) -> int:
+    """reelforge extension [folder | pair | serve] (USAGE)."""
+    if not argv:
+        return status()
+    if argv == ["folder"]:
+        where = folder()
+        print(where)
+        if not where.is_dir():
+            print("It isn't there. Update ReelForge (its Updates tab) to get it.")
+            return 1
+        desktop.reveal(where)
+        return 0
+    if argv == ["pair"]:
+        server = _serving()
+        if server is None:
+            return 1
+        url = server.pair_url()
+        try:
+            if desktop.open_url(url):
+                print("A ReelForge page is opening in your browser: the extension connects there.")
+                print(f"If the extension is in another browser, open this address in that one:\n  {url}")
+            else:
+                print(f"ReelForge couldn't open your browser. Open this address in the browser that has the "
+                      f"extension:\n  {url}")
+            print("Waiting for the extension, for up to ten minutes (Ctrl-C stops)...", flush=True)
+            end = clock() + SECRET_FOR
+            while not (name := server.paired_on(url)):
+                if clock() >= end:
+                    print("No browser connected in ten minutes. Nothing was changed: run this again when you're "
+                          "ready.")
+                    return 1
+                time.sleep(0.2)
+            time.sleep(1.5)  # the page asks once more and says "Connected", and the extension says hello
+            print(f"Connected: {name}. It stays connected until you disconnect it.")
+            return 0
+        except KeyboardInterrupt:
+            print("\nStopped. Nothing was connected.")
+            return 1
+        finally:
+            server.stop()
+    if argv == ["serve"]:
+        server = _serving()
+        if server is None:
+            return 1
+        who = server.app.profile()["name"]
+        print(f"Listening for the browser extension on 127.0.0.1:{server.port}" + (f" for {who}" if who else "")
+              + ", without ReelForge's window. Ctrl-C stops it.", flush=True)
+        try:
+            while True:
+                time.sleep(30)
+                try:
+                    posting.expire_stale()  # what the window's clock does: a job nobody picked up expires
+                except sqlite3.Error:
+                    pass  # busy: the next half minute
+        except KeyboardInterrupt:
+            print("\nStopped.")
+            return 0
+        finally:
+            server.stop()
+    print(USAGE)
+    return 0 if argv[0] in ("-h", "--help", "help") else 2
