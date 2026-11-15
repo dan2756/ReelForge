@@ -12,9 +12,10 @@ it starts (REELFORGE_BRIDGE_PRELOAD). What a test asks for comes in REELFORGE_TE
                "cancelled" are the ledger's own
   spotted      {platform: views}: a post of ep03_hail.mp4 a stats read found there
   logged_in    the platforms ReelForge's own browser is logged in to (they read their stats through it)
+  needs_login  the platforms still waiting for their one log-in there (nothing reads them yet: Type in stats)
   was          {platform: "@old"}: stats that platform was read under before its handle changed
   job_problem  true: the hourly job's last read had a problem (the Settings tab's Background refresh row)
-  fail         an RPC that raises, to see what the window makes of a call that failed
+  fail         an RPC that raises (or a list of them), to see what the window makes of a call that failed
 
 Nothing here touches this computer or the network. No browser opens: each page that would is listed in
 REELFORGE_OPENED's file. Nothing is copied: REELFORGE_COPIED's file gets it. No file manager opens. ReelForge's own
@@ -45,6 +46,7 @@ COLORS = {"tiktok": "#25f4ee", "youtube": "#ff4040", "instagram": "#b46cff", "x"
 CHROME = "install-chrome"
 CAPTION, TAGS = "What if hail doubled every 2 seconds?", "#fyp #whatif #weather"
 LOGGED_IN = set(ASKED.get("logged_in") or ())
+NEEDS_LOGIN = set(ASKED.get("needs_login") or ())
 
 
 def _note(env: str, text: str) -> None:
@@ -67,7 +69,7 @@ class Reader(Platform):
     def __init__(self, key: str, posts: list[Post] = (), connected: bool = True):
         super().__init__({"handle": "me"} if connected else {})
         self.key, self.name, self.color, self.posts = key, NAMES[key], COLORS[key], list(posts)
-        self.browser_stats = key in LOGGED_IN
+        self.browser_stats = key in LOGGED_IN or key in NEEDS_LOGIN
         self.public_stats = not self.browser_stats
         self.setup_note = f"A stand-in for {self.name}: nothing is read."
 
@@ -199,8 +201,9 @@ def test_extension(self, platform: str, states: list[str]) -> None:
 
 Dashboard.test_extension = test_extension
 
-if ASKED.get("fail"):
-    def broken(self, *args, **kwargs):
-        raise RuntimeError("boom")
+def broken(self, *args, **kwargs):
+    raise RuntimeError("boom")
 
-    setattr(Dashboard, ASKED["fail"], rpc(broken))
+
+for name in [ASKED["fail"]] if isinstance(ASKED.get("fail"), str) else ASKED.get("fail") or ():
+    setattr(Dashboard, name, rpc(broken))

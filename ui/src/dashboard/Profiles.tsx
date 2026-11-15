@@ -220,7 +220,7 @@ export function DeleteProfile({ data, close }: { data: DeleteProfileData; close:
   const go = () => {
     if (!ok) return
     close()
-    void s.bridge.call<boolean>("delete_profile", data.key, typed)
+    s.bridge.send("delete_profile", data.key, typed)
   }
   return (
     <Modal name="delete-profile" title={`DELETE ${data.name.toUpperCase()}`} width={84}>

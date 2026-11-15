@@ -103,7 +103,12 @@ function LogStats({ data, close }: { data: LogData; close: () => void }) {
   const [values, setValues] = useState(() => fill(data.start))
   const [problem, setProblem] = useState("")
   const save = async () => {
-    const error = await s.bridge.call<string | null>("save_logged_stats", platform, values.followers, values.views)
+    let error: string | null
+    try {
+      error = await s.bridge.call<string | null>("save_logged_stats", platform, values.followers, values.views)
+    } catch (e) {
+      return s.bridge.failed(e) // nothing was saved: the dialog stays, with what was typed
+    }
     if (error) setProblem(error)
     else close()
   }
@@ -239,7 +244,12 @@ function SignUp({ data, close }: { data: SignupData; close: () => void }) {
   const [handle, setHandle] = useState(s.handles[data.key] ?? "")
   const [problem, setProblem] = useState("")
   const open = async () => {
-    const said = await s.bridge.call<string | null>("open_signup", data.key)
+    let said: string | null
+    try {
+      said = await s.bridge.call<string | null>("open_signup", data.key)
+    } catch (e) {
+      return s.bridge.failed(e) // nothing opened, so nothing here says it did
+    }
     setOpened(said || "Opened in your browser. Come back here when you're done.")
     setTimeout(() => focus.focus(data.account ? "su-handle" : "su-done"), 30)
   }

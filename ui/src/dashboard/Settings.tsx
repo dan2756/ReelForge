@@ -569,7 +569,7 @@ export function FactoryReset({ data, close }: { data: ResetData; close: () => vo
   const go = () => {
     if (!ok) return
     close()
-    void s.bridge.call<boolean>("factory_reset", typed)
+    s.bridge.send("factory_reset", typed)
   }
   return (
     <Modal name="factory-reset" title="FACTORY RESET" width={90}>
@@ -591,7 +591,7 @@ export function MoveFolder({ data, close }: { data: MoveData; close: () => void 
   const go = () => {
     if (data.problem) return
     close()
-    void s.bridge.call<boolean>("move_folder", data.to)
+    s.bridge.send("move_folder", data.to)
   }
   return (
     <Modal name="move-folder" title="MOVE REELFORGE" width={90}>
@@ -619,7 +619,7 @@ export function Uninstall({ data, close }: { data: UninstallData; close: () => v
   const go = () => {
     if (!ok) return
     close()
-    void s.bridge.call<boolean>("uninstall", typed, keep)
+    s.bridge.send("uninstall", typed, keep)
   }
   const what = data.channels.length ? `${data.videos} files, ${data.videos_size}` : ""
   return (

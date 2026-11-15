@@ -11,6 +11,10 @@ import type { Init } from "./dashboard/types"
 import { SetupApp, type SetupInit } from "./setup/App"
 import { toasts } from "./ui/Panels"
 
+/** How the terminal is drawn on (main.tsx). Ctrl+C is the window's own key, nothing takes the keyboard by itself, and
+ * an error is never OpenTUI's developer console over the window: what failed says so in a pop-up (Bridge.failed). */
+export const RENDERER = { exitOnCtrlC: false, autoFocus: false, targetFps: 30, openConsoleOnError: false } as const
+
 /** The Python sides the window has started: the one it shows, and earlier ones still finishing a read. */
 export class Sides {
   active: Bridge | null = null

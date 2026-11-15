@@ -80,7 +80,11 @@ export function SetupApp(props: SetupProps) {
           <Work
             {...props}
             keys={chosen}
-            onNext={async () => go((await props.bridge.call<string>("after_tools")) === "done" ? "done" : "onboard")}
+            onNext={async () => {
+              // (a call that failed has said so in a pop-up: this screen stays, with its button to press again)
+              const to = await props.bridge.ask<string>("after_tools")
+              if (to !== null) go(to === "done" ? "done" : "onboard")
+            }}
             onAgain={() => go("tools")}
           />
         )}
@@ -395,7 +399,7 @@ function Done({ bridge, init, quit }: SetupProps) {
   } | null>(null)
   const system = useView<{ rows: Segs[] }>(bridge, "system")
   useEffect(() => {
-    bridge.call("done_info").then(setInfo)
+    void bridge.ask("done_info").then((said) => said && setInfo(said))
   }, [bridge])
   useEscape(() => quit(0))
   return (
