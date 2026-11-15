@@ -301,7 +301,7 @@ describe("the choices for posts to come", () => {
     // The question before a post shows both, as they will be sent.
     await clickText(h, "▐ Close ▌", 3)
     await ask(h)
-    expect(dialog(h)).toContain("Who can see it ○ Private ▐ ● Unlisted ▌ ○ Public Made for kids No Category People & Blogs")
+    expect(dialog(h)).toContain(`Who can see it ○ Private ▐ ● Unlisted ▌ ○ Public Made for kids No Title ${CAPTION} #shorts`)
   })
 })
 
@@ -314,9 +314,9 @@ describe("the question before a post", () => {
       "ep03_hail.mp4 0.0 MB ✓ QA passed and the review says APPROVED.",
       "ReelForge uploads the video itself, through Google's API, with exactly this. Keep ReelForge open until its row says posted.",
       UNPROVEN,
-      `Title ${CAPTION} #shorts Description ${TAGS} Who can see it ▐ ● Private ▌ ○ Unlisted ○ Public`,
-      "Made for kids Not sent: you haven't answered, so your channel's own setting applies",
-      "Category People & Blogs",
+      // your two choices first, then the text
+      "Who can see it ▐ ● Private ▌ ○ Unlisted ○ Public Made for kids Not sent: you haven't answered, so your channel's own setting applies",
+      `Title ${CAPTION} #shorts Description ${TAGS} Category People & Blogs`,
       "ReelForge doesn't set the altered-content answer, tags, a thumbnail or a schedule. Set those in YouTube Studio.",
       "▐ Cancel ▌ ▐ Post to YouTube ▌",
     ])
@@ -751,6 +751,35 @@ describe("when something goes wrong, or the window is small", () => {
     await h.settle(400)
     expect(frame(h)).not.toContain("POST TO YOUTUBE THROUGH ITS API")
     expect(jobsMade()).toBe(0)
+  })
+
+  test("in a window 80 columns by 24 rows the question shows who can see the video before anything else it sends", async () => {
+    // Under the longest caption the box takes and five hashtags, with posts set to start as public: the row that
+    // says so was below the fold, under the title and the description, while Post could be pressed.
+    const h = await kit({ api: { client: "on", privacy: "public" } }, [80, 24])
+    await clickText(h, CAPTION, 2)
+    await h.t.mockInput.typeText(" And what if every one of them was the size of a house by noon?")
+    h.t.mockInput.pressKey("ESCAPE")
+    await h.settle(300)
+    await clickText(h, TAGS, 2)
+    await h.t.mockInput.typeText(" #physics #hailstorm")
+    h.t.mockInput.pressKey("ESCAPE")
+    await h.settle(300)
+    h.t.mockInput.pressKey("\u001b[6~") // Page Down, to POST
+    await h.settle(400)
+    await ask(h)
+    const choices = ["Who can see it", "▐ ● Public ▌", "Made for kids   Not sent: you haven't answered"]
+    for (const text of [...choices, "▐ Cancel ▌", "▐ Post to YouTube ▌"]) expect(frame(h)).toContain(text)
+    h.t.mockInput.pressKey("TAB") // to Post, which scrolls nothing away
+    await h.settle(200)
+    expect(focused(h)).toBe("Post to YouTube")
+    for (const text of choices) expect(frame(h)).toContain(text)
+    // The question about a video that is up has one more sentence, and still shows both.
+    h.t.mockInput.pressKey("RETURN")
+    await until(h, () => youtube(h).state === "posted" && !frame(h).includes("POST TO YOUTUBE THROUGH ITS API"))
+    expect((await google(h)).starts[0]!.status).toEqual({ privacyStatus: "public" })
+    await ask(h, "Again with API…")
+    for (const text of ["It would be a second video.", ...choices, "▐ Cancel ▌", "▐ Post it again ▌"]) expect(frame(h)).toContain(text)
   })
 
   test("in a window 80 columns by 24 rows the box for the client file and Close show, also while Google's page waits", async () => {

@@ -491,13 +491,15 @@ class YouTubeApiTab:
             return None
         text, block = look["texts"]["youtube"], look["blocked"].get("youtube")
         again = bool(block and block["reason"] in ("posted", "spotted", "unknown"))
-        send = {"title": text["title"], "description": text["description"], "privacy": out["privacy"],
-                "made_for_kids": out["made_for_kids"], "category": youtube_api.CATEGORY}
+        send = {"privacy": out["privacy"], "made_for_kids": out["made_for_kids"], "title": text["title"],
+                "description": text["description"], "category": youtube_api.CATEGORY}
+        # Your two choices first. In a window 24 rows tall only the first rows show without scrolling, and under a
+        # long title "Who can see it: Public" was out of sight while Post could be pressed.
         # (key: which of "send" a row shows. The window puts the choice for this one post on the "privacy" row.)
-        fields = [{"key": "title", "label": "Title", "text": send["title"] or "—"},
-                  {"key": "description", "label": "Description", "text": send["description"] or "—"},
-                  {"key": "privacy", "label": "Who can see it", "text": WHO[send["privacy"]]},
+        fields = [{"key": "privacy", "label": "Who can see it", "text": WHO[send["privacy"]]},
                   {"key": "made_for_kids", "label": "Made for kids", "text": KIDS[send["made_for_kids"]]},
+                  {"key": "title", "label": "Title", "text": send["title"] or "—"},
+                  {"key": "description", "label": "Description", "text": send["description"] or "—"},
                   {"key": "category", "label": "Category", "text": "People & Blogs"}]
         said = youtube_api.status()  # (the view may say "connecting" over a connection that is good)
         if said["state"] != "on":

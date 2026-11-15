@@ -147,9 +147,10 @@ class View(ApiPosting):
         info = w.call("youtube_api_info", CAPTION, TAGS)
         self.assertEqual(info["send"], {"title": TITLE, "description": TAGS, "privacy": "private",
                                         "made_for_kids": False, "category": "22"})
+        # Your two choices are the first rows: they show without scrolling in the smallest window.
         self.assertEqual([(f["label"], f["text"]) for f in info["fields"]],
-                         [("Title", TITLE), ("Description", TAGS), ("Who can see it", "Private"),
-                          ("Made for kids", "No"), ("Category", "People & Blogs")])
+                         [("Who can see it", "Private"), ("Made for kids", "No"), ("Title", TITLE),
+                          ("Description", TAGS), ("Category", "People & Blogs")])
         self.assertEqual([f["key"] for f in info["fields"]], list(info["send"]))  # each row is one thing sent
         self.assertEqual((info["can_post"], info["why"], info["force"], info["blocked"]), (True, "", False, None))
         self.assertEqual((info["video"]["name"], info["review"]["state"], info["note"]), ("ep01.mp4", "none", UNPROVEN))
@@ -200,7 +201,7 @@ class View(ApiPosting):
         self.assertIsNone(w.view("youtube_api")["made_for_kids"])
         info = w.call("youtube_api_info", CAPTION, TAGS)
         self.assertIsNone(info["send"]["made_for_kids"])
-        self.assertEqual(info["fields"][3], {"key": "made_for_kids", "label": "Made for kids",
+        self.assertEqual(info["fields"][1], {"key": "made_for_kids", "label": "Made for kids",
                                              "text": "Not sent: you haven't answered, so your channel's own setting "
                                                      "applies"})
         job = self.posted(w)
@@ -441,7 +442,7 @@ class Buttons(ApiPosting):
         self.assertEqual(w.call("youtube_api_info", CAPTION, TAGS)["send"]["privacy"], "unlisted")
         self.assertTrue(w.call("youtube_api_defaults", None, True)["made_for_kids"])
         fields = w.call("youtube_api_info", CAPTION, TAGS)["fields"]
-        self.assertEqual([f["text"] for f in fields[2:4]], ["Unlisted", "Yes"])
+        self.assertEqual([f["text"] for f in fields[:2]], ["Unlisted", "Yes"])
         self.assertIsNone(w.call("youtube_api_defaults", "everyone"))
         self.assertEqual(w.toasts()[-1], "Choose private, unlisted or public.")
         job = self.posted(w)  # with nothing said for this post: your choices
@@ -585,7 +586,7 @@ class Posting(ApiPosting):
         self.assertEqual((posting.recent(), self.google.starts), ([], []))
         # Asked again, the question shows the new answer, and a yes to that one is sent with it.
         info = w.call("youtube_api_info", CAPTION, TAGS)
-        self.assertEqual(info["fields"][3], {"key": "made_for_kids", "label": "Made for kids", "text": "Yes"})
+        self.assertEqual(info["fields"][1], {"key": "made_for_kids", "label": "Made for kids", "text": "Yes"})
         made = w.call("post_with_api", CAPTION, TAGS, "private", False, self.yes_to(info))
         self.over(w, made["jobs"][0]["id"])
         self.assertEqual(self.google.starts[0]["body"]["status"],
