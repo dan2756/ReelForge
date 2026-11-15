@@ -90,16 +90,41 @@ def _merge(base: dict, over: dict) -> dict:
     return out
 
 
+class SettingsError(ValueError):
+    """A studio.toml that can't be used. The message names the file, says what's wrong in it and how to put it right,
+    so whoever catches it can show it as it is."""
+
+    def __init__(self, path: Path, reason: str):
+        super().__init__(f"{path} can't be read: {reason}. Fix it in a text editor, or write it again from your "
+                         "answers with: reelforge channel --regenerate")
+        self.path = path
+
+
 def load(path: Path | None = None) -> dict:
-    """Settings as a plain dict: the defaults with studio.toml laid over them (missing file = defaults)."""
+    """Settings as a plain dict: the defaults with studio.toml laid over them (missing file = defaults). The file
+    invites hand edits, so one with a typo in it raises SettingsError, which says where."""
     path = path or paths.SETTINGS
     data: dict = {}
     if path.exists():
-        with path.open("rb") as f:
-            data = tomllib.load(f)
+        try:    # utf-8-sig: Notepad on older Windows saves a hand edit with a byte-order mark, which TOML refuses
+            data = tomllib.loads(path.read_text(encoding="utf-8-sig"))
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
+            raise SettingsError(path, str(e)) from None
     s = _merge(DEFAULTS, data)
+    # `captions = 3` parses, and would stop whoever reads a key of it, somewhere far from this file
+    for name in (*DEFAULTS, "platforms.handles"):
+        table = s
+        for part in name.split("."):
+            table = table[part]
+        if not isinstance(table, dict):
+            raise SettingsError(path, f"[{name}] should be a table of settings, not one value")
+    if not isinstance(s["platforms"]["enabled"], list):
+        raise SettingsError(path, 'enabled under [platforms] should be a list, like ["tiktok", "youtube"]')
     s["platforms"]["enabled"] = [p for p in s["platforms"]["enabled"] if p in PLATFORMS] or list(PLATFORMS)
-    s["captions"]["max_hashtags"] = max(0, int(s["captions"]["max_hashtags"]))
+    try:
+        s["captions"]["max_hashtags"] = max(0, int(s["captions"]["max_hashtags"]))
+    except (TypeError, ValueError):
+        raise SettingsError(path, "max_hashtags under [captions] should be a whole number") from None
     s["captions"]["tiktok_first_tag"] = str(s["captions"]["tiktok_first_tag"]).lstrip("#").strip()
     s["ai"]["assistant"] = assistants(s["ai"]["assistant"])
     return s
@@ -108,7 +133,7 @@ def load(path: Path | None = None) -> dict:
 def assistants(value) -> list[str]:
     """The AIs that make a channel's videos, from studio.toml's [ai] assistant: a list of claude and codex, one or both,
     in that order. Versions before 2.2.0 wrote one word, "claude", "codex" or "both"; anything else is Claude Code."""
-    words = [value] if isinstance(value, str) else list(value or [])
+    words = [value] if isinstance(value, str) else list(value) if isinstance(value, (list, tuple)) else []
     return [a for a in AIS if a in words or "both" in words] or ["claude"]
 
 

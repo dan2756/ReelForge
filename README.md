@@ -211,6 +211,7 @@ out, say).
 `reelforge profiles --json` prints one JSON object with `current` (the selected profile's key) and a `profiles` array.
 Each profile has `key`, `name`, `folder` (an absolute path), `main`, `onboarded` (true once its first-time setup is
 done), and `platforms` (enabled platform keys from its studio settings, or the defaults before first-time setup).
+A profile whose `studio.toml` can't be read has no platforms and an `error` that says what's wrong in the file.
 Selection follows `reelforge profiles`: `-p NAME` or `REELFORGE_PROFILE`, then the last-opened profile, then the
 first. It changes no files or profile selection and includes no login data. `--json` cannot be combined with `new`,
 `delete`, or `restore`.

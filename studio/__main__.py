@@ -252,11 +252,16 @@ def list_profiles(argv: list[str], chosen: profiles.Profile | None = None) -> in
     if argv == ["--json"]:
         from . import settings as S
 
-        print(json.dumps({"current": here.key, "profiles": [
-            {"key": p.key, "name": p.name, "folder": str(p.folder), "main": p.main,
-             "onboarded": p.onboarded, "platforms": S.load(p.settings)["platforms"]["enabled"]}
-            for p in profiles.every()
-        ]}))  # ASCII (\u escapes), so it prints under any Windows code page, not only in UTF-8 mode
+        rows = []
+        for p in profiles.every():
+            row = {"key": p.key, "name": p.name, "folder": str(p.folder), "main": p.main, "onboarded": p.onboarded}
+            try:
+                row["platforms"] = S.load(p.settings)["platforms"]["enabled"]
+            except S.SettingsError as e:    # one channel's settings with a typo in them: the others are still listed
+                row.update(platforms=[], error=str(e))
+            rows.append(row)
+        # ASCII (\u escapes), so it prints under any Windows code page, not only in UTF-8 mode
+        print(json.dumps({"current": here.key, "profiles": rows}))
         return 0
     print("Your profiles (one for each channel):")
     for i, p in enumerate(profiles.every(), 1):
@@ -464,6 +469,18 @@ def open_app(argv: list[str]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """The reelforge command. A studio.toml that can't be read (a hand edit with a typo in it) is one line that names
+    the file, whichever command came across it, not a traceback."""
+    from . import settings as S
+
+    try:
+        return run(argv)
+    except S.SettingsError as e:
+        print(e)
+        return 1
+
+
+def run(argv: list[str] | None = None) -> int:
     try:
         sys.stdout.reconfigure(line_buffering=True)    # keep our lines in order with the tools' output in logs
     except (AttributeError, ValueError):
