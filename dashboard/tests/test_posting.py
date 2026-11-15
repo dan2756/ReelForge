@@ -417,11 +417,25 @@ class Moving(LedgerTest):
         self.refused("bad_transition", posting.resolve, job["id"], True)
         self.assertEqual(self.job()["state"], "queued")
 
-    def test_only_queued_expires_and_only_ready_or_posting_goes_unknown(self):
+    def test_only_queued_expires_and_only_a_job_a_browser_has_goes_unknown(self):
+        held = ("claimed", "opening", "uploading", "filling", "ready", "posting", "unknown")
         for old in (*posting.LIVE, *posting.FREE):
             self.assertEqual(posting.allowed(old, "expired", "app"), old in ("queued", "expired"), old)
-            self.assertEqual(posting.allowed(old, "unknown", "app"), old in ("ready", "posting", "unknown"), old)
-            self.assertEqual(posting.allowed(old, "unknown", "extension"), old in ("ready", "posting", "unknown"), old)
+            self.assertEqual(posting.allowed(old, "unknown", "app"), old in held, old)
+            self.assertEqual(posting.allowed(old, "unknown", "extension"), old in held, old)
+
+    def test_your_own_press_before_the_post_was_ready_is_not_sure_too(self):
+        # YouTube takes a press of Publish while the video is still going up. The extension saw the press and then
+        # lost the page: it says "not sure", and the ledger has to take that, or the job would stay under way.
+        for at in ("opening", "uploading", "filling"):
+            self.video.write_bytes(f"a video lost at {at}".encode())
+            job = self.walk(self.job("youtube"), at)
+            said = posting.advance(job["id"], "unknown", install=CHROME, error_code="unknown_outcome",
+                                   error_message="Post was pressed on YouTube and no confirmation was seen.")
+            self.assertEqual((said["state"], said["error_code"]), ("unknown", "unknown_outcome"))
+            (block,) = self.batch("youtube")["blocked"]
+            self.assertEqual(block["reason"], "unknown")
+        self.refused("not_yours", posting.advance, self.job("tiktok")["id"], "unknown", install=CHROME)  # not claimed
 
     def test_the_extension_reports_states_but_never_grants_itself_one(self):
         for new in ("queued", "claimed", "posting", "expired"):
@@ -450,7 +464,9 @@ class Moving(LedgerTest):
     def test_its_posted_is_your_word_once_the_post_was_ready_to_go(self):
         for old in posting.IN_FLIGHT:
             self.assertEqual(posting.allowed(old, "posted", "person"), old in ("ready", "posting"), old)
-            self.assertEqual(posting.allowed(old, "posted", "reconcile"), old in ("ready", "posting"), old)
+            # A stats read that found the post is believed from the moment the video was on the page.
+            self.assertEqual(posting.allowed(old, "posted", "reconcile"),
+                             old in ("uploading", "filling", "ready", "posting"), old)
         job = self.walk(self.job(), "uploading")
         self.refused("bad_transition", posting.resolve, job["id"], True)
         self.assertEqual(posting.cancel(job["id"])["state"], "cancelled")
@@ -662,10 +678,46 @@ class Clock(LedgerTest):
         unknown = posting.get(job["id"])
         self.assertEqual((unknown["state"], unknown["detail"]), ("unknown", "no confirmation after Post was pressed"))
 
-    def test_the_clock_leaves_every_other_state_alone(self):
-        job = self.walk(self.job(), "uploading")
+    def test_a_browser_that_went_silent_before_the_video_was_on_a_page_has_failed(self):
+        # The browser crashed, was closed for good, or the extension was removed: no report ever comes again.
+        taken, opening = self.job("tiktok"), self.walk(self.job("youtube"), "opening")
+        posting.claim(taken["id"], CHROME)
+        for job in (taken, opening):
+            self.age(job, 19)
+        self.assertEqual(posting.expire_stale(), 0)
+        for job in (taken, opening):
+            self.age(job, 20)
+        self.assertEqual(posting.expire_stale(), 2)
+        for job in (taken, opening):
+            failed = posting.get(job["id"])
+            self.assertEqual((failed["state"], failed["error_code"]), ("failed", "timeout"))
+            self.assertIn("Nothing was posted", failed["error_message"])
+        self.assertEqual(posting.active_batches(), [])
+        self.assertEqual([j["state"] for j in self.batch("tiktok", "youtube")["jobs"]], ["queued", "queued"])  # free
+
+    def test_a_browser_that_went_silent_with_the_video_on_the_page_is_unknown(self):
+        # The platform's own Post button was there to press, so nobody can say nothing was posted.
+        uploading, filling = self.walk(self.job("tiktok"), "uploading"), self.walk(self.job("youtube"), "filling")
+        alive = self.walk(self.job("instagram"), "uploading")
+        for job in (uploading, filling, alive):
+            self.age(job, 44)
+        self.assertEqual(posting.expire_stale(), 0)
+        for job in (uploading, filling, alive):
+            self.age(job, 45)
+        posting.advance(alive["id"], "uploading", install=CHROME, step="upload", progress=0.4)  # still at work
+        self.assertEqual(posting.expire_stale(), 2)
+        self.assertEqual([self.state(j) for j in (uploading, filling, alive)], ["unknown", "unknown", "uploading"])
+        self.assertEqual(posting.get(filling["id"])["detail"],
+                         "no word from the browser since the video was on the page")
+        (block,) = self.batch("tiktok")["blocked"]
+        self.assertEqual(block["reason"], "unknown")  # asked about, never tried again by itself
+        self.assertEqual(posting.resolve(uploading["id"], False)["state"], "cancelled")
+        self.assertEqual(self.job("tiktok")["state"], "queued")
+
+    def test_the_clock_leaves_an_upload_through_an_api_to_the_reelforge_that_runs_it(self):
+        job = self.job("youtube", via={"youtube": "api"})
+        posting.advance(job["id"], "uploading", by="app")
         self.age(job, 600)
-        self.age(job, 600, "created_at")
         self.assertEqual(posting.expire_stale(), 0)
         self.assertEqual(self.state(job), "uploading")
         self.assertEqual(posting.expire_stale(datetime.now(timezone.utc) + timedelta(days=1)), 0)
@@ -724,10 +776,26 @@ class Reconciling(LedgerTest):
         db.add_post("tiktok", f"manual-{job['episode_id']}", job["episode_id"], CAPTION, None)  # typed-in numbers
         self.assertEqual(posting.reconcile(), 0)
         self.assertEqual(self.state(job), "ready")
-        early = self.walk(self.job("instagram"), "uploading")            # not waiting on a post yet
+        early = self.walk(self.job("instagram"), "opening")              # no video on any page yet
         self.spot(early, "3500000000000000001")
+        api = self.job("x", via={"x": "api"})                            # ReelForge's own upload, still going
+        posting.advance(api["id"], "uploading", by="app")
+        self.spot(api, "1900000000000000001")
         self.assertEqual(posting.reconcile(), 0)
-        self.assertEqual(self.state(early), "uploading")
+        self.assertEqual((self.state(early), self.state(api)), ("opening", "uploading"))
+
+    def test_a_job_whose_video_was_on_the_page_is_settled_too(self):
+        # You pressed the platform's button before the extension called the post ready, and then the browser was
+        # gone: the job never heard. The read that finds the post ends it, so the video isn't blocked for good.
+        for i, at in enumerate(("uploading", "filling")):
+            video = self.root / "videos" / f"video{i}.mp4"
+            video.write_bytes(f"video {i}".encode())
+            job = self.walk(posting.create_batch(video, ["youtube"], f"Video number {i}", TAGS, self.cfg)["jobs"][0],
+                            at)
+            self.spot(job, f"abcdefghij{i}")
+            self.assertEqual(posting.reconcile(), 1)
+            self.assertEqual((self.state(job), posting.get(job["id"])["post_id"]), ("posted", f"abcdefghij{i}"))
+            self.refused("bad_transition", posting.advance, job["id"], "ready", install=CHROME)  # the late report
 
     def test_a_post_with_another_caption_is_still_this_videos_by_when_it_went_up(self):
         # You changed the caption on the platform's page before pressing Post: the caption matcher has nothing to go

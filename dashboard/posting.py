@@ -46,10 +46,16 @@ FREE = ("failed", "cancelled", "expired")    # over without a post: a new job ma
 LIVE = (*ORDER, "unknown")                   # every state that stands in the way of a new job
 EXTENSION_STATES = ("opening", "uploading", "filling", "ready", "posted", "failed", "cancelled", "unknown")
 WAITING = ("ready", "posting", "unknown")    # a post may be up without ReelForge having heard: a stats read can tell
+ON_THE_PAGE = ("uploading", "filling")       # the video is on the platform's page, whose own Post button you can press
 
 QUEUED_FOR = timedelta(minutes=10)   # a job nobody picked up in this long expires
 READY_FOR = timedelta(minutes=45)    # filled in and then silent this long: you may have pressed Post yourself
 POSTING_FOR = timedelta(minutes=15)  # Post pressed for you and then silent this long
+# A browser that took a job and then says nothing more (it crashed, was closed for good, the extension was removed).
+# Both are longer than the extension itself ever stays silent while it works: it waits 15 minutes for your answer
+# about another account, and 30 for a platform to take a video in.
+OPENING_FOR = timedelta(minutes=20)  # ... before the video was on any page: nothing was posted
+FILLING_FOR = timedelta(minutes=45)  # ... with the video on the page: you may have pressed Post yourself
 CLOCK_SLACK = timedelta(minutes=2)   # a platform's clock and this computer's needn't agree to the second
 
 X_LIMIT = videos.X_LIMIT
@@ -448,7 +454,9 @@ def allowed(old: str, new: str, by: str) -> bool:
     if old == "unknown":  # only you, or a stats read, can say what happened
         return by in ("person", "reconcile") and new in ("posted", "cancelled")
     if by in ("person", "reconcile") and new == "posted":
-        return old in WAITING  # "It's posted" makes sense once the post was ready to go
+        # "It's posted" makes sense once the post was ready to go. A stats read that found the post is believed
+        # from the moment the video was on the page: some platforms take a press of Post while it is going up.
+        return old in WAITING or (by == "reconcile" and old in ON_THE_PAGE)
     if old == "posting" and by == "extension" and new in ("failed", "cancelled"):
         return False  # Post was pressed for you: what the browser calls over is "not sure" (see advance)
     if new in ("failed", "cancelled"):
@@ -456,7 +464,9 @@ def allowed(old: str, new: str, by: str) -> bool:
     if new == "expired":
         return old == "queued"
     if new == "unknown":
-        return old in ("ready", "posting")
+        # From any state a browser has the job in: your own press of Post can come before the extension calls
+        # the post ready (the video only has to be on the page), and the clock gives up on a silent browser.
+        return old in IN_FLIGHT and old != "queued"
     return new in ORDER and ORDER.index(new) > ORDER.index(old)
 
 
@@ -544,19 +554,35 @@ def resolve(job_id: str, posted: bool) -> dict:
 
 
 def expire_stale(now: datetime | None = None) -> int:
-    """What the clock decides, to be run every so often: a job nobody picked up in 10 minutes expires, and one that
-    was ready (for 45 minutes) or being posted (for 15) without a word since becomes unknown. Returns how many."""
-    now = (now or _now()).astimezone(timezone.utc)  # as the rows' times are written
-    rules = (("queued", "created_at", QUEUED_FOR, "expired", "not picked up in time"),
-             ("ready", "updated_at", READY_FOR, "unknown", "no word since it was ready to post"),
-             ("posting", "updated_at", POSTING_FOR, "unknown", "no confirmation after Post was pressed"))
+    """What the clock decides, to be run every so often. Returns how many jobs it moved.
 
-    def stale(c: sqlite3.Connection) -> list[tuple[dict, str, str]]:
+    A job nobody picked up in 10 minutes expires. One that was ready (for 45 minutes) or being posted (for 15)
+    without a word since becomes unknown. And a job a browser took and then went silent on doesn't stay under way
+    for ever, blocking its video: before the video was on a page (20 minutes) it has failed, and nothing was
+    posted; with the video on the page (45 minutes) it is unknown, because the platform's own Post button was
+    there to press. Those two are for the extension's jobs: an upload through a platform's API is ended by the
+    ReelForge that runs it."""
+    now = (now or _now()).astimezone(timezone.utc)  # as the rows' times are written
+    gone = {"error_code": "timeout",
+            "error_message": "The browser stopped reporting before the video was on the page. Nothing was posted."}
+    quiet = {"detail": "no word from the browser since the video was on the page"}
+    # (state, the time that counts, how long, what it becomes, with what, the extension's jobs only)
+    rules = (("queued", "created_at", QUEUED_FOR, "expired", {"detail": "not picked up in time"}, False),
+             ("ready", "updated_at", READY_FOR, "unknown", {"detail": "no word since it was ready to post"}, False),
+             ("posting", "updated_at", POSTING_FOR, "unknown", {"detail": "no confirmation after Post was pressed"},
+              False),
+             ("claimed", "updated_at", OPENING_FOR, "failed", gone, True),
+             ("opening", "updated_at", OPENING_FOR, "failed", gone, True),
+             ("uploading", "updated_at", FILLING_FOR, "unknown", quiet, True),
+             ("filling", "updated_at", FILLING_FOR, "unknown", quiet, True))
+
+    def stale(c: sqlite3.Connection) -> list[tuple[dict, str, dict]]:
         found = []
-        for state, column, limit, to, detail in rules:
+        for state, column, limit, to, fields, extension in rules:
             cut = (now - limit).isoformat(timespec="seconds")
-            found += [(dict(row), to, detail) for row in c.execute(
-                f"SELECT * FROM post_jobs WHERE state = ? AND {column} <= ?", (state, cut)).fetchall()]
+            found += [(dict(row), to, fields) for row in c.execute(
+                f"SELECT * FROM post_jobs WHERE state = ? AND {column} <= ?"
+                + (" AND via = 'extension'" if extension else ""), (state, cut)).fetchall()]
         return found
 
     moved = 0
@@ -566,8 +592,8 @@ def expire_stale(now: datetime | None = None) -> int:
         if not stale(c):
             return 0
         c.execute("BEGIN IMMEDIATE")
-        for old, to, detail in stale(c):
-            _write(c, old, to, "app", detail=detail)
+        for old, to, fields in stale(c):
+            _write(c, old, to, "app", **fields)
             moved += 1
     if moved:
         db.bump()
@@ -575,14 +601,15 @@ def expire_stale(now: datetime | None = None) -> int:
 
 
 def reconcile() -> int:
-    """After a stats read: a job that may have posted without ReelForge hearing of it (ready, posting or unknown) is
-    posted once the read has filed a post under its episode, on its platform, that went up after the job was made.
-    Returns how many it settled."""
+    """After a stats read: a job that may have posted without ReelForge hearing of it (ready, posting or unknown, or
+    one of the extension's whose video was on the page) is posted once the read has filed a post under its episode,
+    on its platform, that went up after the job was made. Returns how many it settled."""
     found = []
     with db.connect() as c:
-        marks = ",".join("?" * len(WAITING))
-        for j in c.execute(f"SELECT * FROM post_jobs WHERE superseded = 0 AND episode_id IS NOT NULL "
-                           f"AND state IN ({marks})", WAITING).fetchall():
+        marks, early = ",".join("?" * len(WAITING)), ",".join("?" * len(ON_THE_PAGE))
+        for j in c.execute(f"SELECT * FROM post_jobs WHERE superseded = 0 AND episode_id IS NOT NULL AND (state IN "
+                           f"({marks}) OR (via = 'extension' AND state IN ({early})))",
+                           (*WAITING, *ON_THE_PAGE)).fetchall():
             since = (db.parse(j["created_at"]) - CLOCK_SLACK).isoformat(timespec="seconds")
             # Not a post another job already stands for (the one you posted again over), nor typed-in numbers.
             post = c.execute(
