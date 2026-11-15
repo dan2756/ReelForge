@@ -314,6 +314,7 @@ class YouTubeApiTab:
     """The YouTube API's half of the window's service."""
 
     api_consent: youtube_api.Consent | None = None  # the try at connecting that is waiting for you, or the last one
+    api_quiet = False                               # that try was asked for in the dialog, which says how it goes
     api_seen: float | None | bool = False           # the connection file's time as last shown (False: not yet)
 
     def mind_the_jobs(self) -> None:
@@ -498,10 +499,12 @@ class YouTubeApiTab:
                 "force": again and not why, "blocked": block}
 
     @rpc
-    def youtube_api_connect(self, path: str = "") -> bool:
+    def youtube_api_connect(self, path: str = "", quiet: bool = False) -> bool:
         """Connect: read the client file at path (the JSON you downloaded from Google Cloud; "" to connect again
         with the client already on file) and open Google's consent page in your browser. True when the page is
-        opening; the view and a pop-up follow when you have answered there."""
+        opening; the view and a pop-up follow when you have answered there. quiet: asked for in the window's
+        dialog for the connection, which says itself that Google's page is open and that it is connected: no
+        pop-up says the same over its buttons. What went wrong is a pop-up either way."""
         if self.demo:
             self.notify("The demo doesn't use YouTube's API.", timeout=4)
             return False
@@ -515,9 +518,12 @@ class YouTubeApiTab:
             self.notify(e.message, title="YouTube's API", severity="warning", timeout=15)
             self.follow_youtube_api(changed=True)
             return False
-        self.notify("Google's consent page is opening in your browser. Pick the Google account your channel belongs "
-                    "to and allow ReelForge to upload videos. Google will say it hasn't verified the app: the app "
-                    "is your own Google Cloud project.", title="Connecting YouTube's API", timeout=20)
+        self.api_quiet = bool(quiet)
+        if not quiet:
+            self.notify("Google's consent page is opening in your browser. Pick the Google account your channel "
+                        "belongs to and allow ReelForge to upload videos. Google will say it hasn't verified the "
+                        "app: the app is your own Google Cloud project.", title="Connecting YouTube's API",
+                        timeout=20)
         self.follow_youtube_api(changed=True)
         return True
 
@@ -525,7 +531,9 @@ class YouTubeApiTab:
         current = self.api_consent
         if current is None or current.outcome is not outcome:
             return  # an earlier try, which a newer one replaced
-        if outcome["ok"]:
+        if outcome["ok"] and self.api_quiet:
+            pass  # the dialog that asked shows it: the line, what posts start as, and how far this is tested
+        elif outcome["ok"]:
             # Who sees a post is said as it is on file: a choice made before this connect still stands.
             privacy = youtube_api.status()["privacy"]
             starts = ("Posts start as private until you choose otherwise." if privacy == "private" else

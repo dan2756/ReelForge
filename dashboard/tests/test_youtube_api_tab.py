@@ -333,6 +333,30 @@ class Buttons(ApiPosting):
         self.assertIn("never against Google itself", w.toasts()[1])
         self.assertEqual(self.rows(w)["youtube"]["actions"], ["post_api"])  # the row follows
 
+    def test_a_connect_asked_for_in_the_dialog_puts_no_pop_up_over_it_unless_something_went_wrong(self):
+        """The dialog for the connection says that Google's page is open, and then that it is connected, with what
+        posts start as and how far this is tested. A pop-up saying the same sat on its buttons for twenty seconds."""
+        w = self.window(api=False)
+        self.assertTrue(w.call("youtube_api_connect", str(self.client_file), True))
+        self.assertTrue(w.until(lambda: w.view("youtube_api")["state"] == "on"))
+        w.pump(0.2)
+        self.assertEqual(w.sent("toast"), [])
+        view = w.view("youtube_api")
+        self.assertIn("posts start as private", plain(view["line"]))  # what the pop-up would have said
+        self.assertEqual(plain(view["lines"][-1]), UNPROVEN)
+        # What went wrong is said all the same: a file that isn't one, and a no on Google's page.
+        self.assertFalse(w.call("youtube_api_connect", str(self.root / "nothing.json"), True))
+        self.assertIn("There is no file at", w.toasts()[-1])
+        self.google.consent = "no"
+        self.assertTrue(w.call("youtube_api_connect", "", True))
+        self.assertTrue(w.until(lambda: "You said no on Google's page" in (w.toasts() or [""])[-1]))
+        # Asked for anywhere else (the YouTube row's button), both pop-ups come as before.
+        self.google.consent = "yes"
+        w.forget()
+        w.call("post_action", "youtube", "connect_api")
+        self.assertTrue(w.until(lambda: len(w.sent("toast")) == 2))
+        self.assertEqual([t["title"] for t in w.sent("toast")], ["Connecting YouTube's API", "YouTube's API"])
+
     def test_connecting_again_says_what_posts_really_start_as(self):
         w = self.window()
         w.call("youtube_api_defaults", "public")  # your choice, made in an earlier session
