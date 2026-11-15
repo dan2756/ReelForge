@@ -164,12 +164,14 @@ void (async () => {
 
     await rf.step("uploading", "attach", "Handing the video to the page", { progress: 0 })
     const file = await rf.fetchVideo(fraction => rf.progress("uploading", "attach", fraction))
+    // The worker is told before the page gets the video. From here a reload cannot be recovered from, and a
+    // script that starts over on a fresh page must never hand the video over a second time.
+    await rf.report({ state: "uploading", step: "attach", progress: 1, attached: true })
+    rf.guard()
     if (!rf.attach(input, file)) {
       throw new rf.Stop("hook_not_found", `${P}'s page did not take the video. You can add it by hand in this tab.`, { detail: "hook=file_input files not set" })
     }
-    // From here a reload cannot be recovered from: the worker has to know the video is in.
     rf.phase = "filled"
-    await rf.report({ state: "uploading", step: "attach", progress: 1, attached: true })
 
     const end = (await flow.fill(job)) || {}
     const button = end.hold ? rf.probe(end.hold) : await rf.find(flow.final)

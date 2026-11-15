@@ -498,13 +498,18 @@
 
   // ---- telling the worker ----------------------------------------------------------------------------------
 
+  // A message to the worker. The browser may stop the worker in the middle of an answer; the next try starts
+  // it again, and everything said here is safe to say twice. No answer after three tries, or an extension that
+  // was reloaded or removed under this page, means there is nobody left to work for.
   rf.send = async message => {
-    try {
-      return await chrome.runtime.sendMessage(message)
-    } catch {
-      // The extension was reloaded or removed under this page. There is nobody left to work for.
-      return null
+    for (let tries = 0; tries < 3 && chrome.runtime?.id; tries++) {
+      try {
+        return await chrome.runtime.sendMessage(message)
+      } catch {
+        await new Promise(resolve => setTimeout(resolve, 300))
+      }
     }
+    return null
   }
 
   let reported = {}
