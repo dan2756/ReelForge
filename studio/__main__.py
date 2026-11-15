@@ -333,7 +333,7 @@ def delete_profile(argv: list[str]) -> int:
         return 1
     from . import generate
 
-    generate.write_guides(profiles.main())   # your AI's notes no longer list it
+    generate.write_guides(profiles.main(), saved_settings=True)   # your AI's notes no longer list it
     print(f"{p.name} is deleted. It's kept whole in {gone.where}: reelforge profiles restore "
           f"\"{p.name}\" brings it back.")
     return 0
@@ -364,7 +364,7 @@ def restore_profile(argv: list[str]) -> int:
         return 1
     from . import generate
 
-    generate.write_guides(profiles.main())   # your AI's notes list it again
+    generate.write_guides(profiles.main(), saved_settings=True)   # your AI's notes list it again
     print(f"{p.name} is back ({p.describe()}), as it was. Open it with: reelforge -p {p.slug}")
     return 0
 

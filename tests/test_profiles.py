@@ -533,6 +533,26 @@ class Deleting(Scratch):
         # oldest first, as ever: the one restored keeps the date it was made
         self.assertEqual([p.name for p in profiles.extra()], ["Tiny Worlds", "Cool Epic Facts"])
 
+    def test_deleting_and_restoring_a_channel_keep_settings_edited_by_hand_in_the_notes(self):
+        """The first channel's notes are written again when a channel goes or comes back, because they list every
+        channel. Written from the first-time answers, they said the answers' loudness while studio.toml, which the
+        pipeline reads and which invites edits by hand, said another."""
+        from studio.__main__ import main
+
+        self.onboard_main()
+        mine = self.root / "my-studio" / "studio.toml"
+        text = mine.read_text(encoding="utf-8")
+        self.assertIn("target_lufs = -25.5", text)
+        mine.write_text(text.replace("target_lufs = -25.5", "target_lufs = -24.0"), encoding="utf-8")
+        profiles.create("Cool Epic Facts")
+        for argv in (["profiles", "delete", "cool epic facts", "--yes"], ["profiles", "restore", "1"]):
+            with redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(main(argv), 0, out.getvalue())
+            notes = (self.root / "CLAUDE.md").read_text(encoding="utf-8")
+            self.assertIn("-24", notes, argv)
+            self.assertNotIn("-25.5", notes, argv)
+        self.assertIn("target_lufs = -24.0", mine.read_text(encoding="utf-8"))
+
     def test_the_commands_delete_and_restore_one(self):
         from studio.__main__ import main
 

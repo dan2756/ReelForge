@@ -558,7 +558,8 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
         try:
             from studio import generate
 
-            generate.write_guides(profiles.main())
+            # (from the settings as they are on file: studio.toml is yours to edit by hand)
+            generate.write_guides(profiles.main(), saved_settings=True)
         except Exception:
             pass  # notes for your AI, which `reelforge channel --regenerate` writes again too
 

@@ -244,6 +244,31 @@ class SetAccount(Scratch):
         generate.write_all(json.loads(P.ANSWERS.read_text(encoding="utf-8")))
         self.assertEqual(self.handles()["x"], "@np_x")
 
+    def test_settings_edited_by_hand_stay_when_an_account_is_connected_or_disconnected(self):
+        """studio.toml's own first line says "or edit them here". Connect on the Accounts tab wrote every file again
+        from the first-time answers, so a loudness set by hand went back to the answer's, in the settings the mixers
+        read and in your AI's notes."""
+        generate.write_all({"channel_name": "Night Physics", "about": "What-ifs.", "assistant": "claude",
+                            "platforms": ["tiktok", "youtube"], "handle_tiktok": "@np"})
+        text = P.SETTINGS.read_text(encoding="utf-8")
+        self.assertIn("target_lufs = -25.5", text)
+        P.SETTINGS.write_text(text.replace("target_lufs = -25.5", "target_lufs = -24.0")
+                              .replace("max_seconds = 75", "max_seconds = 70"), encoding="utf-8")
+        generate.set_account("x", "@np_x")      # Connect
+        generate.set_account("tiktok", "")      # Disconnect
+        s = settings.load(P.SETTINGS)
+        self.assertEqual((s["sound"]["target_lufs"], s["video"]["max_seconds"]), (-24.0, 70))
+        self.assertEqual((s["platforms"]["enabled"], s["platforms"]["handles"].get("x")),
+                         (["tiktok", "youtube", "x"], "@np_x"))   # ... and the account did change
+        self.assertFalse(s["platforms"]["handles"].get("tiktok"))
+        notes = (P.ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("-24", notes)             # your AI's notes say what the pipeline uses
+        self.assertNotIn("-25.5", notes)
+        self.assertEqual(self.handles(), {"tiktok": "", "youtube": "", "instagram": "", "x": "@np_x"})
+        # The channel's answers are a different thing: asked again (Change your answers), they are what counts.
+        generate.write_all(json.loads(P.ANSWERS.read_text(encoding="utf-8")))
+        self.assertEqual(settings.load(P.SETTINGS)["sound"]["target_lufs"], -25.5)
+
     def test_a_handle_typed_into_the_dashboard_settings_counts(self):
         generate.write_all({"channel_name": "Night Physics", "about": "What-ifs.", "assistant": "claude",
                             "platforms": ["tiktok"],

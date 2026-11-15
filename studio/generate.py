@@ -364,10 +364,12 @@ def _keep_yours(old: str, new: str, taken_out: list[str] | None = None) -> str:
     return new
 
 
-def write_all(answers: dict, profile=None) -> list[Path]:
+def write_all(answers: dict, profile=None, *, account_only: bool = False) -> list[Path]:
     """Validate the answers and write every file, for a profile (the one this process works on, by default). Returns
     the paths written. Raises ValueError on bad answers, or when a file can't be made right (the message says which),
-    before any file has changed."""
+    before any file has changed. account_only: nothing but a platform's handle changed in the answers (set_account),
+    so the settings on file stay as they are apart from the platforms: studio.toml invites edits by hand, and an
+    account connected on the Accounts tab must not put the first-time answers back over them."""
     w = _where(profile)
     first = not w.settings.exists()                     # first-time setup: the channel isn't set up yet
     a, problems = validate(answers)
@@ -383,6 +385,10 @@ def write_all(answers: dict, profile=None) -> list[Path]:
     # The answers file is often the one being read (my-studio/answers.json), with no date yet: today, then.
     a["_created"] = a.get("_created") or dt.date.today().isoformat()
     s = settings_from(a)
+    if account_only and w.settings.is_file():
+        saved = S.load(w.settings)   # (a typo in it is a SettingsError, a ValueError: nothing is written then)
+        s = {**saved, "platforms": {**saved["platforms"], "enabled": s["platforms"]["enabled"],
+                                    "handles": s["platforms"]["handles"]}}
     files: list[tuple[Path, str]] = []
 
     def out(path: Path, text: str):
@@ -425,7 +431,7 @@ def write_all(answers: dict, profile=None) -> list[Path]:
         P.write_atomic(*config)
         written.append(config[0])
     if not w.profile.main:
-        written += write_guides(profiles.main())  # the first channel's notes list this one
+        written += write_guides(profiles.main(), saved_settings=True)  # the first channel's notes list this one
     return written
 
 
@@ -480,6 +486,6 @@ def set_account(platform: str, handle: str) -> list[Path]:
         else:
             a.pop(f"handle_{p}", None)
     try:
-        return write_all(a)
+        return write_all(a, account_only=True)
     except ValueError:                                        # answers onboarding would ask about again first
         return dashboard_config.set_handle(platform, handle)
