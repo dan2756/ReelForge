@@ -62,6 +62,53 @@ function patch(id, change) {
   })
 }
 
+// chrome.storage.session is emptied when the browser closes or the extension is reloaded, and a job in the
+// middle of its work would then be forgotten here while the app still waits for it. So the few facts needed to
+// end such a job are also kept in chrome.storage.local, for as long as the job is live.
+let ledgerWork = Promise.resolve()
+
+// One change to that list at a time: two jobs reporting together must not write over each other.
+function ledger(change) {
+  ledgerWork = ledgerWork.then(async () => {
+    const all = (await local.get("ledger")).ledger || {}
+    change(all)
+    await local.set({ ledger: all })
+  }).catch(() => {})
+  return ledgerWork
+}
+
+function remember(job) {
+  return ledger(all => {
+    if (isLive(job)) {
+      all[job.id] = { port: job.port, app_id: job.app_id, profile_key: job.profile_key, platform: job.platform, state: job.state, pressed: job.pressedByPerson === true, at: Date.now() }
+    } else {
+      delete all[job.id]
+    }
+  })
+}
+
+// Called when the worker starts and on every tick: ends, at the app, each job this browser held when it was
+// closed. Nothing is picked up again. A job that had been pressed, or could have been, is "not sure".
+export async function orphans() {
+  const held = (await local.get("ledger")).ledger || {}
+  const install = await app.install()
+  for (const [id, entry] of Object.entries(held)) {
+    if (await getJob(id)) continue
+    const p = platformName(entry.platform)
+    const pressed = entry.state === "posting" || (entry.state === "ready" && entry.pressed)
+    const body = pressed
+      ? { install, state: "unknown", error_code: "unknown_outcome", error_message: `The browser was closed after Post was pressed on ${p}, before any confirmation. Check your profile before you post again.` }
+      : { install, state: "failed", error_code: "tab_closed", error_message: `The browser was closed, or the extension reloaded, ${entry.state === "ready" ? "before Post was pressed" : "before the post was ready"}. Nothing was posted.` }
+    try {
+      await withApp({ ...entry }, found => app.api(found, `/v1/jobs/${id}/event`, { method: "POST", body }))
+    } catch {
+      // ReelForge is not open. The news keeps for a day, then the app's own rules have long since applied.
+      if (Date.now() - entry.at < 24 * 60 * MINUTE) continue
+    }
+    await ledger(all => delete all[id])
+  }
+}
+
 const short = (text, limit = 300) => (text == null ? undefined : String(text).slice(0, limit))
 
 // ---- tabs and the alarm ------------------------------------------------------------------------------------
@@ -230,6 +277,7 @@ export function report(id, event) {
       next.outbox.push(wire)
     }
     await save(next)
+    if (next.state !== job.state) await remember(next)
     await flush(next)
     await save(next)
     return { ok: true }
@@ -302,6 +350,7 @@ async function startJob(found, id, front) {
     tabId: null, created: now, touched: now, outbox: [],
   }
   await save(job)
+  await remember(job)
   listenToTabs()
   await settle()
   if (!PLATFORMS[job.platform] || !allowedPage(job.platform, claimed.upload_url) || !(job.video.size > 0)) {
@@ -309,7 +358,11 @@ async function startJob(found, id, front) {
     return false
   }
   // The first tab of a batch comes to the front; the others load behind it.
-  const tab = await chrome.tabs.create({ url: claimed.upload_url, active: front })
+  const tab = await chrome.tabs.create({ url: claimed.upload_url, active: front }).catch(() => null)
+  if (!tab) {
+    await finish(id, "failed", "tab_closed", "The browser could not open a tab for this post. Nothing was posted.", "open_tab")
+    return false
+  }
   await patch(id, { tabId: tab.id })
   await report(id, { state: "opening", step: "open_tab" })
   // A page that finished loading before the tab id was saved has had no script yet.
@@ -360,7 +413,10 @@ export async function tabEvent(tabId, message) {
   if (message.attached === true) change.attached = true
   if (message.pressedByPerson === true) change.pressedByPerson = true
   if (message.paused) change.paused = { code: "wrong_account", seen: short(message.paused.seen, 60), expected: job.handle, at: Date.now() }
-  if (Object.keys(change).length) await patch(job.id, change)
+  if (Object.keys(change).length) {
+    const now = await patch(job.id, change)
+    if (now && change.pressedByPerson) await remember(now)
+  }
   if (message.account) await app.sawAccount(job.platform, message.account.signed_in === true, short(message.account.handle, 60))
   if (message.state !== undefined && !TAB_STATES.includes(message.state)) return { ok: false }
   if (message.state === undefined && message.step === undefined && message.detail === undefined) return { ok: true }
@@ -395,7 +451,8 @@ export async function tabPress(tabId) {
     return no("app_unreachable", "ReelForge is not running, so it could not allow the press.")
   }
   if (!res.ok || res.data?.ok !== true) return no(String(res.data?.error || "press_not_allowed"), String(res.data?.message || "ReelForge did not allow the press."))
-  await patch(job.id, { state: "posting", step: "press", progress: null, pressedAt: Date.now(), touched: Date.now(), port: job.port })
+  const now = await patch(job.id, { state: "posting", step: "press", progress: null, pressedAt: Date.now(), touched: Date.now(), port: job.port })
+  if (now) await remember(now)
   return { ok: true }
 }
 
@@ -465,6 +522,7 @@ export async function beat(found) {
 // The recovery path. Everything that normally happens on an event (a tab closing, a page reporting) is checked
 // again here, for the case where the worker or the browser was restarted and the event was lost.
 export async function tick() {
+  await orphans()
   const now = Date.now()
   for (const job of await allJobs()) {
     if (isLive(job)) await watch(job, now)
@@ -544,6 +602,7 @@ async function sync(job) {
         done: Date.now(), outbox: [],
       })
       await save(fresh)
+      await remember(fresh)
       await stopTab(fresh, "This post was ended in ReelForge.")
       return
     }

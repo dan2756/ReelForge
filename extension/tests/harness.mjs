@@ -45,9 +45,9 @@ export function ok(value, what) {
   if (!value) throw new Error(what)
 }
 
-// A fresh browser profile with the extension loaded from this folder, as "Load unpacked" would load it.
-export async function launch(site) {
-  const profile = mkdtempSync(join(tmpdir(), "reelforge-ext-"))
+// A browser with the extension loaded from this folder, as "Load unpacked" would load it. The profile is a
+// fresh one unless a test hands over the profile of a browser it closed, to start that browser again.
+export async function launch(site, profile = mkdtempSync(join(tmpdir(), "reelforge-ext-"))) {
   const context = await chromium.launchPersistentContext(profile, {
     channel: "chromium",
     headless: true,
@@ -58,11 +58,12 @@ export async function launch(site) {
   worker ||= await context.waitForEvent("serviceworker", { timeout: 15000 })
   const id = new URL(worker.url()).host
   const browser = {
-    context, id,
+    context, id, profile,
 
-    async close() {
+    // `keep` leaves the profile on disk, for a test that starts the same browser again.
+    async close(keep = false) {
       await context.close()
-      rmSync(profile, { recursive: true, force: true })
+      if (!keep) rmSync(profile, { recursive: true, force: true })
     },
 
     // The popup and the options page, opened as ordinary tabs so the tests can look inside them.

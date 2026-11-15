@@ -49,6 +49,10 @@ For each platform the extension then:
 Then it waits. When the platform shows its own sign that the post went out, ReelForge is told. The tab is left
 open.
 
+Keep the tab and the browser open until then. If a tab is closed, or the whole browser, ReelForge is told what
+state the post was in (the next time the browser opens, if need be), and nothing is ever picked up again by
+itself.
+
 It never touches "Made for kids", the altered-content question or who can see the video. On YouTube, if "Made for
 kids" or the visibility has no saved answer, it stops at that screen and says what is left. It never acts on a
 captcha or a verification: it stops and tells you.
@@ -81,7 +85,7 @@ you are asked. Nothing is ever pressed, attached or tried a second time.
 
 | Permission | Why |
 |---|---|
-| `storage` | Its pairing token, your "Press Post for me" switches, and the state of posts in progress. All of it stays in this browser. Nothing uses the browser's sync storage. |
+| `storage` | Its pairing token, your "Press Post for me" switches, and the state of posts in progress. All of it stays in this browser, where only the extension's own pages and worker can read it. Nothing uses the browser's sync storage. |
 | `alarms` | A check every 30 seconds while a post is under way (it picks a post back up after the browser restarts its background worker), and one every 5 minutes otherwise, so ReelForge can say this browser is connected. No alarm at all before the first pairing. |
 | `scripting` | Putting the platform script into a tab, and only into a tab the extension itself opened for a post you started. |
 | `http://127.0.0.1/*` | Talking to ReelForge on this computer (ports 47821 to 47830) and running on its two local pages, `/pair` and `/post/…`. Not `localhost`, and no other local page. |

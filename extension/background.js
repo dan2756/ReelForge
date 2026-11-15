@@ -5,6 +5,10 @@ import * as jobs from "./worker/jobs.js"
 import * as panel from "./worker/panel.js"
 import { PORTS } from "./shared/consts.js"
 
+// The pairing token and the settings are for the worker, the popup and the options page. The scripts that run
+// in web pages have no business reading them, so the browser is told not to let them.
+chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })
+
 chrome.runtime.onInstalled.addListener(() => jobs.settle())
 chrome.runtime.onStartup.addListener(() => jobs.settle())
 chrome.alarms.onAlarm.addListener(alarm => {
@@ -13,6 +17,7 @@ chrome.alarms.onAlarm.addListener(alarm => {
 chrome.runtime.onConnect.addListener(jobs.onConnect)
 jobs.listenToTabs()
 jobs.settle()
+jobs.orphans()
 
 // Who is asking. A message is only ever acted on for the kind of page it is allowed to come from.
 function sender(from) {

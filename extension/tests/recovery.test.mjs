@@ -1,5 +1,5 @@
 // What happens when something goes away mid-job: the tab, the page, the worker, the app.
-import { equal, ok, until, sleep, note } from "./harness.mjs"
+import { equal, ok, until, sleep, note, launch } from "./harness.mjs"
 import { toReady } from "./posting.test.mjs"
 
 const FINAL = "[data-e2e=post_video_button]"
@@ -163,6 +163,45 @@ export const tests = {
     await sleep(1500)
     equal(statuses, [], "worker starts while an ordinary tab opened, moved and closed")
     equal(await other.isClosed(), true, "the tab was really closed")
+  },
+
+  async "the browser closed mid-job: the app is told when the browser is next opened, and nothing is picked up again"(t) {
+    t.site.mode.tiktok = "slow"
+    t.site.mode.x = "mute"
+    equal(await t.browser.pair(t.app), "ok", "pairing")
+    const made = t.app.createBatch(t.video(), ["tiktok", "x"])
+    await t.browser.post(t.app, made.batch)
+    const [tiktok, x] = made.jobs
+    // X is ready and the person presses Post (this copy shows nothing after it); TikTok is still filling in.
+    await until(() => `X to be ready (it is ${x.state})`, () => x.state === "ready")
+    await (await t.browser.tab("x.com")).locator("[data-testid=tweetButton]").click()
+    await until("the press to be noticed", async () => (await t.browser.jobRecord(x.id)).pressedByPerson === true)
+    equal(tiktok.state, "filling", "TikTok's state")
+    // Closing the browser empties the extension's session storage. What the app knows stays as it was.
+    await t.browser.close(true)
+    equal([tiktok.state, x.state], ["filling", "ready"], "what the app knows while the browser is closed")
+    const again = await launch(t.site, t.browser.profile)
+    try {
+      await until(() => `TikTok to be ended (it is ${tiktok.state})`, () => tiktok.state === "failed", 20000)
+      await until(() => `X to be ended (it is ${x.state})`, () => x.state === "unknown", 20000)
+      equal([tiktok.error_code, tiktok.error_message], ["tab_closed", "The browser was closed, or the extension reloaded, before the post was ready. Nothing was posted."], "TikTok's ending")
+      equal(x.error_code, "unknown_outcome", "X's ending")
+      await sleep(700)
+      equal(t.app.requests("POST", /^\/v1\/jobs\/.*\/claim$/).length, 2, "claims")
+      equal(again.tabs("www.tiktok.com").length + again.tabs("x.com").length, 0, "upload tabs opened by the new browser")
+      equal((await again.storage("local")).ledger, {}, "nothing is left to tell")
+    } finally {
+      await again.close()
+    }
+  },
+
+  async "the 30 second check takes the app's word with no popup open"(t) {
+    const { job, tab } = await toReady(t, "tiktok", t.video())
+    for (const page of t.browser.context.pages()) if (page.url().startsWith("chrome-extension://")) await page.close()
+    Object.assign(job, { state: "cancelled", detail: "cancelled in ReelForge" })
+    // Nothing asks the worker anything now. Only its alarm can bring the news.
+    await until("the note to say so", async () => (await note(tab)).line === "Stopped", 45000)
+    equal((await note(tab)).more, "This post was ended in ReelForge.", "what the note says")
   },
 
   async "a post ended in ReelForge stops the tab's work"(t) {
