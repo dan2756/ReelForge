@@ -95,6 +95,21 @@ class ThePages(unittest.TestCase):
         for guide in ("docs/EXTENSION.md", "docs/YOUTUBE-API.md"):
             self.assertTrue((KIT / guide).is_file(), guide)
 
+    def test_the_extensions_guide_calls_the_windows_buttons_what_the_window_calls_them(self):
+        guide = flat((KIT / "docs" / "EXTENSION.md").read_text(encoding="utf-8"))
+        window = "".join((KIT / "ui" / "src" / "dashboard" / name).read_text(encoding="utf-8")
+                         for name in ("Posting.tsx", "Publish.tsx")) + " ".join(posting_tab.LABELS.values())
+        for label in ("Post…", "Start", "BY HAND", "Set it up", "Set up…", "Connect a browser",
+                      "Connect another browser", "Browsers…", "Show the extension folder", "Disconnect",
+                      "Stop before the Post button", "Try again", "Cancel", "It's posted", "It didn't post", "Open",
+                      "Post again…"):
+            self.assertIn(f"**{label}**", guide, label)
+            self.assertIn(label, window, label)
+        for words in ("POST", "BROWSER EXTENSION"):   # a heading and a dialog's title, as the window writes them
+            self.assertIn(words, guide)
+            self.assertIn(words, window)
+        self.assertNotIn("by-hand button", guide)
+
     def test_neither_optional_way_is_said_to_work_on_the_live_sites(self):
         # They are tested against copies of the upload pages and a stand-in for Google. A page that names one says
         # so, or sends you to the guide that does.
