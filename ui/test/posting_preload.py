@@ -14,7 +14,8 @@ it starts (REELFORGE_BRIDGE_PRELOAD). What a test asks for comes in REELFORGE_TE
   logged_in    the platforms ReelForge's own browser is logged in to (they read their stats through it)
   needs_login  the platforms still waiting for their one log-in there (nothing reads them yet: Type in stats)
   was          {platform: "@old"}: stats that platform was read under before its handle changed
-  job_problem  true: the hourly job's last read had a problem (the Settings tab's Background refresh row)
+  job_problem  true: the hourly job is on (made up, as in job_preload.py) and its last read had a problem (the
+               Settings tab's Background refresh row, which says nothing of a job that is off)
   fail         an RPC that raises (or a list of them), to see what the window makes of a call that failed
 
 Nothing here touches this computer or the network. No browser opens: each page that would is listed in
@@ -38,9 +39,11 @@ from dashboard.platforms import Account, Platform, Post, browser
 from dashboard.service import Dashboard
 from studio.bridge import rpc
 
-runpy.run_path(str(Path(__file__).with_name("settings_preload.py")), run_name="preload")
-ROOT = Path(os.environ["REELFORGE_TEST_ROOT"]).resolve()
 ASKED = json.loads(os.environ.get("REELFORGE_TEST_POSTING") or "{}")
+# (job_preload.py is settings_preload.py's channel too, on a computer whose hourly job is made up and switched on)
+runpy.run_path(str(Path(__file__).with_name("job_preload.py" if ASKED.get("job_problem") else "settings_preload.py")),
+               run_name="preload")
+ROOT = Path(os.environ["REELFORGE_TEST_ROOT"]).resolve()
 NAMES = {"tiktok": "TikTok", "youtube": "YouTube", "instagram": "Instagram", "x": "X"}
 COLORS = {"tiktok": "#25f4ee", "youtube": "#ff4040", "instagram": "#b46cff", "x": "#e7e9ea"}
 CHROME = "install-chrome"

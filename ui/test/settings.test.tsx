@@ -531,14 +531,15 @@ describe("Background refresh on a channel that's set up", () => {
   })
 
   test("a problem with the hourly job's last read is drawn as a warning, and can be read to its end", async () => {
-    // (ui/test/posting_preload.py: the same channel, with the hourly job's last read marked as having had a problem)
+    // (ui/test/posting_preload.py: the same channel, its hourly job switched on and that job's last read marked as
+    // having had a problem. Of a job that is off the row says nothing: its last read is old news.)
     tmp = mkdtempSync(join(tmpdir(), "reelforge-job-"))
     const h = (open = await headless("dashboard", { tab: "settings" }, 84, 66, {
       REELFORGE_BRIDGE_PRELOAD: join(ROOT, "ui", "test", "posting_preload.py"),
       REELFORGE_TEST_ROOT: tmp,
       REELFORGE_TEST_POSTING: JSON.stringify({ job_problem: true }),
     }))
-    await until(h, "had a problem (see data/refresh.log)")
+    await until(h, "its last read, 0m ago, had a problem")
     const hex = (c: { toInts(): [number, number, number, number] }) => "#" + c.toInts().slice(0, 3).map((v) => v.toString(16).padStart(2, "0")).join("")
     /** The colour of the text on the row that has these words. */
     const colour = (words: string) => {
@@ -549,10 +550,11 @@ describe("Background refresh on a channel that's set up", () => {
     expect(colour("closes ReelForge and opens it again")).toBe(DASH.muted) // a row with nothing wrong
     // In a window too narrow for it, the warning goes on under itself instead of being cut at the panel's edge.
     const rows = frame(h).split("\n")
-    const y = find(h, "its last read, 0m ago, had a problem (see data/refresh.log)")![1]
+    const y = find(h, "its last read, 0m ago, had a problem")![1]
     expect(rows[y - 1]).toContain("Background refresh")
-    expect(rows[y + 1]).toContain("STUDIO_DRY_SYSTEM)") // its end, on the next row
-    expect(colour("STUDIO_DRY_SYSTEM)")).toBe(DASH.warn)
+    const said = rows.slice(y, y + 3).map((r) => r.replace("┃", "").trim()).join(" ")
+    expect(said.replace("data/ ", "data/")).toBe("its last read, 0m ago, had a problem (see data/refresh.log) · on: your stats update every hour, even with ReelForge closed")
+    expect(colour("even with ReelForge closed")).toBe(DASH.warn) // its end, two rows down
   })
 })
 
