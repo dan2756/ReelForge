@@ -11,6 +11,9 @@ for Google on the computer it was built on. It has never uploaded a video to Goo
 trial: leave it private, and check it in YouTube Studio. The last section of this page says exactly what has been
 tested and how.
 
+ReelForge's window does not have buttons for it yet. What is behind them is built and tested, and the command
+below already connects and disconnects. Where this page says "in the window", that part is still to come.
+
 ## What it is, and who it is for
 
 - It is the official way to upload: the same API that upload tools and schedulers use. Nothing is typed into a
@@ -18,8 +21,8 @@ tested and how.
 - It runs on a Google Cloud project that you make yourself, with a sign-in client that is yours. Nothing is
   ReelForge's at Google, nothing is shared between ReelForge users, and nothing goes through a server of
   ReelForge's. There is none.
-- It asks Google for one permission: uploading videos to your channel. It cannot read your account, see your
-  other videos, or delete anything.
+- It asks Google for one permission: uploading to your channel. With it ReelForge cannot read your account, list
+  your videos, change a video or delete one.
 - It is for one person posting to their own channel. Setting it up takes about fifteen minutes in Google Cloud,
   once.
 - It is not a bot. A post starts only when you press it in ReelForge's window. Your AI cannot start one: there is
@@ -54,7 +57,7 @@ Keep the file out of any folder you share or commit. ReelForge's own `.gitignore
 
 ## Connect ReelForge
 
-In ReelForge's window, connect YouTube's API and pick the file. Or run:
+Run this, with the file you downloaded (ReelForge's window will offer the same):
 
 ```
 reelforge youtube-api connect path/to/client_secret_....json
@@ -140,7 +143,7 @@ them has been confirmed by an upload.
 | The sign-in ends after 7 days | While your consent screen is in Testing, Google ends the sign-in after 7 days and ReelForge says "connect again". | excerpt |
 | The warning on Google's page | Google shows "Google hasn't verified this app" for a project it has not reviewed. An app that only you use does not need the review. | excerpt |
 | Size | A file can be up to 256 GB. | read |
-| The permission | Uploading needs only `youtube.upload`. Reading your account or changing a video later would need more, and ReelForge does not ask for it. | read |
+| The permission | Uploading needs only `youtube.upload`. Google's description gives that permission four calls: uploading a video, and setting a thumbnail, a channel banner and a watermark, which ReelForge never does. Reading your account, listing, changing or deleting videos need more, and ReelForge does not ask for it. | read |
 
 Because the "private only" rule changed weeks before this was built, and no upload has confirmed the change,
 **ReelForge reads the result back every time.** If you asked for public and YouTube stored the video as private,
@@ -296,4 +299,5 @@ Not verified:
 - The steps in Google Cloud, on a real screen.
 - The limits marked "excerpt".
 - Windows and macOS. The tests ran on Linux.
-- The window. Its Python side is built and tested; the window does not show this yet.
+- The window. Its Python side is built and tested, and was driven from start to finish the way the window would
+  drive it, against the stand-in. The window itself does not show this yet.
