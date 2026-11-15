@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import codecs
 import json
+import os
 import re
 import shutil
 import threading
@@ -201,15 +202,26 @@ def get_token(platform: str) -> dict | None:
 
 
 def set_token(platform: str, data: dict | None) -> None:
-    """Store (or with None, forget) an entry, such as "browser:instagram" once you've logged in to Instagram."""
+    """Store (or with None, forget) an entry, such as "browser:instagram" once you've logged in to Instagram.
+
+    Every ReelForge window and the hourly job keep their log-ins in this one file, so they take turns writing it
+    (a lock file beside it, as for the stats reads): two of them reading it at the same moment would each save
+    without the other's change. Each also writes through a temporary file of its own."""
+    from .sync import ReadLock  # here, not at the top: sync loads the platforms, which load this module
+
+    path = tokens_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     with _tokens_lock:
-        tokens = _read_tokens()
-        if data is None:
-            tokens.pop(platform, None)
-        else:
-            tokens[platform] = data
-        path = tokens_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(tokens, indent=2), "utf-8")
-        tmp.replace(path)
+        turn = ReadLock(path.with_suffix(".lock"))
+        turn.acquire(wait=5)  # still taken after that: written anyway, as it always was
+        try:
+            tokens = _read_tokens()
+            if data is None:
+                tokens.pop(platform, None)
+            else:
+                tokens[platform] = data
+            tmp = path.with_name(f"{path.stem}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(tokens, indent=2), "utf-8")
+            tmp.replace(path)
+        finally:
+            turn.release()

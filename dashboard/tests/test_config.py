@@ -5,6 +5,9 @@ either read, or refused with a message that names what to fix."""
 from __future__ import annotations
 
 import codecs
+import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +18,7 @@ from dashboard import config, switcher, sync
 from dashboard.platforms import YouTube
 from studio import dashboard_config
 
+ROOT = Path(__file__).resolve().parents[2]
 TEXT = 'videos_dir = "vidéos"\nrefresh_minutes = 45\n\n[tiktok]\nhandle = "@mine"\n'
 
 
@@ -104,9 +108,9 @@ class Kinds(ConfigTest):
         self.assertEqual(config.load_config()["refresh_minutes"], 0)
 
     def test_a_value_of_the_wrong_kind_is_named(self):
-        for line, key in (('refresh_minutes = "often"', "refresh_minutes"), ("refresh_minutes = true", "refresh_minutes"),
-                          ("videos_dir = 5", "videos_dir"), ("completed_dir = ['a']", "completed_dir"),
-                          ("default_tags = 3", "default_tags")):
+        for line, key in (('refresh_minutes = "often"', "refresh_minutes"),
+                          ("refresh_minutes = true", "refresh_minutes"), ("videos_dir = 5", "videos_dir"),
+                          ("completed_dir = ['a']", "completed_dir"), ("default_tags = 3", "default_tags")):
             self.saved(line + "\n")
             said = self.refused()
             self.assertTrue(said.startswith(f"{key} in config.toml should be "), said)
@@ -118,6 +122,25 @@ class Kinds(ConfigTest):
         for value, minutes in (("30", 30), ("soon", 30), (None, 30), (float("nan"), 0), (float("inf"), 0), (0, 0)):
             self.assertEqual(sync.gap_minutes(youtube, {"refresh_minutes": value}, manual=False), minutes, value)
         self.assertEqual(sync.gap_minutes(youtube, {}, manual=False), 30)
+
+
+class Tokens(unittest.TestCase):
+    def test_windows_and_the_hourly_job_dont_lose_each_others_log_ins(self):
+        """tokens.json is one file for every ReelForge on a profile. Three of them writing at once used to overwrite
+        each other's entries (each read the file, added its own and saved), or trip over one shared temporary
+        file."""
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "tokens.json"
+        script = ("import sys\nfrom pathlib import Path\nfrom dashboard import config\n"
+                  "config.TOKENS_PATH = Path(sys.argv[1])\n"
+                  "for i in range(8):\n    config.set_token(f'{sys.argv[2]}:{i}', {'since': i})\n")
+        writers = [subprocess.Popen([sys.executable, "-c", script, str(path), name], cwd=ROOT)
+                   for name in ("window", "another-window", "job")]
+        self.assertEqual([w.wait(60) for w in writers], [0, 0, 0])
+        tokens = json.loads(path.read_text("utf-8"))
+        self.assertEqual(len(tokens), 24, sorted(tokens))
+        self.assertEqual([f.name for f in path.parent.iterdir() if f.suffix == ".tmp"], [])
 
 
 if __name__ == "__main__":
