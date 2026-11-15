@@ -85,7 +85,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("episode", type=Path)
     ap.add_argument("--steps", default="all")
-    ap.add_argument("--stills", default="", help="comma-separated seconds for preview stills")
+    ap.add_argument("--stills", default="", help="comma-separated seconds for preview stills, or `lines`: every "
+                    "story line's start and end, both sides of each cut, and the cover")
     ap.add_argument("--rerender", default="", metavar="all|SECONDS",
                     help="render: all frames again, or only these seconds (12-15.5,31-33) keeping the rest")
     ap.add_argument("--keep-frames", action="store_true",
@@ -119,6 +120,8 @@ def main():
         # a wrong line, a missing HUD number or sound, or a caption that breaks the rules stops here, in seconds,
         # instead of after the render and the compose
         run([sys.executable, config.PIPELINE / "qa.py", ep, "--lint"])
+    if args.stills.strip() == "lines":      # the preset: the seconds where a story line can sit over the wrong shot
+        args.stills = ",".join(f"{s:g}" for s in line_times(spec, build))
 
     if "stills" in steps:
         secs = [float(s) for s in args.stills.split(",") if s] or spec.get("preview_times") or \
@@ -128,6 +131,9 @@ def main():
         fresh_stills(build, built_scene(build, spec, "stills"), {int(n) for n in frames.split(",")})
         run([config.BLENDER, "-b", build / "scene.blend", "-o", build / "stills" / "s_####", "-F", "JPEG",
              "-f", frames], log=build / "stills.log")
+        # the same seconds with the text and HUD drawn on, and a labelled contact sheet of them, in build/preview
+        run([sys.executable, config.PIPELINE / "post" / "compose.py", ep, "--preview",
+             ",".join(f"{s:g}" for s in secs)])
 
     if "render" in steps:
         run([sys.executable, config.PIPELINE / "qa.py", ep, "--lint"])
@@ -217,6 +223,25 @@ def built_scene(build, spec, step):
         raise SystemExit(f"{step}: {', '.join(old)} changed after the scene was built, so build/scene.blend "
                          "still shows it as it was. Run --steps build first.")
     return stamp
+
+
+def line_times(spec, build):
+    """The seconds of `--stills lines`: each story line just after it has faded in and just before it goes, each
+    cut from both sides (the effect lists its cuts in build/series.json), and the cover's frame. These are where a
+    line ends up over the wrong shot, which is cheaper to see on stills than after the render."""
+    times = set()
+    for start, end, *_ in spec.get("lines", []):
+        times |= {min(start + 0.45, end), max(end - 0.2, start)}
+    try:
+        events = json.loads((build / "series.json").read_text(encoding="utf-8")).get("events")
+    except (OSError, ValueError):
+        events = None
+    for cut in (events.get("cuts", []) if isinstance(events, dict) else []):
+        times |= {cut - 0.1, cut + 0.1}
+    if spec.get("cover"):
+        times.add(spec["cover"]["time"])
+    last = (int(round(spec["render_until"] * spec["fps"])) - 1) / spec["fps"]      # the last frame Blender renders
+    return sorted({round(t, 2) for t in times if 0 <= t <= last})
 
 
 def fresh_stills(build, stamp, numbers):

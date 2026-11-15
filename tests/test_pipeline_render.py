@@ -33,6 +33,7 @@ class Steps(unittest.TestCase):
         self.spec = {"id": "ep01_test", "title": "What if a duck doubled?", "fps": FPS, "duration": SECONDS,
                      "render_until": SECONDS, "world": {"type": "street"}, "effect": {"type": "grow"}, "lines": []}
         self.passes = 0             # how many times Blender was started
+        self.others = []            # the other commands the steps ran (compose, qa), as lists of words
         self.lost = []              # per pass: the frames that pass fails to write
         self.exit = []              # per pass: the code Blender exits with
         for patch in (mock.patch.object(make_episode, "run", self.blender),
@@ -47,7 +48,9 @@ class Steps(unittest.TestCase):
         """What `blender -b scene.blend -a` and `... -f 1,2` leave on disk."""
         cmd = [str(c) for c in cmd]
         if cmd[0] != "blender":
+            self.others.append([Path(c).name if c.endswith(".py") else c for c in cmd[1:]])
             return
+        self.blender_cmd = cmd
         self.passes += 1
         lost = self.lost.pop(0) if self.lost else set()
         if "-a" in cmd:
@@ -126,6 +129,27 @@ class Stills(Steps):
         with self.assertRaisesRegex(SystemExit, r'stills: episode.json "effect" changed after the scene was built'):
             self.main("--steps", "stills", "--stills", "1")
         self.assertEqual(self.passes, 0)
+
+    def test_the_stills_are_previewed_with_the_text_on(self):
+        self.built()
+        self.main("--steps", "stills", "--stills", "0.5,2")
+        self.assertEqual(self.blender_cmd[self.blender_cmd.index("-f") + 1], "6,21")
+        self.assertEqual(self.others, [["compose.py", str(self.ep), "--preview", "0.5,2"]])
+
+    def test_the_lines_preset_looks_where_a_line_can_be_over_the_wrong_shot(self):
+        self.spec["lines"] = [[0.2, 1.4, "You are a duck."], [1.6, 2.8, "A bigger duck."], [2.7, 4.0, "Past the end."]]
+        self.spec["cover"] = {"time": 1.0}
+        self.built()
+        (self.build / "series.json").write_text(json.dumps({"events": {"cuts": [1.5]}}), encoding="utf-8")
+        times = [0.65, 1.0, 1.2, 1.4, 1.6, 2.05, 2.6]       # 0.2+0.45, cover, 1.4-0.2, cut-0.1, cut+0.1, 1.6+0.45, 2.8-0.2
+        self.assertEqual(make_episode.line_times(self.spec, self.build), times)
+        self.main("--steps", "stills", "--stills", "lines")
+        self.assertEqual(self.blender_cmd[self.blender_cmd.index("-f") + 1], "7,11,13,15,17,21,27")
+        self.assertEqual(self.others[-1][-1], "0.65,1,1.2,1.4,1.6,2.05,2.6")
+
+    def test_the_lines_preset_works_without_cuts_or_a_build_folder_full_of_data(self):
+        self.spec["lines"] = [[0.2, 0.5, "Short."]]
+        self.assertEqual(make_episode.line_times(self.spec, self.build), [0.3, 0.5])
 
 
 class RenderGuard(Steps):

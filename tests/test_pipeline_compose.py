@@ -159,5 +159,83 @@ class FrameGuard(Composing):
             compose.make_cover(self.episode())
 
 
+class Preview(Composing):
+    """compose.py --preview: text over whatever picture there is, before the render as well as after it."""
+
+    COLOURS = {"frame": (40, 90, 160), "still": (200, 40, 40), "grey": (96, 96, 96)}
+
+    def still(self, numbers, stamped=True):
+        (self.build / "stills").mkdir(exist_ok=True)
+        for n in numbers:
+            Image.new("RGB", (54, 96), self.COLOURS["still"]).save(self.build / "stills" / f"s_{n:04d}.jpg")
+        if stamped:
+            framecache.write_stamp(self.build / "stills" / framecache.STAMP, self.stamp())
+
+    def preview(self, *seconds):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            compose.make_preview(self.episode(), list(seconds))
+        return out.getvalue()
+
+    def picture(self, second):
+        """Which picture the preview of that second was drawn over, by its colour."""
+        r, g, b = Image.open(self.build / "preview" / f"p_{second:06.2f}.jpg").convert("RGB").getpixel((5, 5))
+        return min(self.COLOURS, key=lambda k: sum(abs(a - c) for a, c in zip(self.COLOURS[k], (r, g, b))))
+
+    def test_before_the_render_it_draws_over_stills_and_grey_instead_of_failing(self):
+        self.built()
+        self.still([6])
+        out = self.preview(0.5, 1.5)
+        self.assertEqual((self.picture(0.5), self.picture(1.5)), ("still", "grey"))
+        self.assertIn("0.5 s: not rendered yet, drawn over the still", out)
+        self.assertIn("1.5 s: no picture yet, drawn over grey (--steps stills --stills 1.5 renders them)", out)
+        self.assertTrue((self.build / "preview" / "sheet_1.jpg").exists())
+
+    def test_a_rendered_frame_is_preferred_to_its_still(self):
+        self.built()
+        self.rendered([6])
+        self.still([6, 16])
+        out = self.preview(0.5, 1.5)
+        self.assertEqual((self.picture(0.5), self.picture(1.5)), ("frame", "still"))
+        self.assertNotIn("0.5 s", out)
+
+    def test_pictures_of_an_older_scene_are_not_previewed_over(self):
+        self.built()
+        self.rendered([6])
+        self.still([6])
+        self.spec["world"]["type"] = "plaza"
+        self.built()
+        out = self.preview(0.5)
+        self.assertEqual(self.picture(0.5), "grey")
+        self.assertIn("the pictures in build/frames are of an older scene, so they were not used", out)
+        self.assertIn("the pictures in build/stills are of an older scene", out)
+
+    def test_an_empty_frame_is_not_a_picture(self):
+        self.built()
+        self.rendered([6])
+        (self.frames / "f_0006.jpg").write_bytes(b"")
+        self.preview(0.5)
+        self.assertEqual(self.picture(0.5), "grey")
+
+    def test_an_earlier_rounds_previews_are_cleared(self):
+        self.built()
+        self.preview(*[n / 10 for n in range(13)])
+        self.assertEqual(len(list((self.build / "preview").glob("p_*.jpg"))), 13)
+        self.assertEqual(sorted(p.name for p in (self.build / "preview").glob("sheet_*.jpg")),
+                         ["sheet_1.jpg", "sheet_2.jpg"])                      # 12 to a sheet
+        self.preview(0.5)
+        self.assertEqual(sorted(p.name for p in (self.build / "preview").iterdir()), ["p_000.50.jpg", "sheet_1.jpg"])
+
+    def test_each_tile_is_labelled_with_what_it_shows(self):
+        self.spec["lines"] = [[0.2, 1.4, "You are a duck."]]
+        (self.build / "series.json").write_text(json.dumps({"fps": FPS, "frames": TOTAL, "events": {"cuts": [1.5]}}),
+                                                encoding="utf-8")
+        ep = self.episode()
+        self.assertEqual(compose.sheet_label(ep, 0.65), ("0.65 s", "You are a duck."))
+        self.assertEqual(compose.sheet_label(ep, 1.4), ("1.40 s  [cut at 1.5]", ""))
+        ep.stand_in = "grey"
+        self.assertEqual(compose.sheet_label(ep, 1.0), ("1.00 s  [cover]  [no picture yet]", "You are a duck."))
+
+
 if __name__ == "__main__":
     unittest.main()

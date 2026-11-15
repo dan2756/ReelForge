@@ -3,6 +3,10 @@
   python pipeline/post/compose.py <episode_dir> --video
   python pipeline/post/compose.py <episode_dir> --cover
   python pipeline/post/compose.py <episode_dir> --preview 5,22,47,67,75   (writes build/preview/*.jpg)
+
+--preview draws the text and HUD at those seconds over the rendered frame, or the still of that frame when it is not
+rendered yet, or flat grey when there is neither, and writes labelled contact sheets of them (build/preview/
+sheet_N.jpg, 12 to a sheet). So the lines can be checked against their shots before the render.
 """
 import argparse
 import json
@@ -13,7 +17,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config  # noqa: E402
@@ -136,6 +140,8 @@ class Episode:
         overlay.HUD_PANEL = bool(hud_style.get("panel", False))
         overlay.HUD_BRAND = bool(hud_style.get("show_brand", False))
         self._prev_value = None
+        self.pictures = None      # preview mode: the folders world() may take a picture from (see previewing)
+        self.stand_in = None      # preview mode: "still" or "grey" when the last picture was not a rendered frame
         layout = self.spec.get("layout", {})
         self.line_y = layout.get("line_y", overlay.LINE_Y)        # a number, or [[t, y], ...] to follow the shot
         overlay.TITLE_Y = layout.get("title_y", overlay.TITLE_Y)
@@ -185,10 +191,33 @@ class Episode:
             raise SystemExit(f"{step}: {framecache.describe(gone, self.fps)} {verb} not rendered. "
                              "Run --steps render (it carries on with what is missing).")
 
+    def previewing(self):
+        """Switch to preview mode: where a frame is not rendered yet world() takes the still of that frame, and
+        where there is no still either a flat grey, so text can be placed before the render. Pictures of an older
+        scene are left out, frames and stills alike: text placed over the old shot would only mislead. Returns the
+        folders that were left out."""
+        build = self.dir / "build"
+        self.pictures, older = [], []
+        for folder, prefix in (("frames", "f"), ("stills", "s")):
+            state = framecache.frames_state(build, folder, f"{prefix}_*.jpg")[0]
+            if state in ("changed", "unstamped", "unbuilt"):
+                older.append(folder)
+            elif state != "none":
+                self.pictures.append((build / folder, prefix))
+        return older
+
     def world(self, idx):
         """Rendered frame (0-based index) as an RGB array, or black past the render range."""
         if idx >= self.rendered:
             return np.zeros((H, W, 3), np.uint8)
+        if self.pictures is not None:
+            for folder, prefix in self.pictures:
+                p = folder / f"{prefix}_{idx + 1:04d}.jpg"
+                if framecache.whole(p):
+                    self.stand_in = "still" if prefix == "s" else self.stand_in
+                    return np.asarray(Image.open(p).convert("RGB"))
+            self.stand_in = "grey"
+            return np.full((H, W, 3), 96, np.uint8)
         p = self.frames_dir / f"f_{idx + 1:04d}.jpg"
         if not p.exists() or p.stat().st_size == 0:
             raise FileNotFoundError(f"missing render {p}")
@@ -330,6 +359,63 @@ def make_cover(ep):
     print(f"  wrote {out}")
 
 
+def sheet_label(ep, s):
+    """Two short rows of text for a preview's tile: its second and what it is there to show (a cut, the cover, a
+    stand-in picture), then the story line that is on screen."""
+    marks = []
+    events = ep.series.get("events")
+    marks += [f"cut at {c:g}" for c in (events.get("cuts", []) if isinstance(events, dict) else [])
+              if abs(s - c) <= 0.11]
+    if ep.spec.get("cover") and abs(s - ep.spec["cover"]["time"]) < 0.005:
+        marks.append("cover")
+    if ep.stand_in:
+        marks.append("still" if ep.stand_in == "still" else "no picture yet")
+    line = next((text for start, end, text, *_ in ep.spec.get("lines", []) if start <= s < end), "")
+    return f"{s:.2f} s" + "".join(f"  [{m}]" for m in marks), line
+
+
+def make_preview(ep, seconds):
+    """build/preview/p_<second>.jpg for each second, with everything the video draws over the picture, and labelled
+    contact sheets of them."""
+    out = ep.dir / "build" / "preview"
+    out.mkdir(exist_ok=True)
+    for old in [*out.glob("p_*.jpg"), *out.glob("sheet_*.jpg")]:
+        old.unlink()        # an earlier round's previews would sit beside these looking just as current
+    older = ep.previewing()
+    tw, th, strip, per = 270, 480, 54, 12
+    fnt = overlay.font(config.FONT_MONO, 15)
+    tiles, stood_in = [], {"still": [], "grey": []}
+    for s in seconds:
+        ep.stand_in = None
+        img = ep.frame(int(round(s * ep.fps)))
+        img.save(out / f"p_{s:06.2f}.jpg", quality=90)
+        if ep.stand_in:
+            stood_in[ep.stand_in].append(f"{s:g}")
+        tiles.append((img.resize((tw, th)), sheet_label(ep, s)))
+    sheets = []
+    for k in range(0, len(tiles), per):
+        chunk = tiles[k:k + per]
+        sheet = Image.new("RGB", (4 * tw, -(-len(chunk) // 4) * (th + strip)), (16, 16, 16))
+        d = ImageDraw.Draw(sheet)
+        for i, (tile, (head, line)) in enumerate(chunk):
+            x, y = (i % 4) * tw, (i // 4) * (th + strip)
+            sheet.paste(tile, (x, y))
+            d.text((x + 6, y + th + 6), head, font=fnt, fill=(255, 210, 80))
+            while line and fnt.getlength(line) > tw - 12:
+                line = line[:-2].rstrip() + "…"
+            d.text((x + 6, y + th + 28), line, font=fnt, fill=(235, 235, 235))
+        sheets.append(out / f"sheet_{len(sheets) + 1}.jpg")
+        sheet.save(sheets[-1], quality=88)
+    print(f"  wrote {len(tiles)} previews to {out}, on {', '.join(p.name for p in sheets)}")
+    for folder in older:
+        print(f"  note: the pictures in build/{folder} are of an older scene, so they were not used")
+    if stood_in["still"]:
+        print(f"  {', '.join(stood_in['still'])} s: not rendered yet, drawn over the still")
+    if stood_in["grey"]:
+        print(f"  {', '.join(stood_in['grey'])} s: no picture yet, drawn over grey "
+              f"(--steps stills --stills {','.join(stood_in['grey'])} renders them)")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("episode", type=Path)
@@ -340,17 +426,12 @@ def main():
     if args.video or args.cover:
         config.require_ffmpeg()
     ep = Episode(args.episode.resolve())
-    if args.preview:
-        d = ep.dir / "build" / "preview"
-        d.mkdir(exist_ok=True)
-        for s in args.preview.split(","):
-            idx = int(round(float(s) * ep.fps))
-            ep.frame(idx).save(d / f"p_{float(s):05.1f}.jpg", quality=90)
-        print(f"  wrote previews to {d}")
     if args.video:
         make_video(ep)
     if args.cover:
         make_cover(ep)
+    if args.preview:        # last: it switches the episode to stand-in pictures
+        make_preview(ep, [float(s) for s in args.preview.split(",") if s.strip()])
 
 
 if __name__ == "__main__":

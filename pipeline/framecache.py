@@ -185,7 +185,7 @@ def number(path):
     return int(m.group(1)) if m else None
 
 
-def _whole(path):
+def whole(path):
     """A JPEG that was written to its end. A render that was killed leaves the frame it was on empty (Blender makes
     the file first) or cut off; picture data never holds the end marker FF D9, so its last bytes tell."""
     try:
@@ -203,7 +203,7 @@ def sweep_empty(folder, pattern="f_*.jpg"):
     disk, so one of these would never be rendered again."""
     gone = []
     for f in sorted(Path(folder).glob(pattern)):
-        if not _whole(f):
+        if not whole(f):
             try:
                 f.unlink()
                 gone.append(f)
