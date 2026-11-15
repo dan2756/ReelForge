@@ -60,7 +60,7 @@ export const tests = {
     equal((await note(tab)).line, "Posted", "the note after posting")
     equal(await noteOpenToPage(tab), false, "the page's own scripts can read the note")
     // An assisted post that went through is what unlocks "press Post for me" for the platform.
-    ok(t.app.pressUnlocked.has("tiktok"), "press unlocked after an assisted post")
+    ok(t.app.unlocked("tiktok"), "press unlocked after an assisted post")
   },
 
   async "YouTube: follows the redirect into Studio, fills title and description, leaves the audience and visibility alone"(t) {
@@ -136,7 +136,7 @@ export const tests = {
     await until(() => `the job to end (it is ${job.state})`, () => job.state !== "ready", 30000)
     equal([job.state, job.error_code], ["unknown", "unknown_outcome"], "state and code")
     ok(job.error_message.includes("did not see Post being pressed"), `message (${job.error_message})`)
-    equal([await tab.evaluate(() => window.fixture?.clicks ?? 0), t.app.pressUnlocked.has("tiktok")], [0, false], "presses, and whether the press was unlocked")
+    equal([await tab.evaluate(() => window.fixture?.clicks ?? 0), t.app.unlocked("tiktok")], [0, false], "presses, and whether the press was unlocked")
   },
 
   async "TikTok: the same page reached without a load, and without a press, is not posted either"(t) {
@@ -146,7 +146,7 @@ export const tests = {
       document.getElementById("app").innerHTML = "<h1>Posts</h1><p>No posts yet</p>"
     })
     await until(() => `the job to end (it is ${job.state})`, () => job.state !== "ready", 30000)
-    equal([job.state, job.error_code, t.app.pressUnlocked.has("tiktok")], ["unknown", "unknown_outcome", false], "state, code and the press lock")
+    equal([job.state, job.error_code, t.app.unlocked("tiktok")], ["unknown", "unknown_outcome", false], "state, code and the press lock")
     equal((await note(tab)).line, "Not sure it posted", "the note")
   },
 
@@ -158,7 +158,7 @@ export const tests = {
     equal((await t.browser.jobRecord(job.id)).pressedByPerson === true, false, "a press was noticed")
     await tab.evaluate(() => document.querySelector("ytcp-app").shadowRoot.querySelector("ytcp-uploads-dialog").remove())
     await sleep(3500)
-    equal([job.state, await tab.evaluate(() => fixture.clicks), t.app.pressUnlocked.has("youtube")], ["ready", 0, false], "state, presses of Save and the press lock")
+    equal([job.state, await tab.evaluate(() => fixture.clicks), t.app.unlocked("youtube")], ["ready", 0, false], "state, presses of Save and the press lock")
   },
 
   async "X: Ctrl+Enter with the post ready is the person's press"(t) {
