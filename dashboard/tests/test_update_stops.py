@@ -93,6 +93,38 @@ class PartWayTest(unittest.TestCase):
         self.assertIn("Nothing was changed.", str(stopped.exception))
         self.assertEqual(update.read_version(self.root), "1.0.0")
         self.assertEqual(list(self.root.rglob("*.rf-new")), [])
+        self.assertFalse((self.root / "dashboard" / "data").exists())   # no note of a part-way update either
+
+    def test_updating_again_while_the_file_is_still_busy_doesnt_say_nothing_changed(self):
+        # The first message asks you to update again. When the same file is still busy then, that attempt replaces
+        # nothing itself, and it said "Nothing was changed" (and the Updates tab "The version you have keeps
+        # working") of a folder the first attempt had left part old and part new.
+        self.kit("1.0.0", self.root, **{"README.md": "old", "dashboard/service.py": "old"})
+        new = self.kit("1.1.0", self.dir / "new", **{"README.md": "new", "dashboard/service.py": "new"})
+        part_way = self.root / "dashboard" / "data" / "update-part-way"
+        for attempt in (1, 2):
+            with self.subTest(attempt=attempt):
+                with self.busy("service.py"), self.assertRaises(update.UpdateError) as stopped:
+                    update._copy_tree(new, self.root, lambda *a: None)
+                self.assertTrue(stopped.exception.partial)
+                self.assertIn("The other new files are in", str(stopped.exception))
+                self.assertNotIn("Nothing was changed", str(stopped.exception))
+                self.assertTrue(part_way.exists())
+        # so is an attempt that stops before it copies anything: the folder is still the first attempt's mix
+        rel = update.Release("1.1.0", "v1.1.0", assets={update.asset_name("1.1.0"): ("https://x/z", 1)})
+
+        def offline(*args):
+            raise update.UpdateError("The download stopped (timed out). Check your connection and try again.")
+
+        with mock.patch.object(update, "_download", offline), self.assertRaises(update.UpdateError) as stopped:
+            update.apply(rel, root=self.root)
+        self.assertTrue(stopped.exception.partial)
+        update._copy_tree(new, self.root, lambda *a: None)           # the file is let go of: it finishes
+        self.assertEqual(update.read_version(self.root), "1.1.0")
+        self.assertFalse(part_way.exists())
+        with mock.patch.object(update, "_download", offline), self.assertRaises(update.UpdateError) as stopped:
+            update.apply(rel, root=self.root)                        # and a whole folder is called whole again
+        self.assertFalse(stopped.exception.partial)
 
     def after(self, pip: int = 0) -> tuple[list[list[str]], list[str]]:
         """Run the steps after the copy with nothing really run: (the commands, what was logged)."""

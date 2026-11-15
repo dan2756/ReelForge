@@ -51,6 +51,9 @@ KEEP = ("my-studio/", "episodes/", "completed videos/", "research/", "tools/", "
 # is asked for). An update puts one in place only where there is none.
 STARTERS = (".codex/config.toml",)
 VERSION_FILE = "studio/__init__.py"  # names this copy's version (read_version): an update puts it in place last
+# There from the first new file an update puts in place until its last: this folder is part old and part new. What a
+# later attempt says goes by it, since that attempt may stop without replacing a file itself.
+PART_WAY = "dashboard/data/update-part-way"
 BUSY_WAIT = 10.0  # seconds an update waits for a file another program has open (a virus scanner, another window)
 
 Progress = Callable[[str, int, int], None]  # (what's happening, done, total); total 0 = no idea how long
@@ -180,6 +183,9 @@ def apply(rel: Release, progress: Progress | None = None, log: Callable[[str], N
             path = _download(url, work / name, size, progress)
             _verify(rel, name, path, progress)
             _copy_release(path, root, work, progress)
+        except UpdateError as e:   # whatever stopped this attempt, an earlier one's new files are still in the folder
+            e.partial = e.partial or (root / PART_WAY).exists()
+            raise
         finally:
             shutil.rmtree(work, ignore_errors=True)
     new = read_version(root) or rel.version
@@ -299,7 +305,7 @@ def _copy_tree(src: Path, root: Path, progress: Progress) -> None:
     if not (src / VERSION_FILE).exists():
         raise UpdateError("The download doesn't look like ReelForge; nothing was changed.")
     files = sorted((p for p in src.rglob("*") if p.is_file()), key=lambda p: p == src / VERSION_FILE)
-    busy, changed = [], 0
+    busy, changed, part_way = [], 0, root / PART_WAY
     for i, f in enumerate(files, 1):
         rel = f.relative_to(src).as_posix()
         progress("Copying the new files", i, len(files))
@@ -321,16 +327,31 @@ def _copy_tree(src: Path, root: Path, progress: Progress) -> None:
             # one; once a file has stayed busy the update can't finish this time, and the rest aren't waited for.
             paths.replace(tmp, dest, wait=0 if busy else BUSY_WAIT)
             changed += 1
+            if changed == 1:
+                _note_part_way(part_way)
         except OSError:
             busy.append(rel)
             _drop(tmp)
     if busy:
+        # New files an earlier attempt put in count too: updating again, as the message asks, can stop at the same
+        # busy file without replacing anything, and "Nothing was changed" would then be said of a mixed folder.
+        partial = bool(changed) or part_way.exists()
         names = f"{', '.join(busy[:3])}{'…' if len(busy) > 3 else ''}"
         raise UpdateError(
             f"{len(busy)} of the new files couldn't be put in place ({names}): another program has them open, or the "
             "disk is full. " + ("The other new files are in, and this copy still counts as the version you had. "
-                                if changed else "Nothing was changed. ") +
-            "Close other ReelForge windows, then update again to finish.", partial=bool(changed))
+                                if partial else "Nothing was changed. ") +
+            "Close other ReelForge windows, then update again to finish.", partial=partial)
+    _drop(part_way)
+
+
+def _note_part_way(part_way: Path) -> None:
+    try:
+        part_way.parent.mkdir(parents=True, exist_ok=True)
+        part_way.write_text("An update has put some of the new version's files in this folder and not yet all of "
+                            "them. Update again to finish (ReelForge's Updates tab).\n", encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _drop(tmp: Path) -> None:
