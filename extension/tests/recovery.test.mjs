@@ -19,13 +19,15 @@ export const tests = {
     await (await t.browser.tab("www.tiktok.com")).close()
     await until(() => `the job to stop (it is ${job.state})`, () => job.state === "failed")
     equal([job.error_code, job.error_message], ["tab_closed", "The tab was closed before the post was ready. Nothing was posted."], "error")
+    // The worker ends this one, not the page's script. Its report still says which step the post was on.
+    ok(["fill_caption", "upload"].includes(job.step), `the step the failure carries (${job.step})`)
   },
 
   async "a tab closed at ready, before Post was pressed: tab_closed, nothing posted"(t) {
     const { job, tab } = await toReady(t, "tiktok", t.video())
     await tab.close()
     await until(() => `the job to stop (it is ${job.state})`, () => job.state === "failed")
-    equal([job.error_code, job.error_message], ["tab_closed", "The tab was closed before Post was pressed. Nothing was posted."], "error")
+    equal([job.error_code, job.error_message, job.step], ["tab_closed", "The tab was closed before Post was pressed. Nothing was posted.", "ready"], "error and step")
   },
 
   async "a tab closed after the person pressed Post, with no confirmation seen: unknown, not failed"(t) {
@@ -238,6 +240,8 @@ export const tests = {
       await until(() => `TikTok to be ended (it is ${tiktok.state})`, () => tiktok.state === "failed", 20000)
       await until(() => `X to be ended (it is ${x.state})`, () => x.state === "unknown", 20000)
       equal([tiktok.error_code, tiktok.error_message], ["tab_closed", "The browser was closed, or the extension reloaded, before the post was ready. Nothing was posted."], "TikTok's ending")
+      // The step is the one written down when the job last changed state, before the browser closed.
+      equal(tiktok.step, "fill_caption", "the step TikTok's ending carries")
       equal(x.error_code, "unknown_outcome", "X's ending")
       await sleep(700)
       equal(t.app.requests("POST", /^\/v1\/jobs\/.*\/claim$/).length, 2, "claims")

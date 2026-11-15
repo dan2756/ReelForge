@@ -80,7 +80,7 @@ function ledger(change) {
 function remember(job) {
   return ledger(all => {
     if (isLive(job)) {
-      all[job.id] = { port: job.port, app_id: job.app_id, profile_key: job.profile_key, platform: job.platform, state: job.state, pressed: job.pressedByPerson === true, at: Date.now() }
+      all[job.id] = { port: job.port, app_id: job.app_id, profile_key: job.profile_key, platform: job.platform, state: job.state, step: job.step, pressed: job.pressedByPerson === true, at: Date.now() }
     } else {
       delete all[job.id]
     }
@@ -99,6 +99,8 @@ export async function orphans() {
     const body = pressed
       ? { install, state: "unknown", error_code: "unknown_outcome", error_message: `The browser was closed after Post was pressed on ${p}, before any confirmation. Check your profile before you post again.` }
       : { install, state: "failed", error_code: "tab_closed", error_message: `The browser was closed, or the extension reloaded, ${entry.state === "ready" ? "before Post was pressed" : "before the post was ready"}. Nothing was posted.` }
+    // The step the job had reached when this was last written down (it is kept at each change of state).
+    if (entry.step) body.step = entry.step
     try {
       await withApp({ ...entry }, found => app.api(found, `/v1/jobs/${id}/event`, { method: "POST", body }))
     } catch {
@@ -301,10 +303,12 @@ export function report(id, event) {
   })
 }
 
+// An ending the worker itself decides (a closed tab, a page that went quiet). Every failure carries its step:
+// where no other is named it is the one the job was on, which ReelForge would otherwise show as none at all.
 async function finish(id, state, code, message, step) {
   const job = await getJob(id)
   if (!job || isFinal(job.state)) return
-  await report(id, { state, error_code: code, error_message: message, step })
+  await report(id, { state, error_code: code, error_message: message, step: step || job.step })
   await stopTab(job, message)
 }
 
