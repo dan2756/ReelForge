@@ -5,7 +5,9 @@ by stand-in windows and pages."""
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
+import types
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
@@ -270,7 +272,7 @@ class BrowserTest(unittest.TestCase):
         self.windows: list[bool] = []  # each time the browser was opened: in the background (headless) or not
 
         @contextmanager
-        def opened(headless: bool = True):
+        def opened(headless: bool = True, busy: str = ""):
             self.windows.append(headless)
             yield self.window
 
@@ -377,6 +379,52 @@ class LogOut(BrowserTest):
         self.assertEqual(self.windows, [True])  # in the background: no window to look at
         self.assertEqual((browser.logged_in("x"), browser.logged_in("instagram")), (False, True))
         self.assertFalse(browser._has_session(w, "x"))  # dropbox.com's cookie isn't x.com's
+
+
+class HeldProfile(unittest.TestCase):
+    """Another ReelForge has the browser's profile open (the hourly job, reading): after a few tries, each thing
+    says what happens next. A read is tried again by the next refresh. A log-in or a log-out isn't, so it says to
+    press again (the log-out used to say "it tries again next refresh")."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        self.tries: list[bool] = []  # each time the browser was started: in the background (headless) or not
+        held = browser_error("Error")("BrowserType.launch_persistent_context: Target page, context or browser has "
+                                      "been closed\nBrowser logs:\n<process did exit: exitCode=21, signal=null>")
+
+        def launch(profile: str, **how):
+            self.tries.append(how["headless"])
+            raise held
+
+        @contextmanager
+        def sync_playwright():
+            yield SimpleNamespace(chromium=SimpleNamespace(launch_persistent_context=launch))
+
+        playwright = {"playwright": types.ModuleType("playwright"),
+                      "playwright.sync_api": SimpleNamespace(sync_playwright=sync_playwright)}
+        for patch in (mock.patch.dict(sys.modules, playwright),
+                      mock.patch.object(config, "TOKENS_PATH", Path(tmp.name) / "tokens.json"),
+                      mock.patch.object(config, "DATA_DIR", Path(tmp.name)),
+                      mock.patch.object(browser, "available", lambda: True),
+                      mock.patch.object(browser, "chosen", lambda: SimpleNamespace(exe=None)),
+                      mock.patch.object(browser.browsers, "user_agent", lambda b: "a browser"),
+                      mock.patch.object(browser, "time", Clock())):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_each_says_what_happens_next(self):
+        config.set_token("browser:x", {"since": 1.0})
+        busy = "ReelForge's browser is busy reading stats right now. Press {} again in a moment."
+        for do, said in ((lambda: browser.x("me"),
+                          "ReelForge's browser was busy with another read; it tries again next refresh."),
+                         (lambda: browser.login("x"), busy.format("Log in")),
+                         (lambda: browser.logout("x"), busy.format("Log out"))):
+            with self.assertRaises(PlatformError) as caught:
+                do()
+            self.assertEqual(str(caught.exception), said)
+        self.assertEqual(self.tries, [True] * 8 + [False] * 8 + [True] * 8)
+        self.assertTrue(browser.logged_in("x"))  # a log-out that didn't happen forgets nothing
 
 
 def x_site(lands: str | None = None, tweets: list | None = None):

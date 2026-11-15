@@ -74,10 +74,15 @@ def forget(platform: str) -> None:
     config.set_token(f"browser:{platform}", None)
 
 
+BUSY = "ReelForge's browser was busy with another read; it tries again next refresh."
+# A log-in or a log-out that finds the browser busy: nothing tries those again by itself.
+PRESS_AGAIN = "ReelForge's browser is busy reading stats right now. Press {} again in a moment."
+
+
 @contextmanager
-def _browser(headless: bool = True):
+def _browser(headless: bool = True, busy: str = BUSY):
     """ReelForge's browser, open on its own profile: in the background for a read (headless), or with a window for
-    a log-in."""
+    a log-in. busy: what to say when another ReelForge still has the profile open after a few tries."""
     if not available():
         raise PlatformError("Browser stats need Playwright: run setup again to install it.")
     b = chosen()
@@ -101,16 +106,12 @@ def _browser(headless: bool = True):
                 )
                 break
             except Exception as e:
-                busy = "exitCode=21" in str(e)
-                if busy and attempt < 7:
+                held = "exitCode=21" in str(e)
+                if held and attempt < 7:
                     time.sleep(2.5)
                     continue
-                if busy and not headless:  # a log-in: nothing tries it again by itself
-                    raise PlatformError("ReelForge's browser is busy reading stats right now. Press Log in again in "
-                                        "a moment.") from e
-                if busy:
-                    raise PlatformError("ReelForge's browser was busy with another read; it tries again next "
-                                        "refresh.") from e
+                if held:
+                    raise PlatformError(busy) from e
                 raise PlatformError(f"Couldn't start {b.describe()}: {str(e).splitlines()[0]}") from e
         try:
             chosen_file().write_text(browsers.key(b), encoding="utf-8")
@@ -161,7 +162,7 @@ def login(platform: str, timeout: float = 600) -> None:
     for a few seconds, or when you close the window still logged in. (The window used to close by itself after 3
     seconds whenever the cookie was there, before you could do anything.)
     """
-    with _browser(headless=False) as ctx:
+    with _browser(headless=False, busy=PRESS_AGAIN.format("Log in")) as ctx:
         had = has = False  # logged in when the window opened, and when last looked
         ended = "closed"
         try:
@@ -211,7 +212,7 @@ def login(platform: str, timeout: float = 600) -> None:
 def logout(platform: str) -> None:
     """Log ReelForge's browser out of a platform: the cookies its site set are removed from the browser profile, and
     the log-in is forgotten (Disconnect alone keeps both). Your normal browser has nothing to do with it."""
-    with _browser() as ctx:
+    with _browser(busy=PRESS_AGAIN.format("Log out")) as ctx:
         for site in COOKIE_SITES[platform]:
             ctx.clear_cookies(domain=re.compile(rf"(^|\.){re.escape(site)}$"))
     forget(platform)
