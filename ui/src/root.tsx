@@ -25,12 +25,15 @@ export class Sides {
     private log?: string,
   ) {}
 
-  /** Start a Python side for a screen ("dashboard" or "setup"), on a profile (undefined: the launcher's). */
+  /** Start a Python side for a screen ("dashboard" or "setup"), on a profile (undefined: the launcher's). The
+   * dashboard's sends nothing until the window says it is listening (DashboardApp calls ready): it is quick enough
+   * to send the picked video's caption and its first pop-ups before the window has drawn itself, and those are
+   * heard only by a window that is already listening. */
   async open<T>(screen: string, opts: object, profile?: string): Promise<{ bridge: Bridge; init: T }> {
     const env = { ...this.env, ...(profile !== undefined ? { REELFORGE_PROFILE: profile } : {}) }
     const bridge = new Bridge({ env, log: this.log })
     try {
-      const init = await bridge.start<T>(screen, opts)
+      const init = await bridge.start<T>(screen, screen === "dashboard" ? { ...opts, ready: true } : opts)
       return { bridge, init }
     } catch (e) {
       bridge.kill()

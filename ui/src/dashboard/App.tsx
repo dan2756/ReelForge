@@ -46,6 +46,9 @@ export function DashboardApp({ bridge, init, quit, nav }: { bridge: Bridge; init
       // Another ReelForge window moved a tab (the Settings tab's Tab order): this one follows.
       bridge.on("order", (d) => state.set({ order: tabOrder(d.order) })),
     ]
+    // Now that every handler is there (this effect runs after the tabs' own): the Python side starts sending. Its
+    // first words include the picked video's caption and the pop-ups it has waiting, which nothing keeps for later.
+    bridge.send("ready")
     if (state.drawer) bridge.send("drawer_opened")
     return () => offs.forEach((off) => off())
   }, [bridge, state, focus, quit])

@@ -116,6 +116,12 @@ export class DashState {
     this.order = tabOrder(init.order)
     this.drawer = init.drawer
     this.tags = init.default_tags
+    // The picked video's caption, when the Python side has sent it already (the window drawn again on the same one).
+    const form = bridge.view<{ caption?: string; tags?: string }>("form")
+    if (form) {
+      this.caption = form.caption ?? ""
+      this.tags = form.tags ?? ""
+    }
   }
 
   subscribe = (fn: () => void) => {
