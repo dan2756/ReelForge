@@ -3,6 +3,7 @@
 // palette (src/dashboard/cards.ts, src/lib/fit.ts, src/ui/Graphics.tsx, src/ui/Panels.tsx, src/theme.ts).
 
 import { describe, expect, test } from "bun:test"
+import { headerFit, tabWindow } from "../src/dashboard/App"
 import { cardLines, wrapLines } from "../src/dashboard/cards"
 import { metricTitle, pickVariant } from "../src/dashboard/titles"
 import type { MetricView, Variant } from "../src/dashboard/types"
@@ -177,6 +178,39 @@ describe("block art", () => {
     expect(stacked[0]![1]!.ch).toBe("█") // the tallest column reaches the top
     expect(stacked[1]![0]!.ch).toBe("▄") // two platforms in one cell: the lower as eighths on the upper's colour
     expect(stacked[1]![0]!.bg).not.toBeNull()
+  })
+})
+
+describe("the header in a narrow window", () => {
+  const TABS = ["Overview", "Videos", "Compare", "Stats", "Accounts", "Settings", "Updates ●"].map((t) => t.length)
+  const tabsW = (gap: number) => TABS.reduce((n, w) => n + w, 0) + gap * (TABS.length - 1)
+
+  test("one row while it fits; narrower, the profile button and the signs go over the tabs, which keep the row", () => {
+    expect(headerFit(100, "Night Physics", 9, tabsW).stacked).toBeFalsy()
+    const at80 = headerFit(80, "Night Physics", 9, tabsW)
+    expect(at80.stacked).toBe(true)
+    expect(at80.tabsRoom).toBeGreaterThanOrEqual(tabsW(at80.gap)) // an 80-column terminal shows every tab
+    for (let width = 30; width < 100; width++) {
+      const fit = headerFit(width, "Night Physics", 9, tabsW, 2)
+      if (fit.stacked) expect(fit.nameRoom).toBeGreaterThanOrEqual(1)
+    }
+  })
+
+  test("too narrow for every tab: whole names only, the open one always among them, and room for ‹ and ›", () => {
+    const shown = (open: number, room: number) => tabWindow(TABS, 1, open, room)
+    const used = ([a, b]: [number, number]) => TABS.slice(a, b + 1).reduce((n, w) => n + w, 0) + (b - a) + (a > 0 ? 2 : 0) + (b < TABS.length - 1 ? 2 : 0)
+    expect(shown(0, 57)).toEqual([0, 6]) // they all fit
+    expect(shown(0, 38)).toEqual([0, 3]) // Overview Videos Compare Stats ›
+    expect(shown(5, 38)).toEqual([2, 5]) // ‹ Compare Stats Accounts Settings ›
+    expect(shown(6, 38)).toEqual([3, 6]) // ‹ Stats Accounts Settings Updates ●
+    expect(shown(-1, 38)).toEqual([0, 3]) // Publish is open: from the first one
+    for (let room = 14; room <= 57; room++)
+      for (let open = 0; open < TABS.length; open++) {
+        const [a, b] = shown(open, room)
+        expect(a).toBeLessThanOrEqual(open)
+        expect(b).toBeGreaterThanOrEqual(open)
+        expect(used([a, b])).toBeLessThanOrEqual(room)
+      }
   })
 })
 

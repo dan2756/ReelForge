@@ -190,6 +190,7 @@ class WindowTest(Folder):
         self.assertIn("Log out", about["accounts"][1])
         self.assertEqual(dict(KEYS)["1-7"], "switch tabs")
         self.assertIn("Publish", dict(KEYS)["u"])
+        self.assertIn("notifications", dict(KEYS)["n"])  # the bell, for the keyboard
 
 
 if __name__ == "__main__":

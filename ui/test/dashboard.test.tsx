@@ -158,6 +158,55 @@ describe("the header and the bell", () => {
   })
 })
 
+describe("the header in a narrow window", () => {
+  test("at 80 columns nothing is pushed off the edge: every tab, Publish, Refresh, Help, Quit and the bell, each doing its job", async () => {
+    const h = await window("overview", [80, 24])
+    const top = rows(h)
+    expect(top[0]).toContain("Night Physics ▾") // the profile button and the signs sit over the tabs
+    expect(top[0]).toContain("↻ ? ×")
+    expect(top[0]).toMatch(/\d▌\s*$/) // the bell's unread count, in the corner
+    expect(top[1]).toMatch(/^ Overview +Videos +Compare +Stats +Accounts +Settings +Updates ● +│Publish│/)
+    for (const row of top.slice(0, 3)) expect([...row].length).toBeLessThanOrEqual(80)
+    await clickText(h, "↻ ? ×", 2) // ?
+    expect(frame(h)).toContain("HOW REELFORGE WORKS")
+    await press(h, "escape")
+    await h.t.mockMouse.click(80 - 4, 1) // the bell
+    await h.settle(400)
+    expect(frame(h)).toContain("NOTIFICATIONS")
+    await press(h, "escape")
+    await clickText(h, "│Publish│", 3)
+    expect(publishOpen(h)).toBe(true)
+    h.bridge.emit("refreshed", { ago: "5m ago", reading: "refreshing TikTok…" })
+    await h.settle(300)
+    expect(rows(h)[0]).toContain("↻ ? ×  reading…") // a read under way, beside the signs
+    await clickText(h, "↻ ? ×", 4) // ×
+    expect(h.exits).toEqual([{ code: 0, result: undefined }])
+  })
+
+  test("narrower still, the tabs that fit show whole, the open one among them, and ‹ › reach the rest", async () => {
+    const h = await window("overview", [60, 24])
+    expect(rows(h)[1]).toMatch(/^ Overview Videos Compare Stats › +│Publish│/)
+    expect(rows(h)[0]).toContain("↻ ? ×")
+    await press(h, "6")
+    expect(activeTab(h)).toBe("Settings")
+    expect(rows(h)[1]).toMatch(/^ ‹ Compare Stats Accounts Settings › +│Publish│/)
+    await clickText(h, "Settings ›", 9) // ›: the next tab along
+    expect(activeTab(h)).toBe("Updates")
+    expect(rows(h)[1]).toMatch(/^ ‹ Stats Accounts Settings Updates ● +│Publish│/)
+    await clickText(h, "‹ Stats", 0) // ‹: the one before the first shown
+    expect(activeTab(h)).toBe("Compare")
+  })
+
+  test("n opens and closes the notifications, as the bell does", async () => {
+    const h = await window("overview", [122, 30])
+    expect(frame(h)).not.toContain("NOTIFICATIONS")
+    await press(h, "n")
+    expect(frame(h)).toContain("NOTIFICATIONS")
+    await press(h, "n")
+    expect(frame(h)).not.toContain("NOTIFICATIONS")
+  })
+})
+
 describe("pop-ups", () => {
   test("a click anywhere on the pop-ups closes one, even on the row between two: nothing under them shows through", async () => {
     const h = await window("accounts", [180, 50], false, { unconnected: ["x"] })

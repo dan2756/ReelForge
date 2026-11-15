@@ -35,12 +35,13 @@ export function profileButton(p: ProfileView, open: boolean, hover = false, room
   return out
 }
 
-export function ProfileButton({ room = 40 }: { room?: number }) {
+/** height: the rows it is centred in: the header's three, or one where it sits over the tabs (a narrow window). */
+export function ProfileButton({ room = 40, height = 3 }: { room?: number; height?: number }) {
   const s = useDash()
   const view = useView<ProfileView>(s.bridge, "profile") ?? s.init.profile
   const [hover, setHover] = useState(false)
   return (
-    <box flexDirection="row" height={3} alignItems="center" flexShrink={0} onMouseOver={() => setHover(true)} onMouseOut={() => setHover(false)}>
+    <box flexDirection="row" height={height} alignItems="center" flexShrink={0} onMouseOver={() => setHover(true)} onMouseOut={() => setHover(false)}>
       <Line segs={profileButton(view, s.dialog?.kind === "profiles", hover, room)} />
     </box>
   )

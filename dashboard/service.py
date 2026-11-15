@@ -145,7 +145,7 @@ HELP = [
               "each chart: every platform's number now, what it gained over the range and its share of the total. A "
               "stretch the computer was off for is filled in with an estimate, hatched, and the totals start once "
               "every platform you count has a first reading.", "totals"),
-    ("Notifications", "The bell at the top right opens the drawer: updates, milestones, badges, finished videos and "
+    ("Notifications", "The bell at the top right (or n) opens the drawer: updates, milestones, badges, finished videos and "
                       "log-ins that need you. A red dot on the bell means something's unread; click one to go "
                       "to it, or the × at its right to delete it (Delete deletes the highlighted one), and Clear "
                       "all deletes them all. The hourly background job (reelforge stats on) adds them while "
@@ -168,6 +168,7 @@ HELP = [
 ]
 KEYS = [("1-7", "switch tabs"), ("u", "open Publish (the green button at the top right)"),
         ("r / R", "refresh / force refresh"),
+        ("n", "open or close the notifications (the bell at the top right)"),
         ("p", "profiles: switch, add, change or delete one"),
         ("Tab", "move between buttons, lists and fields (Enter presses, the arrows move through a list)"),
         ("Esc", "close the drawer or a dialog, or leave a text field"), ("Ctrl+Q", "quit")]
