@@ -82,17 +82,28 @@ class View(PostingTest):
         self.assertEqual(view["review"]["state"], "none")
         self.assertIn("Not checked by ReelForge", plain(view["review"]["line"]))
         self.assertEqual(view["extension"]["state"], "on")
-        self.assertEqual([(r["key"], r["name"], r["state"], r["busy"], r["url"], r["job"], r["actions"])
+        self.assertEqual([(r["key"], r["name"], r["state"], r["busy"], r["url"], r["job"], r["via"], r["actions"])
                           for r in view["rows"]],
-                         [(key, name, "none", False, None, None, []) for key, name in NAMES.items()])
+                         [(key, name, "none", False, None, None, None, []) for key, name in NAMES.items()])
         self.assertEqual(plain(view["rows"][0]["line"]), "○ not posted")
 
     def test_every_action_a_row_can_offer_has_the_words_for_its_button(self):
+        """The window draws a button's words and never an action's own name: so each one a row can carry has
+        words, the two that go through YouTube's API among them (youtube_api_tab.api_rows), and the window's own
+        button for posting there again through the API."""
         w = self.window()
         labels = w.view("posting")["labels"]
-        self.assertEqual({a for acts in posting_tab.ACTIONS.values() for a in acts}, set(labels))
+        api = {"post_api", "connect_api", "post_api_again"}
+        self.assertEqual({a for acts in posting_tab.ACTIONS.values() for a in acts} | api, set(labels))
         self.assertEqual((labels["mark_posted"], labels["not_posted"], labels["retry"]),
                          ("It's posted", "It didn't post", "Try again"))
+        self.assertEqual((labels["post_api"], labels["connect_api"], labels["post_api_again"]),
+                         ("Post with API…", "Connect API", "Again with API…"))
+        for action, words in labels.items():
+            self.assertNotIn("_", words, action)
+        # The two that open a question before anything starts say so, as Post again… does.
+        self.assertEqual({a for a, words in labels.items() if words.endswith("…")},
+                         {"post_again", "post_api", "post_api_again"})
 
     def test_an_upload_page_opened_by_hand_shows_on_its_row_until_the_post_is_spotted(self):
         w = self.window()
@@ -423,7 +434,7 @@ class Posting(PostingTest):
         row = self.rows(w)["tiktok"]
         self.assertTrue(plain(row["line"]).startswith(
             "× failed at finding the upload box: TikTok changed its page, so the extension lost its way"))
-        self.assertEqual((row["busy"], row["actions"]), (False, ["retry"]))
+        self.assertEqual((row["busy"], row["actions"], row["via"]), (False, ["retry"], "extension"))
         self.assertTrue(w.until(lambda: self.flags(w)["TT"] == f"bold {posting_tab.BAD}"))
         self.assertIn("× TikTok failed", plain(w.view("posted")["line"]))
         self.assertTrue(w.view("posting")["can_post"])

@@ -73,8 +73,12 @@ ACTIONS = {
 # What each platform's text is called in its own boxes, for the question before a post.
 FIELDS = {"title": "Title", "description": "Description", "caption": "Caption", "text": "Post"}
 # What the button for each of a row's actions says. Short: a row that is posted keeps its two beside its numbers.
+# The last three are for YouTube's own API (youtube_api_tab.py): post_api and connect_api are actions on the YouTube
+# row, and post_api_again is the window's own button on a row whose "api" says a post there would be a post again.
+# An ending "…" means the button asks before anything starts.
 LABELS = {"retry": "Try again", "cancel": "Cancel", "mark_posted": "It's posted", "not_posted": "It didn't post",
-          "open_post": "Open", "post_again": "Post again…"}
+          "open_post": "Open", "post_again": "Post again…", "post_api": "Post with API…",
+          "connect_api": "Connect API", "post_api_again": "Again with API…"}
 # Setting the extension up, once (docs/EXTENSION.md says the same at more length).
 SETUP = (
     "Open your browser's extensions page: type chrome://extensions in the address bar. In Edge it is "
@@ -332,6 +336,8 @@ class PostingTab:
                          "line": state_line(job, post, p.name, opened.get(p.key)).json(), "busy": state in BUSY,
                          "url": url,
                          "job": job["id"] if job and state == job["state"] else None,
+                         # How that job goes: "extension" or "api". The window asks it before Try again.
+                         "via": job["via"] if job and state == job["state"] else None,
                          "actions": [a for a in ACTIONS[state] if a != "open_post" or url]})
         self.api_rows(rows, jobs, posts)  # what posting through YouTube's own API adds (youtube_api_tab.py)
         style = {"approved": GOOD, "none": MUTED, "demo": MUTED}.get(review["state"], f"bold {AMBER}")
