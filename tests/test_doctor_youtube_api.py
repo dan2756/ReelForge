@@ -61,17 +61,17 @@ class YouTubeApiRow(Scratch):
         self.assertEqual(store, self.root / "dashboard" / "data" / "youtube_api.json")
         self.assertEqual(json.loads(store.read_text("utf-8")), {"client_id": ID, "client_secret": SECRET})
         self.assertEqual(self.row(), (doctor.OK, "YouTube API", "client on file. You connect in ReelForge's window "
-                                                                "each time it opens"))
+                                                                "each time it opens (docs/YOUTUBE-API.md)"))
 
     def test_with_several_channels_it_says_whose(self):
         other = self.second()
         self.give_client()
         self.assertEqual(self.row()[2], "client on file for Night Physics (not set up for Cool Epic Facts). You "
-                                        "connect in ReelForge's window each time it opens")
+                                        "connect in ReelForge's window each time it opens (docs/YOUTUBE-API.md)")
         store = self.give_client(other)
         self.assertEqual(store, other.data / "youtube_api.json")
         self.assertEqual(self.row()[2], "client on file for Night Physics, Cool Epic Facts. You connect in "
-                                        "ReelForge's window each time it opens")
+                                        "ReelForge's window each time it opens (docs/YOUTUBE-API.md)")
 
     def test_choices_without_a_client_are_not_a_client(self):
         youtube_api.set_defaults("unlisted")   # who can see a post, chosen before any client file was given
@@ -111,14 +111,15 @@ class YouTubeApiRow(Scratch):
         with redirect_stdout(io.StringIO()):
             self.assertEqual(main([downloaded if word == "FILE" else word for word in command[1:]]), 0)
         self.assertEqual(self.row()[2], "client on file for Cool Epic Facts (not set up for Night Physics). You "
-                                        "connect in ReelForge's window each time it opens")
+                                        "connect in ReelForge's window each time it opens (docs/YOUTUBE-API.md)")
         self.assertFalse((self.root / "dashboard" / "data" / "youtube_api.json").exists())
         # Both broken: each file, and each channel's own command (the first one's too, now that there are two).
         mine = self.give_client()
         for store in (mine, theirs):
             store.write_text("{not json", "utf-8")
         said = self.row()[2]
-        self.assertIn(f"{Path('dashboard') / 'data' / 'youtube_api.json'}, {Path('profiles') / 'cool-epic-facts'}", said)
+        first, second = Path("dashboard") / "data" / "youtube_api.json", Path("profiles") / "cool-epic-facts"
+        self.assertIn(f"{first}, {second}", said)
         self.assertTrue(said.endswith("again: reelforge -p night-physics youtube-api client FILE and reelforge -p "
                                       "cool-epic-facts youtube-api client FILE"), said)
 

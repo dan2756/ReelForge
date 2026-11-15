@@ -137,8 +137,9 @@ def youtube_api_check(r: Report) -> None:
         else:
             whose = "" if len(every) == 1 else f" for {', '.join(have)}"
             rest = f" (not set up for {', '.join(without)})" if without else ""
+            # (the guide beside it: it is where the window's side of this is said, as far as it has got)
             r.add(OK, "YouTube API", f"client on file{whose}{rest}. You connect in ReelForge's window each time it "
-                                     "opens")
+                                     "opens (docs/YOUTUBE-API.md)")
     except Exception as e:  # the window's own packages are missing, say: the rows above have that
         r.add(WARN, "YouTube API", f"couldn't be checked ({type(e).__name__})")
 

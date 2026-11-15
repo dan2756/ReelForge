@@ -135,6 +135,27 @@ class ThePages(unittest.TestCase):
         self.assertIn("tested against copies of the upload pages, not yet on the live sites", window)
         self.assertIn("has never uploaded a video to YouTube itself", window)
 
+    def test_the_window_has_the_buttons_for_youtubes_api_or_its_guide_says_they_are_to_come(self):
+        # README.md, the window's README, its Help and doctor's row (tests/test_doctor_youtube_api.py) say a post
+        # through YouTube's API is pressed in the window, and each names docs/YOUTUBE-API.md beside it. That holds
+        # where the window has its words for those buttons. Where it has none yet, the guide has to go on saying
+        # that the window's part is still to come: it is the one page that does.
+        from dashboard import faq
+
+        answer = next(i["a"] for i in faq.items(assistant=["claude"], root=KIT, episodes=KIT / "episodes",
+                                                 completed=KIT / "completed videos", channel="Night Physics",
+                                                 main=True, several=False, refresh_minutes=30)
+                      if i["q"] == "Can ReelForge upload to YouTube through its API?")
+        self.assertIn("docs/YOUTUBE-API.md", answer)
+        for rel in ("README.md", "dashboard/README.md"):
+            text = (KIT / rel).read_text(encoding="utf-8")
+            way = flat(text[text.index("- **To YouTube through its own API**"):].split("\n\n")[0])
+            self.assertIn("on the Publish tab", way, rel)
+            self.assertIn("docs/YOUTUBE-API.md", way, rel)
+        in_the_window = {"post_api", "connect_api"} <= set(posting_tab.LABELS)
+        guide = flat((KIT / "docs" / "YOUTUBE-API.md").read_text(encoding="utf-8"))
+        self.assertTrue(in_the_window or "ReelForge's window does not have buttons for it yet" in guide)
+
 
 if __name__ == "__main__":
     unittest.main()
