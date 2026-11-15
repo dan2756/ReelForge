@@ -1200,6 +1200,54 @@ class Approval(unittest.TestCase):
         report.write_bytes(b"\xff\xfe\x00broken")
         self.assertEqual(self.state(), "qa_failed")
 
+    def test_the_approval_shown_is_worked_out_again_only_when_a_file_changed(self):
+        approve(self.ep, self.video)
+        self.assertEqual(self.state(), "approved")
+        with mock.patch.object(videos, "approval", wraps=videos.approval) as worked_out:
+            for _ in range(5):  # a list that redraws every few seconds
+                self.assertEqual(videos.approval_shown(self.video, self.cfg)["state"], "approved")
+            self.assertEqual(worked_out.call_count, 1)
+            outside = self.root / "videos" / "clip.mp4"  # no episode: nothing but the file itself to watch
+            outside.parent.mkdir()
+            outside.write_bytes(b"a clip")
+            for _ in range(3):
+                self.assertEqual(videos.approval_shown(outside, self.cfg)["state"], "none")
+            self.assertEqual(worked_out.call_count, 2)
+            # Each of these changes what it is read from, and shows at the next look.
+            (self.ep / "build" / "qa" / "review.md").write_text("Too dark.\nREJECTED: too dark", "utf-8")
+            self.assertEqual(videos.approval_shown(self.video, self.cfg)["state"], "rejected")
+            approve(self.ep, self.video)
+            self.assertEqual(videos.approval_shown(self.video, self.cfg)["state"], "approved")
+            self.video.write_bytes(b"a second cut, longer")
+            self.assertEqual(videos.approval_shown(self.video, self.cfg)["state"], "stale")
+            (self.ep / "final" / "cover.jpg").write_bytes(b"a new cover")  # what a receipt would be about
+            calls = worked_out.call_count
+            videos.approval_shown(self.video, self.cfg)
+            (self.ep / "facts.md").write_text("Every claim, with its source.", "utf-8")
+            videos.approval_shown(self.video, self.cfg)
+            self.assertEqual(worked_out.call_count, calls + 2)
+            # And after five minutes whatever happened (the channel's settings are part of a receipt too).
+            videos.approval_shown(self.video, self.cfg)
+            self.assertEqual(worked_out.call_count, calls + 2)
+            later = time.monotonic() + videos.SHOWN_FOR + 1
+            with mock.patch.object(videos.time, "monotonic", lambda: later):
+                videos.approval_shown(self.video, self.cfg)
+            self.assertEqual(worked_out.call_count, calls + 3)
+
+    def test_a_post_never_goes_by_a_remembered_approval(self):
+        self.addCleanup(setattr, db, "_path", db._path)
+        db.init(self.root / "stats.db")
+        approve(self.ep, self.video)
+        self.assertEqual(videos.approval_shown(self.video, self.cfg)["state"], "approved")
+        review = self.ep / "build" / "qa" / "review.md"
+        with mock.patch.object(videos, "SHOWN_FOR", 10 ** 9), \
+                mock.patch.object(videos, "_shown", {str(self.video): ((), time.monotonic(), {
+                    "state": "approved", "line": "QA passed and the review says APPROVED."})}):
+            review.write_text("REJECTED: wrong video", "utf-8")
+            made = posting.create_batch(self.video, ["tiktok"], CAPTION, TAGS, self.cfg)
+        self.assertEqual((made["jobs"], made["blocked"][0]["reason"]), ([], "review"))
+        self.assertIn("REJECTED", made["blocked"][0]["message"])
+
     def test_a_demo_is_never_postable(self):
         (self.ep / "episode.json").write_text(json.dumps({**self.spec, "demo": True}), encoding="utf-8")
         approve(self.ep, self.video)

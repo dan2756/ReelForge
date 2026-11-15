@@ -709,6 +709,17 @@ class Jobs(ApiTest):
         self.assertEqual((made.status, made.json["batch"], made.json["jobs"]), (200, None, []))
         self.assertEqual([b["reason"] for b in made.json["blocked"]], ["review"])
 
+    def test_an_open_popup_does_not_have_every_video_checked_again_every_few_seconds(self):
+        from dashboard import videos
+
+        with mock.patch.object(videos, "approval", wraps=videos.approval) as worked_out:
+            for _ in range(4):
+                self.assertTrue(self.get("/v1/state").json["videos"][0]["postable"])
+            self.assertEqual(worked_out.call_count, 1)
+            # Post itself never goes by what the list remembered.
+            self.post("/v1/batches", {"video": posting.digest(self.video), "platforms": ["tiktok"]})
+            self.assertEqual(worked_out.call_count, 2)
+
     def test_post_in_the_popup_makes_the_jobs_with_the_videos_saved_text(self):
         self.video.with_suffix(".json").write_text(json.dumps({"caption": CAPTION, "tags": TAGS}), "utf-8")
         sha = posting.digest(self.video)

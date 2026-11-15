@@ -323,7 +323,7 @@ def state(app: "App") -> dict:
             size, sha = f.stat().st_size, posting.digest(f)
         except OSError:
             continue  # moved or deleted since the folder was listed
-        review = videos.approval(f, app.cfg)
+        review = videos.approval_shown(f, app.cfg)  # for the list only: Post works it out afresh (create_batch)
         ok = review["state"] in videos.POSTABLE
         mine, found = jobs.get(f, {}), posting.spotted(f.name)
         where = {}

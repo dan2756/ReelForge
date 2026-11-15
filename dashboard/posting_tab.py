@@ -149,11 +149,13 @@ class PostingTab:
     def review_of(self, video: Path, fresh: bool = False) -> dict:
         """The picked video's approval (videos.approval). It reads files, and with review receipts it hashes the
         video, so it's kept between looks: read again (fresh) when the Publish tab is opened, every half minute
-        while it is open, and when a post is asked for."""
+        while it is open, and when a post is asked for. Even then the video is only read in full again when one of
+        the episode's files has changed (videos.approval_shown); what a post goes by is worked out anew (post_info
+        and posting.create_batch)."""
         if self.demo:
             return {"state": "demo", "line": "This is the demo: nothing is posted from it."}
         if fresh or self.picked_review is None or self.picked_review[0] != video:
-            self.picked_review = (video, videos.approval(video, self.cfg))
+            self.picked_review = (video, videos.approval_shown(video, self.cfg))
         return self.picked_review[1]
 
     def spotted_posts(self, video: Path) -> dict[str, dict]:
