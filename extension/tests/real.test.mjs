@@ -380,6 +380,7 @@ export const tests = {
     const tab = await t.browser.tab(HOST.tiktok)
     await until("the note to say why nothing was pressed", async () => (await note(tab)).more.includes("nobody said yes to it for this post in this browser"))
     equal([await tab.evaluate(() => fixture.clicks), await t.app.state(first.jobs.tiktok)], [0, "ready"], "presses of Post, and the job")
+    await until("ReelForge's page to say why too", async () => (await text(first.page.locator("#rows"))).includes("Not pressed: nobody said yes to it for this post in this browser. ReelForge stops here."))
     await until("the question to go once it is too late", () => first.page.locator("#press").isHidden())
     await tab.locator("[data-e2e=post_video_button]").click()  // the person presses it themselves
     await becomes(t.app, first.jobs.tiktok, ["posted"])

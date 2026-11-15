@@ -117,7 +117,7 @@ export const tests = {
     await until("the note to say why", async () => (await note(tab)).more.includes("ReelForge did not press for you"))
     equal([presses(app)[0].status, job.state], [409, "ready"], "the refusal and the state")
     equal(await tab.evaluate(() => fixture.clicks), 0, "presses the page saw")
-    ok(job.events.some(event => String(event.detail).startsWith("not pressed:")), "the app is told it was not pressed")
+    ok(job.events.some(event => event.detail === "Not pressed: Press Post yourself: ReelForge isn't allowed to for this post."), `the app is told it was not pressed, and why (${job.events.map(event => event.detail)})`)
   },
 
   async "a grant that was already used is refused and nothing is pressed a second time"({ app, browser, video }) {

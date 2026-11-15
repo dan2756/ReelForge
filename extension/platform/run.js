@@ -127,7 +127,8 @@ void (async () => {
   async function press(button, cannot) {
     const stay = async why => {
       rf.say("Check it, then press Post", "ready", `ReelForge did not press for you: ${why}`)
-      await rf.report({ step: "ready", detail: `not pressed: ${why}` })
+      // (A sentence of its own: ReelForge's page and the popup show it as it is.)
+      await rf.report({ step: "ready", detail: `Not pressed: ${why}` })
     }
     if (cannot) return stay(cannot)
     const grant = await rf.send({ t: "job.press" })
