@@ -458,7 +458,7 @@ repairs the setup.
 
 Yes. Setup gets everything ReelForge needs into its own folder on all three, so you don't need Homebrew or a package
 manager: Blender from blender.org, ffmpeg from the builds ffmpeg.org points to, Bun (for ReelForge's window) from its
-own releases, and a private Python if yours is older than 3.11. ReelForge reads your stats with Chrome or Edge if you have one, or with a Chromium setup downloads if you
+own releases, and a private Python if yours is older than 3.11.4. ReelForge reads your stats with Chrome or Edge if you have one, or with a Chromium setup downloads if you
 don't. On a Mac, ReelForge goes in your Applications folder (so it's in Launchpad, Spotlight and the Dock) and opens in
 Terminal; on Linux it goes in your app menu. The hourly stats job is a launchd agent on a Mac and a systemd timer (or
 a cron job) on Linux. Every change is tested on Windows, on Macs with Apple Silicon and Intel, and on Linux.
