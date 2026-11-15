@@ -32,7 +32,7 @@ def handles(p) -> dict[str, str]:
     try:
         with _config(p).open("rb") as f:
             cfg = tomllib.load(f)
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, ValueError):  # unreadable, a typo, or not saved as UTF-8
         return {}
     out = {}
     for key in NAMES:

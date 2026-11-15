@@ -7,7 +7,9 @@ they always were."""
 
 from __future__ import annotations
 
+import codecs
 import json
+import re
 import shutil
 import threading
 import tomllib
@@ -73,21 +75,78 @@ class ConfigError(Exception):
     """config.toml can't be read; the message says where."""
 
 
+def read_text(path: Path) -> str:
+    """config.toml's text, however a Windows tool saved it: plain UTF-8, UTF-8 with a byte-order mark (older Notepad,
+    PowerShell's Set-Content -Encoding UTF8) or UTF-16 with one (PowerShell's > and Out-File). One of the last two is
+    saved again as plain UTF-8, the same text, so everything else that reads the file (first-time setup, the
+    profile menu, an older ReelForge) can read it too."""
+    raw = path.read_bytes()
+    marked = "utf-8-sig" if raw.startswith(codecs.BOM_UTF8) else \
+        "utf-16" if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)) else None
+    try:
+        text = raw.decode(marked or "utf-8")
+    except UnicodeDecodeError as e:
+        raise ConfigError(f"{path.name} isn't saved as UTF-8 text, so ReelForge can't read it. Open it in a text "
+                          "editor and save it again as UTF-8 (in Notepad: Save as, then Encoding: UTF-8).") from e
+    if marked:
+        try:
+            tmp = path.with_suffix(".utf8.tmp")
+            tmp.write_bytes(text.encode("utf-8"))
+            tmp.replace(path)
+        except OSError:
+            pass  # a file ReelForge can't write is still read
+    return text
+
+
 def load_config() -> dict:
     path = config_path()
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(APP_DIR / "config.example.toml", path)
+    text = read_text(path)
     try:
-        with path.open("rb") as f:
-            cfg = tomllib.load(f)
+        cfg = tomllib.loads(text)
     except tomllib.TOMLDecodeError as e:
-        raise ConfigError(f"{path.name} has a typo ({e}). Fix it in a text editor, or delete the file "
+        # A Windows path in double quotes ("C:\Users\you") is the usual one: \U starts a character code in TOML.
+        at, lines = re.search(r"at line (\d+)", str(e)), text.splitlines()
+        line = lines[int(at.group(1)) - 1] if at and 0 < int(at.group(1)) <= len(lines) else ""
+        hint = (' Write a Windows folder with forward slashes, like "C:/Users/you/Videos".'
+                if "\\" in line.split("#")[0] else "")
+        raise ConfigError(f"{path.name} has a typo ({e}).{hint} Fix it in a text editor, or delete the file "
                           "and ReelForge makes a fresh one from config.example.toml.") from e
     for key in PLATFORM_KEYS:
         if not isinstance(cfg.get(key), dict):
             cfg[key] = {}
+    # A value of the wrong kind is said here, by name, instead of going wrong somewhere in the window later.
+    minutes = cfg.get("refresh_minutes", 30)
+    try:
+        if isinstance(minutes, bool):
+            raise ValueError
+        float(minutes)
+    except (TypeError, ValueError):
+        raise ConfigError(f"refresh_minutes in {path.name} should be a number of minutes, like refresh_minutes = 30 "
+                          "(0: only when you press Refresh).") from None
+    cfg["refresh_minutes"] = refresh_minutes(cfg)
+    for key, example in TEXT_SETTINGS.items():
+        if key in cfg and not isinstance(cfg[key], str):
+            raise ConfigError(f'{key} in {path.name} should be text in quotes, like {key} = "{example}".')
     return cfg
+
+
+# Settings that are text: each with what one looks like, for the message when it's something else.
+TEXT_SETTINGS = {"videos_dir": "videos", "episodes_dir": "../episodes", "completed_dir": "../completed videos",
+                 "default_tags": "#cooking #recipe"}
+
+
+def refresh_minutes(cfg: dict) -> float:
+    """How often an open window re-reads the stats, in minutes (0: only when you press Refresh): refresh_minutes,
+    whatever kind of value the settings hold. One that isn't a number counts as the usual 30 (load_config says so
+    when it reads the file; settings made some other way end up here)."""
+    try:
+        minutes = float(cfg.get("refresh_minutes", 30))
+    except (TypeError, ValueError):
+        return 30.0
+    return minutes if 0 < minutes < float("inf") else 0.0
 
 
 def save_handle(platform: str, handle: str) -> None:

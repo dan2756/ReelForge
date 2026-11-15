@@ -140,7 +140,7 @@ def handles(profile=None) -> dict[str, str] | None:
     target = config_toml(profile)
     try:
         data = tomllib.loads(target.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, ValueError):  # unreadable, a typo, or not saved as UTF-8
         return None
     tables = {p: data.get(p) if isinstance(data.get(p), dict) else {} for p in S.PLATFORMS}
     return {p: str(t.get("handle", "")).strip() for p, t in tables.items()}

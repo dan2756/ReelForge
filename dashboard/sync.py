@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
-from . import analytics, db, notify
+from . import analytics, config, db, notify
 from .platforms import Platform, PlatformError
 
 # When each platform was last tried, successful or not, so a failing one waits like any other
@@ -187,7 +187,7 @@ def gap_minutes(p: Platform, cfg: dict, manual: bool, fresh: bool = False) -> fl
     Reads through ReelForge's browser wait an hour, or 30 minutes while the platform has a video under two
     days old (10 minutes when you press r).
     """
-    gap = 2 if manual else cfg.get("refresh_minutes", 30)
+    gap = 2 if manual else config.refresh_minutes(cfg)
     if not gap:
         return 0
     if p.uses_browser:  # each read opens a browser for a few seconds, so go easy
