@@ -17,6 +17,13 @@ def cached(name):
     return SFX / "_cache" / f"{name}.wav"
 
 
+def cue_sounds(cues):
+    """The names of the recorded sounds a cue sheet (episode.json "audio") uses: its beds, hits and scatter pools."""
+    names = {b["sound"] for b in cues.get("beds", [])}
+    names |= {h["sound"] for h in cues.get("hits", []) if "sound" in h}
+    return names | {name for s in cues.get("scatter", []) for name in s.get("pool", [])}
+
+
 def build_cache(force=False):
     manifest = json.loads((SFX / "manifest.json").read_text(encoding="utf-8"))
     (SFX / "_cache").mkdir(exist_ok=True)

@@ -116,6 +116,9 @@ def main():
     if "build" in steps:
         run([config.BLENDER, "-b", "--factory-startup", "--python-exit-code", "1",
              "-P", config.PIPELINE / "blender" / "build_scene.py", "--", ep], log=build / "build.log")
+        # a wrong line, a missing HUD number or sound, or a caption that breaks the rules stops here, in seconds,
+        # instead of after the render and the compose
+        run([sys.executable, config.PIPELINE / "qa.py", ep, "--lint"])
 
     if "stills" in steps:
         secs = [float(s) for s in args.stills.split(",") if s] or spec.get("preview_times") or \
@@ -127,12 +130,14 @@ def main():
              "-f", frames], log=build / "stills.log")
 
     if "render" in steps:
+        run([sys.executable, config.PIPELINE / "qa.py", ep, "--lint"])
         render(build, spec, args.rerender, args.keep_frames)
 
     post = config.PIPELINE / "post"
     if "audio" in steps:
         mixer = "audio_mix.py" if spec.get("audio", {}).get("mixer") == "samples" else "audio.py"
         run([sys.executable, "-I", post / mixer, ep])
+        run([sys.executable, config.PIPELINE / "qa.py", ep, "--audio"])     # sound faults stop before the compose
     if "video" in steps:
         run([sys.executable, post / "compose.py", ep, "--video"])
     if "cover" in steps:
@@ -313,19 +318,9 @@ def write_captions(spec, final):
     only if the channel allows them there). Rules (max hashtags, TikTok's first tag) come from studio.toml."""
     s = config.SETTINGS
     tags = settings.tag_list(spec.get("hashtags", []))
-    n = config.MAX_HASHTAGS
-    if len(tags) > n:
-        raise SystemExit(f"caption: {len(tags)} hashtags in episode.json, the channel's maximum is {n}")
-    first = config.TIKTOK_FIRST_TAG
-    if (n > 0 and "tiktok" in config.PLATFORMS and first and
-            first.lower() not in (t.lower() for t in tags) and len(tags) >= n):
-        raise SystemExit(f"caption: TikTok needs #{first} first and max {n} hashtags; drop one hashtag from "
-                         "episode.json")
+    for problem in config.caption_problems(spec):       # the same rules the lint asks before the render
+        raise SystemExit(f"caption: {problem}")
     hook = " ".join(spec["title"].split())
-    if "#" in hook:
-        raise SystemExit("caption: put hashtags in episode.json 'hashtags', not in the title")
-    if len(hook) > 280:
-        raise SystemExit(f"caption: the title is {len(hook)} characters, X allows 280")
     if len(hook) > config.TITLE_MAX_CHARS:
         print(f"  note: the title is {len(hook)} characters (the channel aims for {config.TITLE_MAX_CHARS} or fewer)")
     out = settings.post_texts(hook, tags, s)
