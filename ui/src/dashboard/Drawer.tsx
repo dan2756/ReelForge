@@ -6,7 +6,7 @@
 import { TextAttributes, type Renderable } from "@opentui/core"
 import { useState } from "react"
 import { useView } from "../bridge"
-import { segsLen, type Segs } from "../lib/styled"
+import { cellLen, plain, segsLen, truncate, type Segs } from "../lib/styled"
 import { DASH, mix } from "../theme"
 import { Line } from "../ui/Line"
 import { OptionList, type Option } from "../ui/Lists"
@@ -19,21 +19,23 @@ export const DRAWER_WIDTH = 52
 const BODY_LINES = 3 // a notification shows at most this many lines of its body
 const X = 3 // the ×'s column, and a space either side
 
-/** Plain text wrapped at spaces to `width` columns (a word longer than that is cut). */
+/** Plain text wrapped at spaces to `width` columns (a word longer than that is cut). Columns, not characters: a
+ * title in Chinese or with an emoji in it takes two for each of those, and would run past the drawer's edge. */
 export function wrap(text: string, width: number): string[] {
   const out: string[] = []
   for (const para of text.split("\n")) {
     let line = ""
     for (const word of para.split(/\s+/).filter(Boolean)) {
       if (!line) line = word
-      else if (line.length + 1 + word.length <= width) line += " " + word
+      else if (cellLen(line) + 1 + cellLen(word) <= width) line += " " + word
       else {
         out.push(line)
         line = word
       }
-      while (line.length > width) {
-        out.push(line.slice(0, width))
-        line = line.slice(width)
+      while (cellLen(line) > width) {
+        const head = plain(truncate([[line]], width)) || [...line][0]! // (a column narrower than one wide character)
+        out.push(head)
+        line = line.slice(head.length)
       }
     }
     out.push(line)

@@ -4,12 +4,13 @@
 
 import { describe, expect, test } from "bun:test"
 import { headerFit, tabWindow } from "../src/dashboard/App"
+import { wrap } from "../src/dashboard/Drawer"
 import { cardLines, wrapLines } from "../src/dashboard/cards"
 import { metricTitle, pickVariant } from "../src/dashboard/titles"
 import type { MetricView, Variant } from "../src/dashboard/types"
 import { fit } from "../src/lib/fit"
 import { fmtNum, shortNum } from "../src/lib/format"
-import { plain, segsLen, wrappedRows, type Parts } from "../src/lib/styled"
+import { cellLen, plain, segsLen, wrappedRows, type Parts } from "../src/lib/styled"
 import { PLATFORM, restyle, tone } from "../src/theme"
 import { bell, BELL_WIDTH, faceCells, faceWidth, sparkline, stackedSparkline } from "../src/ui/Graphics"
 import { inline, mdBlocks } from "../src/ui/Panels"
@@ -211,6 +212,18 @@ describe("the header in a narrow window", () => {
         expect(b).toBeGreaterThanOrEqual(open)
         expect(used([a, b])).toBeLessThanOrEqual(room)
       }
+  })
+})
+
+describe("a notification's words in the drawer", () => {
+  test("wrap to the drawer's columns, counting wide characters as the two they take", () => {
+    expect(wrap("A video passed 100K views on TikTok", 20)).toEqual(["A video passed 100K", "views on TikTok"])
+    const wide = "もし世界中の人が同時にジャンプしたら？ 🎬🎬🎬🎬🎬🎬🎬🎬🎬🎬🎬🎬🎬🎬 What if everyone jumped?"
+    for (const width of [1, 2, 9, 20, 43]) {
+      const lines = wrap(wide, width)
+      for (const line of lines) expect(cellLen(line)).toBeLessThanOrEqual(Math.max(width, 2)) // (it ran to twice the width)
+      expect(lines.join("").replace(/\s/g, "")).toBe(wide.replace(/\s/g, "")) // and nothing is lost
+    }
   })
 })
 
