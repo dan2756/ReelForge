@@ -79,6 +79,7 @@ LATEST_COLUMNS = ("last_ts", "views", "likes", "comments", "shares", "saves")
 # video's upload page, posts on two platforms matched each other, or ReelForge posted it (or you typed in its numbers).
 # NULL: not linked. auto_link re-checks every link except hand and publish ones.
 LINKS = ("hand", "caption", "upload", "twin", "publish")
+TYPED = "manual-"  # a post id that starts with this holds numbers you typed in for an episode: manual-<episode id>
 BACKUPS_KEPT = 7
 
 
@@ -451,6 +452,21 @@ def add_post(platform: str, post_id: str, episode_id: int | None, title: str, ur
                  link = COALESCE(excluded.link, posts.link)""",
             (platform, post_id, episode_id, title, url, published_at or now_iso(), link),
         )
+
+
+def retire_typed() -> int:
+    """Drop the numbers you typed in for an episode on a platform (a manual-<episode> post and its readings) once
+    that episode has the real post there: ReelForge reads the platform itself now, so the typed ones would only sit
+    beside it with numbers that never move. Typed numbers for an episode whose post hasn't been found stay. Returns
+    how many went."""
+    with connect() as db:
+        gone = db.execute(
+            """SELECT platform, post_id FROM posts t WHERE post_id LIKE 'manual-%' AND episode_id IS NOT NULL
+               AND EXISTS (SELECT 1 FROM posts r WHERE r.platform = t.platform AND r.episode_id = t.episode_id
+                           AND r.post_id NOT LIKE 'manual-%')""").fetchall()
+        for table in ("post_stats", "posts"):
+            db.executemany(f"DELETE FROM {table} WHERE platform = ? AND post_id = ?", [tuple(r) for r in gone])
+    return len(gone)
 
 
 def link_post(platform: str, post_id: str, episode_id: int | None, how: str | None = "caption") -> None:

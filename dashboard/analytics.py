@@ -376,7 +376,10 @@ def _place(posts: list[dict], episodes: list[dict], links: dict) -> tuple[dict, 
         if e["video"]:
             files.setdefault(db.video_file(e["video"]).name.lower(), []).append(e["id"])
     placed = dict(links)
-    taken = {(eid, ref[0]) for ref, (eid, how) in links.items() if how in FIXED_LINKS and eid is not None}
+    # A fixed link holds its episode's place on that platform, except numbers you typed in (manual-<episode>): the
+    # real post takes that place once ReelForge can read it (and the typed ones then go: db.retire_typed).
+    taken = {(eid, ref[0]) for ref, (eid, how) in links.items()
+             if how in FIXED_LINKS and eid is not None and not ref[1].startswith(db.TYPED)}
     claims, named = [], set()
     for p in posts:
         ref = p["ref"]
@@ -455,7 +458,9 @@ def auto_link() -> int:
         if not twins:
             break
     changes = [(*ref, *was[ref], *links[ref]) for ref in links if links[ref] != was[ref]]
-    return db.relink(changes, {e["id"]: (e["title"], e["created_at"]) for e in made})
+    changed = db.relink(changes, {e["id"]: (e["title"], e["created_at"]) for e in made})
+    db.retire_typed()
+    return changed
 
 
 # --- formatting ---------------------------------------------------------------------------

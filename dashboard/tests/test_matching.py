@@ -384,6 +384,47 @@ class SnapshotTest(DbTest):
         self.assertEqual(self.account("x")[0], 40)
 
 
+class TypedInTest(DbTest):
+    """Numbers typed in for a platform ReelForge can't read yet (a manual-<episode> post each: the Accounts tab's Type
+    in stats)."""
+
+    def typed(self, platform: str, numbers: dict[int, int], minutes: float) -> None:
+        """Save typed-in views per episode, the way the dialog's Save stores them."""
+        titles = {e["id"]: e["title"] for e in db.episodes()}
+        for eid in numbers:
+            db.add_post(platform, f"manual-{eid}", eid, titles[eid], None, at(0))
+        read(platform, [post(f"manual-{eid}", titles[eid], 0, views=n) for eid, n in numbers.items()], minutes=minutes)
+
+    def posts(self, platform: str) -> list[str]:
+        with db.connect() as c:
+            return [r[0] for r in c.execute("SELECT post_id FROM posts WHERE platform = ? ORDER BY post_id",
+                                            (platform,))]
+
+    def test_the_real_post_takes_the_place_of_typed_in_numbers(self):
+        kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
+        jump = db.create_episode(REAL["jump"][0], video(REAL["jump"][1]), at(-50))
+        self.typed("instagram", {kite: 1200, jump: 300}, 60)
+        # Logged in now: Instagram is read, and its newest post is the kite video.
+        read("instagram", [post("ig777", CAPTIONS["instagram"].format(REAL["kite"][0]), 5, views=1350)], minutes=120)
+        self.assertEqual(analytics.auto_link(), 1)
+        self.assertEqual(where("instagram", "ig777"), (kite, "caption"))
+        # The kite video's typed numbers went with their readings; the jump video's post wasn't read, so its stay.
+        self.assertEqual(self.posts("instagram"), ["ig777", f"manual-{jump}"])
+        with db.connect() as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM post_stats WHERE post_id = ?",
+                                       (f"manual-{kite}",)).fetchone()[0], 0)
+        self.assertEqual(analytics.auto_link(), 0)
+        self.assertEqual(self.posts("instagram"), ["ig777", f"manual-{jump}"])
+
+    def test_typed_in_numbers_stay_while_no_post_is_read(self):
+        kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
+        self.typed("x", {kite: 500}, 60)
+        read("tiktok", [post("tt", CAPTIONS["tiktok"].format(REAL["kite"][0]), 5, views=90)], minutes=120)
+        analytics.auto_link()
+        self.assertEqual(where("x", f"manual-{kite}"), (kite, "publish"))  # another platform's post doesn't replace it
+        self.assertEqual(where("tiktok", "tt"), (kite, "caption"))
+
+
 class CompactTest(DbTest):
     def test_compacted_at_written_bare_by_older_versions_still_reads(self):
         with db.connect() as c:
