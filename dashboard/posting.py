@@ -476,12 +476,14 @@ def advance(job_id: str, state: str, *, by: str = "extension", install: str | No
             strategy: str | None = None) -> dict:
     """Move a job to a state (or say again where it is, with its step and progress). Returns the job as it is now.
     strategy: how the extension found what it was looking for on the page ("caption=role"), kept in the job's log
-    only. Refused: no such job ("not_found"), another browser has it ("not_yours", with install), or not a move a
-    job can make ("bad_transition")."""
+    only. Refused: no such job ("not_found"), not this browser's ("not_yours", with install: only the browser that
+    claimed a job reports on it), or not a move a job can make ("bad_transition")."""
     with db.connect() as c:
         c.execute("BEGIN IMMEDIATE")
         old = _locked(c, job_id)
-        if install is not None and old["claimed_by"] != install:
+        # (A job still waiting is nobody's yet: any connected browser may call it off, as the popup's Cancel does
+        # for the posts it asked about.)
+        if install is not None and old["claimed_by"] != install and (old["state"], state) != ("queued", "cancelled"):
             raise Refused("not_yours", "Another browser took this post.", old)
         if by == "extension" and old["state"] == "posting" and state in ("failed", "cancelled"):
             # The press was granted, so the click may have landed whatever the page showed afterwards. A browser
@@ -663,9 +665,10 @@ def _write(c: sqlite3.Connection, old: dict, state: str, by: str, **fields) -> d
         given = {k: v for k, v in given.items() if k in ("step", "progress", "detail") or not old[k]}
     else:
         new.update(state=state, step=None, progress=None, detail=None)
-        if old["state"] == "queued" and state in FREE:
-            # Nobody picked it up, so nothing was opened anywhere: its line in the upload log goes, or a post that
-            # happens to go up in the next hours would be filed under this video (analytics.auto_link).
+        if old["state"] in ("queued", "claimed") and state in FREE:
+            # Nobody picked it up, or the browser that did hadn't opened its tab yet (it says "opening" when it
+            # has). So nothing was opened anywhere: its line in the upload log goes, or a post that happens to go
+            # up in the next hours would be filed under this video (analytics.auto_link).
             c.execute("DELETE FROM uploads WHERE ts = ? AND platform = ? AND video = ? AND status = ?",
                       (old["created_at"], old["platform"], old["video"], old["via"]))
     if "post_id" in given and by != "reconcile" and not re.fullmatch(POST_ID.get(old["platform"], ".+"),

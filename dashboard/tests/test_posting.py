@@ -223,11 +223,15 @@ class Making(LedgerTest):
         # A post that goes up in the next hours is filed under the video whose upload was last started there. A job
         # that never reached a browser started nothing.
         expired, cancelled, begun = self.job("tiktok"), self.job("youtube"), self.job("instagram")
+        taken = self.job("x")
         self.age(expired, 11, "created_at")
         posting.expire_stale()
         posting.cancel(cancelled["id"])
         self.walk(begun, "opening")
         posting.cancel(begun["id"])  # its tab was opened: you may well finish that one by hand
+        # A browser took this one and called it off before it opened anything (it says "opening" when it has).
+        posting.claim(taken["id"], CHROME)
+        posting.advance(taken["id"], "cancelled", install=CHROME, detail="cancelled before it started")
         self.assertEqual([(u["platform"], u["status"]) for u in db.uploads()], [("instagram", "extension")])
         went_up = (db.parse(expired["created_at"]) + timedelta(minutes=20)).isoformat(timespec="seconds")
         db.record_snapshot("tiktok", Account("@me", 100), [Post("7300000000000000001", "Something else entirely",
@@ -532,7 +536,19 @@ class Claiming(LedgerTest):
 
     def test_a_job_nobody_reported_on_cannot_be_moved_by_a_browser(self):
         job = self.job()
-        self.refused("not_yours", posting.advance, job["id"], "opening", install=CHROME)  # not claimed yet
+        for state in ("opening", "ready", "posted", "failed", "unknown"):
+            self.refused("not_yours", posting.advance, job["id"], state, install=CHROME)  # not claimed yet
+        self.assertEqual(self.state(job), "queued")
+
+    def test_any_connected_browser_can_call_off_a_job_that_is_still_waiting(self):
+        # The popup's Cancel on its question: the jobs were made, and nothing was opened.
+        job = self.job()
+        called_off = posting.advance(job["id"], "cancelled", install=EDGE, detail="cancelled before it started")
+        self.assertEqual((called_off["state"], called_off["claimed_by"]), ("cancelled", None))
+        self.assertEqual(db.uploads(), [])
+        taken = self.job()
+        posting.claim(taken["id"], CHROME)
+        self.refused("not_yours", posting.advance, taken["id"], "cancelled", install=EDGE)  # Chrome's by now
 
     def test_what_cannot_be_claimed(self):
         over = self.job()
@@ -693,6 +709,8 @@ class Clock(LedgerTest):
             self.assertEqual((failed["state"], failed["error_code"]), ("failed", "timeout"))
             self.assertIn("Nothing was posted", failed["error_message"])
         self.assertEqual(posting.active_batches(), [])
+        # The one whose tab was never opened started nothing: its line in the upload log is gone.
+        self.assertEqual([(u["platform"], u["ts"]) for u in db.uploads()], [("youtube", opening["created_at"])])
         self.assertEqual([j["state"] for j in self.batch("tiktok", "youtube")["jobs"]], ["queued", "queued"])  # free
 
     def test_a_browser_that_went_silent_with_the_video_on_the_page_is_unknown(self):

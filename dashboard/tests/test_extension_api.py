@@ -790,6 +790,18 @@ class Jobs(ApiTest):
         log = [detail for _, _, detail in self.events(job) if detail and detail.startswith("found by")]
         self.assertEqual(log, ["found by tab=upload_url", "found by caption=role,post=text"])
 
+    def test_the_popups_cancel_calls_waiting_posts_off_and_leaves_no_trace_of_them(self):
+        made = self.post("/v1/batches", {"video": posting.digest(self.video), "platforms": ["tiktok", "x"]}).json
+        self.assertEqual(len(db.uploads()), 2)
+        for job in made["jobs"]:  # no claim first: nothing was opened, and nothing should look as if it had been
+            answer = self.event(job, "cancelled", detail="cancelled before it started")
+            self.assertEqual((answer.status, answer.json["state"]), (200, "cancelled"))
+        self.assertEqual([e[0] for e in self.events(made["jobs"][0])], ["queued", "cancelled"])
+        # An unrelated post that goes up later has no upload of this video to be filed under.
+        self.assertEqual(db.uploads(), [])
+        self.assertEqual(self.post("/v1/batches", {"video": posting.digest(self.video),
+                                                   "platforms": ["tiktok"]}).status, 201)
+
     def test_what_the_extension_says_is_cleaned_before_it_is_kept(self):
         job = self.job()
         self.post(f"/v1/jobs/{job['id']}/claim")
