@@ -58,6 +58,8 @@ class ApiPosting(PostingTest):
             self.connect_api()
         w = super().window(**options)
         self.addCleanup(self.finish, w)  # (before the window closes: no upload outlives its test)
+        # On another tab than Publish, where a pop-up says how an upload ended. (On Publish the video's row does.)
+        w.svc.tab = "overview"
         w.forget()
         w.svc.follow_youtube_api(changed=True)
         return w
@@ -603,6 +605,39 @@ class Posting(ApiPosting):
         w.call("post_action", self.rows(w)["youtube"]["job"], "mark_posted")
         row = self.rows(w)["youtube"]
         self.assertEqual((row["state"], row["via"], row["actions"]), ("posted", "api", ["post_again"]))  # no link
+
+    def test_on_the_publish_tab_the_row_says_how_it_ended_and_no_pop_up_covers_it(self):
+        """A pop-up with the row's own words sat on the row's buttons for twenty seconds. With the Publish tab
+        open on that video, the row says it. Anywhere else the pop-up is how you hear of it."""
+        other = self.root / "videos" / "ep02.mp4"
+        other.write_bytes(BYTES[::-1])
+        w = self.window()
+        w.call("tab_opened", "publish")
+        w.call("pick_file", str(self.video))
+        w.forget()
+        self.assertEqual(self.posted(w)["state"], "posted")
+        self.assertEqual(w.sent("toast"), [])
+        self.assertIn("It is private, as you chose.", plain(self.rows(w)["youtube"]["line"]))
+        # A refusal, and a post nobody is sure of: the same.
+        w.call("pick_file", str(other))
+        self.google.start_script = [(403, "quotaExceeded")]
+        self.assertEqual(self.posted(w)["state"], "failed")
+        self.assertEqual(w.sent("toast"), [])
+        self.assertIn("× failed: Your Google Cloud project has used up", plain(self.rows(w)["youtube"]["line"]))
+        self.google.script, self.google.then = [None, None, None, "lost"], "drop"
+        w.call("post_action", self.rows(w)["youtube"]["job"], "retry")
+        self.assertTrue(w.until(lambda: self.rows(w)["youtube"]["state"] == "unknown", 15))
+        self.assertTrue(w.until(lambda: not w.loop.live(("youtube-api",)), 15))
+        w.pump(0.1)
+        self.assertEqual(w.sent("toast"), [])
+        # With another video picked by the time it ends, or another tab open, the pop-up says it.
+        w.call("post_action", self.rows(w)["youtube"]["job"], "not_posted")
+        self.google.script, self.google.then, self.google.hold = [], None, threading.Event()
+        w.call("post_action", self.rows(w)["youtube"]["job"], "retry")
+        self.assertTrue(w.until(lambda: self.rows(w)["youtube"]["state"] == "uploading"))
+        w.call("pick_file", str(self.video))
+        self.google.hold.set()
+        self.assertTrue(w.until(lambda: [t["title"] for t in w.sent("toast")] == ["Posted to YouTube"], 15))
 
     def test_the_rows_own_button_posts_with_the_form_as_it_is_and_never_again(self):
         w = self.window()

@@ -404,7 +404,7 @@ describe("a post through the API", () => {
     expect(row(h)).toContain("✓ posted")
     expect(row(h)).toContain("It is private, as you chose. Change who can see it in YouTube Studio when you're ready.")
     expect(row(h)).toMatch(/▐ Open ▌ ▐ Post again… ▌ ▐ Again with API… ▌$/)
-    expect(popups().at(-1)).toBe(`Posted to YouTube: It is private, as you chose. Change who can see it in YouTube Studio when you're ready. ${LINK}`)
+    expect(popups()).toEqual([]) // the row says it, with its buttons: no pop-up sits on them
     // What Google got: that title and description, private, and the answer on file about kids. One video.
     const sent = await google(h)
     expect(sent.starts).toEqual([{ snippet: { title: `${CAPTION} #shorts`, description: TAGS, categoryId: "22" }, status: { privacyStatus: "private", selfDeclaredMadeForKids: false } }])
@@ -450,7 +450,7 @@ describe("a post through the API", () => {
     expect(row(h)).toContain("YouTube stored it as private, not public as you chose. Change who can see it in YouTube Studio.")
     const note = youtube(h).line.at(-1)!
     expect(note[1]).not.toBe(youtube(h).line[1]![1]) // in another colour than the quiet words beside "posted": amber
-    expect(popups().at(-1)).toContain("Posted to YouTube: YouTube stored it as private, not public as you chose.")
+    expect(popups()).toEqual([])
     expect(api(h).privacy).toBe("private") // the choice was for that post only
   })
 
@@ -472,7 +472,7 @@ describe("a post through the API", () => {
     const why = "Your Google Cloud project has used up today's YouTube API allowance. It starts again at midnight Pacific time. Nothing was posted."
     expect(row(h)).toContain(`× failed: ${why}`)
     expect(row(h)).toMatch(/▐ Try again ▌ ▐ Post with API… ▌$/)
-    expect(popups().at(-1)).toBe(`YouTube: not posted: ${why}`)
+    expect(popups()).toEqual([])
     expect((await google(h)).videos).toEqual([])
     // This window isn't listening for the browser extension, which stops a Try again that needs it. This one
     // doesn't: it went through the API, and goes through it again.
@@ -491,7 +491,7 @@ describe("a post through the API", () => {
     await until(h, () => youtube(h).state === "unknown")
     expect(row(h)).toContain("? did it post? ReelForge lost track: check YouTube Studio before trying again")
     expect(row(h)).toMatch(/▐ It's posted ▌ ▐ It didn't post ▌$/) // and no Try again: the video may be up
-    expect(popups().at(-1)).toBe("YouTube: not sure it posted: The last piece went out, but YouTube didn't say whether it arrived. Check YouTube Studio before trying again.")
+    expect(popups()).toEqual([])
     await clickText(h, "It didn't post", 2)
     await until(h, () => youtube(h).state === "cancelled")
     expect(row(h)).toMatch(/▐ Try again ▌ ▐ Post with API… ▌$/)

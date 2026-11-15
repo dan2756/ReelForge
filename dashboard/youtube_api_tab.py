@@ -686,8 +686,14 @@ class YouTubeApiTab:
             self.loop.call_soon(self._api_done, job)
 
     def _api_done(self, job: dict | None) -> None:
-        """On the loop, when this window's upload is over: say how it ended."""
-        if job and job["state"] == "posted":
+        """On the loop, when this window's upload is over: say how it ended. Not in a pop-up while the Publish tab
+        is open on that video: its row says the same there, with the buttons for it, and the pop-up sat on them
+        for twenty seconds."""
+        on_show = bool(job) and self.tab == "publish" and self.selected_file is not None \
+            and str(self.selected_file) == job["video_path"]
+        if on_show:
+            pass
+        elif job and job["state"] == "posted":
             said, act_on = to_look_at(job)
             self.notify((said or "It is up.") + (f" {job['url']}" if job["url"] else ""), title="Posted to YouTube",
                         severity="warning" if act_on else "information", timeout=20)
