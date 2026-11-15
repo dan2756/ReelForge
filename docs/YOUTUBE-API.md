@@ -246,7 +246,8 @@ What the window gets and calls:
 | view `posting` | the YouTube row has `post_api` among its `actions` while a post could start, with `api: {"force": ...}` |
 
 A job goes `queued`, `uploading` (with `progress`), `posting` (the last piece is on its way), then `posted`, or
-ends as `failed` or `unknown`. Retry on a failed row goes through the API again.
+ends as `failed` or `unknown`. Retry on a failed row goes through the API again. A posted job whose `step` is
+`confirm` has a sentence in `detail` about how YouTube stored the video: something for the person to look at.
 
 The addresses ReelForge talks to are constants in `youtube_api.py`. No setting or environment variable changes
 them. The tests patch them to a stand-in on the same computer.

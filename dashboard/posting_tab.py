@@ -262,7 +262,7 @@ class PostingTab:
                          "line": state_line(job, post, p.name).json(), "busy": state in BUSY, "url": url,
                          "job": job["id"] if job and state == job["state"] else None,
                          "actions": [a for a in ACTIONS[state] if a != "open_post" or url]})
-        self.api_rows(rows, jobs)  # what posting through YouTube's own API adds (dashboard/youtube_api_tab.py)
+        self.api_rows(rows, jobs, posts)  # what posting through YouTube's own API adds (youtube_api_tab.py)
         style = {"approved": GOOD, "none": MUTED, "demo": MUTED}.get(review["state"], f"bold {AMBER}")
         mark = {"approved": "✓ ", "none": "", "demo": ""}.get(review["state"], "! ")
         why = self.cant_post(video, review, extension, rows)

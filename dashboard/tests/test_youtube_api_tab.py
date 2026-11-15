@@ -60,7 +60,7 @@ class ApiPosting(PostingTest):
     def finish(self, w: Window) -> None:
         if self.google.hold is not None:
             self.google.hold.set()
-        for worker in w.loop.live(("youtube-api", "youtube-api-account")):
+        for worker in w.loop.live(("youtube-api", "youtube-api-settle", "youtube-api-account")):
             worker.thread.join(15)
 
     def api_post(self, w: Window, privacy: str = "", force: bool = False) -> dict | None:
@@ -281,8 +281,8 @@ class Posting(ApiPosting):
                          (True, [], ["youtube"]))
         self.assertRegex(made["batch"], r"^pb_[0-9a-f]{16}$")
         job = self.over(w, made["jobs"][0]["id"])
-        self.assertEqual((job["state"], job["via"], job["post_id"], job["url"], job["error_code"]),
-                         ("posted", "api", "vid00000001", LINK, None))
+        self.assertEqual((job["state"], job["via"], job["post_id"], job["url"], job["error_code"], job["detail"]),
+                         ("posted", "api", "vid00000001", LINK, None, None))
         self.assertEqual(json.loads(job["options"]), {"privacy": "private", "made_for_kids": False})
         self.assertEqual(json.loads(job["text"]), {"title": TITLE, "description": TAGS})
         self.assertEqual(self.events(job), [("queued", None), ("uploading", "upload"), ("posting", None),
@@ -308,7 +308,7 @@ class Posting(ApiPosting):
         self.assertTrue(said.startswith("✓ posted"), said)
         self.assertIn("It is private, as you chose. Change who can see it in YouTube Studio when you're ready.", said)
         toast = w.sent("toast")[-1]
-        self.assertEqual(toast["title"], "Posted to YouTube")
+        self.assertEqual((toast["title"], toast["severity"]), ("Posted to YouTube", "information"))
         self.assertIn("It is private, as you chose.", toast["body"])
         self.assertIn(LINK, toast["body"])
         self.assertIn(f"posted with its API · {LINK}", plain(w.view("uploads")["rows"][0]["cells"][4]))
@@ -359,8 +359,18 @@ class Posting(ApiPosting):
         self.assertIn("YouTube stored it as private, not public as you chose. Change who can see it in YouTube Studio.",
                       job["detail"])
         self.assertIn("docs/YOUTUBE-API.md", job["detail"])
-        self.assertIn("YouTube stored it as private, not public", plain(self.rows(w)["youtube"]["line"]))
-        self.assertIn("YouTube stored it as private, not public", w.sent("toast")[-1]["body"])
+        self.assertEqual(job["step"], "confirm")  # something for you to look at
+        said = self.rows(w)["youtube"]["line"][-1]
+        self.assertTrue(said[0].startswith("  YouTube stored it as private, not public"))
+        self.assertIn(youtube_api_tab.AMBER, said[1])
+        toast = w.sent("toast")[-1]
+        self.assertEqual((toast["title"], toast["severity"]), ("Posted to YouTube", "warning"))
+        self.assertIn("YouTube stored it as private, not public", toast["body"])
+        # Once a stats read has the post's numbers, everyone can see it: the note has done its work.
+        w.svc.posts = [{"platform": "youtube", "post_id": "vid00000001", "episode_id": job["episode_id"],
+                        "published_at": db.now_iso(), "views": 12, "url": LINK}]
+        w.svc.update_posting()
+        self.assertEqual(plain(self.rows(w)["youtube"]["line"]).count("YouTube stored it"), 0)
 
     def test_a_public_post_youtube_stored_as_asked_has_nothing_to_add(self):
         w = self.window()
@@ -370,7 +380,7 @@ class Posting(ApiPosting):
 
     def test_what_the_read_back_says(self):
         made = {"privacy": "private", "made_for_kids": False}
-        self.assertIn("It is private, as you chose.", youtube_api_tab.read_back("private", False, made))
+        self.assertEqual(youtube_api_tab.read_back("private", False, made), "")  # as it was sent: nothing to say
         self.assertEqual(youtube_api_tab.read_back("unlisted", False, {**made, "privacy": "unlisted"}), "")
         self.assertIn("stored it as private, not unlisted", youtube_api_tab.read_back("unlisted", False, made))
         self.assertIn("didn't say who can see it", youtube_api_tab.read_back("public", False, {**made, "privacy": None}))
@@ -692,7 +702,6 @@ class AfterAQuit(ApiPosting):
         self.assertEqual(youtube_api_tab.settle_orphans(), 1)
         done = posting.get(job["id"])
         self.assertEqual((done["state"], done["post_id"], done["url"]), ("posted", "vid00000001", LINK))
-        self.assertIn("It is private, as you chose.", done["detail"])
         self.assertEqual(self.google.puts[-1]["range"], f"bytes */{SIZE}")  # it asked; it sent nothing
         self.assertEqual((len(self.google.starts), len(self.google.videos)), (1, 1))
         self.assertIsNone(youtube_api.session(job["id"]))

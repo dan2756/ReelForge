@@ -46,6 +46,7 @@ WHO = {"private": "Private", "unlisted": "Unlisted", "public": "Public"}
 NOT_SET = ("ReelForge doesn't set the altered-content answer, tags, a thumbnail or a schedule. Set those in YouTube "
            "Studio.")
 STUDIO = "Check YouTube Studio before trying again."
+PRIVATE = "It is private, as you chose. Change who can see it in YouTube Studio when you're ready."
 
 
 # ---- one job's upload
@@ -158,26 +159,33 @@ def _stopped_short(job: dict, why: str) -> None:
 
 
 def read_back(privacy: str, made_for_kids: bool, made: dict) -> str:
-    """What to tell you about a video YouTube has, from its own answer: whether it stored who can see it and the
-    made-for-kids answer as they were sent, and what to do if it didn't. "" when there is nothing to say."""
+    """What YouTube's own answer about a video says that isn't what was sent: who can see it, and the
+    made-for-kids answer, with what to do about each. "" when it stored both as they were sent."""
     said = []
     if made["privacy"] is None:
         said.append("YouTube didn't say who can see it: check that in YouTube Studio.")
     elif made["privacy"] != privacy:
         said.append(f"YouTube stored it as {made['privacy']}, not {privacy} as you chose. Change who can see it in "
-                    "YouTube Studio. YouTube has kept uploads from a Google Cloud project it hasn't verified "
-                    f"private before ({DOCS}).")
-    elif privacy == "private":
-        said.append("It is private, as you chose. Change who can see it in YouTube Studio when you're ready.")
+                    "YouTube Studio. YouTube has been known to keep uploads private when they come from a Google "
+                    f"Cloud project it hasn't verified: {DOCS} says more.")
     if made["made_for_kids"] is not None and made["made_for_kids"] != made_for_kids:
         said.append(f"YouTube has it as {'made' if made['made_for_kids'] else 'not made'} for kids, which isn't "
                     "what ReelForge sent. Check its audience in YouTube Studio.")
     return " ".join(said)
 
 
+def to_look_at(job: dict) -> tuple[str, bool]:
+    """What a posted job has to add, and whether it is something to act on: what the read-back found (finish notes
+    it with the step "confirm"), else that the video is private because you chose so."""
+    if job["step"] == "confirm" and job["detail"]:
+        return job["detail"], True
+    return (PRIVATE if json.loads(job["options"]).get("privacy") == "private" else ""), False
+
+
 def finish(job: dict, made: dict) -> dict | None:
-    """An upload YouTube has taken whole: the job is posted, with the video's id, its link and what the read-back
-    found. One YouTube turned down after taking it is failed, with its reason."""
+    """An upload YouTube has taken whole: the job is posted, with the video's id and its link, and with what the
+    read-back found if it found anything (then its step is "confirm": there is something for you to look at). One
+    YouTube turned down after taking it is failed, with its reason."""
     options = json.loads(job["options"])
     youtube_api.note_channel(made)
     if made["upload_status"] in ("failed", "rejected", "deleted"):
@@ -190,7 +198,8 @@ def finish(job: dict, made: dict) -> dict | None:
     if not made["id"]:
         note = ("YouTube took the video, but ReelForge couldn't read its id: find it in YouTube Studio. " + note).strip()
     try:
-        return posting.advance(job["id"], "posted", by="app", post_id=made["id"], url=url, detail=note or None)
+        return posting.advance(job["id"], "posted", by="app", post_id=made["id"], url=url, detail=note or None,
+                               step="confirm" if note else None)
     except posting.Refused:
         # The job ended another way meanwhile (called off, or the clock gave up on it), but the video is up. It
         # goes into the stats as this episode's: that is what stops a second post of it, and a job that was
@@ -249,8 +258,8 @@ class YouTubeApiTab:
         """At start and every half minute, before PostingTab's own: a connection another window made or ended, and
         an upload a ReelForge closed in the middle of (settle_orphans, off the loop's thread: it may ask YouTube)."""
         self.follow_youtube_api()
-        if not self.demo and self._safe(orphans, []) and not self.loop.live(("youtube-api",)):
-            self.loop.run_worker(self._api_settle, group="youtube-api")
+        if not self.demo and self._safe(orphans, []) and not self.loop.live(("youtube-api", "youtube-api-settle")):
+            self.loop.run_worker(self._api_settle, group="youtube-api-settle")
         super().mind_the_jobs()
 
     def _api_settle(self) -> None:
@@ -315,19 +324,22 @@ class YouTubeApiTab:
             Text("Optional. It posts to YouTube through Google's own API, with a Google Cloud project you make "
                  f"yourself. {DOCS} has the steps.", MUTED)]
 
-    def api_rows(self, rows: list[dict], jobs: dict[str, dict]) -> None:
+    def api_rows(self, rows: list[dict], jobs: dict[str, dict], posts: dict[str, dict]) -> None:
         """The posting view's rows, as this way of posting changes them (PostingTab.update_posting calls it): the
         YouTube row offers post_api while the API is connected and a post could start there (row["api"]["force"]:
-        it would be a post again), a posted row says what the read-back found, and a row whose last piece is on
-        its way has no buttons, since only YouTube's word ends it."""
+        it would be a post again); a posted row says what the read-back found, or that the video is private, until
+        a stats read has its numbers (only a video everyone can see has any); and a row whose last piece is on its
+        way has no buttons, since only YouTube's word ends it."""
         connected = not self.demo and youtube_api.status()["state"] == "on"
         for row in rows:
-            job = jobs.get(row["key"])
+            job, post = jobs.get(row["key"]), posts.get(row["key"])
             if job is not None and job["via"] == "api" and row["job"] == job["id"]:
                 if row["state"] == "posting":
                     row["actions"] = []
-                elif row["state"] == "posted" and job["detail"]:
-                    row["line"].append(["  " + job["detail"], AMBER])
+                elif row["state"] == "posted" and not (post and post["views"] is not None):
+                    said, act_on = to_look_at(job)
+                    if said:
+                        row["line"].append(["  " + said, AMBER if act_on else MUTED])
             again = row["state"] in ("posted", "spotted")
             if row["key"] == "youtube" and connected and (again or row["state"] in ("none", *posting.FREE)):
                 row["actions"].append("post_api")
@@ -538,8 +550,9 @@ class YouTubeApiTab:
     def _api_done(self, job: dict | None) -> None:
         """On the loop, when this window's upload is over: say how it ended."""
         if job and job["state"] == "posted":
-            self.notify((job["detail"] or "It is up.") + (f" {job['url']}" if job["url"] else ""),
-                        title="Posted to YouTube", timeout=20)
+            said, act_on = to_look_at(job)
+            self.notify((said or "It is up.") + (f" {job['url']}" if job["url"] else ""), title="Posted to YouTube",
+                        severity="warning" if act_on else "information", timeout=20)
         elif job and job["state"] == "failed":
             self.notify(job["error_message"] or "The upload failed.", title="YouTube: not posted", severity="warning",
                         timeout=20)
