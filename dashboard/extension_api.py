@@ -11,6 +11,8 @@ Who gets in:
                   minutes, and the extension trades it for a token. Only the SHA-256 of that token is kept here
                   (dashboard/data/extension.json, one file for every channel of this ReelForge folder). The token is
                   the only real authentication: it goes in the X-ReelForge-Token header of every /v1 call but hello.
+                  Before the extension sends it anywhere, hello has to prove that this is the ReelForge the token
+                  came from (proof): ten ports on this computer are easy for another program to listen on.
   the local pages /pair and /post/<batch>, opened by ReelForge with a key in their address that is good for two
                   hours and for that one page. They can read where their own batch stands and ask for the by-hand
                   flow, nothing else.
@@ -210,6 +212,24 @@ def whose(store: dict, token: str) -> dict | None:
         if hmac.compare_digest(str(p.get("token_sha256", "")).encode("utf-8"), digest):
             found = p
     return found if token else None
+
+
+def proof(store: dict, install: str, nonce: str, port: int | None) -> str | None:
+    """ReelForge's proof, to a browser that is connected, that it is the ReelForge that browser connected to and not
+    another program listening on one of ReelForge's ports. An HMAC over the nonce the browser just made up, the
+    port this server listens on and this ReelForge's id, keyed with the SHA-256 of that browser's token: what the
+    connections file holds of the token, and what the browser can work out from the token it kept. The extension
+    asks for it with every hello and sends its token, or believes anything it is told, only where the proof holds.
+    The port is in it so that the real ReelForge's answer, passed on by a program on another port, proves nothing
+    there. None for a browser that isn't connected, or a nonce that isn't 32 hex digits."""
+    if not re.fullmatch(r"[0-9a-f]{32}", nonce):
+        return None
+    for p in paired(store):
+        key = str(p.get("token_sha256", ""))
+        if p.get("install") == install and re.fullmatch(r"[0-9a-f]{64}", key):
+            said = f"reelforge hello\n{nonce}\n{port}\n{store.get('app_id')}"
+            return hmac.new(bytes.fromhex(key), said.encode("utf-8"), hashlib.sha256).hexdigest()
+    return None
 
 
 def unpair(install: str) -> str | None:
@@ -719,10 +739,15 @@ class Handler(BaseHTTPRequestHandler):
         app = api.app
 
         if (self.command, path) == ("GET", "/v1/hello"):
-            token = self.headers.get(TOKEN_HEADER) or ""
-            self.reply(200, {"app": "reelforge", "protocol": PROTOCOL, "version": KIT_VERSION, "app_id": api.app_id,
-                             "profile": app.profile(), "demo": bool(app.demo),
-                             "paired": bool(token and not app.demo and whose(read_store(), token))})
+            token, store = self.headers.get(TOKEN_HEADER) or "", read_store()
+            said = {"app": "reelforge", "protocol": PROTOCOL, "version": KIT_VERSION, "app_id": api.app_id,
+                    "profile": app.profile(), "demo": bool(app.demo),
+                    "paired": bool(token and not app.demo and whose(store, token))}
+            # For a connected browser that says which one it is and sends a nonce: the proof that this is its
+            # ReelForge (see proof). The extension sends no token with a hello.
+            proven = None if app.demo else proof(store, (asked.get("install") or [""])[0],
+                                                 (asked.get("nonce") or [""])[0], api.port)
+            self.reply(200, {**said, "proof": proven} if proven else said)
             return
         if app.demo:
             raise Refusal(403, "demo", "ReelForge is showing its demo, which never posts.")

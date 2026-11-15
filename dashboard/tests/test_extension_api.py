@@ -7,6 +7,8 @@ the extension's folder and the stats database are scratch ones."""
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import hmac
 import http.client
 import inspect
 import io
@@ -180,6 +182,33 @@ class Rules(ApiTest):
         self.assertTrue(self.ask("GET", "/v1/hello", token=token).json["paired"])
         self.assertFalse(self.ask("GET", "/v1/hello", token=token[:-1] + "x").json["paired"])
         self.assertFalse(self.ask("GET", "/v1/hello", token="").json["paired"])
+
+    def test_hello_proves_which_reelforge_this_is_to_a_connected_browser(self):
+        token, nonce = self.pair(), "0123456789abcdef" * 2
+        app_id = json.loads(self.store.read_text("utf-8"))["app_id"]
+
+        def expected(port: int) -> str:
+            said = f"reelforge hello\n{nonce}\n{port}\n{app_id}".encode()
+            return hmac.new(hashlib.sha256(token.encode()).digest(), said, hashlib.sha256).hexdigest()
+
+        hello = self.ask("GET", f"/v1/hello?install={CHROME}&nonce={nonce}")  # no token is sent for it
+        self.assertEqual((hello.status, hello.json["proof"], hello.json["paired"]), (200, expected(self.port), False))
+        # Another ReelForge window (another port, the same connections) proves itself with another answer, so
+        # passing this one on from there proves nothing.
+        other = extension_api.Server(self.app, ports=(0,))
+        self.assertTrue(other.start())
+        self.addCleanup(other.stop)
+        theirs = ask(other.port, "GET", f"/v1/hello?install={CHROME}&nonce={nonce}").json["proof"]
+        self.assertEqual(theirs, expected(other.port))
+        self.assertNotEqual(theirs, hello.json["proof"])
+        for query in (f"install={EDGE}&nonce={nonce}", f"install={CHROME}", f"install={CHROME}&nonce=abc",
+                      f"install={CHROME}&nonce={nonce.upper()}", f"nonce={nonce}", ""):  # nobody it knows, no nonce
+            self.assertNotIn("proof", self.ask("GET", f"/v1/hello?{query}").json, query)
+        self.ask("POST", "/v1/unpair", {}, token=token, origin=EXTENSION)
+        self.assertNotIn("proof", self.ask("GET", f"/v1/hello?install={CHROME}&nonce={nonce}").json)  # forgotten
+        self.pair()
+        self.app.demo = True
+        self.assertNotIn("proof", self.ask("GET", f"/v1/hello?install={CHROME}&nonce={nonce}").json)
 
     def test_only_its_own_name_and_port_is_served(self):
         for host in (f"localhost:{self.port}", f"evil.example:{self.port}", "127.0.0.1", f"127.0.0.1:{self.port + 1}",
