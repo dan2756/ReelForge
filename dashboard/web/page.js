@@ -237,12 +237,13 @@
       row.bar.value = Math.round(job.progress * 100)
       row.bar.setAttribute("aria-label", `${job.name} upload`)
     }
-    // One link at most: the post once it is up, or the upload page when ReelForge couldn't open it for you.
+    // One link at most: the post (YouTube gives a video its link before it is published), or the upload page
+    // when ReelForge couldn't open it for you.
     const href = job.url || (told && told.url) || ""
     show(row.link, href.startsWith("https://"))
     if (href.startsWith("https://")) {
       row.link.href = href
-      write(row.link, job.url ? "Open the post" : `Open ${job.name}'s upload page`)
+      write(row.link, !job.url ? `Open ${job.name}'s upload page` : job.state === "posted" ? "Open the post" : `Open its link on ${job.name}`)
     }
     const handed = job.state === "cancelled" && job.detail === "posted by hand"
     const offer = job.by_hand && !handed && (job.state !== "queued" || stuck) && !closed && !over
@@ -279,6 +280,7 @@
     const missing = waited && !extension()
     const stuck = missing || state === "unpaired" || Boolean(wrong)
 
+    if (!answer && (closed || over)) write(el("video"), "")  // nothing to wait for: the notice says why
     if (answer) {
       const video = answer.video
       write(el("video"), video ? `${video.name} · ${megabytes(video.size)}` : "")

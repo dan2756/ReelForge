@@ -1060,6 +1060,8 @@ class Pages(ApiTest):
                                                 "ready", False))
         ready = extension_api.page_job({**job, "platform": "instagram", "state": "ready"}, "Instagram", names)
         self.assertEqual(ready["line"], "Ready: check it and press Share in the Instagram tab")
+        self.assertEqual(words(state="ready", detail="Visibility: Private")[1],  # what the extension said, first
+                         "Visibility: Private. ReelForge stops here. Nothing is posted until you press it.")
         self.assertEqual(words(state="posting")[0], "Pressing Post for you")
         self.assertEqual(words(state="posted", url=TIKTOK_URL), ("Posted", "", "good", False))
         self.assertIn("after the next stats read", words(state="posted")[1])

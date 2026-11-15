@@ -371,8 +371,8 @@ def page_job(job: dict, name: str, handles: dict[str, str]) -> dict:
         words, tone = ("You're posting this one by hand" if detail == "posted by hand" else "Cancelled"), "wait"
         note = "" if detail in ("", "posted by hand") else \
             detail[:1].upper() + detail[1:] + ("" if detail[-1] in ".!?" else ".")
-    if detail and stands in posting.IN_FLIGHT:
-        note = detail
+    if detail and stands in posting.IN_FLIGHT:  # what the extension last said ("Visibility: Private"), first
+        note = detail + (("" if detail[-1] in ".!?" else ".") + " " + note if note else "")
     out.update(name=name, line=words, note=note, tone=tone, by_hand=stands in BY_HAND)
     return out
 
