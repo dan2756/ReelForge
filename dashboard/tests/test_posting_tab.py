@@ -94,6 +94,18 @@ class View(PostingTest):
         self.assertEqual((labels["mark_posted"], labels["not_posted"], labels["retry"]),
                          ("It's posted", "It didn't post", "Try again"))
 
+    def test_an_upload_page_opened_by_hand_shows_on_its_row_until_the_post_is_spotted(self):
+        w = self.window()
+        w.call("open_upload", "tiktok", CAPTION, TAGS)
+        rows = self.rows(w)
+        self.assertEqual(plain(rows["tiktok"]["line"]), "○ not posted  upload page opened 0m ago, not spotted yet")
+        self.assertEqual((rows["tiktok"]["state"], rows["tiktok"]["actions"]), ("none", []))  # nothing to wait for
+        self.assertEqual(plain(rows["youtube"]["line"]), "○ not posted")
+        other = self.root / "videos" / "ep02.mp4"  # another video's row says nothing of it
+        other.write_bytes(b"second")
+        w.call("pick_file", str(other))
+        self.assertEqual(plain(self.rows(w)["tiktok"]["line"]), "○ not posted")
+
     def test_picking_a_video_sends_its_view(self):
         other = self.root / "videos" / "ep02.mp4"
         other.write_bytes(b"second")

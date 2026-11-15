@@ -118,11 +118,14 @@ def flag_style(color: str, state: str) -> str:
     return f"bold {BAD}" if state == "failed" else "#3a4049"
 
 
-def state_line(job: dict | None, post: dict | None, name: str) -> Text:
-    """A platform's row on the posting view: its state in words, with what the extension last said."""
+def state_line(job: dict | None, post: dict | None, name: str, opened: str | None = None) -> Text:
+    """A platform's row on the posting view: its state in words, with what the extension last said. opened: when
+    its upload page was last opened by hand for this video, which is all ReelForge knows of a post made that way
+    until a stats read finds it."""
     state = standing(job, post)
     if state == "none":
-        return Text("○ not posted", FAINT)
+        out = Text("○ not posted", FAINT)
+        return out.append(f"  upload page opened {fmt_ago(opened)}, not spotted yet", MUTED) if opened else out
     if state == "spotted" or (state == "posted" and post):
         return Text("✓ posted", f"bold {GOOD}").append("  " + numbers(post), MUTED)
     words = {**WORDS, **(API_WORDS if job["via"] == "api" else {})}[state]
@@ -294,13 +297,18 @@ class PostingTab:
         review = self.review_of(video, fresh)
         jobs = self._safe(lambda: posting.for_files([video]).get(video, {}), {})
         posts = self.spotted_posts(video)
+        opened: dict[str, str] = {}  # platform -> when its upload page was last opened by hand for this video
+        for u in self._safe(db.uploads, []):  # (newest first)
+            if u["status"] == "manual" and (u["video"] or "").lower() == video.name.lower():
+                opened.setdefault(u["platform"], u["ts"])
         rows = []
         for p in self.platforms.values():
             job, post = jobs.get(p.key), posts.get(p.key)
             state = standing(job, post)
             url = (job["url"] if job and state == job["state"] else None) or (post["url"] if post else None)
             rows.append({"key": p.key, "name": p.name, "color": p.color, "state": state,
-                         "line": state_line(job, post, p.name).json(), "busy": state in BUSY, "url": url,
+                         "line": state_line(job, post, p.name, opened.get(p.key)).json(), "busy": state in BUSY,
+                         "url": url,
                          "job": job["id"] if job and state == job["state"] else None,
                          "actions": [a for a in ACTIONS[state] if a != "open_post" or url]})
         style = {"approved": GOOD, "none": MUTED, "demo": MUTED}.get(review["state"], f"bold {AMBER}")
