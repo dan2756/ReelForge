@@ -148,12 +148,13 @@ enough to plan on and not good enough to quote as fact.
 
 | Platform | What its API would need | What stands in the way |
 |---|---|---|
-| YouTube | Your own Google Cloud project and a desktop sign-in. The upload call and its permissions are known (read). | Little. Uploads from your own unreviewed project are no longer locked to private, by the API's current description (read), but this changed in late 2026 and has not been confirmed with a real upload. About 100 uploads a day (excerpt). Sign-in lasts 7 days while the project is in testing (excerpt). This is the one platform where an official way to post is practical, and it is planned as a second way to post to YouTube. |
+| YouTube | Your own Google Cloud project and a desktop sign-in. The upload call and its permissions are known (read). | Little. Uploads from your own unreviewed project are no longer locked to private, by the API's current description (read), but this changed in late 2026 and has not been confirmed with a real upload. About 100 uploads a day (excerpt). Sign-in lasts 7 days while the project is in testing (excerpt). This is the one platform where an official way to post is practical, and ReelForge has it as a second way to post to YouTube: [YOUTUBE-API.md](YOUTUBE-API.md). |
 | TikTok | A developer app, for which TikTok asks for website addresses you have verified (excerpt). | Posts from an app TikTok has not audited are private only, on a private account (excerpt). TikTok lists a tool for uploading to your own account as something it does not approve (excerpt). So there is no official way for one creator to post publicly. |
 | Instagram | A professional account and a Meta developer app. No review is needed for your own account (excerpt). | A local file can only be sent on the path that needs a linked Facebook Page (the upload itself: read, in Meta's own sample; that it is limited to that path: excerpt). Otherwise the video has to sit at a public address (excerpt). There is no draft or private mode to try it with (excerpt). |
 | X | A developer app and paid credits: $0.015 a post, $0.20 if the post has a link (read). | It costs money for every post. Its sign-in changes on 31 January 2027, when the older kind stops working (read). X's developer guidelines forbid automating its website (read), which is why the extension never presses Post there. |
 
-So TikTok, Instagram and X go through the extension. YouTube can too.
+So TikTok, Instagram and X go through the extension. YouTube can too, or through its own API
+([YOUTUBE-API.md](YOUTUBE-API.md)), which like the extension has not yet been tried on the real thing.
 
 ## When something goes wrong
 
