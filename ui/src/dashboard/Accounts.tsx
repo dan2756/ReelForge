@@ -15,7 +15,7 @@ import { Button } from "../ui/Button"
 import { Chart } from "../ui/Chart"
 import { TextField } from "../ui/Fields"
 import { Fitted, Line } from "../ui/Line"
-import { Panel, Scroll, Wrapped } from "../ui/Panels"
+import { Panel, Reading, Scroll, Wrapped } from "../ui/Panels"
 import { ExtensionStrip } from "./Posting"
 import { useDash } from "./state"
 import type { AccountPanelView, AccountsView, ExtensionView } from "./types"
@@ -43,13 +43,7 @@ export function Accounts() {
       {row.length === 1 ? <box flexGrow={1} flexBasis={0} /> : null}
     </box>
   ))
-  if (!accounts) {
-    return (
-      <text fg={DASH.muted} marginTop={1} marginLeft={1}>
-        Reading your accounts…
-      </text>
-    )
-  }
+  if (!accounts) return <Reading what="your accounts" />
   return (
     <box flexDirection="column" flexGrow={1} paddingTop={1} gap={1}>
       {accounts.hint ? (

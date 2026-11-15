@@ -12,7 +12,7 @@ import { HBars } from "../ui/Graphics"
 import { Line } from "../ui/Line"
 import { OptionList, Table, type Option } from "../ui/Lists"
 import { useProgress } from "../ui/Motion"
-import { Panel, Scroll } from "../ui/Panels"
+import { Panel, Reading, Scroll } from "../ui/Panels"
 import { useDash } from "./state"
 import { hoursTitle } from "./titles"
 import type { CompareChart, CompareView } from "./types"
@@ -28,6 +28,7 @@ export function Compare() {
   const sort: Segs = (episodes?.sort ?? []).map((seg) =>
     !seg[0].trim() ? seg : seg[2] ? [seg[0], DASH.muted, seg[2]] : [seg[0], `bold ${DASH.text} on ${mix(DASH.raised, "#ffffff", 0.05)}`],
   )
+  if (!episodes || !compare) return <Reading what="your episodes" />
   return (
     <box flexDirection="row" flexGrow={1} marginTop={1} gap={1}>
       <Panel title="EPISODES" width={44} flexShrink={0} paddingX={1} right={sort.length ? <Line segs={sort} /> : undefined}>

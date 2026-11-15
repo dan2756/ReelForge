@@ -417,6 +417,33 @@ export function Wrapped({ segs, flexGrow = 1 }: { segs: Segs; flexGrow?: number 
   )
 }
 
+/** How long a view may take before Reading says something is wrong (a test shortens it). */
+export const READING = { lateMs: 10_000 }
+
+/** What a tab shows until its view arrives from the Python side: one quiet line saying what is being read (never an
+ * empty table or a chart with nothing in it, which read as "you have none"). A view that still hasn't come after ten
+ * seconds isn't coming by itself: the Python side tripped over making it, and said so in a pop-up that has gone by
+ * now. The line then says that it is taking too long, and what to do. inside: in a panel or the drawer, which have
+ * their own space round it (by itself it sits where a tab's first panel would). */
+export function Reading({ what, inside }: { what: string; inside?: boolean }) {
+  const theme = useTheme()
+  const [late, setLate] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setLate(true), READING.lateMs)
+    return () => clearTimeout(t)
+  }, [])
+  return (
+    <box flexDirection="column" marginTop={inside ? 0 : 1} paddingLeft={inside ? 0 : 1} paddingRight={1} flexShrink={0}>
+      <text fg={theme.muted} wrapMode="none">{`Reading ${what}…`}</text>
+      {late ? (
+        <text fg={theme.warn} wrapMode="word">
+          This is taking longer than it should. Press r to read again, or open another tab and come back. If it stays like this, close ReelForge and run: reelforge doctor
+        </text>
+      ) : null}
+    </box>
+  )
+}
+
 /** Measure the width a box gets (for things drawn to fit it). */
 export function useWidth(initial = 0): [number, (this: Renderable) => void] {
   const [width, setWidth] = useState(initial)

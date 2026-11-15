@@ -221,18 +221,20 @@ class Running:
 
 
 def table(columns: list[tuple[str, str, int]], rows: list[tuple[str | None, list]], sort: tuple | None = None,
-          bold_sorted_only: bool = False) -> dict:
+          bold_sorted_only: bool = False, empty: str = "") -> dict:
     """A table for the window: its columns (the sorted one with ▲ or ▼) and rows of cells, each row with the key the
-    window hands back when you pick it ("<platform>|<post id>")."""
+    window hands back when you pick it ("<platform>|<post id>"). empty: what the window says under the headings
+    while there are no rows (what goes here, and what to do to get one)."""
     cols = []
     for key, label, width in columns:
         arrow = (" ▼" if sort[1] else " ▲") if sort and key == sort[0] else ""
         style = "bold" if arrow or not bold_sorted_only else ""
         cols.append({"key": key, "label": Text(label + arrow, style).json(), "width": width,
                      "right": key in RIGHT})
-    return {"columns": cols, "rows": [{"key": k, "cells": [c if isinstance(c, list) else
-                                                             (c.json() if isinstance(c, Text) else Text(str(c)).json())
-                                                             for c in cells]} for k, cells in rows]}
+    return {"columns": cols, "empty": empty,
+            "rows": [{"key": k, "cells": [c if isinstance(c, list) else
+                                          (c.json() if isinstance(c, Text) else Text(str(c)).json())
+                                          for c in cells]} for k, cells in rows]}
 
 
 class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
@@ -1117,7 +1119,11 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
         cells = [(f"{p['platform']}|{p['post_id']}",
                   [tag(self.platforms[p["platform"]]), Text(name), Text(fmt_age(p["age_h"])), num(p["views"]),
                    _after(p, 12), score_text(p["score"])]) for name, p in rows]
-        self.emit("top", {"title": parts(title), **table([("platform", "", 4), *TOP_COLUMNS], cells, self.top_sort)})
+        empty = NOTHING_CONNECTED if not self.platforms else (
+            "No video is ranked yet. One shows up here once it has 50 views and ReelForge has read enough of your "
+            "videos to score it against your typical one.")
+        self.emit("top", {"title": parts(title),
+                          **table([("platform", "", 4), *TOP_COLUMNS], cells, self.top_sort, empty=empty)})
 
     def update_latest(self) -> None:
         """The newest video on every platform: how it's doing so far."""
@@ -1199,7 +1205,15 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
             self.video_key = select
         elif self.video_key not in keys:
             self.video_key = keys[0] if keys else None
-        self.emit("videos", {"hint": parts(hint), **table(VIDEO_COLUMNS, cells, self.sort, bold_sorted_only=True),
+        if not self.platforms:
+            empty = NOTHING_CONNECTED
+        elif self.filter:
+            empty = f"No videos read on {self.platforms[self.filter].name} yet. All shows the other platforms' videos."
+        else:
+            empty = ("No videos read yet. Post one from the Publish tab (u), and it shows up here at the next "
+                     "refresh (r).")
+        self.emit("videos", {"hint": parts(hint),
+                             **table(VIDEO_COLUMNS, cells, self.sort, bold_sorted_only=True, empty=empty),
                              "select": self.video_key, "focus": select is not None})
         self.update_video_detail()
 
@@ -1275,8 +1289,11 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
         post = self._post_for(self.video_key)
         self.update_video_badges(post)
         if not post:
-            self.emit("detail", {"key": None, "title": Text("VIEWS SINCE POSTING", "bold").json(),
-                                 "empty": "Pick a video above to see its views against your typical video's."})
+            # (with no video in the table there is nothing to pick: say what will be here instead)
+            empty = ("Pick a video above to see its views against your typical video's." if self.posts else
+                     "A video's views since it went up show here, against your typical video's, once there is one "
+                     "above.")
+            self.emit("detail", {"key": None, "title": Text("VIEWS SINCE POSTING", "bold").json(), "empty": empty})
             return
         p = self.platforms[post["platform"]]
         xs, ys = analytics.post_curve(post, self.parsed)
@@ -1832,7 +1849,9 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
                                 Text(u["video"] or ""), mark, note]))
         columns = [("when", "When", 8), ("platform", "", 4), ("title", "Video", 26), ("mark", "", 2),
                    ("note", "Post", 64)]
-        self.emit("uploads", {"heading": Text("RECENT UPLOADS", "bold").json(), **table(columns, rows)})
+        empty = ("Nothing yet. A post you start, with Post… or a platform's button under BY HAND, is listed here "
+                 "with where it stands.")
+        self.emit("uploads", {"heading": Text("RECENT UPLOADS", "bold").json(), **table(columns, rows, empty=empty)})
 
     # --- accounts -------------------------------------------------------------------------
 

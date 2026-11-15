@@ -168,6 +168,28 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(self.buttons(w), [])
         for tab in ("videos", "compare", "publish", "updates"):  # every tab copes with no platform at all
             w.call("tab_opened", tab)
+        # ... and a table with nothing in it says where to go, in place of a row of headings over nothing.
+        self.assertEqual(w.view("top")["empty"], NOTHING_CONNECTED)
+        self.assertEqual((w.view("videos")["rows"], w.view("videos")["empty"]), ([], NOTHING_CONNECTED))
+
+    def test_a_table_with_nothing_in_it_says_what_goes_there_and_what_to_do(self):
+        """Connected, and nothing read yet (a new channel before its first video): each empty table says what to do
+        next, and the chart under the Videos table doesn't ask you to pick a video there isn't."""
+        with db.connect() as c:
+            for table in ("account_stats", "post_stats", "posts", "uploads", "episodes"):
+                c.execute(f"DELETE FROM {table}")
+        w = self.open(demo.platforms())
+        self.assertEqual(w.view("top")["rows"], [])
+        self.assertIn("50 views", w.view("top")["empty"])
+        w.call("tab_opened", "videos")
+        self.assertEqual(w.view("videos")["rows"], [])
+        self.assertIn("Post one from the Publish tab", w.view("videos")["empty"])
+        self.assertNotIn("Pick a video", w.view("detail")["empty"])
+        self.assertIn("once there is one above", w.view("detail")["empty"])
+        w.call("set_filter", "youtube")
+        self.assertIn("No videos read on YouTube yet", w.view("videos")["empty"])
+        self.assertEqual(w.view("uploads")["rows"], [])
+        self.assertIn("BY HAND", w.view("uploads")["empty"])
 
     def test_hiding_every_platform_empties_the_charts(self):
         """Every platform hidden in the chart keys: each chart says how to show one again, and showing one brings its

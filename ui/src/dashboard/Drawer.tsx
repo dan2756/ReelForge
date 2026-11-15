@@ -12,6 +12,7 @@ import { Line } from "../ui/Line"
 import { OptionList, type Option } from "../ui/Lists"
 import { Asleep } from "../ui/Mascot"
 import { MOTION, useTween } from "../ui/Motion"
+import { Reading } from "../ui/Panels"
 import { TOP_ROWS, useDash } from "./state"
 import type { NotesView } from "./types"
 
@@ -105,6 +106,11 @@ function Notes() {
         setWidth(this.width - 3)
       }}
     >
+      {notes ? null : (
+        <box marginTop={1} flexShrink={0}>
+          <Reading what="your notifications" inside />
+        </box>
+      )}
       <box flexDirection="row" height={1} marginTop={1} flexShrink={0}>
         <box flexGrow={1}>
           <Line segs={notes?.head} />

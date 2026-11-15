@@ -25,6 +25,8 @@ export interface Row {
 export interface TableData {
   columns: Column[]
   rows: Row[]
+  /** What to say under the headings while there are no rows: what goes here, and what to do to get one. */
+  empty?: string
 }
 
 /** A thin one-column scrollbar: `visible` of `total` lines shown, from `offset`. */
@@ -191,6 +193,13 @@ export function Table(props: TableProps) {
         }}
       >
         <box flexDirection="column" flexGrow={1}>
+          {!rows.length && props.data?.empty ? (
+            <box flexDirection="row" paddingLeft={1} paddingRight={1} flexShrink={0}>
+              <text fg={theme.muted} wrapMode="word" flexGrow={1} flexShrink={1}>
+                {props.data.empty}
+              </text>
+            </box>
+          ) : null}
           {visible.map((row, i) => {
             const at = offset + i
             const here = at === index && (focused || props.cursor !== false)

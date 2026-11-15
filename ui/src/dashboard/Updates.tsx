@@ -10,7 +10,7 @@ import { Button } from "../ui/Button"
 import { ProgressBar } from "../ui/Graphics"
 import { Lines } from "../ui/Line"
 import { Mascot, MASCOT } from "../ui/Mascot"
-import { Markdown, Panel, Scroll, useTick, Wrapped } from "../ui/Panels"
+import { Markdown, Panel, Reading, Scroll, useTick, Wrapped } from "../ui/Panels"
 import { useDash } from "./state"
 import type { UpdateStep, UpdateView } from "./types"
 
@@ -24,6 +24,7 @@ export function Updates() {
   const [room, setRoom] = useState<[number, number]>([0, 0])
   // the mascot beside the panels when they keep 70 columns and he has his rows
   const mascot = room[0] - MASCOT.width - 2 >= 70 && room[1] >= MASCOT.height
+  if (!u) return <Reading what="which version you have" />
   return (
     <box flexDirection="column" flexGrow={1}>
       <box

@@ -15,7 +15,7 @@ import { lines, type Segs } from "../lib/styled"
 import { DASH, mix } from "../theme"
 import { Button } from "../ui/Button"
 import { Switch, TextField } from "../ui/Fields"
-import { Markdown, Modal, Panel, Scroll, Wrapped } from "../ui/Panels"
+import { Markdown, Modal, Panel, Reading, Scroll, Wrapped } from "../ui/Panels"
 import { PUBLISH_KEY, TAB_NAMES, useDash, type Tab } from "./state"
 
 export interface ComputerRow {
@@ -98,13 +98,7 @@ export function Settings() {
   const s = useDash()
   const v = useView<SettingsView>(s.bridge, "settings")
   const [width, setWidth] = useState(0)
-  if (!v) {
-    return (
-      <text fg={DASH.muted} marginTop={1}>
-        Reading your settings…
-      </text>
-    )
-  }
+  if (!v) return <Reading what="your settings" />
   const side = width === 0 || width >= SIDE_BY_SIDE
   return (
     <Scroll flexGrow={1} scrollY>

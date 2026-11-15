@@ -10,7 +10,7 @@ import { Chart } from "../ui/Chart"
 import { BadgeLine, Fitted } from "../ui/Line"
 import { DASH } from "../theme"
 import { Table } from "../ui/Lists"
-import { Panel } from "../ui/Panels"
+import { Panel, Reading } from "../ui/Panels"
 import { useDash } from "./state"
 import { hoursTitle } from "./titles"
 import type { DetailView, TableView } from "./types"
@@ -33,6 +33,7 @@ export function Videos() {
     s.set({ video: key })
     s.bridge.send("video_highlighted", key)
   }
+  if (!videos) return <Reading what="your videos" />
   return (
     <box flexDirection="column" flexGrow={1} marginTop={1} gap={1}>
       <Panel flexGrow={1} minHeight={8}>

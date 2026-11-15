@@ -16,7 +16,7 @@ import { TextField } from "../ui/Fields"
 import { Fitted, Line } from "../ui/Line"
 import { OptionList, Table } from "../ui/Lists"
 import { Asleep } from "../ui/Mascot"
-import { Panel, Scroll } from "../ui/Panels"
+import { Panel, Reading, Scroll } from "../ui/Panels"
 import { PostBlock } from "./Posting"
 import { useDash } from "./state"
 import type { FilesView, PlatformInfo, PreviewView, TableView } from "./types"
@@ -61,9 +61,16 @@ function Files({ rows }: { rows?: number }) {
   const count = files?.items.length ?? 0
   return (
     <Panel flexGrow={rows ? undefined : 1} flexShrink={rows ? 0 : 1} paddingX={1}>
-      <box height={1} marginBottom={1} paddingLeft={1} flexShrink={0}>
-        <Line segs={files?.heading} base={DASH.faint} />
-      </box>
+      {files ? (
+        <box height={1} marginBottom={1} paddingLeft={1} flexShrink={0}>
+          <Line segs={files.heading} base={DASH.faint} />
+        </box>
+      ) : (
+        // (before the list has come: an empty list here would say "no videos yet", with the mascot asleep over it)
+        <box paddingLeft={1} marginBottom={1} flexShrink={0}>
+          <Reading what="your videos" inside />
+        </box>
+      )}
       <OptionList
         id="file-list"
         items={files?.items ?? []}
@@ -76,13 +83,15 @@ function Files({ rows }: { rows?: number }) {
         }}
         onMenu={(id) => void s.openDialog("remove", s.bridge.call("remove_menu", id))}
         empty={
-          <Asleep>
-            <box flexDirection="column">
-              {(files?.empty ?? []).map((l, i) => (
-                <Line key={i} segs={l} />
-              ))}
-            </box>
-          </Asleep>
+          files ? (
+            <Asleep>
+              <box flexDirection="column">
+                {(files.empty ?? []).map((l, i) => (
+                  <Line key={i} segs={l} />
+                ))}
+              </box>
+            </Asleep>
+          ) : null
         }
       />
     </Panel>
@@ -160,7 +169,8 @@ function Form({ page }: { page?: boolean }) {
       <box marginTop={1} marginBottom={1} flexShrink={0}>
         <Line segs={uploads?.heading} />
       </box>
-      <Table id="uploads-table" data={uploads} cursor={false} rowsShown={Math.min(Math.max(uploads?.rows.length ?? 0, 1), 11)} />
+      {/* (with nothing uploaded yet, two rows for the words that say so) */}
+      <Table id="uploads-table" data={uploads} cursor={false} rowsShown={Math.min(uploads?.rows.length || 2, 11)} />
     </>
   )
   return (

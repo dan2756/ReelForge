@@ -15,7 +15,7 @@ import { BigNumber, faceWidth, Sparkline, StackedSparkline } from "../ui/Graphic
 import { BadgeLine, Fitted, Line, Lines } from "../ui/Line"
 import { Table } from "../ui/Lists"
 import { useTween } from "../ui/Motion"
-import { Panel, Scroll } from "../ui/Panels"
+import { Panel, Reading, Scroll } from "../ui/Panels"
 import { cardLines, wrapLines } from "./cards"
 import { useDash } from "./state"
 import { metricTitle, pickVariant } from "./titles"
@@ -47,6 +47,7 @@ export function Overview() {
     </box>
   )
   const badge = badges?.line?.length ? <BadgeLine parts={badges.line} how={s.init.badges_how} bg={DASH.surface} fg={DASH.muted} marginTop={1} /> : null
+  if (!cards) return <Reading what="your stats" />
   return (
     <box
       flexDirection="column"
