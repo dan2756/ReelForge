@@ -81,10 +81,17 @@ if (MODE === "signed_out") {
         })
         return
       }
-      action.innerHTML = '<div role="button" tabindex="0">Next</div>'
+      // "next_shares": Instagram changed its page, and the button on the Edit screen that is still labelled
+      // Next for screen readers now says Share and shares. Whoever clicks it has shared.
+      const shares = MODE === "next_shares" && name === "Edit"
+      action.innerHTML = shares ? '<div role="button" tabindex="0" aria-label="Next">Share</div>' : '<div role="button" tabindex="0">Next</div>'
       body.innerHTML = `<p>${name} your video</p>`
       // Each screen takes a moment to arrive, and Next is a fresh element every time.
-      action.firstChild.addEventListener("click", () => {
+      action.firstChild.addEventListener("click", event => {
+        if (shares) {
+          if (pressed(event, action.firstChild)) fixture.posted = true
+          return
+        }
         action.innerHTML = ""
         setTimeout(() => screen(name === "Crop" ? "Edit" : "New reel"), 150)
       })

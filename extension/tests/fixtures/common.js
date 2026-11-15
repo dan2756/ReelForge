@@ -21,5 +21,5 @@ window.pressed = function (event, button) {
   if (button.getAttribute("aria-disabled") === "true" || button.dataset.disabled === "true" || button.disabled) return false
   // "trusted_only": the page ignores a scripted click, as a site is free to.  "mute": it ignores every click.
   if (MODE === "trusted_only" && !event.isTrusted) return false
-  return MODE !== "mute"
+  return MODE !== "mute" && MODE !== "slow_mute"
 }

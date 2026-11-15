@@ -52,7 +52,7 @@ function details(file) {
   const visible = MODE !== "visibility_unset"
   content.innerHTML = `
     <ytcp-video-upload-progress><span class="progress-label">Uploading 0% ...</span></ytcp-video-upload-progress>
-    <a class="video-url-fadeable" href="https://youtu.be/FIXTUREvid01" target="_blank">https://youtu.be/FIXTUREvid01</a>
+    <a class="video-url-fadeable" href="https://youtu.be/FIXTUREvid1" target="_blank">https://youtu.be/FIXTUREvid1</a>
     <div id="details">
       <div id="title-textarea"><div id="textbox" contenteditable="true" role="textbox" aria-label="Add a title that describes your video (type @ to mention a channel)"></div></div>
       <div id="description-textarea"><div id="textbox" contenteditable="true" role="textbox" aria-label="Tell viewers about your video (type @ to mention a channel)"></div></div>
@@ -86,7 +86,7 @@ function details(file) {
   const label = content.querySelector(".progress-label")
   let percent = 0
   const tick = setInterval(() => {
-    percent += MODE === "slow" ? 2 : 25
+    percent += MODE === "slow" || MODE === "slow_mute" ? 2 : 25
     if (percent < 100) return (label.textContent = `Uploading ${percent}% ... 1 minute left`)
     clearInterval(tick)
     label.textContent = "Upload complete ... Checks complete. No issues found."
@@ -96,20 +96,26 @@ function details(file) {
   let at = 0
   const next = content.querySelector("#next-button")
   const done = content.querySelector("#done-button")
-  next.addEventListener("click", () => {
+  next.addEventListener("click", event => {
     const answered = content.querySelector("#audience [aria-checked=true]")
     content.querySelector("#complaint").hidden = Boolean(answered)
     if (!answered) return
+    // "next_publishes": YouTube changed its page, and the button that used to say Next publishes from the
+    // checks screen on. Whoever clicks it now has published.
+    if (MODE === "next_publishes" && at === 2) return publish(event, next)
     content.querySelector("#" + screens[at]).hidden = true
     at++
     content.querySelector("#" + screens[at]).hidden = false
+    if (MODE === "next_publishes" && at === 2) next.textContent = "Publish"
     if (at === 3) {
       next.hidden = true
       done.hidden = false
     }
   })
-  done.addEventListener("click", event => {
-    if (!pressed(event, done)) return
+  done.addEventListener("click", event => publish(event, done))
+
+  function publish(event, button) {
+    if (!pressed(event, button)) return
     if (!content.querySelector("#privacy-radios [aria-checked=true]")) return
     fixture.text = {
       title: content.querySelector("#title-textarea #textbox").innerText.trim(),
@@ -120,9 +126,9 @@ function details(file) {
     // "quiet_save": a private video is saved and the dialog just closes, with nothing shown after it.
     if (MODE === "quiet_save") return
     const share = document.createElement("ytcp-video-share-dialog")
-    share.innerHTML = '<h2>Video published</h2><a href="https://youtu.be/FIXTUREvid01">https://youtu.be/FIXTUREvid01</a>'
+    share.innerHTML = '<h2>Video published</h2><a href="https://youtu.be/FIXTUREvid1">https://youtu.be/FIXTUREvid1</a>'
     root.append(share)
-  })
+  }
 }
 </script>
 </body>
