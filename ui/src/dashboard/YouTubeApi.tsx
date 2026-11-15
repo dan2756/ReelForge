@@ -242,6 +242,8 @@ function Picks({ id, options, value, onChange }: { id: string; options: [string,
 
 // ---------------------------------------------------------------- the question before a post
 
+const STAYS_UP = 400 // ms the question stays after its yes was answered: longer than a double click takes
+
 /** The question before a post through YouTube's API: the video and its review, what happens after your yes, that this
  * way of posting has never been run against YouTube itself, then exactly what will be sent, a row for each thing,
  * with who can see it to choose for this one post, and what is left to YouTube Studio. A video that is up there
@@ -259,10 +261,15 @@ export function ApiPostDialog({ data, close }: { data: ApiPostData; close: () =>
     if (!ok || sent.current) return
     sent.current = true
     setBusy(true)
+    const asked = s.dialog
     // What it started, and why not when it didn't, come back as the YouTube row and as pop-ups.
     const shown = { video: info.video!.path, sha256: info.video!.sha256, made_for_kids: info.send!.made_for_kids }
     await s.bridge.ask("post_with_api", data.caption, data.tags, privacy, info.force, shown)
-    if (s.dialog?.kind === "api_post") close() // (Esc may have closed it meanwhile)
+    // The answer comes at once, and the second click of a double click a moment later, on the same spot. The question
+    // stays up for it: closed straight away, that click went to whatever is under the button on the Publish tab (Open
+    // all 4 →, in a window 120 columns by 30 rows).
+    await new Promise((done) => setTimeout(done, STAYS_UP))
+    if (s.dialog === asked) close() // (Esc may have closed it meanwhile)
   }
   // Who can see it, in words: while the yes is on its way the choice can't be changed any more, and reads as it went.
   const who = info.privacies.find((p) => p.key === privacy)?.label

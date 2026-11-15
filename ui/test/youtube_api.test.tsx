@@ -12,7 +12,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { TextAttributes } from "@opentui/core"
 import { headless, type Headless } from "../scripts/headless"
-import { clickText } from "../scripts/shots"
+import { clickText, find } from "../scripts/shots"
 import { ROOT } from "../src/bridge"
 import type { PostingView, YouTubeApiView } from "../src/dashboard/types"
 import { toasts } from "../src/ui/Panels"
@@ -435,12 +435,16 @@ describe("a post through the API", () => {
     expect(jobsMade()).toBe(1)
   })
 
-  test("is only posted again by the button that says so", async () => {
+  test("is only posted again by the button that says so, and Enter twice on a yes is one yes", async () => {
     const h = await kit({ api: { client: "on", kids: false } })
     await ask(h)
-    await clickText(h, "Post to YouTube", 2)
-    await until(h, () => youtube(h).state === "posted")
-    toasts.clear()
+    h.t.mockInput.pressKey("TAB")
+    await h.settle(200)
+    expect(focused(h)).toBe("Post to YouTube")
+    h.t.mockInput.pressKey("RETURN") // twice before the window has drawn again
+    h.t.mockInput.pressKey("RETURN")
+    await until(h, () => youtube(h).state === "posted" && !frame(h).includes("POST TO YOUTUBE THROUGH ITS API"))
+    expect([jobsMade(), (await google(h)).starts.length, popups()]).toEqual([1, 1, []]) // (a second yes came back as "already under way")
     // The row's own call posts nothing a second time, whoever makes it.
     await h.bridge.call("post_action", youtube(h).job, "post_api")
     await h.settle(500)
@@ -451,9 +455,35 @@ describe("a post through the API", () => {
     expect(dialog(h)).toContain("Already posted with ReelForge's help. It would be a second video.")
     expect(dialog(h)).toContain("▐ Cancel ▌ ▐ Post it again ▌")
     expect(focused(h)).toBe("Cancel")
-    await clickText(h, "Post it again", 2)
-    await until(h, () => jobsMade() === 2 && youtube(h).state === "posted")
-    expect((await google(h)).videos).toEqual(["vid00000001", "vid00000002"])
+    // Enter twice on Post it again is one more video, not two: only the window stands between the second press and a
+    // third video, should the first upload be over by the time it arrives.
+    h.t.mockInput.pressKey("TAB")
+    await h.settle(200)
+    expect(focused(h)).toBe("Post it again")
+    h.t.mockInput.pressKey("RETURN")
+    h.t.mockInput.pressKey("RETURN")
+    await until(h, () => jobsMade() === 2 && youtube(h).state === "posted" && !frame(h).includes("POST TO YOUTUBE THROUGH ITS API"))
+    await h.settle(800)
+    expect([jobsMade(), (await google(h)).videos, popups()]).toEqual([2, ["vid00000001", "vid00000002"], []])
+  })
+
+  test("a double click on the yes is one yes, and its second click lands on the question", async () => {
+    // In a window 120 columns by 30 rows the question's yes is over BY HAND's Open all 4 →. The question closed with
+    // the answer to the yes, which comes at once, and the second click opened four upload pages.
+    const h = await kit({ api: { client: "on", kids: false } }, [120, 30])
+    expect(frame(h)).toContain("▐ Open all 4 → ▌")
+    await ask(h)
+    const at = find(h, "Post to YouTube")!
+    const answer = h.bridge.ask.bind(h.bridge)
+    let answered: Promise<unknown> = Promise.resolve()
+    h.bridge.ask = ((method: string, ...args: unknown[]) => (answered = answer(method, ...args))) as typeof h.bridge.ask
+    await h.t.mockMouse.click(at[0] + 4, at[1])
+    await answered
+    await h.settle(60)
+    expect(frame(h)).toContain("POST TO YOUTUBE THROUGH ITS API") // still there for the second click
+    await h.t.mockMouse.click(at[0] + 4, at[1])
+    await until(h, () => youtube(h).state === "posted" && !frame(h).includes("POST TO YOUTUBE THROUGH ITS API"))
+    expect([jobsMade(), (await google(h)).videos, listed("opened.txt"), popups()]).toEqual([1, ["vid00000001"], [], []])
   })
 
   test("a Post it again that YouTube refuses is said in a pop-up, because the row still says posted", async () => {
