@@ -1,7 +1,7 @@
 """Turn onboarding answers into your studio: settings, channel bible, CLAUDE.md, AGENTS.md and the dashboard's config.
 
   python -m studio onboard --answers my-studio/answers.json     (what the AI-led interview runs)
-  python -m studio onboard --regenerate                         (rebuild everything from the saved answers)
+  python -m studio channel --regenerate                         (rebuild everything from the saved answers)
 
 Each profile (each channel, see studio/profiles.py) gets its own: the first profile's go where they always have, a
 new profile's into its folder in profiles/. The first profile's CLAUDE.md and AGENTS.md also list the other channels,
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -59,8 +60,7 @@ def write_claude_settings(s: dict) -> Path | None:
     data.setdefault("model", CLAUDE_MODEL)
     if not effort:
         data["effortLevel"] = CLAUDE_EFFORT
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
+    P.write_atomic(path, json.dumps(data, indent=2) + "\n")
     return path
 
 
@@ -308,13 +308,66 @@ def _guides(a: dict, s: dict, w: SimpleNamespace, out) -> None:
         _backup_if_foreign(target, w.backups)
         text = render("context.md.j2", context(a, s, who, w.profile))
         if who == "codex" and len(text.encode("utf-8")) > 30_000:
-            raise RuntimeError(f"AGENTS.md came out at {len(text.encode()) // 1024} KiB; Codex reads only 32 KiB")
+            raise ValueError(f"AGENTS.md came out at {len(text.encode()) // 1024} KiB, and Codex reads only 32 KiB: "
+                             "shorten your format's description or the look's notes in your answers")
         out(target, text)
+
+
+SLATE, NOTES, SUGGESTED = "## Slate", "## Research notes", " *(suggested)*"
+
+
+def _slate(bible: str) -> tuple[int, int]:
+    """Where the slate's list is in a channel bible: from its first idea to where the section's list ends (the title
+    examples, or the next section). Both the end when it has no ideas; (-1, -1) for a bible with no slate."""
+    head = re.search(rf"^{SLATE}.*$", bible, re.M)
+    if not head:
+        return -1, -1
+    stop = re.search(r"^(## |Title pattern examples:)", bible[head.end():], re.M)
+    end = head.end() + stop.start() if stop else len(bible)
+    idea = re.search(r"^[-*] ", bible[head.end():end], re.M)
+    return (head.end() + idea.start() if idea else end), end
+
+
+def _idea(line: str) -> str:
+    """The idea a slate line holds, without what's marked on it: "- ~~a snowball~~ (ep03)", "- [x] a snowball" and
+    "- a snowball *(suggested)*" all hold "a snowball"."""
+    text = re.sub(r"^[-*] (\[.\] )?", "", line.removesuffix(SUGGESTED))
+    struck = re.search(r"~~(.+?)~~", text)
+    text = re.sub(r"(\s*\([^()]*\))+$", "", (struck.group(1) if struck else text).rstrip())
+    return " ".join(text.split()).casefold()
+
+
+def _keep_yours(old: str, new: str, taken_out: list[str] | None = None) -> str:
+    """A newly rendered channel bible with what your AI keeps in it carried over from the old one: the slate (its
+    ideas in their order, with whatever was added or marked on them) and the research notes. The slate still gains an
+    idea the new answers bring (yours ahead of the format's suggestions), and loses a suggestion nobody touched that
+    the format no longer makes, and an idea of yours nobody touched that you've taken out of your answers
+    (taken_out). An idea counts as there already when a line holds that very idea, however it's marked (_idea), so
+    marking one used never brings it back as new. A line that only has its words in it ("a snowball rolling
+    downhill" for "a snowball") is another idea."""
+    (a, b), (c, d) = _slate(old), _slate(new)
+    if a >= 0 and c >= 0:
+        fresh = new[c:d].rstrip().splitlines()
+        gone = {f"- {x}" for x in taken_out or ()}
+        ideas = [ln for ln in old[a:b].rstrip().splitlines()
+                 if ln not in gone and (not ln.endswith(SUGGESTED) or ln in fresh)]
+        have = {_idea(ln) for ln in ideas}
+        more = [ln for ln in fresh if _idea(ln) not in have]
+        first = next((i for i, ln in enumerate(ideas) if ln.endswith(SUGGESTED)), len(ideas))
+        ideas[first:first] = [ln for ln in more if not ln.endswith(SUGGESTED)]
+        ideas += [ln for ln in more if ln.endswith(SUGGESTED)]
+        new = new[:c] + "\n".join(ideas) + ("\n\n" if ideas else "") + new[d:]
+    if NOTES in old and NOTES in new:
+        notes = old[old.index(NOTES) + len(NOTES):].strip()
+        if notes:
+            new = new[:new.index(NOTES) + len(NOTES)] + "\n\n" + notes + "\n"
+    return new
 
 
 def write_all(answers: dict, profile=None) -> list[Path]:
     """Validate the answers and write every file, for a profile (the one this process works on, by default). Returns
-    the paths written. Raises ValueError on bad answers."""
+    the paths written. Raises ValueError on bad answers, or when a file can't be made right (the message says which),
+    before any file has changed."""
     w = _where(profile)
     first = not w.settings.exists()                     # first-time setup: the channel isn't set up yet
     a, problems = validate(answers)
@@ -324,56 +377,65 @@ def write_all(answers: dict, profile=None) -> list[Path]:
         a.pop(key, None)
     if not a.get("_created") and w.answers.exists():   # keep the original creation date across re-runs
         try:
-            a["_created"] = json.loads(w.answers.read_text(encoding="utf-8")).get("_created")
+            a["_created"] = json.loads(w.answers.read_text(encoding="utf-8-sig")).get("_created")
         except ValueError:
             pass
     # The answers file is often the one being read (my-studio/answers.json), with no date yet: today, then.
     a["_created"] = a.get("_created") or dt.date.today().isoformat()
     s = settings_from(a)
-    written: list[Path] = []
-    w.my_studio.mkdir(parents=True, exist_ok=True)
+    files: list[tuple[Path, str]] = []
 
     def out(path: Path, text: str):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8", newline="\n")
-        written.append(path)
+        files.append((path, text))
 
     out(w.answers, json.dumps({k: v for k, v in a.items()}, indent=2, ensure_ascii=False) + "\n")
     out(w.settings, "# Your studio's settings, from first-time setup. The pipeline and the dashboard read this file.\n" +
         S.dump_toml(s, SETTINGS_COMMENTS))
     bible = render("channel-bible.md.j2", context(a, s, "claude", w.profile))
-    if w.bible.exists():
-        # keep the research notes your AI added, and a copy of the old bible
-        old = w.bible.read_text(encoding="utf-8", errors="replace")
-        w.backups.mkdir(parents=True, exist_ok=True)
-        (w.backups / f"channel-bible.{dt.datetime.now():%Y%m%d-%H%M%S}.md").write_text(old, encoding="utf-8")
-        head = "## Research notes"
-        if head in old and head in bible:
-            notes = old[old.index(head) + len(head):].strip()
-            if notes:
-                bible = bible[:bible.index(head) + len(head)] + "\n\n" + notes + "\n"
+    old = w.bible.read_text(encoding="utf-8", errors="replace") if w.bible.exists() else None
+    if old is not None:
+        try:    # studio.toml isn't written again yet, so it still lists the ideas of the answers before these
+            before = S.load(w.settings)["format"]["subjects"]
+        except (OSError, ValueError):
+            before = []
+        taken_out = [x for x in before if x not in s["format"]["subjects"]] if isinstance(before, list) else []
+        bible = _keep_yours(old, bible, taken_out)
     out(w.bible, bible)
     _guides(a, s, w, out)
     log = w.completed / "production-log.md"
     if not log.exists():
         out(log, render("production-log.md.j2", context(a, s, "claude", w.profile)))
+    from . import dashboard_config
+    config = dashboard_config.rendered(s, w.profile)
+    # Every file is rendered and checked by now, so whatever stops this (answers to fix, a typo in the dashboard's
+    # config.toml, notes too long for Codex) has stopped it above, with every file still as it was.
+
+    # A copy of the bible as it was, when it changes (its first lines carry today's date: that alone is no change).
+    if old is not None and old.split("-->", 1)[-1] != bible.split("-->", 1)[-1]:
+        P.write_atomic(w.backups / f"channel-bible.{dt.datetime.now():%Y%m%d-%H%M%S}.md", old)
+    written: list[Path] = []
+    for path, text in files:
+        P.write_atomic(path, text)
+        written.append(path)
     if w.profile.main and first:  # Claude Code's for the ReelForge folder, where your AI works on every channel
         cs = write_claude_settings(s)
         if cs:
             written.append(cs)
-    from . import dashboard_config
-    written += dashboard_config.write(s, w.profile)
+    if config:
+        P.write_atomic(*config)
+        written.append(config[0])
     if not w.profile.main:
         written += write_guides(profiles.main())  # the first channel's notes list this one
     return written
 
 
-def write_guides(profile=None) -> list[Path]:
+def write_guides(profile=None, *, saved_settings: bool = False) -> list[Path]:
     """A profile's CLAUDE.md and AGENTS.md again from its saved answers, nothing else: the first profile's list the
-    other channels, so they follow when a channel is added or removed. Nothing for a profile not set up yet."""
+    other channels, so they follow when a channel is added or removed. Updates use saved_settings to honor manual
+    settings and account edits. Nothing for a profile not set up yet."""
     w = _where(profile)
     try:
-        a, problems = validate(json.loads(w.answers.read_text(encoding="utf-8")))
+        a, problems = validate(json.loads(w.answers.read_text(encoding="utf-8-sig")))
     except (OSError, ValueError):
         return []
     if problems:
@@ -381,10 +443,18 @@ def write_guides(profile=None) -> list[Path]:
     written: list[Path] = []
 
     def out(path: Path, text: str):
-        path.write_text(text, encoding="utf-8", newline="\n")
+        P.write_atomic(path, text)
         written.append(path)
 
-    _guides(a, settings_from(a), w, out)
+    s = S.load(w.settings) if saved_settings and w.settings.is_file() else settings_from(a)
+    if saved_settings:
+        # Settings are documented as editable. An update refreshes instructions
+        # from the effective settings without rewriting them from older answers.
+        from . import dashboard_config
+        handles = dashboard_config.handles(w.profile)
+        if handles is not None:
+            s["platforms"]["handles"] = handles
+    _guides(a, s, w, out)
     return written
 
 
@@ -399,7 +469,7 @@ def set_account(platform: str, handle: str) -> list[Path]:
     if not P.ANSWERS.exists():
         return dashboard_config.set_handle(platform, handle)
     try:
-        a = json.loads(P.ANSWERS.read_text(encoding="utf-8"))
+        a = json.loads(P.ANSWERS.read_text(encoding="utf-8-sig"))
     except ValueError:
         return dashboard_config.set_handle(platform, handle)   # unreadable answers: leave them for onboarding
     # The handles connected in the dashboard are the ones that count (someone may have typed one into its settings).

@@ -197,6 +197,17 @@ class GitPullTest(unittest.TestCase):
         self.assertEqual((self.copy / "CLAUDE.md").read_text(encoding="utf-8"), "my channel\n")
         self.assertEqual((self.copy / "AGENTS.md").read_text(encoding="utf-8"), "my channel\n")
 
+    def test_codex_settings_you_edited_dont_stop_it_and_stay(self):
+        (self.kit / ".codex").mkdir()
+        self.commit({".codex/config.toml": 'model_reasoning_effort = "high"\n'})
+        self.git(self.copy, "pull", "-q")
+        (self.copy / ".codex" / "config.toml").write_text('model_reasoning_effort = "xhigh"\n', encoding="utf-8")
+        self.commit({"README.md": "1.1\n"})
+        update._git_pull(self.copy, lambda *a: None)                # "You've changed files in this copy", before
+        self.assertEqual((self.copy / "README.md").read_text(encoding="utf-8"), "1.1\n")
+        self.assertEqual((self.copy / ".codex" / "config.toml").read_text(encoding="utf-8"),
+                         'model_reasoning_effort = "xhigh"\n')
+
     def test_other_changes_stop_it(self):
         (self.copy / "README.md").write_text("edited\n", encoding="utf-8")
         self.commit({"README.md": "1.1\n"})

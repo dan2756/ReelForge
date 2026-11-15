@@ -107,7 +107,12 @@ def check(ep_dir: Path) -> tuple[bool, str]:
     spec_file = ep_dir / "episode.json"
     if not spec_file.exists():
         return False, f"  FAIL  no episode.json in {ep_dir}"
-    spec = json.loads(spec_file.read_text(encoding="utf-8"))
+    try:
+        spec = json.loads(spec_file.read_text(encoding="utf-8"))
+        if not isinstance(spec, dict) or not spec.get("id"):
+            raise ValueError('it has no "id"')
+    except ValueError as e:     # a typo from an edit by hand: one FAIL line, like every other problem here
+        return False, f"  FAIL  {spec_file} can't be read: {e}"
     video = ep_dir / "final" / f"{spec['id']}.mp4"
     cap = ep_dir / "final" / "caption.txt"
     qa = ep_dir / "build" / "qa" / "qa.json"

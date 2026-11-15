@@ -11,6 +11,7 @@ it at the new place; after moving the folder by hand, run setup again to do the 
 
 from __future__ import annotations
 
+import base64
 import os
 import plistlib
 import shlex
@@ -78,15 +79,19 @@ def ours() -> bool:
     link = path()
     if not link.exists():
         return False
-    ps = ("(New-Object -ComObject WScript.Shell).CreateShortcut($env:RF_LINK).TargetPath")
+    # The target comes back as base64 of its UTF-8 text. Windows PowerShell writes redirected output in the console's
+    # own code page, so a folder with a letter outside ASCII in its path (C:\Users\José\ReelForge) came back garbled,
+    # and this folder's own icon was taken for another copy's: not moved with the folder, not removed by uninstall.
+    ps = ("[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("
+          "(New-Object -ComObject WScript.Shell).CreateShortcut($env:RF_LINK).TargetPath))")
     try:
         r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], capture_output=True,
                            text=True, encoding="utf-8", errors="replace", timeout=30,
                            env={**os.environ, "RF_LINK": str(link)},
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except (OSError, subprocess.SubprocessError):
+        target = base64.b64decode(r.stdout.strip().lstrip("\ufeff"), validate=True).decode("utf-8")
+    except (OSError, subprocess.SubprocessError, ValueError):    # ValueError: PowerShell printed something else
         return False
-    target = r.stdout.strip()
     return bool(target) and os.path.normcase(os.path.normpath(target)) == os.path.normcase(
         os.path.normpath(str(P.ROOT / "ReelForge.bat")))
 

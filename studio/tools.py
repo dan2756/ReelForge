@@ -43,8 +43,10 @@ def _exists(p) -> bool:
 
 
 def _prefer_45(paths: list[str]) -> list[str]:
-    """Blender installs, the 4.5 ones first (the pipeline is built on 4.5 LTS), newest patch first. The version is
-    read from the folder name ("blender-4.5.5-windows-x64", "Blender 4.5"); unversioned paths come last."""
+    """Blender installs, the 4.5 ones first (the pipeline is built on 4.5 LTS), among those the copy in the kit's own
+    tools/ (the one setup downloaded and checked, the version the pipeline is tested with) ahead of one found
+    elsewhere, then the newest patch first. The version is read from the folder name ("blender-4.5.5-windows-x64",
+    "Blender 4.5"); unversioned paths come last."""
     series = tuple(int(x) for x in BLENDER_SERIES.split("."))
 
     def key(p):
@@ -54,7 +56,7 @@ def _prefer_45(paths: list[str]) -> list[str]:
         else:
             m = re.search(r"blender[- _](\d+)\.(\d+)(?:\.(\d+))?", p, re.IGNORECASE)
         ver = tuple(int(x or 0) for x in m.groups()) if m else (0, 0, 0)
-        return (ver[:2] == series, ver)
+        return (ver[:2] == series, TOOLS in Path(p).parents, ver)
     return sorted(paths, key=key, reverse=True)
 
 
@@ -118,8 +120,8 @@ def find_ffmpeg() -> str | None:
         return env if _exists(env) else None
     exe = "ffmpeg.exe" if WINDOWS else "ffmpeg"
     local = sorted(glob.glob(str(TOOLS / "ffmpeg*" / "bin" / exe)) + glob.glob(str(TOOLS / "ffmpeg*" / exe)))
-    if local:
-        return local[-1]
+    if local:      # one with ffprobe beside it first: a copy without it is half an install
+        return ([p for p in local if _exists(ffprobe_for(p))] or local)[-1]
     if _kit_only():
         return None
     on_path = shutil.which("ffmpeg")
@@ -139,6 +141,11 @@ def find_ffmpeg() -> str | None:
 def ffprobe_for(ffmpeg: str) -> str:
     p = Path(ffmpeg)
     return str(p.with_name("ffprobe" + p.suffix))
+
+
+def has_ffprobe(ffmpeg: str) -> bool:
+    """ffprobe is beside this ffmpeg, or on the PATH: QA measures every video with it, so ffmpeg alone isn't enough."""
+    return _exists(ffprobe_for(ffmpeg)) or bool(shutil.which("ffprobe"))
 
 
 # ---------------------------------------------------------------- fonts
@@ -254,6 +261,80 @@ def _fetch_text(url: str) -> str:
     return net.fetch_text(url)
 
 
+def untar(archive: Path, dest: Path) -> list[str]:
+    """Unpack a tar archive into dest and nowhere else; returns the names in it. Python 3.12 (and 3.11 from 3.11.4)
+    checks that itself, with tarfile's "data" filter. Python 3.11.0 to 3.11.3, which Debian 12 ships, has no filters
+    at all (asking for one is a TypeError), so there every entry is checked here first: no path or link that leaves
+    dest, by itself or by way of another link in the archive, and nothing but files, folders and links. Raises
+    tarfile.TarError for an archive that tries."""
+    with tarfile.open(archive) as t:
+        names = t.getnames()
+        if hasattr(tarfile, "data_filter"):
+            t.extractall(dest, filter="data")
+            return names
+        root = os.path.realpath(dest)
+        members = t.getmembers()
+        links = {os.path.normpath(m.name) for m in members if m.issym() or m.islnk()}
+
+        def inside(path: str) -> bool:
+            return os.path.commonpath([root, os.path.realpath(os.path.join(root, path))]) == root
+
+        def by_a_link(path: str, then_up: bool = False) -> bool:
+            """A folder on the way to path is one of the archive's own links (then_up: and the path climbs with ".."
+            after it). Where such a path leads depends on the link once it's unpacked, and inside() can't tell: it
+            looks before anything is there. A few links that each stay inside could otherwise lead out together,
+            and a file named beyond them land there."""
+            way, crossed = "", False
+            for part in Path(path).parts:
+                if crossed and (part == ".." or not then_up):
+                    return True
+                way = os.path.normpath(os.path.join(way, part))
+                crossed = crossed or way in links
+            return False
+
+        for m in members:
+            link = m.linkname if m.islnk() else os.path.join(os.path.dirname(m.name), m.linkname) if m.issym() else ""
+            # An entry is never named beyond a link (an archive of a real folder has none like that). A link may
+            # point through another one, as the links between a library's versions do, but not up from there.
+            if not (m.isfile() or m.isdir() or link) or not inside(m.name) or not inside(link) \
+                    or by_a_link(m.name) or by_a_link(link, then_up=True):
+                raise tarfile.TarError(f"{m.name} isn't something to unpack here")
+        t.extractall(dest)
+        return names
+
+
+def _staging() -> Path:
+    """An empty tools/new: where a download is unpacked and looked over before its folder moves into place. A setup
+    that stops part way (its window closed, a full disk) then leaves its half there, where nothing looks for a tool,
+    and not where find_blender and find_ffmpeg would take it for an install. The name is short because Windows counts
+    the whole path of every file unpacked into it."""
+    stage = TOOLS / "new"
+    if stage.exists():
+        shutil.rmtree(stage)
+    stage.mkdir(parents=True)
+    return stage
+
+
+def _unpack(archive: Path) -> Path:
+    """Unpack a .zip or .tar download that holds one top folder into the staging folder; returns that folder."""
+    stage = _staging()
+    if archive.name.endswith(".zip"):
+        with zipfile.ZipFile(archive) as z:
+            top = z.namelist()[0].split("/")[0]
+            z.extractall(stage)
+    else:
+        top = untar(archive, stage)[0].split("/")[0]
+    return stage / top
+
+
+def _move_in(folder: Path, dst: Path) -> None:
+    """A staged folder, whole and checked, takes dst's place (a rename inside tools/, so it's there or it isn't)."""
+    if dst.exists():
+        shutil.rmtree(dst)
+    folder.rename(dst)
+    shutil.rmtree(TOOLS / "new", ignore_errors=True)
+
+
 def blender_asset() -> str:
     if WINDOWS:
         return f"blender-{BLENDER_VERSION}-windows-{'arm64' if arm() else 'x64'}.zip"
@@ -283,19 +364,11 @@ def install_blender(progress: Progress | None = None) -> str:
     _say(progress, "Unpacking Blender (a minute or two)")
     if asset.endswith((".zip", ".tar.xz")):
         # unpack, then rename the folder to the short tools/blender (Windows struggles with very long paths)
-        if asset.endswith(".zip"):
-            with zipfile.ZipFile(archive) as z:
-                top = z.namelist()[0].split("/")[0]
-                z.extractall(TOOLS)
-        else:
-            with tarfile.open(archive) as t:
-                top = t.getnames()[0].split("/")[0]
-                t.extractall(TOOLS, filter="data")
-        dst = TOOLS / "blender"
-        if dst.exists():
-            shutil.rmtree(dst)
-        (TOOLS / top).rename(dst)
-        (dst / "kit-version.txt").write_text(f"{BLENDER_VERSION}\n", encoding="utf-8")
+        top = _unpack(archive)
+        if not (top / ("blender.exe" if WINDOWS else "blender")).is_file():
+            raise RuntimeError("the Blender download has no Blender in it; run setup again")
+        (top / "kit-version.txt").write_text(f"{BLENDER_VERSION}\n", encoding="utf-8")
+        _move_in(top, TOOLS / "blender")
     else:  # macOS .dmg: mount it and copy Blender.app out
         mnt = TOOLS / "downloads" / "blender-dmg"
         mnt.mkdir(parents=True, exist_ok=True)
@@ -361,27 +434,28 @@ def _ffmpeg_unpack(dst: Path, url: str, name: str, want: str, progress: Progress
     """Download an archive with one top folder holding bin/ffmpeg and bin/ffprobe, and make that folder dst."""
     archive = download(url, TOOLS / "downloads" / name, "ffmpeg", want, progress)
     _say(progress, "Unpacking ffmpeg")
-    if name.endswith(".zip"):
-        with zipfile.ZipFile(archive) as z:
-            top = z.namelist()[0].split("/")[0]
-            z.extractall(TOOLS)
-    else:
-        with tarfile.open(archive) as t:
-            top = t.getnames()[0].split("/")[0]
-            t.extractall(TOOLS, filter="data")
-    if dst.exists():
-        shutil.rmtree(dst)
-    (TOOLS / top).rename(dst)
+    top = _unpack(archive)
+    _both(top)
+    _move_in(top, dst)
     archive.unlink(missing_ok=True)
+
+
+def _both(folder: Path) -> None:
+    """A staged ffmpeg folder has ffmpeg and ffprobe in its bin, or it doesn't go into place."""
+    exe = ".exe" if WINDOWS else ""
+    gone = [t for t in ("ffmpeg", "ffprobe") if not (folder / "bin" / (t + exe)).is_file()]
+    if gone:
+        raise RuntimeError(f"the ffmpeg download has no {' or '.join(gone)} in it; run setup again")
 
 
 def _ffmpeg_mac(dst: Path, progress: Progress | None) -> None:
     """Martin Riedl's builds come as one zip per program, each holding just the program. The link to the newest
     release redirects to the build itself, whose checksum sits next to it."""
     arch = "arm64" if arm() else "amd64"
-    if dst.exists():
-        shutil.rmtree(dst)
-    (dst / "bin").mkdir(parents=True)
+    # Both programs first, then into place: a second download that fails leaves the ffmpeg you had (or none), never
+    # a new ffmpeg without its ffprobe, which setup would take for a finished install.
+    top = _staging() / "ffmpeg"
+    (top / "bin").mkdir(parents=True)
     for tool in ("ffmpeg", "ffprobe"):
         with net.open_url(FFMPEG_MAC.format(arch=arch, tool=tool)) as r:
             url = r.geturl()
@@ -389,9 +463,11 @@ def _ffmpeg_mac(dst: Path, progress: Progress | None) -> None:
         archive = download(url, TOOLS / "downloads" / f"{tool}-macos-{arch}.zip", tool, want, progress)
         with zipfile.ZipFile(archive) as z:
             member = next(n for n in z.namelist() if n.rsplit("/", 1)[-1] == tool)
-            (dst / "bin" / tool).write_bytes(z.read(member))
-        (dst / "bin" / tool).chmod(0o755)
+            (top / "bin" / tool).write_bytes(z.read(member))
+        (top / "bin" / tool).chmod(0o755)
         archive.unlink(missing_ok=True)
+    _both(top)
+    _move_in(top, dst)
 
 
 def tool_size_note() -> str:

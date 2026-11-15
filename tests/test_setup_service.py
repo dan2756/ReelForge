@@ -58,6 +58,14 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual([i["key"] for i in items["items"]], ["blender", "ffmpeg", "fonts"])
         self.assertEqual(items["todo"], ["blender"])  # ffmpeg is ready, the fonts need you
         self.assertIn("Let's get ReelForge ready.", "".join(s[0] for s in items["intro"]))
+        # the note names where this system's ffmpeg really comes from (it said gyan.dev on a Mac and Linux too)
+        self.assertIn(f"(blender.org, {setup_flow.tools.ffmpeg_source()[0]}, Mixkit)", items["note"])
+        for mac, windows, source in ((True, False, "ffmpeg.martin-riedl.de"), (False, True, "gyan.dev"),
+                                     (False, False, "BtbN's builds on GitHub")):
+            with mock.patch.object(setup_flow.tools, "MAC", mac), mock.patch.object(setup_flow.tools, "WINDOWS", windows):
+                svc.show_items(list(self.ITEMS))
+            self.assertIn(f"Downloads come only from the official sites (blender.org, {source}, Mixkit)",
+                          loop.view("items")["note"])
 
     def test_setting_up_reports_each_job_then_the_health_check(self):
         svc, loop = setup()

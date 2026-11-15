@@ -215,6 +215,25 @@ class AtOnce(MoveScratch):
         self.assertFalse((self.root / move.STATE).exists())
         self.assertIn("didn't move (in use)", self.said)
 
+    def test_a_move_that_doesnt_happen_leaves_the_settings_naming_the_folders_they_did(self):
+        # A folder written in full inside ReelForge is pointed at the new place before the folder moves. When the
+        # move then failed it stayed that way, and the Publish tab read a folder that doesn't exist.
+        self.outside_config()
+        cfg = self.root / "dashboard" / "config.toml"
+        text = cfg.read_text(encoding="utf-8")
+        text = text.replace('videos_dir = "../../../rendered/renders"', f"videos_dir = {json.dumps(str(self.root / 'clips'))}")
+        cfg.write_text(text, encoding="utf-8")
+        with mock.patch.object(P, "WINDOWS", False), mock.patch.object(move.os, "chdir"), \
+                mock.patch.object(move, "rename", lambda p, wait=10: "in use"):
+            code, moved = self.quiet(move.go, move.plan())
+        self.assertEqual((code, moved), (1, False))
+        self.assertIn("nothing else changed", self.said)
+        self.assertEqual(cfg.read_text(encoding="utf-8"), text)
+        self.assertEqual(Path(tomllib.loads(text)["videos_dir"]), self.root / "clips")
+        with mock.patch.object(P, "WINDOWS", True), mock.patch.object(move, "_window", lambda p, reopen, pause: "no PowerShell"):
+            code, moved = self.quiet(move.go, move.plan())      # on Windows: the small window that couldn't start
+        self.assertEqual((code, moved, cfg.read_text(encoding="utf-8")), (1, False, text))
+
 
 class OnWindows(MoveScratch):
     """Windows: the small window renames the folder once ReelForge has closed."""

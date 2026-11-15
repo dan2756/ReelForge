@@ -9,7 +9,7 @@
 | Georgia and Consolas fonts (Windows) | Microsoft's licence, part of Windows | No: used from your Windows fonts folder |
 | **Blender** 4.5 LTS | [GPL](https://www.blender.org/about/license/); what you make with it is yours | No: setup downloads it from download.blender.org (checksum verified) |
 | **ffmpeg** (builds by gyan.dev for Windows, Martin Riedl for macOS, BtbN for Linux) | [GPL](https://ffmpeg.org/legal.html) | No: setup downloads it from gyan.dev, ffmpeg.martin-riedl.de or BtbN's GitHub releases (checksum verified), or use your own |
-| **Python** (macOS and Linux, only without Python 3.11+) | [PSF licence](https://docs.python.org/3/license.html) | No: setup downloads it from the python-build-standalone releases on GitHub (checksum verified) into `tools/python` |
+| **Python** (macOS and Linux, only without Python 3.11.4+) | [PSF licence](https://docs.python.org/3/license.html) | No: setup downloads it from the python-build-standalone releases on GitHub (checksum verified) into `tools/python` |
 | **Chromium** (macOS and Linux, only without Chrome or Edge) | [BSD and others](https://www.chromium.org/chromium-projects/) | No: Playwright downloads it into its own cache folder |
 | Python packages: numpy, Pillow, Jinja2, httpx, Playwright, certifi, truststore | Their own open-source licences (BSD, MIT-CMU, MIT, Apache 2.0, MPL 2.0) | No: installed by pip from PyPI |
 | **Bun** (runs ReelForge's window) | [MIT and others](https://bun.com/docs/project/licensing) | No: setup downloads it from Bun's GitHub releases (checksum verified) into `tools/bun` |

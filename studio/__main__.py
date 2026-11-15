@@ -23,7 +23,9 @@
       --plain                  the same questions as plain prompts
       --questions              the questions as JSON (for an AI running the interview in chat)
       --answers FILE.json      write everything from saved answers, no questions
-      --regenerate             rebuild everything from my-studio/answers.json (e.g. after an update), every profile's
+      --regenerate             rebuild everything from my-studio/answers.json (after you edit it), every profile's
+      --preserve-settings      with --regenerate: only CLAUDE.md / AGENTS.md again, from your settings as they are
+                               (what an update runs: studio.toml and your accounts stay as you left them)
       --new                    for a new profile (with --answers too, for an AI running the interview in chat)
   reelforge doctor [--render-test] [--json]    check everything the pipeline needs
   reelforge stats [on|off]     the hourly job that reads your stats while ReelForge is closed
@@ -49,6 +51,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -115,11 +118,13 @@ def _interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def onboard(argv: list[str]) -> int:
+def onboard(argv: list[str], *, preserve_settings: bool = False) -> int:
     ap = argparse.ArgumentParser(prog="reelforge channel")
     ap.add_argument("--plain", action="store_true")
     ap.add_argument("--answers", type=Path)
     ap.add_argument("--regenerate", action="store_true")
+    ap.add_argument("--preserve-settings", action="store_true",
+                    help="refresh agent instructions without replacing saved settings or accounts")
     ap.add_argument("--questions", action="store_true")
     ap.add_argument("--new", action="store_true")
     args = ap.parse_args(argv)
@@ -130,7 +135,7 @@ def onboard(argv: list[str]) -> int:
         print(json.dumps(questions.describe(), indent=2, ensure_ascii=False))
         return 0
     if args.regenerate and not args.answers:
-        return regenerate()
+        return regenerate(preserve_settings=preserve_settings or args.preserve_settings)
     if args.answers or args.regenerate:
         src = args.answers or P.ANSWERS
         if not src.exists():
@@ -155,7 +160,13 @@ def onboard(argv: list[str]) -> int:
             answers = {**answers, "_created": ""}
         try:
             written = generate.write_all(answers, target)
-        except ValueError as e:
+        except Exception as e:
+            # A new profile that never got its files: its folder goes again, so the same command works once the
+            # answers are fixed (left there, the folder had the channel's name taken).
+            if target is not None:
+                shutil.rmtree(target.folder, ignore_errors=True)
+            if not isinstance(e, ValueError):
+                raise
             print(e)
             return 1
         _print_written(written)
@@ -176,7 +187,10 @@ def onboard(argv: list[str]) -> int:
                   "JSON file: reelforge channel --new --answers FILE.json")
             return 2
         from . import onboard_cli
-        prior = json.loads(P.ANSWERS.read_text(encoding="utf-8")) if P.ANSWERS.exists() else None
+        try:
+            prior = json.loads(P.ANSWERS.read_text(encoding="utf-8-sig")) if P.ANSWERS.exists() else None
+        except ValueError:
+            prior = None        # answers that can't be read: the questions start from their defaults
         again = S.onboarded()
         answers = onboard_cli.ask(prior)
         written = generate.write_all(answers)
@@ -187,9 +201,10 @@ def onboard(argv: list[str]) -> int:
     return first_run("onboard", new=args.new)
 
 
-def regenerate() -> int:
+def regenerate(*, preserve_settings: bool = False) -> int:
     """Every profile's files again from its saved answers (after an update, so they get the new version's
-    instructions): the first one last, so its notes list the others as they are now."""
+    instructions): the first one last, so its notes list the others as they are now. Updates preserve settings
+    and refresh only instructions; an explicit channel regeneration can apply edited answers."""
     from . import generate
 
     done = 0
@@ -198,7 +213,8 @@ def regenerate() -> int:
             continue
         try:
             answers = json.loads(p.answers.read_text(encoding="utf-8-sig"))
-            written = generate.write_all(answers, p)
+            written = (generate.write_guides(p, saved_settings=True) if preserve_settings
+                       else generate.write_all(answers, p))
         except (ValueError, OSError) as e:
             print(f"{p.name}: {e}")
             continue
@@ -247,11 +263,16 @@ def list_profiles(argv: list[str], chosen: profiles.Profile | None = None) -> in
     if argv == ["--json"]:
         from . import settings as S
 
-        print(json.dumps({"current": here.key, "profiles": [
-            {"key": p.key, "name": p.name, "folder": str(p.folder), "main": p.main,
-             "onboarded": p.onboarded, "platforms": S.load(p.settings)["platforms"]["enabled"]}
-            for p in profiles.every()
-        ]}))  # ASCII (\u escapes), so it prints under any Windows code page, not only in UTF-8 mode
+        rows = []
+        for p in profiles.every():
+            row = {"key": p.key, "name": p.name, "folder": str(p.folder), "main": p.main, "onboarded": p.onboarded}
+            try:
+                row["platforms"] = S.load(p.settings)["platforms"]["enabled"]
+            except S.SettingsError as e:    # one channel's settings with a typo in them: the others are still listed
+                row.update(platforms=[], error=str(e))
+            rows.append(row)
+        # ASCII (\u escapes), so it prints under any Windows code page, not only in UTF-8 mode
+        print(json.dumps({"current": here.key, "profiles": rows}))
         return 0
     print("Your profiles (one for each channel):")
     for i, p in enumerate(profiles.every(), 1):
@@ -407,8 +428,7 @@ def new_episode(argv: list[str]) -> int:
     (dest / "facts.md").write_text(facts, encoding="utf-8")
     print(f"Started {P.rel(dest)} from {P.rel(src.parent)}.")
     print("Next: write the title, lines, HUD, sound cues and facts.md, then build and look at the stills:")
-    print(f"  {P.venv_python()} {Path('pipeline') / 'make_episode.py'} {Path('episodes') / ep_id} "
-          f"--steps build,stills")
+    print(f"  {P.venv_python()} {Path('pipeline') / 'make_episode.py'} \"{P.rel(dest)}\" --steps build,stills")
     return 0
 
 
@@ -430,6 +450,23 @@ def tab_for(word: str) -> str | None:
     except ImportError:
         return None
     return dash_tab_for(word)
+
+
+def unknown(word: str) -> str:
+    """What to say to a word that's neither a command nor a tab: one line, with the nearest one there is. (The whole
+    help used to follow it, forty lines that pushed this one off the screen.) The commands are the ones the help at
+    the top of this file lists, so a new one is known here as soon as it's written there."""
+    import difflib
+
+    words = {"help", "open", *re.findall(r"^  reelforge ([a-z][a-z-]+)", __doc__, re.M)}
+    try:
+        from dashboard.tabs import TABS
+        words.update(TABS)
+    except ImportError:
+        pass
+    near = difflib.get_close_matches(word.lower(), sorted(words), n=1, cutoff=0.6)
+    return (f"{KIT_NAME}: there's no command or tab called {word!r}." +
+            (f" Did you mean reelforge {near[0]}?" if near else "") + " reelforge help lists them all.")
 
 
 def dashboard(argv: list[str]) -> int:
@@ -459,6 +496,18 @@ def open_app(argv: list[str]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """The reelforge command. A studio.toml that can't be read (a hand edit with a typo in it) is one line that names
+    the file, whichever command came across it, not a traceback."""
+    from . import settings as S
+
+    try:
+        return dispatch(argv)
+    except S.SettingsError as e:
+        print(e)
+        return 1
+
+
+def dispatch(argv: list[str] | None = None) -> int:
     try:
         sys.stdout.reconfigure(line_buffering=True)    # keep our lines in order with the tools' output in logs
     except (AttributeError, ValueError):
@@ -497,7 +546,11 @@ def main(argv: list[str] | None = None) -> int:
     if cmd in ("--demo", "refresh") or tab_for(cmd):
         return dashboard(argv)
     if cmd in ("channel", "onboard"):
-        return onboard(rest)
+        # Published updaters (including 2.2.1) call the legacy name with --regenerate
+        # after copying new files. They must not replay old answers over hand-edited
+        # settings/accounts. `channel --regenerate` still explicitly applies edited
+        # answers; future updaters also pass --preserve-settings for clarity.
+        return onboard(rest, preserve_settings=cmd == "onboard" and "--regenerate" in rest)
     if cmd == "profiles":
         return list_profiles(rest, chosen)
     if cmd == "setup":
@@ -541,7 +594,7 @@ def main(argv: list[str] | None = None) -> int:
         print("ffmpeg:", tools.find_ffmpeg())
         print("fonts:", *[str(f) for f in tools.find_fonts()], sep="\n  ")
         return 0
-    print(f"{KIT_NAME}: there's no command or tab called {cmd!r}.\n{__doc__}")
+    print(unknown(cmd))
     return 2
 
 

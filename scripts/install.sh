@@ -53,13 +53,15 @@ main() {
     return 1
   fi
 
-  local work
+  local work unpack=""        # the download's folder, and the one it's unpacked in (fetch_release makes that one)
   work="$(mktemp -d "${TMPDIR:-/tmp}/reelforge-install.XXXXXX")"
+  trap 'tidy; exit 130' INT TERM HUP                   # Ctrl-C or a closed terminal part way leaves neither behind
   if ! fetch_release "$release" "$kind" "$ext" "$work" "$dir"; then
-    rm -rf "$work"
+    tidy
     return 1
   fi
-  rm -rf "$work"
+  tidy
+  trap - INT TERM HUP
 
   echo "ReelForge is in $dir"
   if [ -n "${REELFORGE_NO_SETUP:-}" ]; then
@@ -88,8 +90,13 @@ sha256() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
 }
 
+tidy() {   # main's two work folders go
+  rm -rf "$work"
+  [ -z "$unpack" ] || rm -rf "$unpack"
+}
+
 fetch_release() {   # fetch_release RELEASE KIND EXT WORK DIR: download, check and unpack the newest package into DIR
-  local release="$1" kind="$2" ext="$3" work="$4" dir="$5" line want name top
+  local release="$1" kind="$2" ext="$3" work="$4" dir="$5" line want name top broken
   echo "Finding the newest ReelForge..."
   fetch "$release/SHA256SUMS.txt" "$work/SHA256SUMS.txt" || { echo "ReelForge wasn't installed: GitHub couldn't be reached."; return 1; }
   line="$(grep -E "^[0-9a-fA-F]{64} +\*?ReelForge-[0-9A-Za-z.-]+-$kind\.$ext\$" "$work/SHA256SUMS.txt" | head -n 1 || true)"
@@ -107,19 +114,30 @@ fetch_release() {   # fetch_release RELEASE KIND EXT WORK DIR: download, check a
     return 1
   fi
   echo "Unpacking it into $dir..."
-  mkdir -p "$work/unpack" "$(dirname "$dir")"
+  # main calls this function inside an "if", where bash switches set -e off, so each step that can fail says so
+  # itself. An unpack cut short (a full disk) would otherwise still leave one top folder, pass the check below and be
+  # moved into place as if it were whole.
+  broken="ReelForge wasn't installed: $name couldn't be unpacked (is the disk full?)."
+  mkdir -p "$(dirname "$dir")" || { echo "ReelForge wasn't installed: $(dirname "$dir") couldn't be made."; return 1; }
+  # It's unpacked beside $dir, not in the temporary folder. /tmp is often on another disk (and always is when
+  # ReelForge goes on another drive), where mv has to copy, and a copy cut short left half a ReelForge that the next
+  # run took for an install. From beside it the last step is a rename: the folder is there whole, or not at all.
+  unpack="$(mktemp -d "$(dirname "$dir")/.reelforge-unpack.XXXXXX")" ||
+    { echo "ReelForge wasn't installed: nothing can be written in $(dirname "$dir")."; return 1; }
   if [ "$kind" = macOS ]; then
-    unzip -q "$work/$name" -d "$work/unpack"       # keeps the scripts runnable
+    unzip -q "$work/$name" -d "$unpack" || { echo "$broken"; return 1; }       # unzip keeps the scripts runnable
   else
-    tar -xzf "$work/$name" -C "$work/unpack"
+    tar -xzf "$work/$name" -C "$unpack" || { echo "$broken"; return 1; }
   fi
-  top="$(ls -A "$work/unpack")"
-  if [ "$(printf '%s\n' "$top" | wc -l | tr -d ' ')" != 1 ] || [ ! -d "$work/unpack/$top" ]; then
+  top="$(ls -A "$unpack")"
+  if [ "$(printf '%s\n' "$top" | wc -l | tr -d ' ')" != 1 ] || [ ! -d "$unpack/$top" ]; then
     echo "ReelForge wasn't installed: $name isn't laid out the way ReelForge's are."
     return 1
   fi
-  [ -d "$dir" ] && rmdir "$dir"                    # the empty folder found earlier
-  mv "$work/unpack/$top" "$dir"
+  if [ -d "$dir" ]; then                           # the empty folder found earlier
+    rmdir "$dir" || { echo "ReelForge wasn't installed: $dir couldn't be replaced."; return 1; }
+  fi
+  mv "$unpack/$top" "$dir" || { echo "ReelForge wasn't installed: it couldn't be moved into $dir."; return 1; }
 }
 
 main "$@"

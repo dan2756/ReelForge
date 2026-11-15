@@ -6,15 +6,17 @@ the real thing run only there (the CI workflow runs this file on Windows, macOS 
   REELFORGE_BROWSER_TEST=1 ...    also start the browser ReelForge reads stats with (needs one installed)
 """
 
+import base64
 import os
 import plistlib
 import shlex
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
 import zipfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest import mock
 
 from studio import browsers, logo, shortcut, stats_schedule, tools
@@ -119,6 +121,38 @@ class Icon(unittest.TestCase):
             shortcut.make()                     # making it again replaces it
             self.assertTrue(shortcut.remove())
             self.assertFalse(made.exists())
+
+    def test_a_windows_shortcut_is_this_folders_whatever_letters_its_path_has(self):
+        # What PowerShell is asked and what's made of its answer (PowerShell itself only runs on Windows). The
+        # shortcut's target used to come back as text in the console's code page: "José" arrived as "Jos" and a
+        # stray byte, never equal to this folder, so its own icon counted as another copy's.
+        root = PureWindowsPath("C:\\Users\\José 田中\\ReelForge")
+        link = self.home / "Desktop" / "ReelForge.lnk"
+        link.parent.mkdir(parents=True)
+        link.write_bytes(b"a shortcut")
+        asked, answer = [], [""]
+
+        def powershell(cmd, **kwargs):
+            asked.append((cmd[-1], kwargs["env"]["RF_LINK"]))
+            return subprocess.CompletedProcess(cmd, 0, stdout=answer[0], stderr="")
+
+        def as_powershell_prints(target: str) -> str:
+            return base64.b64encode(target.encode("utf-8")).decode("ascii") + "\r\n"
+
+        with mock.patch.object(P, "WINDOWS", True), mock.patch.object(P, "MAC", False), \
+                mock.patch.object(P, "ROOT", root), mock.patch.dict(os.environ, {"USERPROFILE": str(self.home)}), \
+                mock.patch.object(shortcut.subprocess, "run", powershell):
+            answer[0] = as_powershell_prints(str(root / "ReelForge.bat"))
+            self.assertTrue(shortcut.ours())
+            script, about = asked[0]
+            self.assertIn("[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(", script)   # plain ASCII back
+            self.assertIn("CreateShortcut($env:RF_LINK).TargetPath", script)
+            self.assertEqual(about, str(link))
+            answer[0] = as_powershell_prints("C:\\Users\\José 田中\\Another ReelForge\\ReelForge.bat")
+            self.assertFalse(shortcut.ours())                       # another copy's icon
+            for nothing_to_go_by in ("", "\r\n", "C:\\Users\\Jos\ufffd\\ReelForge\\ReelForge.bat\r\n", "!!!"):
+                answer[0] = nothing_to_go_by
+                self.assertFalse(shortcut.ours(), nothing_to_go_by)
 
     def test_linux_menu_entry(self):
         with mock.patch.object(P, "MAC", False), mock.patch.object(P, "WINDOWS", False), \

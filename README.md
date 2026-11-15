@@ -211,6 +211,7 @@ out, say).
 `reelforge profiles --json` prints one JSON object with `current` (the selected profile's key) and a `profiles` array.
 Each profile has `key`, `name`, `folder` (an absolute path), `main`, `onboarded` (true once its first-time setup is
 done), and `platforms` (enabled platform keys from its studio settings, or the defaults before first-time setup).
+A profile whose `studio.toml` can't be read has no platforms and an `error` that says what's wrong in the file.
 Selection follows `reelforge profiles`: `-p NAME` or `REELFORGE_PROFILE`, then the last-opened profile, then the
 first. It changes no files or profile selection and includes no login data. `--json` cannot be combined with `new`,
 `delete`, or `restore`.
@@ -457,7 +458,7 @@ repairs the setup.
 
 Yes. Setup gets everything ReelForge needs into its own folder on all three, so you don't need Homebrew or a package
 manager: Blender from blender.org, ffmpeg from the builds ffmpeg.org points to, Bun (for ReelForge's window) from its
-own releases, and a private Python if yours is older than 3.11. ReelForge reads your stats with Chrome or Edge if you have one, or with a Chromium setup downloads if you
+own releases, and a private Python if yours is older than 3.11.4. ReelForge reads your stats with Chrome or Edge if you have one, or with a Chromium setup downloads if you
 don't. On a Mac, ReelForge goes in your Applications folder (so it's in Launchpad, Spotlight and the Dock) and opens in
 Terminal; on Linux it goes in your app menu. The hourly stats job is a launchd agent on a Mac and a systemd timer (or
 a cron job) on Linux. Every change is tested on Windows, on Macs with Apple Silicon and Intel, and on Linux.
