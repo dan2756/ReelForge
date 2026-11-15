@@ -9,7 +9,7 @@ import { useCallback, useState } from "react"
 import { useView } from "../bridge"
 import { clockLabels, lines as drawLines, MARK, type Drawn } from "../lib/chart"
 import { fmtNum } from "../lib/format"
-import { lines, segsLen, type Segs } from "../lib/styled"
+import { lines, segsLen, truncate, type Segs } from "../lib/styled"
 import { DASH } from "../theme"
 import { Button } from "../ui/Button"
 import { Chart } from "../ui/Chart"
@@ -85,12 +85,16 @@ function Account({ panel: p, picked }: { panel: AccountPanelView; picked: boolea
   )
 }
 
-/** The first line: where the stats come from, and Disconnect at its right end while there's room. */
+/** The first line: where the stats come from, and Disconnect at its right end, always. The words take their longest
+ * form that fits beside it, and where neither does (a long @handle, a window 80 columns wide) the shorter is cut off
+ * with "…": Disconnect is nowhere else, and it used to be the one left out. */
 function Status({ panel: p }: { panel: AccountPanelView }) {
   const [width, setWidth] = useState(0)
   const out = p.disconnect
-  const fits = (t: Segs) => out && segsLen(t) + 2 + segsLen(out) <= width
-  const line = fits(p.status) ? p.status : p.status_short && fits(p.status_short) ? p.status_short : null
+  const room = width - (out ? segsLen(out) + 2 : 0) // what the words have, two columns clear of Disconnect
+  const words = segsLen(p.status) <= room ? p.status : (p.status_short ?? p.status)
+  const cut = truncate(words, Math.max(room - 1, 0))
+  const line: Segs = !width || segsLen(words) <= room ? words : [...cut.slice(0, -1), [(cut.at(-1)?.[0] ?? "").trimEnd() + "…", words.at(-1)?.[1]]]
   return (
     <box
       flexDirection="row"
@@ -100,8 +104,8 @@ function Status({ panel: p }: { panel: AccountPanelView }) {
         setWidth(this.width)
       }}
     >
-      <Line segs={line ?? p.status_short ?? p.status} flexGrow={1} />
-      {line && out ? <Line segs={out} /> : null}
+      <Line segs={line} flexGrow={1} />
+      {out ? <Line segs={out} /> : null}
     </box>
   )
 }

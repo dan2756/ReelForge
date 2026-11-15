@@ -89,6 +89,26 @@ describe("logging ReelForge's browser out", () => {
     expect(frame(h)).not.toContain("Something went wrong")
   })
 
+  test("Disconnect is on every connected panel in a window 80 columns wide too, where its line is cut short to make room", async () => {
+    // The panels are 34 columns wide there. Disconnect was left out when the line beside it didn't fit, and it is
+    // nowhere else: at the smallest window ReelForge says it fits, a platform couldn't be disconnected.
+    const h = await kit({ logged_in: ["x"] }, [80, 24])
+    expect(frame(h)).toMatch(/┃ ● public stats for… +Disconnect +┃ ● public stats for… +Disconnect /) // TikTok and YouTube
+    await clickText(h, " Disconnect ", 2)
+    await until(h, () => frame(h).includes("DISCONNECT TIKTOK?"))
+    expect(frame(h)).toContain("DISCONNECT TIKTOK?")
+    h.t.mockInput.pressKey("ESCAPE")
+    await h.settle(400)
+    // A line with a shorter form takes that one whole (X's, read through ReelForge's browser), and wider panels have
+    // room for all of it.
+    h.t.resize(100, 60)
+    await h.settle(600)
+    expect(frame(h)).toMatch(/┃ ● public stats for @me +Disconnect +┃ ● reading @me +Disconnect /) // Instagram and X
+    h.t.resize(160, 60)
+    await h.settle(600)
+    expect(frame(h)).toMatch(/● reading @me through ReelForge's browser +Disconnect /)
+  })
+
   test("Disconnect offers Disconnect and log out while ReelForge's browser is logged in there, and only then", async () => {
     const h = await kit({ logged_in: ["x"] })
     await clickText(h, " Disconnect ", 2) // TikTok's, the first panel
