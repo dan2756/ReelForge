@@ -425,6 +425,29 @@ class TypedInTest(DbTest):
         self.assertEqual(where("tiktok", "tt"), (kite, "caption"))
 
 
+    def test_a_typed_in_number_can_be_put_right(self):
+        """34000 typed where 3400 was meant: the video, the account and their charts all come down to 3400."""
+        kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
+        jump = db.create_episode(REAL["jump"][0], video(REAL["jump"][1]), at(-50))
+        self.typed("x", {kite: 3000, jump: 100}, 60)
+        self.typed("x", {kite: 34000, jump: 100}, 120)
+        self.assertEqual(db.latest_accounts()["x"]["views"], 34100)
+        self.typed("x", {kite: 3400, jump: 100}, 180)
+        latest = {p["post_id"]: p["views"] for p in db.posts_latest()}
+        self.assertEqual(latest, {f"manual-{kite}": 3400, f"manual-{jump}": 100})
+        self.assertEqual(db.latest_accounts()["x"]["views"], 3500)
+        self.assertEqual([v for _, v in db.post_series(at(-1000))["x", f"manual-{kite}"]], [3000, 3400, 3400])
+        self.assertEqual([r["views"] for r in db.account_series("x", "")], [3100, 3500, 3500])
+
+    def test_putting_a_typed_in_number_right_leaves_read_numbers_alone(self):
+        kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
+        read("x", [post("1234", "something else", 0, views=9000)], minutes=30)  # read while X was logged in
+        self.typed("x", {kite: 500}, 60)
+        self.typed("x", {kite: 50}, 120)
+        self.assertEqual([r["views"] for r in db.account_series("x", "")], [9000, 500, 50])
+        self.assertEqual(next(p["views"] for p in db.posts_latest() if p["post_id"] == "1234"), 9000)
+
+
 class CompactTest(DbTest):
     def test_compacted_at_written_bare_by_older_versions_still_reads(self):
         with db.connect() as c:

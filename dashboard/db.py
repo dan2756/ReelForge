@@ -179,7 +179,7 @@ def record_snapshot(platform: str, account, posts: list, ts: str | None = None,
     A read that misses numbers never wipes known ones: a post keeps its last known counts and its views never go down
     (RSS counts lag and dip), while post_stats keeps what was read. Without the platform's own totals, the account gets
     the sum over every post ReelForge knows there (one page load only shows the newest), or its last totals if no posts
-    came.
+    came. Numbers you typed in are taken as typed, so a slip can be put right (see _correct_typed).
     """
     ts = ts or now_iso()
     if conn is None:
@@ -199,7 +199,8 @@ def _record(db: sqlite3.Connection, platform: str, account, posts: list, ts: str
              url = COALESCE(excluded.url, posts.url),
              published_at = excluded.published_at,
              last_ts = excluded.last_ts,
-             views = COALESCE(MAX(excluded.views, posts.views), excluded.views, posts.views),
+             views = CASE WHEN posts.post_id LIKE 'manual-%' THEN COALESCE(excluded.views, posts.views)
+                          ELSE COALESCE(MAX(excluded.views, posts.views), excluded.views, posts.views) END,
              likes = COALESCE(excluded.likes, posts.likes), comments = COALESCE(excluded.comments, posts.comments),
              shares = COALESCE(excluded.shares, posts.shares), saves = COALESCE(excluded.saves, posts.saves)""",
         [(platform, p.post_id, p.title, p.url, to_iso(p.published_at),
@@ -222,10 +223,24 @@ def _record(db: sqlite3.Connection, platform: str, account, posts: list, ts: str
                 f"SELECT {field} FROM account_stats WHERE platform = ? AND ts < ? ORDER BY ts DESC LIMIT 1",
                 (platform, ts)).fetchone() or [None])[0]
         totals.append(given)
+    if typed:
+        _correct_typed(db, platform, posts, totals[0])
     db.execute(
         "INSERT INTO account_stats VALUES (?,?,?,?,?,?,?)",
         (platform, ts, account.handle, account.followers, *totals, account.posts),
     )
+
+
+def _correct_typed(db: sqlite3.Connection, platform: str, posts: list, total: int | None) -> None:
+    """A typed-in number put right downwards (34000 that should have been 3400): the earlier readings that were
+    higher come down to it, the video's and, on a platform with only typed-in numbers, the account's, so no chart
+    holds on to the slip (charts keep a count at its highest reading)."""
+    db.executemany("UPDATE post_stats SET views = ? WHERE platform = ? AND post_id = ? AND views > ?",
+                   [(p.views, platform, p.post_id, p.views) for p in posts if p.views is not None])
+    read_too = db.execute("SELECT 1 FROM posts WHERE platform = ? AND post_id NOT LIKE 'manual-%' LIMIT 1",
+                          (platform,)).fetchone()
+    if total is not None and not read_too:
+        db.execute("UPDATE account_stats SET views = ? WHERE platform = ? AND views > ?", (total, platform, total))
 
 
 def latest_accounts() -> dict[str, sqlite3.Row]:
