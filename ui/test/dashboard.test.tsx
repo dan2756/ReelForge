@@ -145,7 +145,9 @@ describe("a dialog in a window 24 rows tall", () => {
     const flat = frame(h).replace(/[│┃]/g, " ").replace(/\s+/g, " ")
     // (squeezed, its lines were drawn over each other: "ReelForgehmatchesopostsdtoavideosdbyotheirecaption")
     expect(flat).toContain("ReelForge matches posts to videos by their caption. If it got this one wrong, pick the right video")
-    expect(frame(h)).toContain("Not one of my videos")
+    // The list, on the video the post is filed under now. (Not its first row, "Not one of my videos": at some hours
+    // the demo's top video is the last in the list, and the list opens scrolled down to it.)
+    expect(frame(h)).toContain("▌ ✓ What if")
     expect(frame(h)).toMatch(/▐ Cancel ▌ ▐ This one ▌/)
   })
 })
@@ -628,6 +630,11 @@ describe("dialogs", () => {
     expect(first).not.toBe("")
     h.t.mockInput.pressArrow("down") // no click and no Tab first
     await h.settle(300)
+    if (lit() === first) {
+      // (at some hours the demo's top video is the last in the list, with nothing under it: then up moves)
+      h.t.mockInput.pressArrow("up")
+      await h.settle(300)
+    }
     expect(lit()).not.toBe(first)
     await press(h, "return")
     await h.settle(500)
