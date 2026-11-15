@@ -1,6 +1,32 @@
-// The two static content scripts: ReelForge's own local pages, and the reelforge.tools website.
+// The two static content scripts: ReelForge's own local pages, and the reelforge.tools website. And who the
+// extension takes for ReelForge.
 import crypto from "node:crypto"
+import http from "node:http"
 import { equal, ok, until, sleep } from "./harness.mjs"
+
+// Another program on one of ReelForge's ports. It answers hello as ReelForge would, with any id and name it
+// likes, says "paired" to everything, and offers a newer list of hooks. It has no token and no files: all it
+// can do is listen. Everything it is sent is kept.
+async function impostor(port, like) {
+  const got = []
+  const server = http.createServer((request, response) => {
+    const path = request.url.split("?")[0]
+    got.push({ method: request.method, path, token: request.headers["x-reelforge-token"] || null })
+    const send = data => {
+      const body = JSON.stringify(data)
+      response.writeHead(200, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) })
+      response.end(body)
+    }
+    request.resume()
+    if (path === "/v1/hello") return send({ app: "reelforge", protocol: 1, version: like.version, app_id: like.appId, profile: like.profile, demo: false, paired: true, proof: "0".repeat(64) })
+    if (path === "/v1/seen") return send({ ok: true, selectors_version: 9999 })
+    if (path === "/v1/selectors") return send({ version: 9999, platforms: {} })
+    if (path === "/v1/state") return send({ profile: like.profile, platforms: [], videos: [], active: [] })
+    send({ ok: true })
+  })
+  await new Promise((resolve, reject) => server.once("error", reject).listen(port, "127.0.0.1", resolve))
+  return { got, stop: () => new Promise(resolve => { server.closeAllConnections(); server.close(resolve) }) }
+}
 
 const dataset = page => page.evaluate(() => ({ ...document.documentElement.dataset }))
 
@@ -64,6 +90,56 @@ export const tests = {
     await sleep(500)
     equal(await dataset(page), {}, "attributes the extension set")
     equal(app.requests("POST", /pair\/claim/).length, 0, "claims sent")
+  },
+
+  async "another program on a lower port that says it is this ReelForge gets no token and is believed in nothing"({ app, browser, video }) {
+    const film = video()
+    // The real ReelForge moves up a port, and the other program sits on the first one, where it is asked first.
+    await app.stop()
+    const other = await impostor(47821, app)
+    await app.start(47822)
+    try {
+      equal(await browser.pair(app), "ok", "pairing with the real one")
+      const popup = await browser.popup()
+      await until("the videos", () => popup.locator(`[data-video="${film.id}"]`).count())
+      equal(await popup.locator("#status").textContent(), "Rendered Wrong", "the popup is connected, to the real one")
+      // A whole post goes through the real one, heartbeats and all.
+      const made = app.createBatch(film, ["tiktok"])
+      await browser.post(app, made.batch)
+      await until(() => `ready (it is ${made.jobs[0].state})`, () => made.jobs[0].state === "ready", 30000)
+      await popup.getByRole("button", { name: "Settings" }).count()
+      await sleep(3500)  // the popup has asked again by now
+      ok(other.got.length > 0 && other.got.every(entry => entry.path === "/v1/hello"), `the other program was only ever said hello to (${JSON.stringify([...new Set(other.got.map(entry => entry.path))])})`)
+      equal(other.got.filter(entry => entry.token).length, 0, "requests to it that carried the token")
+      equal((await browser.storage("local")).selectors, undefined, "its list of hooks was not taken")
+      ok(app.heartbeats.length > 0, "the real one got the heartbeats")
+    } finally {
+      await other.stop()
+    }
+  },
+
+  async "another program on ReelForge's port while ReelForge is closed: not connected, and still no token"({ app, browser, video }) {
+    video()
+    equal(await browser.pair(app), "ok", "pairing")
+    const port = app.port
+    await app.stop()
+    const other = await impostor(port, app)
+    try {
+      const popup = await browser.popup()
+      await until("the screen", () => popup.locator("[data-screen]").count())
+      equal(await popup.locator("[data-screen]").getAttribute("data-screen"), "not_connected", "what the popup shows")
+      // The website's question gets the same answer.
+      const page = await browser.context.newPage()
+      await page.goto("https://reelforge.tools/")
+      await page.evaluate(() => window.say({ source: "reelforge-site", type: "status" }))
+      await until("the status answer", () => page.evaluate(() => window.answers.length === 1))
+      equal(await page.evaluate(() => window.answers[0].paired), false, "paired, as the website is told")
+      await sleep(600)
+      equal(other.got.filter(entry => entry.token || entry.path !== "/v1/hello"), [], "what it was sent beyond hello")
+      equal((await browser.storage("local")).selectors, undefined, "its list of hooks was not taken")
+    } finally {
+      await other.stop()
+    }
   },
 
   async "the website gets hello and status, and nothing else"({ app, browser, video }) {
