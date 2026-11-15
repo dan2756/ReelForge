@@ -97,6 +97,45 @@ class InstallTest(unittest.TestCase):
             self.assertEqual((self.root / rel).read_text(encoding="utf-8"), text, rel)
         self.assertEqual(launcher.stat().st_mtime_ns, before)  # unchanged files aren't rewritten
 
+    def test_an_update_keeps_the_sounds_you_added_to_the_list(self):
+        """assets/sfx/manifest.json is the kit's list, and docs/SOUND.md has you add an entry there for every sound
+        you bring. An update that put the kit's list over it took those entries away, and the next mix stopped on
+        "the cue sheet names sounds that aren't in assets/sfx/manifest.json"."""
+        import json
+
+        yours = {"_licenses": {"kenney": "CC0", "pixabay": "Pixabay Content License"},
+                 "sounds": {"pop": {"file": "kenney/pop.ogg", "source": "kenney", "id": 1},
+                            "hail_hit": {"file": "pixabay/hail_hit.ogg", "source": "pixabay"}}}
+        kit = {"_licenses": {"kenney": "CC0 1.0", "mixkit": "Mixkit"}, "_mixkit_url": "https://example.invalid/{id}",
+               "sounds": {"pop": {"file": "kenney/pop2.ogg", "source": "kenney", "id": 2},
+                          "whoosh": {"file": "mixkit/mixkit_9.wav", "source": "mixkit", "id": 9}}}
+        files = {"studio/__init__.py": 'KIT_VERSION = "1.0.0"\n', update.SOUNDS: json.dumps(yours, indent=2),
+                 "assets/sfx/pixabay/hail_hit.ogg": "the sound itself"}
+        for rel, text in files.items():
+            (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / rel).write_text(text, encoding="utf-8")
+        src = self.dir / "new"
+        for rel, text in {"studio/__init__.py": 'KIT_VERSION = "1.1.0"\n', update.SOUNDS: json.dumps(kit, indent=2)}.items():
+            (src / rel).parent.mkdir(parents=True, exist_ok=True)
+            (src / rel).write_text(text, encoding="utf-8")
+        update._copy_tree(src, self.root, lambda *a: None)
+        now = json.loads((self.root / update.SOUNDS).read_text(encoding="utf-8"))
+        self.assertEqual(now["sounds"], {**kit["sounds"], "hail_hit": yours["sounds"]["hail_hit"]})  # the kit's, and yours
+        self.assertEqual(now["_licenses"], {**kit["_licenses"], "pixabay": "Pixabay Content License"})
+        self.assertEqual(now["_mixkit_url"], kit["_mixkit_url"])
+        self.assertTrue((self.root / "assets/sfx/pixabay/hail_hit.ogg").is_file())
+        self.assertEqual(update.read_version(self.root), "1.1.0")
+        # The same update again changes nothing, and with nothing of yours in it the kit's file goes in as it is.
+        before = (self.root / update.SOUNDS).stat().st_mtime_ns
+        update._copy_tree(src, self.root, lambda *a: None)
+        self.assertEqual((self.root / update.SOUNDS).stat().st_mtime_ns, before)
+        (self.root / update.SOUNDS).write_text(json.dumps({"sounds": {"pop": {}}}), encoding="utf-8")
+        update._copy_tree(src, self.root, lambda *a: None)
+        self.assertEqual((self.root / update.SOUNDS).read_bytes(), (src / update.SOUNDS).read_bytes())
+        (self.root / update.SOUNDS).write_text("{not json", encoding="utf-8")  # a broken one is simply replaced
+        update._copy_tree(src, self.root, lambda *a: None)
+        self.assertEqual((self.root / update.SOUNDS).read_bytes(), (src / update.SOUNDS).read_bytes())
+
     @unittest.skipIf(os.name == "nt", "file permissions are a macOS and Linux thing")
     def test_mac_zip_update_keeps_scripts_runnable(self):
         """ZipFile unpacks without permissions; the update gives the zip's executable files theirs back."""

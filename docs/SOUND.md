@@ -57,3 +57,7 @@ Approved free sources: **Mixkit** (free licence: commercial use, no attribution,
 and **Kenney** (CC0). Put the file in `assets/sfx/<source>/`, add a manifest entry (`file`, `source`, `id` or
 `title`, licence note), run `python -I pipeline/post/sfx_cache.py`, then use its name in a cue sheet. Check its
 length and listen for noise before you rely on it.
+
+An update brings the kit's new list and keeps the entries you added to yours. The one exception is the update
+away from ReelForge 2.2.1, which 2.2.1's own updater does: it puts the new list over yours. Your sound files stay
+where they are, so add their entries again after that update, or keep a copy of your `manifest.json` before it.

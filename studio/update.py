@@ -51,6 +51,9 @@ KEEP = ("my-studio/", "episodes/", "completed videos/", "research/", "tools/", "
 # Shipped with the kit, and yours from then on: its own first lines invite you to edit it (the reasoning effort Codex
 # is asked for). An update puts one in place only where there is none.
 STARTERS = (".codex/config.toml",)
+# The list of sounds is the kit's and yours at once: docs/SOUND.md has you add an entry for every sound you bring. An
+# update puts the kit's new list in place with the entries of yours that it lacks (_with_your_sounds).
+SOUNDS = "assets/sfx/manifest.json"
 VERSION_FILE = "studio/__init__.py"  # names this copy's version (read_version): an update puts it in place last
 # There from the first new file an update puts in place until its last: this folder is part old and part new. What a
 # later attempt says goes by it, since that attempt may stop without replacing a file itself.
@@ -309,6 +312,26 @@ def _copy_release(archive: Path, root: Path, work: Path, progress: Progress) -> 
     _copy_tree(tops[0] if len(tops) == 1 and not any(p.is_file() for p in out.iterdir()) else out, root, progress)
 
 
+def _with_your_sounds(new: Path, yours: Path) -> bytes | None:
+    """The kit's new list of sounds (new) with what you added to the one in place (yours): every sound, and every
+    licence note, that yours has and the new list lacks. None: there is nothing of yours to carry over, or one of the
+    two isn't such a list, so the new file goes in as it is."""
+    try:
+        theirs, mine = (json.loads(f.read_text(encoding="utf-8")) for f in (new, yours))
+    except (OSError, ValueError, RecursionError):
+        return None
+    if not isinstance(theirs, dict) or not isinstance(mine, dict):
+        return None
+    added = False
+    for part in ("_licenses", "sounds"):
+        had, has = mine.get(part), theirs.get(part)
+        if isinstance(had, dict) and isinstance(has, dict):
+            for name, entry in had.items():
+                if name not in has:
+                    has[name], added = entry, True
+    return json.dumps(theirs, indent=2, ensure_ascii=False).encode("utf-8") + b"\n" if added else None
+
+
 def _copy_tree(src: Path, root: Path, progress: Progress) -> None:
     """Copy a new version's files (src) over the copy in root, leaving everything that's the person's own alone.
     The file that names the version goes last, and only when every other file is in: until then this copy still
@@ -326,13 +349,18 @@ def _copy_tree(src: Path, root: Path, progress: Progress) -> None:
             continue
         tmp = dest.with_name(dest.name + ".rf-new")
         try:
-            if dest.exists() and dest.stat().st_size == f.stat().st_size and dest.read_bytes() == f.read_bytes():
+            merged = _with_your_sounds(f, dest) if rel == SOUNDS and dest.exists() else None
+            if dest.exists() and (dest.read_bytes() == merged if merged is not None else
+                                  dest.stat().st_size == f.stat().st_size and dest.read_bytes() == f.read_bytes()):
                 if os.name != "nt" and os.access(f, os.X_OK) and not os.access(dest, os.X_OK):
                     os.chmod(dest, 0o755)   # an earlier update left it unrunnable
                 _drop(tmp)                  # what an earlier update that stopped at this file left beside it
                 continue  # unchanged (this also leaves a running launcher alone)
             dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(f, tmp)
+            if merged is not None:
+                tmp.write_bytes(merged)
+            else:
+                shutil.copy2(f, tmp)
             if os.name != "nt" and os.access(f, os.X_OK):
                 os.chmod(tmp, 0o755)
             # Windows won't replace a file someone has open. Most let go within a moment, so wait for the first
