@@ -1152,6 +1152,10 @@ class Pages(ApiTest):
         self.assertEqual(note, "TikTok changed its page, so the extension lost its way: post this one by hand. You "
                                "can finish in the tab that is open, or press Post by hand.")
         self.assertIn("TikTok said no. You can", words(state="failed", error_message="TikTok said no")[1])
+        # The extension's own sentence often says the tab can be finished by hand. The page says it once.
+        lost = "TikTok has changed its page: ReelForge could not find the Post button. You can finish by hand in this tab."
+        self.assertEqual(words(state="failed", error_code="hook_not_found", error_message=lost)[1],
+                         lost + " Or press Post by hand.")
         # Where the failure itself says there is no tab to finish in, the page doesn't send you to one.
         closed = "The tab was closed before the post was ready. Nothing was posted."
         self.assertEqual(words(state="failed", step="upload", error_code="tab_closed", error_message=closed),

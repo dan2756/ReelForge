@@ -381,8 +381,12 @@ def page_job(job: dict, name: str, handles: dict[str, str]) -> dict:
         why = posting.failure(job, name)
         if why:  # the extension's own sentence, or ours for its code: one sentence either way
             why = why[:1].upper() + why[1:] + ("" if why[-1] in ".!?" else ".") + " "
-        note = why + ("Start it again from ReelForge, or press Post by hand." if job["error_code"] in NO_TAB
-                      else "You can finish in the tab that is open, or press Post by hand.")
+        if job["error_code"] in NO_TAB:
+            note = why + "Start it again from ReelForge, or press Post by hand."
+        elif "in this tab" in why:  # the extension's sentence has said so already: once is enough
+            note = why + "Or press Post by hand."
+        else:
+            note = why + "You can finish in the tab that is open, or press Post by hand."
     elif stands == "unknown":
         words, tone = "ReelForge can't tell whether this posted", "ask"
         note = (f"Check {name} before trying again. Then say on ReelForge's Publish tab whether it posted. "

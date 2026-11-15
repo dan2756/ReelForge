@@ -547,7 +547,7 @@ export const tests = {
     const tab = await t.browser.tab(HOST.tiktok)
     equal([await tab.evaluate(() => fixture.files.length), (await filled(tab, "tiktok")).caption], [1, caption], "the file and the caption, left in the tab")
     await until("the page to say so", async () => (await text(page.locator("#rows"))).includes("Failed at uploading"))
-    ok((await text(page.locator("#rows"))).includes("TikTok has changed its page: ReelForge could not find the Post button."), "the page gives the extension's sentence")
+    ok((await text(page.locator("#rows"))).includes("TikTok has changed its page: ReelForge could not find the Post button. You can finish by hand in this tab. Or press Post by hand."), `the page gives the extension's sentence, and says once where to finish (${await text(page.locator("#rows"))})`)
     // Post by hand is ReelForge's own flow: the text copied, the upload page opened, the job set aside.
     await page.getByRole("button", { name: "Post to TikTok by hand" }).click()
     await until("ReelForge to set the job aside", async () => (await t.app.job(jobs.tiktok)).detail === "posted by hand")
@@ -591,7 +591,8 @@ export const tests = {
     await becomes(t.app, first.jobs.tiktok, ["failed", "unknown", "cancelled"])
     const job = await t.app.job(first.jobs.tiktok)
     equal([job.state, job.error_code, job.error_message], ["failed", "tab_closed", "The tab was closed before the post was ready. Nothing was posted."], "the job")
-    await until("the page to say so", async () => (await text(first.page.locator("#rows"))).includes("The tab was closed before the post was ready. Nothing was posted."))
+    // (and it does not send the person to a tab that is gone)
+    await until("the page to say so", async () => (await text(first.page.locator("#rows"))).includes("The tab was closed before the post was ready. Nothing was posted. Start it again from ReelForge, or press Post by hand."))
     // It failed, so nothing stands in the way of the same video there.
     t.site.mode.tiktok = "ok"
     const second = await post(t, film, ["tiktok"])
