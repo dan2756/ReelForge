@@ -497,6 +497,10 @@ class CompactTest(DbTest):
         (self.dir / "backups").write_text("a file where the folder should be")
         db.compact(min_hours=0)
         self.assertIsNotNone(db.get_meta("compacted_at"))
+        note = db.last_backup()  # ... and it's kept that it failed, and why, for the Settings tab
+        self.assertTrue(note["failed"])
+        self.assertIsNone(note["ok"])
+        self.assertIn(note["why"], ("File exists", "Cannot create a file when that file already exists"))
 
 
 class ApiTest(DbTest):

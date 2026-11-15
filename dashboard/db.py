@@ -413,8 +413,9 @@ def compact(min_hours: float = 20) -> int:
 def daily_backup(keep: int = BACKUPS_KEPT) -> Path | None:
     """Save data/backups/stats-YYYYMMDD.db unless today's is there, and keep the newest `keep`.
 
-    Never raises: a failed backup only means there is none today. Returns today's backup, or None. The demo's
-    made-up stats aren't backed up: its copies would sit among the real ones.
+    Never raises: a failed backup only means there is none today. Returns today's backup, or None. How it went is
+    kept for the Settings tab (last_backup). The demo's made-up stats aren't backed up: its copies would sit among
+    the real ones.
     """
     if _demo:
         return None
@@ -431,9 +432,35 @@ def daily_backup(keep: int = BACKUPS_KEPT) -> Path | None:
         ours = sorted(f for f in folder.iterdir() if re.fullmatch(rf"{re.escape(_path.stem)}-\d{{8}}\.db", f.name))
         for old in ours[:-keep]:
             old.unlink()
-        return target
-    except Exception:
+    except Exception as e:
+        _note_backup(e)
         return None
+    _note_backup(None)
+    return target
+
+
+def _note_backup(error: Exception | None) -> None:
+    """Keep how the daily backup went (meta "backup"): {"ok": when the last one worked}, and after one that didn't
+    also {"failed": when, "why": in a few words}. A backup that fails every day (a full disk, a folder ReelForge
+    can't write to) would otherwise go unnoticed until the day it's needed."""
+    try:
+        was = get_meta("backup")
+        note = {"ok": was.get("ok") if isinstance(was, dict) else None}
+        if error is None:
+            note = {"ok": now_iso()}
+        else:
+            why = error.strerror if isinstance(error, OSError) and error.strerror else \
+                str(error) if isinstance(error, sqlite3.Error) else type(error).__name__
+            note.update(failed=now_iso(), why=why)
+        set_meta("backup", note)
+    except Exception:
+        pass  # the store itself is the trouble: nothing to keep it in
+
+
+def last_backup() -> dict:
+    """How the daily backup last went (see _note_backup); {} before the first one."""
+    note = get_meta("backup")
+    return note if isinstance(note, dict) else {}
 
 
 def episodes() -> list[sqlite3.Row]:

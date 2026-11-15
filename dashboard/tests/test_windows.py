@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -22,6 +23,7 @@ from unittest import mock
 
 import httpx
 
+from dashboard import __main__ as launcher
 from dashboard import config, db, demo, notify, sync
 from dashboard.__main__ import refresh as job_refresh
 from dashboard.config import PLATFORM_KEYS
@@ -301,6 +303,73 @@ class Unreachable(Fake):
     def fetch(self):
         self.reads += 1
         raise httpx.ConnectError("[Errno -2] Name or service not known")
+
+
+class HourlyJobTest(StoreTest):
+    """reelforge refresh, the hourly job (dashboard/__main__.py, started by dashboard/refresh.pyw): it has no window
+    and, under the scheduler, no terminal, so data/refresh.log says how each run went, one that couldn't start
+    included."""
+
+    def job(self, platforms: dict) -> tuple[int, str, str]:
+        """One run: its exit code, what it printed, and the log afterwards."""
+        out = io.StringIO()
+        with mock.patch.object(config, "DATA_DIR", self.dir), contextlib.redirect_stdout(out):
+            code = job_refresh(platforms, self.cfg, demo=True)
+        return code, out.getvalue(), (self.dir / "refresh.log").read_text("utf-8")
+
+    def test_the_terminal_gets_a_sentence_and_the_log_the_errors_own_words(self):
+        code, said, log = self.job({"tiktok": Fake("tiktok", "TikTok"), "youtube": Unreachable("youtube", "YouTube")})
+        self.assertEqual(code, 1)
+        self.assertIn("refreshed: TikTok\n", said)
+        self.assertIn("error: YouTube couldn't be reached (is this computer online?). ReelForge tries again at the "
+                      "next refresh.", said)
+        self.assertNotIn("ConnectError", said)
+        self.assertIn("  refreshed: TikTok\n", log)
+        self.assertIn("  error: YouTube: ConnectError: [Errno -2] Name or service not known\n", log)
+        self.assertEqual(db.get_meta("job")["problems"], 1)
+
+    def test_a_run_that_goes_wrong_after_its_read_has_still_logged_it(self):
+        with mock.patch.object(db, "compact", side_effect=sqlite3.OperationalError("database is locked")):
+            code, _, log = self.job(self.fakes())
+        self.assertEqual(code, 0)  # the read itself went fine
+        self.assertIn("  refreshed: TikTok, YouTube\n", log)
+        self.assertIn("  error: tidying the stats database: OperationalError: database is locked\n", log)
+        job = db.get_meta("job")
+        self.assertEqual((job["read"], job["problems"]), ("TikTok, YouTube", 1))
+
+    def test_a_run_that_cant_start_says_why_in_the_log(self):
+        settings = self.dir / "config.toml"
+        settings.write_text('videos_dir = "C:\\Users\\me\\Videos"\n', "utf-8")  # a Windows path, as people type it
+        out = io.StringIO()
+        with mock.patch.object(config, "DATA_DIR", self.dir), mock.patch.object(config, "CONFIG_PATH", settings), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(launcher.main(["refresh"]), 2)
+            settings.write_text('videos_dir = "videos"\n', "utf-8")
+            with mock.patch.object(launcher, "refresh_profiles",
+                                   side_effect=sqlite3.DatabaseError("file is not a database")):
+                self.assertEqual(launcher.main(["refresh"]), 1)
+        log = (self.dir / "refresh.log").read_text("utf-8").splitlines()
+        self.assertIn("  error: the stats read didn't run: config.toml has a typo", log[0])
+        self.assertTrue(log[1].endswith("  error: the stats read didn't run: DatabaseError: file is not a database"))
+
+    def test_refresh_pyw_logs_what_stops_it_outside_the_read(self):
+        """The script the scheduler starts, in a stand-in ReelForge folder whose dashboard fails in turn the ways a
+        real one can: an error nothing caught, the kit's packages missing (exit code 3), and not at all."""
+        kit = self.dir / "kit" / "dashboard"
+        kit.mkdir(parents=True)
+        shutil.copy(ROOT / "dashboard" / "refresh.pyw", kit / "refresh.pyw")
+        (kit / "__init__.py").write_text("", "utf-8")
+        log = kit / "data" / "refresh.log"
+        for stand_in, logged in (("def main(argv):\n    raise RuntimeError('the disk went away')\n",
+                                  "error: the stats read didn't run: RuntimeError: the disk went away"),
+                                 ("import sys\nsys.exit(3)\n", "error: the stats read didn't run: ReelForge's Python "
+                                                               "packages are missing: run setup again"),
+                                 ("def main(argv):\n    return 1\n", None)):
+            (kit / "__main__.py").write_text(stand_in, "utf-8")
+            before = log.read_text("utf-8").splitlines() if log.exists() else []
+            subprocess.run([sys.executable, str(kit / "refresh.pyw")], cwd=self.dir, check=True, timeout=60)
+            added = (log.read_text("utf-8").splitlines() if log.exists() else [])[len(before):]
+            self.assertEqual([line.split("  ", 1)[1] for line in added], [logged] if logged else [])
 
 
 class WindowsTest(unittest.TestCase):
