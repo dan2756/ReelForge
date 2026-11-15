@@ -124,7 +124,8 @@ The Publish tab shows the same states under **POST**, in a row for each platform
 **Cancel**, **It's posted**, **It didn't post**, **Try again**, **Open**. A video can have one post under way for
 each platform, and a video that is up somewhere is not posted there again unless you ask for it, with **Post
 again…** on its row. A video is known by its content, not its file name, so a renamed copy counts as the same
-video.
+video. A new cut under the same name is another video, but where an earlier cut of it is up, or may be, its row
+says so ("posted as an earlier cut") and the new cut goes there only with **Post again…** too.
 
 Once the platform's button was pressed, by you in the tab or for you, the row has no **Cancel** any more: a press
 can't be taken back. It says that it is waiting for the platform, and asks **It's posted** or **It didn't post**.

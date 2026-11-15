@@ -46,6 +46,15 @@ class LedgerTest(unittest.TestCase):
         self.cfg = {"videos_dir": str(self.root / "videos"), "episodes_dir": str(self.root / "episodes"),
                     "completed_dir": str(self.root / "completed"), **{key: {} for key in PLATFORM_KEYS}}
 
+    def another_video(self, data: bytes = b"") -> Path:
+        """The next video the channel finishes: another file, so another episode, and the tests' video from here
+        on. (New bytes under the first one's name would be a new cut of that episode, which is posted where the
+        earlier cut is up only as a post again.)"""
+        number = len(list((self.root / "videos").glob("ep*.mp4"))) + 1
+        self.video = self.root / "videos" / f"ep{number:02d}.mp4"
+        self.video.write_bytes(data or f"video number {number}".encode())
+        return self.video
+
     def batch(self, *platforms: str, video: Path | None = None, **kw) -> dict:
         return posting.create_batch(video or self.video, list(platforms or ("tiktok",)), CAPTION, TAGS, self.cfg,
                                     **kw)
@@ -364,6 +373,37 @@ class Making(LedgerTest):
         self.assertTrue(posting.unchanged(remade))
         self.assertFalse(posting.unchanged(posting.get(job["id"])))  # its file was replaced
 
+    def test_a_new_cut_of_an_episode_that_is_up_is_posted_only_when_you_say_again(self):
+        # TikTok and Instagram show no id for a new post, so one made with the extension is in no stats until a
+        # read finds it. The file is then rendered again: other bytes, and by its bytes alone a video nobody posted.
+        first = self.walk(self.job("tiktok"), *STEPS, "posted")
+        unsure = self.walk(self.job("instagram"), *STEPS, "unknown")
+        self.assertEqual(db.all_posts(), [])
+        self.video.write_bytes(b"a second cut, under the same name")
+        look = posting.preview(self.video, ["tiktok", "instagram", "x"], CAPTION, TAGS, self.cfg)["blocked"]
+        self.assertEqual({k: (b["reason"], b["job"]) for k, b in look.items()},
+                         {"tiktok": ("posted", first["id"]), "instagram": ("unknown", unsure["id"])})
+        self.assertEqual(look["tiktok"]["message"],
+                         "An earlier cut of this video was posted there with ReelForge's help.")
+        made = self.batch("tiktok", "instagram", "x")
+        self.assertEqual(([j["platform"] for j in made["jobs"]], sorted(b["reason"] for b in made["blocked"])),
+                         (["x"], ["posted", "unknown"]))
+        # The rows of the new cut say so too, with the earlier cut's job behind their buttons.
+        rows = posting.for_files([self.video])[self.video]
+        self.assertEqual({k: (j["id"], j["state"], j.get("earlier_cut", False)) for k, j in rows.items()},
+                         {"tiktok": (first["id"], "posted", True), "instagram": (unsure["id"], "unknown", True),
+                          "x": (made["jobs"][0]["id"], "queued", False)})
+        # You say again: the new cut goes, and the earlier cut's post goes on standing for the episode.
+        again = self.job("tiktok", force=("tiktok",))
+        self.assertEqual((again["episode_id"], again["state"]), (first["episode_id"], "queued"))
+        self.assertEqual(posting.get(first["id"])["superseded"], 0)
+        self.assertEqual(posting.for_files([self.video])[self.video]["tiktok"]["id"], again["id"])
+        posting.cancel(again["id"])  # called off: the episode is still up there
+        self.assertEqual([b["reason"] for b in self.batch("tiktok")["blocked"]], ["posted"])
+        # "It didn't post" on the earlier cut's job frees the platform for the new one.
+        posting.resolve(unsure["id"], False)
+        self.assertEqual(self.job("instagram")["state"], "queued")
+
     def test_two_presses_at_the_same_moment_make_one_job(self):
         go, results = threading.Barrier(2), []
 
@@ -560,7 +600,7 @@ class Moving(LedgerTest):
         # YouTube takes a press of Publish while the video is still going up. The extension saw the press and then
         # lost the page: it says "not sure", and the ledger has to take that, or the job would stay under way.
         for at in ("opening", "uploading", "filling"):
-            self.video.write_bytes(f"a video lost at {at}".encode())
+            self.another_video(f"a video lost at {at}".encode())
             job = self.walk(self.job("youtube"), at)
             said = posting.advance(job["id"], "unknown", install=CHROME, error_code="unknown_outcome",
                                    error_message="Post was pressed on YouTube and no confirmation was seen.")
@@ -699,7 +739,7 @@ class Pressing(LedgerTest):
         first = posting.create_batch(self.video, [platform], "The one before", TAGS, self.cfg)
         self.assertEqual(first["blocked"], [])
         self.walk(first["jobs"][0], *STEPS, "posted")
-        self.video.write_bytes(self.video.read_bytes() + b"+")  # the next video
+        self.another_video()  # the next video
 
     def test_post_is_pressed_exactly_once(self):
         self.earlier_post()
@@ -799,7 +839,7 @@ class Pressing(LedgerTest):
         # The extension saw you press the platform's own button and says so: the step "press" under the state the
         # job is in. From then on the job is treated as one that was pressed for you.
         for at in ("uploading", "filling", "ready"):  # (YouTube takes a press while the video is still going up)
-            self.video.write_bytes(f"pressed while {at}".encode())
+            self.another_video(f"pressed while {at}".encode())
             job = self.walk(self.job("youtube"), *STEPS[:STEPS.index(at) + 1])
             self.assertFalse(posting.pressed(job["id"]))
             told = posting.advance(job["id"], at, install=CHROME, step="press")
@@ -907,7 +947,7 @@ class Clock(LedgerTest):
     def test_posting_and_silent_for_15_minutes_is_unknown(self):
         first = self.job(press=True)
         self.walk(first, *STEPS, "posted")
-        self.video.write_bytes(b"the next video")
+        self.another_video(b"the next video")
         job = self.walk(self.job(press=True), *STEPS)
         posting.grant_press(job["id"], CHROME)
         self.age(job, 14)
@@ -1001,7 +1041,7 @@ class Reconciling(LedgerTest):
 
     def test_a_job_being_posted_is_settled_too(self):
         self.walk(self.job(press=True), *STEPS, "posted")
-        self.video.write_bytes(b"the next video")
+        self.another_video(b"the next video")
         job = self.walk(self.job(press=True), *STEPS)
         posting.grant_press(job["id"], CHROME)
         self.spot(job, episode=job["episode_id"])
@@ -1120,7 +1160,8 @@ class Posted(LedgerTest):
         db.set_post_episode("tiktok", "7300000000000000002", old)
         for taken in ("7300000000000000001", "7300000000000000002"):
             self.video.write_bytes(f"the video said to be {taken}".encode())
-            job = self.walk(self.job(), *STEPS)
+            # (New bytes under the same name: a new cut of the episode, so after the first one a post again.)
+            job = self.walk(self.job(force=("tiktok",)), *STEPS)
             done = posting.advance(job["id"], "posted", install=CHROME, post_id=taken,
                                    url=f"https://www.tiktok.com/@me/video/{taken}")
             self.assertEqual((done["state"], done["post_id"], done["url"]), ("posted", None, None))
@@ -1131,7 +1172,7 @@ class Posted(LedgerTest):
         self.assertEqual(posting.spotted("ep01.mp4"), {})
         # A post the read has seen but nobody has filed, that went up after the job was made, is this job's.
         self.video.write_bytes(b"one more")
-        job = self.walk(self.job(), *STEPS)
+        job = self.walk(self.job(force=("tiktok",)), *STEPS)
         db.record_snapshot("tiktok", Account("@me", 100), [Post("7300000000000000003", "New", None, db.now_iso())])
         done = posting.advance(job["id"], "posted", install=CHROME, post_id="7300000000000000003")
         self.assertEqual(done["post_id"], "7300000000000000003")

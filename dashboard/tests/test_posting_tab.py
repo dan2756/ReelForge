@@ -481,10 +481,10 @@ class Posting(PostingTest):
     def test_a_cancel_that_arrives_after_post_was_pressed_ends_nothing(self):
         # The row was drawn with Cancel a moment before the extension was let to press: the click on it lands late.
         w = self.window()
-        earlier = posting.create_batch(self.video, ["tiktok"], "The one before", TAGS, w.svc.cfg)["jobs"][0]
+        before = self.root / "videos" / "ep00.mp4"
+        before.write_bytes(b"the video before")
+        earlier = posting.create_batch(before, ["tiktok"], "The one before", TAGS, w.svc.cfg)["jobs"][0]
         self.work(earlier["id"], "ready", "posted")  # one post you pressed yourself: the press is unlocked
-        self.video.write_bytes(b"the next video")
-        w.svc.scan_files()
         (job,) = self.post(w, stop_before=False)["jobs"]
         self.work(job["id"], "ready")
         self.assertTrue(w.until(lambda: self.rows(w)["tiktok"]["actions"] == ["mark_posted", "cancel"]))
@@ -563,6 +563,28 @@ class Posting(PostingTest):
         self.assertEqual((row["state"], row["actions"]), ("posted", ["post_again"]))
         asked = {q["key"]: q for q in w.call("post_info", CAPTION, TAGS)["platforms"]}["tiktok"]
         self.assertEqual((asked["blocked"]["reason"], asked["again"]), ("posted", True))
+
+    def test_a_new_cut_of_a_video_that_is_up_says_so_and_is_not_posted_by_a_plain_post(self):
+        # Posted with the extension on TikTok, which shows no id: the post is in no stats yet. Then the file is
+        # rendered again under its name.
+        w = self.window()
+        (job,) = self.post(w)["jobs"]
+        self.work(job["id"], "ready", "posted")
+        self.assertTrue(w.until(lambda: self.rows(w)["tiktok"]["state"] == "posted"))
+        self.video.write_bytes(b"the same video, rendered again")
+        w.svc.scan_files()
+        w.svc.update_posting(fresh=True)
+        row = self.rows(w)["tiktok"]
+        self.assertEqual((row["state"], row["job"], row["actions"]), ("posted", job["id"], ["post_again"]))
+        self.assertRegex(plain(row["line"]), r"^✓ posted  \S+ ago as an earlier cut, not in your stats yet$")
+        asked = {q["key"]: q for q in w.call("post_info", CAPTION, TAGS)["platforms"]}["tiktok"]
+        self.assertEqual((asked["blocked"]["reason"], asked["again"]), ("posted", True))
+        self.assertEqual(asked["blocked"]["message"],
+                         "An earlier cut of this video was posted there with ReelForge's help.")
+        made = self.post(w, "tiktok")
+        self.assertEqual((made["jobs"], [b["reason"] for b in made["blocked"]]), ([], ["posted"]))
+        (again,) = self.post(w, "tiktok", force=["tiktok"])["jobs"]
+        self.assertEqual(self.rows(w)["tiktok"]["job"], again["id"])
 
     def test_a_job_reelforge_lost_track_of_takes_your_word(self):
         w = self.window()

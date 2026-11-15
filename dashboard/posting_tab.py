@@ -158,7 +158,8 @@ def state_line(job: dict | None, post: dict | None, name: str, opened: str | Non
     words = {**WORDS, **(API_WORDS if job["via"] == "api" else {})}[state]
     when = fmt_ago(job["updated_at"])
     if state == "posted":
-        return Text("✓ posted", f"bold {GOOD}").append(f"  {when}, not in your stats yet", MUTED)
+        cut = " as an earlier cut" if job.get("earlier_cut") else ""  # (the file was rendered again since)
+        return Text("✓ posted", f"bold {GOOD}").append(f"  {when}{cut}, not in your stats yet", MUTED)
     if state == "failed":
         why, step = failure(job, name), STEPS.get(job["step"] or "", "")
         out = Text("× failed", f"bold {BAD}")
