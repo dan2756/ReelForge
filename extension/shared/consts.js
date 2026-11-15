@@ -65,6 +65,8 @@ export function advice(code, platform) {
 // One short line per state for the popup.
 export function stateLine(job) {
   const p = platformName(job.platform)
+  // The person's own press was seen, and the platform has not said yet that the post is up.
+  if (job.pressedByPerson && isLive(job) && job.state !== "posting") return `You pressed ${PLATFORMS[job.platform]?.button || "Post"}. Waiting for ${p} to say it is up`
   switch (job.state) {
     case "queued": return "Waiting to start"
     case "claimed":

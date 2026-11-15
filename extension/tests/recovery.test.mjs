@@ -43,6 +43,24 @@ export const tests = {
     equal(t.app.createBatch(t.app.videos[0], ["tiktok"]).blocked.length, 1, "a second job is blocked")
   },
 
+  async "the person's own press is passed on to ReelForge, and what stops the job afterwards is unknown, not failed"(t) {
+    // YouTube takes a press of Save while the video is still going up. This copy shows nothing after it.
+    t.site.mode.youtube = "slow_mute"
+    const job = await start(t, "youtube", t.video())
+    await until(() => `the last screen (it is ${job.state} ${job.step})`, () => job.step === "upload" && job.events.some(event => event.step === "visibility"), 30000)
+    const tab = await t.browser.tab("studio.youtube.com")
+    await tab.locator("#done-button").click()
+    await until("the press to be noticed", async () => (await t.browser.jobRecord(job.id)).pressedByPerson === true)
+    // ReelForge hears of it as the step "press" of the state the job is in, so its window stops offering Cancel.
+    await until(() => `ReelForge to hear of the press (${JSON.stringify(job.events.slice(-3))})`, () => job.events.some(event => event.state === "filling" && event.step === "press"))
+    // The page then shows an error of its own. After a press that is never "failed: nothing was posted".
+    await tab.evaluate(() => { document.querySelector("ytcp-app").shadowRoot.querySelector(".error-area").textContent = "Something went wrong" })
+    await until(() => `the job to end (it is ${job.state})`, () => job.state !== "filling")
+    equal([job.state, job.error_code, job.error_message], ["unknown", "unknown_outcome", "Post was pressed on YouTube and no confirmation was seen. Check your profile before you post again."], "state, code and sentence")
+    const mine = await t.browser.jobRecord(job.id)
+    equal([mine.state, mine.error_code, mine.outbox], ["unknown", "unknown_outcome", []], "the extension's own record")
+  },
+
   async "a tab closed after the person's press, before the page was called ready: unknown, not \"nothing was posted\""(t) {
     // YouTube takes a press of Save while the video is still going up. This copy shows nothing after it.
     t.site.mode.youtube = "slow_mute"

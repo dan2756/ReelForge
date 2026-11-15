@@ -214,9 +214,10 @@ function tabGone(job) {
 }
 
 // Post was pressed and the page never said it worked. This is never tried again: only the person can tell.
+const unsureWords = job => `Post was pressed on ${platformName(job.platform)} and no confirmation was seen. Check your profile before you post again.`
+
 function unsure(job) {
-  return finish(job.id, "unknown", "unknown_outcome",
-    `Post was pressed on ${platformName(job.platform)} and no confirmation was seen. Check your profile before you post again.`)
+  return finish(job.id, "unknown", "unknown_outcome", unsureWords(job))
 }
 
 // `posted`: the job is over because ReelForge has the post as up, which the note says in place of "Stopped".
@@ -275,8 +276,14 @@ export function report(id, event) {
     const job = await getJob(id)
     if (!job || isFinal(job.state)) return { ok: false, stop: true }
     // A job is "claimed" only for the moment before its tab opens; the app hears of it as "opening" from then on.
-    const state = event.state || (job.state === "claimed" ? "opening" : job.state)
+    let state = event.state || (job.state === "claimed" ? "opening" : job.state)
     if (!isFinal(state) && rank(state) < rank(job.state)) return { ok: true }
+    // Post was pressed, so whatever stopped the job afterwards, nobody here can say that nothing was posted.
+    // It ends as "not sure", here and in ReelForge alike: never as a job that is free to be tried again.
+    if (wasPressed(job) && (state === "failed" || state === "cancelled")) {
+      state = "unknown"
+      event = { ...event, error_code: "unknown_outcome", error_message: unsureWords(job) }
+    }
     const wire = { state }
     for (const field of ["step", "progress", "detail", "error_code", "error_message", "post_id", "url", "strategy"]) {
       if (event[field] !== undefined && event[field] !== null) wire[field] = event[field]
@@ -469,7 +476,13 @@ export async function tabEvent(tabId, message) {
   if (message.paused) change.paused = { code: "wrong_account", seen: short(message.paused.seen, 60), expected: job.handle, at: Date.now() }
   if (Object.keys(change).length) {
     const now = await patch(job.id, change)
-    if (now && change.pressedByPerson) await remember(now)
+    if (now && change.pressedByPerson) {
+      await remember(now)
+      // ReelForge hears of the press too, as the step "press" of the state the job is in. From then on its
+      // window offers no Cancel for this post, only "It's posted" and "It didn't post": a press cannot be
+      // taken back, and a job that Cancel freed would be offered again while this post goes up.
+      if (!job.pressedByPerson) await report(job.id, { step: "press" })
+    }
   }
   if (message.account) await app.sawAccount(job.platform, message.account.signed_in === true, short(message.account.handle, 60))
   if (message.state !== undefined && !TAB_STATES.includes(message.state)) return { ok: false }
@@ -628,7 +641,8 @@ async function watch(job, now) {
       await finish(job.id, "unknown", "unknown_outcome", `The ${p} tab sat ready for 45 minutes with no word. Check your profile, in case you pressed Post.`)
     }
   } else if (now - job.touched > QUIET_LIMIT) {
-    await finish(job.id, "failed", "timeout", `The ${p} page stopped answering. The tab is still open: you can finish by hand there.`, job.step || "open_tab")
+    if (wasPressed(job)) await unsure(job)
+    else await finish(job.id, "failed", "timeout", `The ${p} page stopped answering. The tab is still open: you can finish by hand there.`, job.step || "open_tab")
     return
   } else if (now - job.touched > 45000) {
     // Quiet for a while: the page may have loaded while the worker was not running.
@@ -701,10 +715,11 @@ export async function focus(id) {
   }
 }
 
-// Stop a job from the popup. Not offered once Post has been pressed for the person: that one has to be looked at.
+// Stop a job from the popup. Not offered once Post has been pressed, for the person or by the person: that one
+// has to be looked at, and "nothing was posted" would no longer be true.
 export async function cancel(id) {
   const job = await getJob(id)
-  if (!job || isFinal(job.state) || job.state === "posting") return { ok: false }
+  if (!job || isFinal(job.state) || wasPressed(job)) return { ok: false }
   await report(id, { state: "cancelled", detail: "stopped in the extension" })
   await stopTab(job, "You stopped this post. Nothing was posted by ReelForge.")
   return { ok: true }

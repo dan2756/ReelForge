@@ -155,7 +155,7 @@ function jobCard(job) {
       job.detail ? h("p", { class: "small soft", text: job.detail }) : null,
       job.offline ? h("p", { class: "small soft", text: "ReelForge is not answering. This will be passed on when it is back." }) : null,
     ]
-    actions = [showTab, job.state === "posting" ? null : button("Stop", `stop:${job.id}`, () => ask("ui.cancel", { job: job.id }))]
+    actions = [showTab, job.state === "posting" || job.pressedByPerson ? null : button("Stop", `stop:${job.id}`, () => ask("ui.cancel", { job: job.id }))]
   }
   return h("div", { class: "panel job", data: { job: job.id, state: job.state, platform: job.platform } },
     h("div", { class: "row" }, h("h3", { class: "grow", text: p }), h("span", { class: "chip", "data-tone": tone(job.state), text: WORD[job.state] || job.state })),

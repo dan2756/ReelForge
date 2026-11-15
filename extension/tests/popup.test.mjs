@@ -245,6 +245,22 @@ export const tests = {
     ok(!(await text(row)).includes("tell ReelForge whether it posted"), `what the row says now (${await text(row)})`)
   },
 
+  async "a post the person pressed themselves has no Stop: a press cannot be taken back"({ app, site, browser, video }) {
+    site.mode.tiktok = "mute"
+    const { job, tab } = await toReady({ app, browser }, "tiktok", video())
+    const popup = await browser.popup()
+    const row = popup.locator("[data-job]")
+    await until("the row with its Stop", () => row.getByRole("button", { name: "Stop" }).count())
+    await tab.locator("[data-e2e=post_video_button]").click()
+    await until("the press to be noticed", async () => (await browser.jobRecord(job.id)).pressedByPerson === true)
+    await until("the row to say so", async () => (await text(row)).includes("You pressed Post. Waiting for TikTok to say it is up"))
+    equal(await row.getByRole("button", { name: "Stop" }).count(), 0, "Stop buttons")
+    // A popup drawn before the press still had its Stop. The worker refuses that one.
+    equal(await popup.evaluate(id => chrome.runtime.sendMessage({ t: "ui.cancel", job: id }), job.id), { ok: false }, "Stop, asked for anyway")
+    equal([job.state, (await browser.jobRecord(job.id)).state], ["ready", "ready"], "the job, in ReelForge and here")
+    ok(job.events.some(event => event.state === "ready" && event.step === "press"), `ReelForge was told of the press (${JSON.stringify(job.events.slice(-3))})`)
+  },
+
   async "two channels open: the popup offers both and follows the choice"({ app, browser, video }) {
     video()
     // A second ReelForge window, on another channel of the same install: same app id, same paired browsers.
