@@ -1,9 +1,9 @@
 // The Publish tab: every finished video with its post already written. For the picked video, under its caption and
 // hashtags: POST, where its post stands on each platform and Post…, which has the browser extension fill in each upload
-// page for you to check and press Post on (Posting.tsx); then BY HAND, each platform's own button, which opens its
-// upload page, copies exactly the text it needs and shows the file, so you drag it in and press Post. ReelForge spots
-// the post by itself either way. Then the exact text each platform gets, and the uploads so far. Under the list, the
-// best time to post on each platform.
+// page for you to check and press Post on (Posting.tsx), and for YouTube a second way, through its own API
+// (YouTubeApi.tsx); then BY HAND, each platform's own button, which opens its upload page, copies exactly the text it
+// needs and shows the file, so you drag it in and press Post. ReelForge spots the post by itself either way. Then the
+// exact text each platform gets, and the uploads so far. Under the list, the best time to post on each platform.
 
 import { TextAttributes } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/react"

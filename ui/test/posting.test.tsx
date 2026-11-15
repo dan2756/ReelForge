@@ -83,13 +83,14 @@ async function until(h: Headless, ok: () => boolean) {
   for (let i = 0; i < 30 && !ok(); i++) await h.settle(200)
 }
 
-/** A platform's row on the Publish tab: the line that starts with its name, and the ones under it up to the next. */
+/** A platform's row on the Publish tab: the line that starts with its name, and the ones under it up to the next (or,
+ * under the last platform's, up to the row for YouTube's API, whose button is at its right-hand end). */
 function row(h: Headless, name: string): string {
   const rows = frame(h).split("\n")
   const at = rows.findIndex((r) => new RegExp(`┃ ${name} +[○●✓×?]`).test(r))
   if (at < 0) return ""
   const text = (r: string) => r.slice(r.lastIndexOf("┃") + 1).replace(/[█▀▄]\s*$/, "").trim() // (less the scrollbar)
-  const next = rows.findIndex((r, i) => i > at && /┃ (\S|$)/.test(r.slice(r.lastIndexOf("┃"))))
+  const next = rows.findIndex((r, i) => i > at && (/┃ (\S|$)/.test(r.slice(r.lastIndexOf("┃"))) || r.includes("YouTube API…")))
   return rows.slice(at, next < 0 ? at + 4 : next).map(text).join(" ").trim()
 }
 

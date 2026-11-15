@@ -218,7 +218,14 @@ export interface PostingRow {
   busy: boolean // ReelForge or the extension is at work on it
   url: string | null
   job: string | null
-  actions: string[] // retry, cancel, mark_posted, not_posted, open_post, post_again
+  via: "extension" | "api" | null // how that job goes: with the browser extension, or through YouTube's own API
+  // retry, cancel, mark_posted, not_posted, open_post, post_again. On the YouTube row also post_api (the question
+  // before a post through YouTube's API) while this window is connected to it, and connect_api (Google's page, to
+  // connect this window) while it isn't. The view's labels has the words for each: an action's name is never drawn.
+  actions: string[]
+  // The YouTube row, while this window is connected to YouTube's API and a post could start through it. force: the
+  // video is up there already, so it would be a post again: the window's own button asks for that by name.
+  api?: { force: boolean }
 }
 
 /** off: no browser is connected; waiting: one is, and hasn't been heard from lately (it wakes when a post starts); on;
@@ -292,6 +299,42 @@ export interface PostInfo {
   note: string // how far posting with the extension has been tested
   how: string // what happens next, in a sentence
   how_press: string // ... with "stop before posting" switched off: what else the extension wants before it presses
+}
+
+/** The connection to YouTube's own API (the "youtube_api" view, dashboard/youtube_api_tab.py), a second way to post
+ * there. off: no client file was ever given. again: one is on file and this window has no sign-in (every window
+ * starts there: the sign-in is never kept in a file). connecting: Google's consent page is open in your browser. on. */
+export interface YouTubeApiView {
+  state: "off" | "connecting" | "on" | "again"
+  line: Segs
+  lines: Segs[] // what it is, or why this window has to connect, and how far this way of posting is tested
+  client: boolean // a client is on file: Connect needs no file
+  wants_file: boolean // connecting takes a client file: none is on file, or Google no longer knows the one that is
+  channel: { id: string; title: string } | null // where the last upload went: all Google tells
+  privacy: string // who can see a new post, until you choose otherwise for one
+  made_for_kids: boolean | null // your answer for the posts to come (null: not given, and then none is sent)
+  privacies: { key: string; label: string }[]
+  note: string // that this way of posting has never been run against YouTube itself
+  docs: string // where the guide is
+  // The sentences beside the dialog's controls. caveat: for the Publish tab's line while a post is on offer.
+  words: { caveat: string; file: string; waiting: string; leave: string; start_as: string; kids: string }
+}
+
+/** What the question before a post through YouTube's API shows (youtube_api_info): the view, and for the picked video
+ * exactly what would be sent. video is null when there is nothing to post (why says so). force: the video is up there
+ * or may be, so this would be a post again. */
+export interface YouTubeApiInfo extends YouTubeApiView {
+  video: { path: string; name: string; size: string } | null
+  review: { state: string; line: string } | null
+  send: { title: string; description: string; privacy: string; made_for_kids: boolean | null; category: string } | null
+  fields: { key: string; label: string; text: string }[] // send, a row each, in words
+  left: string // what ReelForge leaves to YouTube Studio
+  can_post: boolean
+  why: string
+  force: boolean
+  blocked: { reason: string; message: string; url?: string } | null
+  how: string // what happens after your yes
+  again: string // what a post again means
 }
 
 /** One platform on the Accounts tab: on (connected), login (its handle is in, waiting for the one log-in) or off

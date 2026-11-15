@@ -2,7 +2,9 @@
 // post stands on each platform, with what can be done about it, and Post…, which asks first (PostDialog: each
 // platform's exact text, its account, what stops it) and then hands the posts to the extension through a page in your
 // browser. The extension itself (ExtensionDialog: its state, the browsers it's connected in, connecting and
-// disconnecting one, the steps that set it up) and its one line on the Accounts tab (ExtensionStrip).
+// disconnecting one, the steps that set it up) and its one line on the Accounts tab (ExtensionStrip). YouTube's own
+// API, a second way to post there, is YouTubeApi.tsx: its line sits above Post…, and its buttons on the YouTube row
+// are drawn here like any other row's.
 //
 // dashboard/posting_tab.py sends the "posting" and "extension" views and writes their words. Nothing here posts by
 // itself: a post starts with your press in the question, and ends at the platform's own Post button. The question's
@@ -23,6 +25,7 @@ import { Fitted } from "../ui/Line"
 import { DialogButtons, Modal, modalRoom, Panel, Scroll, toasts, useWidth, Wrapped } from "../ui/Panels"
 import { useDash, type PostData } from "./state"
 import type { ExtensionInstall, ExtensionView, FilesView, PlatformInfo, PostInfoPlatform, PostingRow, PostingView } from "./types"
+import { ApiLine } from "./YouTubeApi"
 
 /** A line from the Python side as parts for a narrow place: its first piece always, the rest while there's room. Every
  * piece opens the extension's dialog when clicked. */
@@ -38,8 +41,9 @@ const HINT_BUTTONS = 24 // columns Set it up and Hide take beside the hint, with
 const POST_BUTTON = 11 // ... Post… and the gap after it
 const BROWSERS_BUTTON = 15 // ... and Browsers…, with the gap before it
 
-/** POST, on the Publish tab: the picked video's review, a row for each connected platform, then Post… with the
- * extension's state beside it, and while the extension isn't set up one line that says it exists. */
+/** POST, on the Publish tab: the picked video's review, a row for each connected platform, the line for YouTube's own
+ * API (YouTubeApi.tsx: one quiet button until it is set up), then Post… with the extension's state beside it, and
+ * while the extension isn't set up one line that says it exists. */
 export function PostBlock() {
   const s = useDash()
   const v = useView<PostingView>(s.bridge, "posting")
@@ -90,7 +94,9 @@ export function PostBlock() {
           <Button id="post-accounts" label="Open Accounts" onPress={() => s.setTab("accounts")} />
         </box>
       ) : null}
-      <box flexDirection="row" marginTop={1} flexShrink={0} gap={2}>
+      {/* (the row above Post…: empty, as it was, unless this channel can post through YouTube's API) */}
+      <ApiLine rows={v?.rows ?? []} />
+      <box flexDirection="row" flexShrink={0} gap={2}>
         <Button id="post-go" label="Post…" variant="primary" disabled={!enabled} onPress={press} />
         {stuck || problem || !fits ? <Wrapped segs={stuck || problem ? [[stuck || problem, DASH.warn]] : line.slice(0, 1)} /> : <Fitted parts={foldable(line)} flexGrow={1} />}
         {/* the extension's dialog, for the keyboard too (its line is a click away already) */}
@@ -110,11 +116,14 @@ export function PostBlock() {
 
 /** One platform: its name, where its post stands in the Python side's words, and a button for each thing that can be
  * done about it: at the end of the line while it all fits in one (room: the columns after the name), else under the
- * words, which then wrap under themselves. */
+ * words, which then wrap under themselves. A button says its words (labels), never an action's own name: one the
+ * Python side sent no words for isn't drawn. On a row whose video is up on YouTube while this window is connected to
+ * YouTube's API (row.api.force), one more button asks about posting it there again that way. */
 function PostRow({ row, labels, nameWidth, room }: { row: PostingRow; labels: Record<string, string>; nameWidth: number; room: number }) {
   const s = useDash()
-  const label = (action: string) => labels[action] ?? action
-  const buttons = row.actions.reduce((n, a) => n + cellLen(label(a)) + 5, 0) // each with its ends and the gap before it
+  const actions = [...row.actions, ...(row.api?.force ? ["post_api_again"] : [])].filter((a) => labels[a])
+  const label = (action: string) => labels[action]!
+  const buttons = actions.reduce((n, a) => n + cellLen(label(a)) + 5, 0) // each with its ends and the gap before it
   const beside = segsLen(row.line) + buttons <= room
   return (
     <box flexDirection="row" flexShrink={0}>
@@ -126,9 +135,9 @@ function PostRow({ row, labels, nameWidth, room }: { row: PostingRow; labels: Re
           {/* (under the name, the words have the row's measured width: see Wrapped) */}
           <Wrapped segs={row.line} width={beside ? undefined : Math.max(room, 0)} />
         </box>
-        {row.actions.length ? (
+        {actions.length ? (
           <box flexDirection="row" height={1} flexShrink={0} gap={1}>
-            {row.actions.map((action) => (
+            {actions.map((action) => (
               <Button key={action} id={`post-${row.key}-${action}`} label={label(action)} onPress={() => s.postAction(row, action)} />
             ))}
           </box>
