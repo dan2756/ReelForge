@@ -145,7 +145,11 @@ describe("a dialog in a window 24 rows tall", () => {
     const flat = frame(h).replace(/[│┃]/g, " ").replace(/\s+/g, " ")
     // (squeezed, its lines were drawn over each other: "ReelForgehmatchesopostsdtoavideosdbyotheirecaption")
     expect(flat).toContain("ReelForge matches posts to videos by their caption. If it got this one wrong, pick the right video")
-    expect(frame(h)).toContain("Not one of my videos")
+    // The list shows as many of its rows as fit, from the video the post is filed under. (That one is not always
+    // near the top: at some hours the demo's highlighted post belongs to the eighth video in the list, and the list's
+    // first row, "Not one of my videos", which this looked for, is scrolled out of sight.)
+    expect(frame(h).split("\n").filter((r) => /│ +(▌ ✓ )?(What if|Not one of my videos)/.test(r)).length).toBeGreaterThanOrEqual(4)
+    expect(frame(h)).toMatch(/▌ ✓ What if /) // the one it is filed under, marked and in view
     expect(frame(h)).toMatch(/▐ Cancel ▌ ▐ This one ▌/)
   })
 })
@@ -628,6 +632,11 @@ describe("dialogs", () => {
     expect(first).not.toBe("")
     h.t.mockInput.pressArrow("down") // no click and no Tab first
     await h.settle(300)
+    if (lit() === first) {
+      // (at some hours the demo's highlighted post belongs to the last video in the list: down has nowhere to go)
+      h.t.mockInput.pressArrow("up")
+      await h.settle(300)
+    }
     expect(lit()).not.toBe(first)
     await press(h, "return")
     await h.settle(500)
