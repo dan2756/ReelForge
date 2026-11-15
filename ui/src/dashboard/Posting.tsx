@@ -161,8 +161,12 @@ export function PostDialog({ data, close }: { data: PostData; close: () => void 
   const chosen = info.platforms.filter((p) => ticked.includes(p.key))
   const mayPress = chosen.some((p) => p.press) // only then is there anything to switch
   const ok = info.can_post && chosen.length > 0 && !busy
+  // Start was pressed. A ref, since a second Enter can come before the window has drawn again: `busy` is still false
+  // to that press, and a second yes came back as a warning that the posts just started were "already under way".
+  const sent = useRef(false)
   const go = async () => {
-    if (!ok) return
+    if (!ok || sent.current) return
+    sent.current = true
     setBusy(true)
     // What it started and what it refused come back as the rows on the tab and as pop-ups. The video goes with the
     // yes: the Python side starts nothing when another one is picked by now.
@@ -216,8 +220,10 @@ export function PostDialog({ data, close }: { data: PostData; close: () => void 
         </box>
       ) : null}
       <DialogButtons>
-        <Button id="post-cancel" label={info.can_post ? "Cancel" : "Close"} autoFocus={!ok} onPress={close} />
-        <Button id="post-start" label={busy ? "Opening your browser…" : chosen.length ? `Start ${count}` : "Start"} variant="primary" disabled={!ok} autoFocus={ok} onPress={() => void go()} />
+        {/* Cancel has the keyboard when the question opens, as in every dialog whose yes can't be taken back: an Enter
+            still held from pressing Post… closes it, where on Start it began every ticked post before a word was read. */}
+        <Button id="post-cancel" label={info.can_post ? "Cancel" : "Close"} autoFocus onPress={close} />
+        <Button id="post-start" label={busy ? "Opening your browser…" : chosen.length ? `Start ${count}` : "Start"} variant="primary" disabled={!ok} onPress={() => void go()} />
       </DialogButtons>
     </Modal>
   )

@@ -10,6 +10,7 @@ import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { TextAttributes } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { createRoot } from "@opentui/react"
 import { headless, type Headless } from "../scripts/headless"
@@ -66,6 +67,15 @@ function inStats<T>(use: (db: Database) => T): T {
   }
 }
 const jobsMade = () => inStats((db) => (db.query("SELECT COUNT(*) AS n FROM post_jobs").get() as { n: number }).n)
+
+/** The label of the button that has the keyboard: it's the underlined one. */
+function focused(h: Headless): string {
+  for (const line of h.t.captureSpans().lines) {
+    const text = line.spans.filter((sp) => sp.attributes & TextAttributes.UNDERLINE).map((sp) => sp.text).join("").trim()
+    if (text) return text
+  }
+  return ""
+}
 
 /** Wait (up to 6 s) for something the Python side does after a click: each look comes after a settle. */
 async function until(h: Headless, ok: () => boolean) {
@@ -279,6 +289,30 @@ describe("Post…", () => {
     await until(h, () => frame(h).includes("POST THIS VIDEO"))
     expect(dialog(h)).toContain("○ X @me Already posted with ReelForge's help. Tick it to post there again.")
     expect(frame(h)).toContain("▐ Start 3 posts ▌") // the other three: X only when you tick it
+  })
+
+  test("the question opens with the keyboard on Cancel, and Enter twice on Start is one yes", async () => {
+    const h = await kit({ extension: "on" })
+    await clickText(h, "▐ Post… ▌", 3)
+    await until(h, () => frame(h).includes("POST THIS VIDEO"))
+    expect(focused(h)).toBe("Cancel")
+    h.t.mockInput.pressKey("RETURN") // an Enter still held from pressing Post…: it starts nothing
+    await h.settle(500)
+    expect(frame(h)).not.toContain("POST THIS VIDEO")
+    expect(jobsMade()).toBe(0)
+    await clickText(h, "▐ Post… ▌", 3)
+    await until(h, () => frame(h).includes("POST THIS VIDEO"))
+    h.t.mockInput.pressKey("TAB")
+    await h.settle(200)
+    expect(focused(h)).toBe("Start 4 posts")
+    h.t.mockInput.pressKey("RETURN")
+    h.t.mockInput.pressKey("RETURN") // again, before the window has drawn "Opening your browser…"
+    await until(h, () => state(h, "x") === "queued" && !frame(h).includes("POST THIS VIDEO"))
+    await h.settle(800)
+    expect(posting(h).rows.map((r) => r.state)).toEqual(["queued", "queued", "queued", "queued"])
+    expect(jobsMade()).toBe(4)
+    expect(listed("opened.txt").length).toBe(1) // one batch, one page
+    expect(popups()).toEqual([]) // and no "not started: a post is already under way" about the posts it just started
   })
 
   test("the question is about one video: when another is the picked one by now it closes, and its yes starts nothing", async () => {
