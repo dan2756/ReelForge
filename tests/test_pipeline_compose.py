@@ -326,7 +326,9 @@ class Fonts(unittest.TestCase):
             serif, bold, mono = (Path(tmp) / name for name in ("DejaVuSerif.ttf", "DejaVuSerif-Bold.ttf", "Mono.ttf"))
             for font in (serif, bold, mono):
                 font.write_bytes(b"font")
-            elsewhere = Path("C:/Windows/Fonts")           # what find_fonts answers when nothing was found
+            # find_fonts answers with another system's path when it found nothing. A folder that is never made
+            # stands in for that here: C:/Windows/Fonts is a real one on a Windows machine, with both faces in it.
+            elsewhere = Path(tmp) / "another system's fonts"
             found = (serif, elsewhere / "georgiai.ttf", bold, mono, elsewhere / "consolab.ttf")
             self.assertEqual(compose.config._faces(found), (serif, serif, bold, mono, mono))
             self.assertEqual(compose.config._faces((serif, serif, bold, mono, mono)), (serif, serif, bold, mono, mono))
