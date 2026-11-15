@@ -21,7 +21,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config  # noqa: E402
 from post.loudness import master  # noqa: E402
-from post.sfx_cache import build_cache, cached  # noqa: E402
+from post.sfx_cache import build_cache, cached, cue_sounds  # noqa: E402
 
 SR = config.SAMPLE_RATE
 _cache = {}
@@ -195,10 +195,10 @@ def synth(name, p, rng):
 
 
 def build(ep_dir):
-    build_cache()
     spec = json.loads((ep_dir / "episode.json").read_text(encoding="utf-8"))
     series = json.loads((ep_dir / "build" / "series.json").read_text(encoding="utf-8"))
     A = spec["audio"]
+    build_cache(needed=cue_sounds(A))
     ev = series.get("events", {})
     dur = spec["duration"]
     n = int(dur * SR)

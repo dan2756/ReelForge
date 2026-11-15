@@ -44,7 +44,8 @@ The three demo scenes in `examples/` (`demo_*`) are the minimum visual standard.
 ## How to check
 
 1. **Stills before rendering:** `--steps build,stills` at 10+ key moments, and look at every one. Put them next to
-   the example scene's at matching moments. Fix and repeat until they clear this page.
+   the example scene's at matching moments. Fix and repeat until they clear this page. Then `--stills lines` and
+   look at `build/preview/sheet_*.jpg`: every line over its own shot, never across a cut, never over the subject.
 2. **After rendering:** look at every `build/qa/sheet_*.jpg` and the cover, then at **full-resolution frames from
    the final mp4** at every story line, every big moment (milestones, hits, the payoff) and the last frame. For
    example, a frame at 21.5 s:

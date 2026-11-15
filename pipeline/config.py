@@ -63,6 +63,25 @@ HASHTAGS_ON_X = bool(SETTINGS["captions"]["hashtags_on_x"])
 TITLE_MAX_CHARS = int(SETTINGS["captions"]["title_max_chars"])
 
 
+def caption_problems(spec):
+    """What in episode.json breaks the channel's caption rules, as sentences ([] when nothing does). The caption step
+    stops on these, and the lint asks them before the render."""
+    tags = _settings.tag_list(spec.get("hashtags", []))
+    n, first = MAX_HASHTAGS, TIKTOK_FIRST_TAG
+    hook = " ".join(spec["title"].split())
+    problems = []
+    if len(tags) > n:
+        problems.append(f"{len(tags)} hashtags in episode.json, the channel's maximum is {n}")
+    elif (n > 0 and "tiktok" in PLATFORMS and first and
+            first.lower() not in (t.lower() for t in tags) and len(tags) >= n):
+        problems.append(f"TikTok needs #{first} first and max {n} hashtags; drop one hashtag from episode.json")
+    if "#" in hook:
+        problems.append("put hashtags in episode.json 'hashtags', not in the title")
+    if len(hook) > 280:
+        problems.append(f"the title is {len(hook)} characters, X allows 280")
+    return problems
+
+
 def _missing(name, hint):
     raise FileNotFoundError(f"{name} not found. {hint}")
 
@@ -83,5 +102,14 @@ def require_ffmpeg():
     return FFMPEG
 
 
+def _faces(fonts):
+    """(serif, italic, bold, mono, mono bold) with any face this machine doesn't have replaced by the regular one
+    beside it. Debian's fonts-dejavu-core has the serif without its italic, for one; find_fonts then answers with a
+    path from another system, and the story lines would stop the video step instead of being drawn upright."""
+    serif, italic, bold, mono, mono_bold = fonts
+    return (serif, italic if Path(italic).is_file() else serif, bold if Path(bold).is_file() else serif,
+            mono, mono_bold if Path(mono_bold).is_file() else mono)
+
+
 # Typography: Georgia (serif) and Consolas (mono) on Windows; the closest fonts elsewhere (studio/tools.py).
-FONT_SERIF, FONT_SERIF_ITALIC, FONT_SERIF_BOLD, FONT_MONO, FONT_MONO_BOLD = _tools.find_fonts()
+FONT_SERIF, FONT_SERIF_ITALIC, FONT_SERIF_BOLD, FONT_MONO, FONT_MONO_BOLD = _faces(_tools.find_fonts())

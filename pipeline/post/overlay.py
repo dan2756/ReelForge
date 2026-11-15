@@ -279,11 +279,18 @@ def hud_lines(label, value, sub):
             ("sub", sub, config.FONT_MONO_BOLD, 25, 4, 5, 3, 182)]
 
 
+# The HUD's text is new on almost every frame (the counter). In the big caches above its layers would pile up for the
+# whole video, hundreds of megabytes that are never asked for again, so the HUD's lines get a small cache of their
+# own: enough for a readout that holds still for a while.
+_hud_text = lru_cache(maxsize=24)(text_layer.__wrapped__)
+_hud_glow = lru_cache(maxsize=24)(glow_layer.__wrapped__)
+
+
 def _hud_layers(label, value, sub, brand, value_color=None):
     if not HUD_PANEL:
         fills = {"label": (240, 240, 240), "value": value_color or (255, 255, 255), "sub": (235, 235, 235)}
-        return [(text_layer(text, f, size, fill=fills[name], tracking=tr, shadow=200, blur=blur, align="left",
-                            outline=ol), 0, dy, 1.0, glow_layer(text, f, size, tracking=tr, blur=blur))
+        return [(_hud_text(text, f, size, fill=fills[name], tracking=tr, shadow=200, blur=blur, align="left",
+                           outline=ol), 0, dy, 1.0, _hud_glow(text, f, size, tracking=tr, blur=blur))
                 for name, text, f, size, tr, blur, ol, dy in hud_lines(label, value, sub) if text]
     # the old boxed look (only if a spec asks for "panel": true)
     vs = _value_size(value)
@@ -292,12 +299,12 @@ def _hud_layers(label, value, sub, brand, value_color=None):
         layers.append((text_layer(brand, config.FONT_MONO_BOLD, 22, fill=(235, 235, 235), tracking=6, shadow=140,
                                   blur=5, align="left"), 34, 0, 0.72, None))
     layers += [
-        (text_layer(label, config.FONT_MONO, 27, fill=(240, 240, 240), tracking=4, shadow=150, blur=5,
-                    align="left"), 0, 44, 0.9, None),
-        (text_layer(value, config.FONT_MONO_BOLD, vs, fill=value_color or (255, 255, 255),
-                    shadow=170, blur=7, align="left"), 0, 80 + (80 - vs) // 2, 1.0, None),
-        (text_layer(sub, config.FONT_MONO, 25, fill=(235, 235, 235), tracking=4, shadow=150, blur=5,
-                    align="left"), 0, 182, 0.85, None),
+        (_hud_text(label, config.FONT_MONO, 27, fill=(240, 240, 240), tracking=4, shadow=150, blur=5,
+                   align="left"), 0, 44, 0.9, None),
+        (_hud_text(value, config.FONT_MONO_BOLD, vs, fill=value_color or (255, 255, 255),
+                   shadow=170, blur=7, align="left"), 0, 80 + (80 - vs) // 2, 1.0, None),
+        (_hud_text(sub, config.FONT_MONO, 25, fill=(235, 235, 235), tracking=4, shadow=150, blur=5,
+                   align="left"), 0, 182, 0.85, None),
     ]
     return layers
 

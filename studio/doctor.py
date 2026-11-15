@@ -240,7 +240,16 @@ def render_check(r: Report) -> None:
                                      f"(my-studio/render-test.jpg)")
         else:
             log = tmp / "build" / "build.log"
-            tail = log.read_text(encoding="utf-8", errors="replace")[-600:] if log.exists() else res.stdout[-600:]
-            r.add(FAIL, "Render test", "Blender couldn't build or render the example:\n" + tail)
+            built = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
+            if res.returncode and "[build_scene] saved" in built:
+                # Blender did its part. What stopped is in the command's own output: the check of episode.json
+                # (its FAIL rows), the still, or the text drawn over it (a failed step prints the end of its log).
+                said = (res.stdout or "") + (res.stderr or "")
+                rows = [line for line in said.splitlines() if "[FAIL]" in line]
+                r.add(FAIL, "Render test", "Blender built the example, then a later step stopped:\n" +
+                      ("\n".join(rows) or said[-1500:]))
+            else:
+                r.add(FAIL, "Render test", "Blender couldn't build or render the example:\n" +
+                      (built or res.stdout)[-600:])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

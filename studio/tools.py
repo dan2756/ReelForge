@@ -169,7 +169,9 @@ def linux_font_dirs() -> list[Path]:
 
 def font_package() -> str:
     """The command that installs the serif font Linux renders the videos' text with."""
-    for tool, cmd in (("apt-get", "sudo apt install fonts-dejavu-core"), ("dnf", "sudo dnf install dejavu-serif-fonts"),
+    # Debian and Ubuntu split DejaVu in two: -core has the serif and its bold, -extra the italic the story lines use
+    for tool, cmd in (("apt-get", "sudo apt install fonts-dejavu-core fonts-dejavu-extra"),
+                      ("dnf", "sudo dnf install dejavu-serif-fonts"),
                       ("pacman", "sudo pacman -S ttf-dejavu"), ("zypper", "sudo zypper install dejavu-fonts")):
         if shutil.which(tool):
             return cmd

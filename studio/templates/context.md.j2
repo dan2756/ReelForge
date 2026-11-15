@@ -199,8 +199,11 @@ them on purpose, so they can't be posted. Never work round that; `new-episode` g
    scenes go in new modules (`pipeline/blender/worlds/<name>.py`, `effects/<name>.py`); never change a module
    another episode uses in a way that changes that episode.
 5. **Check the text** without a full render: `{{ py }} pipeline{{ sep }}post{{ sep }}compose.py {{ here_cmd }}episodes{{ sep }}<id> --preview {{ preview }}`.
-6. **Render:** `--steps render` (20-40 min on a good GPU; run it in the background). It resumes and **skips frames
-   that already exist**, so delete `build/frames` after changing the scene.{% if codex %} If your shell stops a long
+6. **Render:** `--steps render` (about 15 minutes to an hour on a fast graphics card; run it in the background). It
+   says how far it is and carries on where a stopped render left off. If the scene was built again since the frames
+   were rendered, it stops and asks: `--rerender all`, `--rerender 12-15.5` for one shot, or `--keep-frames` when the
+   picture did not change. A re-render that is stopped carries on too when the same command is run again.
+   **Nothing needs deleting by hand.**{% if codex %} If your shell stops a long
    command, run it again: it carries on where it stopped.{% endif %}
 
 7. **Post-production:** `--steps post` (sound, video, cover, captions, then QA -> `build/qa/report.md`). It stops on
@@ -266,7 +269,8 @@ when {{ who }} asks for it, as in "Making a video".
 ## Gotchas
 
 - Blender's `keyframe_insert()` ignores the default interpolation: call `rf.set_interpolation(...)`.
-- Delete `build/frames` after changing the world or effect, or the render keeps the old frames.
+- Stills and frames belong to the scene they were rendered from. Stills are always rendered afresh, and `--stills lines`
+  shows every line over its shot in `build/preview/`. `make_episode.py <episode> --status` says where an episode stands.
 - Run anything that reads downloaded files (e.g. `assets/sfx/`) with `python -I`. Every new sound needs a licence
   entry in `assets/sfx/manifest.json`; Mixkit and Kenney (CC0) are the approved free sources.
 - `{{ here }}episodes/` grows by about 0.6 GB per video until `ship` cleans the frames. Keep 10 GB free before a render.

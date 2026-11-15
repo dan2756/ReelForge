@@ -107,6 +107,46 @@ class DoctorJson(unittest.TestCase):
                     self.assertEqual(list((root / "episodes").iterdir()), [])
                     self.assertEqual((root / "my-studio" / "render-test.jpg").exists(), render_ok)
 
+    def test_the_render_test_says_which_step_stopped(self):
+        """Once Blender has saved the scene, the build step checks episode.json and the stills step draws the text
+        over the still. A fault there is not Blender's, and the end of build.log says nothing about it."""
+        saved = 'Info: Saved as "scene.blend"\n[build_scene] saved build/scene.blend\n'
+        lint = ("  [PASS] title: 52 characters\n  [FAIL] HUD numbers: ft: no format called 'feet'\n" +
+                "  [PASS] cover frame: the frame at 5 s\n" * 60 + "  lint FAILED: fix episode.json before rendering\n")
+        for build_log, stdout, stderr, expect, never in (
+            (saved, lint, "step failed with exit code 1\n",
+             "Blender built the example, then a later step stopped:\n  [FAIL] HUD numbers: ft: no format called 'feet'",
+             "[PASS]"),
+            (saved, "> python compose.py --preview 21\n", "OSError: cannot open resource\nstep failed\n",
+             "then a later step stopped:\n> python compose.py --preview 21\nOSError: cannot open resource\nstep failed",
+             "couldn't build"),
+            ("Error: cannot read the scene\n", "> blender -b\n", "step failed with exit code 1 (see build.log)\n",
+             "Blender couldn't build or render the example:\nError: cannot read the scene", "later step"),
+        ):
+            with self.subTest(expect=expect), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                example = root / "examples" / "demo_doubling_duck" / "episode.json"
+                example.parent.mkdir(parents=True)
+                example.write_text("{}", encoding="utf-8")
+                (root / "episodes").mkdir()
+
+                def make_episode(cmd, **kwargs):
+                    log = Path(cmd[2]) / "build" / "build.log"
+                    log.parent.mkdir(parents=True)
+                    log.write_text(build_log, encoding="utf-8")
+                    return subprocess.CompletedProcess(cmd, 1, stdout=stdout, stderr=stderr)
+
+                report = doctor.Report(quiet=True)
+                with mock.patch.object(P, "ROOT", root), mock.patch.object(P, "EXAMPLES", root / "examples"), \
+                        mock.patch.object(doctor.subprocess, "run", side_effect=make_episode), \
+                        redirect_stderr(io.StringIO()):
+                    doctor.render_check(report)
+                status, what, detail = report.rows[-1]
+                self.assertEqual((status, what), (doctor.FAIL, "Render test"))
+                self.assertIn(expect, detail)
+                self.assertNotIn(never, detail)
+                self.assertEqual(list((root / "episodes").iterdir()), [])
+
     def test_cli_stdout_is_json_when_tools_are_missing(self):
         with tempfile.TemporaryDirectory() as folder:
             env = {**os.environ, "REELFORGE_PROFILE": ".", "STUDIO_ONLY_KIT_TOOLS": "1",
