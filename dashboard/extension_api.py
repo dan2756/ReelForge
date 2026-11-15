@@ -11,6 +11,8 @@ Who gets in:
                   minutes, and the extension trades it for a token. Only the SHA-256 of that token is kept here
                   (dashboard/data/extension.json, one file for every channel of this ReelForge folder). The token is
                   the only real authentication: it goes in the X-ReelForge-Token header of every /v1 call but hello.
+                  Before the extension sends it anywhere, hello has to prove that this is the ReelForge the token
+                  came from (proof): ten ports on this computer are easy for another program to listen on.
   the local pages /pair and /post/<batch>, opened by ReelForge with a key in their address that is good for two
                   hours and for that one page. They can read where their own batch stands and ask for the by-hand
                   flow, nothing else.
@@ -87,6 +89,9 @@ POST_HOSTS = {"tiktok": ("tiktok.com",), "youtube": ("youtube.com", "youtu.be"),
 # What each platform calls its own last button.
 BUTTONS = {"tiktok": "Post", "youtube": "Publish (or Save)", "instagram": "Share", "x": "Post"}
 BY_HAND = ("queued", "expired", "failed", "cancelled")  # the states the local page's by-hand button is for
+# The failures after which there may be no tab to finish in (it was closed, never opened, or has no video on it).
+# The page then says to start again, and whether a tab is still open is left to the extension's own sentence.
+NO_TAB = ("tab_closed", "timeout", "extension_outdated", "app_unreachable", "changed")
 
 clock = time.monotonic  # (the tests move it on)
 _store_lock = threading.Lock()
@@ -212,6 +217,24 @@ def whose(store: dict, token: str) -> dict | None:
     return found if token else None
 
 
+def proof(store: dict, install: str, nonce: str, port: int | None) -> str | None:
+    """ReelForge's proof, to a browser that is connected, that it is the ReelForge that browser connected to and not
+    another program listening on one of ReelForge's ports. An HMAC over the nonce the browser just made up, the
+    port this server listens on and this ReelForge's id, keyed with the SHA-256 of that browser's token: what the
+    connections file holds of the token, and what the browser can work out from the token it kept. The extension
+    asks for it with every hello and sends its token, or believes anything it is told, only where the proof holds.
+    The port is in it so that the real ReelForge's answer, passed on by a program on another port, proves nothing
+    there. None for a browser that isn't connected, or a nonce that isn't 32 hex digits."""
+    if not re.fullmatch(r"[0-9a-f]{32}", nonce):
+        return None
+    for p in paired(store):
+        key = str(p.get("token_sha256", ""))
+        if p.get("install") == install and re.fullmatch(r"[0-9a-f]{64}", key):
+            said = f"reelforge hello\n{nonce}\n{port}\n{store.get('app_id')}"
+            return hmac.new(bytes.fromhex(key), said.encode("utf-8"), hashlib.sha256).hexdigest()
+    return None
+
+
 def unpair(install: str) -> str | None:
     """Forget a browser: its token stops working at once. Returns its name, or None if it wasn't connected."""
     def drop(store: dict) -> str | None:
@@ -272,18 +295,17 @@ def line(value, limit: int) -> str | None:
 
 
 def post_url(platform: str, value) -> str | None:
-    """A post's link as the extension read it off the page, if it is an https address on that platform's own site."""
+    """A post's link as the extension read it off the page, if it is an https address on that platform's own site.
+    Only the plainest shape is taken: a host name and a path. Python and a browser read anything else differently
+    (a backslash, a name and password before the host), and it is a browser that opens this link."""
     url = line(value, 500)
-    if not url:
+    if not url or not re.fullmatch(r"https://[a-z0-9.-]+(/[^\s\\]*)?", url):
         return None
     try:
-        parts = urlsplit(url)
-        host = (parts.hostname or "").lower()
+        host = urlsplit(url).netloc
     except ValueError:
         return None
-    if parts.scheme != "https" or not any(host == h or host.endswith("." + h) for h in POST_HOSTS.get(platform, ())):
-        return None
-    return url
+    return url if any(host == h or host.endswith("." + h) for h in POST_HOSTS.get(platform, ())) else None
 
 
 def listed(cfg: dict) -> list[Path]:
@@ -304,7 +326,7 @@ def state(app: "App") -> dict:
             size, sha = f.stat().st_size, posting.digest(f)
         except OSError:
             continue  # moved or deleted since the folder was listed
-        review = videos.approval(f, app.cfg)
+        review = videos.approval_shown(f, app.cfg)  # for the list only: Post works it out afresh (create_batch)
         ok = review["state"] in videos.POSTABLE
         mine, found = jobs.get(f, {}), posting.spotted(f.name)
         where = {}
@@ -359,7 +381,12 @@ def page_job(job: dict, name: str, handles: dict[str, str]) -> dict:
         why = posting.failure(job, name)
         if why:  # the extension's own sentence, or ours for its code: one sentence either way
             why = why[:1].upper() + why[1:] + ("" if why[-1] in ".!?" else ".") + " "
-        note = why + "You can finish in the tab that is open, or press Post by hand."
+        if job["error_code"] in NO_TAB:
+            note = why + "Start it again from ReelForge, or press Post by hand."
+        elif "in this tab" in why:  # the extension's sentence has said so already: once is enough
+            note = why + "Or press Post by hand."
+        else:
+            note = why + "You can finish in the tab that is open, or press Post by hand."
     elif stands == "unknown":
         words, tone = "ReelForge can't tell whether this posted", "ask"
         note = (f"Check {name} before trying again. Then say on ReelForge's Publish tab whether it posted. "
@@ -387,16 +414,19 @@ def by_hand(job: dict, name: str, copy: Callable[[str], object], record: Callabl
     what = {"youtube": "title", "x": "post"}.get(job["platform"], "caption and hashtags")
     if text:
         copy(text)
-    if video.exists():
+    shown = video.exists()
+    if shown:
         desktop.reveal(video)
     opened = desktop.open_upload_page(job["platform"])
     if opened:
         record(PublishItem(video=video, caption=text, tags=""))
-        message = (f"{name}'s upload page is opening. The {what} is copied: drag {video.name} in from "
-                   f"{desktop.FILES_WINDOW}, then paste.")
+        message = f"{name}'s upload page is opening. The {what} is copied: " + (
+            f"drag {video.name} in from {desktop.FILES_WINDOW}, then paste." if shown else
+            f"paste it there. ReelForge can't find {video.name} any more, so you have to find the video yourself.")
     else:
-        message = (f"ReelForge couldn't open your browser for {name}. Open its upload page yourself: the {what} is "
-                   f"copied, and {video.name} is showing in {desktop.FILES_WINDOW}.")
+        message = f"ReelForge couldn't open your browser for {name}. Open its upload page yourself: the {what} is " + (
+            f"copied, and {video.name} is showing in {desktop.FILES_WINDOW}." if shown else
+            f"copied. ReelForge can't find {video.name} any more, so you have to find the video yourself.")
     if job["platform"] == "youtube":
         message += " For the description, use Copy YouTube hashtags on ReelForge's Publish tab."
     if job["platform"] == "instagram":
@@ -717,10 +747,15 @@ class Handler(BaseHTTPRequestHandler):
         app = api.app
 
         if (self.command, path) == ("GET", "/v1/hello"):
-            token = self.headers.get(TOKEN_HEADER) or ""
-            self.reply(200, {"app": "reelforge", "protocol": PROTOCOL, "version": KIT_VERSION, "app_id": api.app_id,
-                             "profile": app.profile(), "demo": bool(app.demo),
-                             "paired": bool(token and not app.demo and whose(read_store(), token))})
+            token, store = self.headers.get(TOKEN_HEADER) or "", read_store()
+            said = {"app": "reelforge", "protocol": PROTOCOL, "version": KIT_VERSION, "app_id": api.app_id,
+                    "profile": app.profile(), "demo": bool(app.demo),
+                    "paired": bool(token and not app.demo and whose(store, token))}
+            # For a connected browser that says which one it is and sends a nonce: the proof that this is its
+            # ReelForge (see proof). The extension sends no token with a hello.
+            proven = None if app.demo else proof(store, (asked.get("install") or [""])[0],
+                                                 (asked.get("nonce") or [""])[0], api.port)
+            self.reply(200, {**said, "proof": proven} if proven else said)
             return
         if app.demo:
             raise Refusal(403, "demo", "ReelForge is showing its demo, which never posts.")
@@ -893,7 +928,8 @@ class Handler(BaseHTTPRequestHandler):
                                              "cancel it on ReelForge's Publish tab first.")
         names, handles = self.names()
         name = names.get(platform, platform)
-        done = api.app.by_hand(job, name)
+        # (the video where it is now: it may have been moved to completed videos/ since the job was made)
+        done = api.app.by_hand({**job, "video_path": str(posting.whereabouts(job, api.app.cfg))}, name)
         if done is None:
             raise Refusal(503, "busy", "ReelForge didn't answer in time. Try again.")
         job = posting.cancel(job["id"], "posted by hand")
@@ -948,7 +984,9 @@ class Handler(BaseHTTPRequestHandler):
             if job is None:
                 raise posting.Refused("not_found", "ReelForge has no such post.")
             if to not in posting.EXTENSION_STATES:
-                raise posting.Refused("bad_transition", f"The extension can't make a post {line(str(to), 40)}.", job)
+                named = line(to, 40)  # (None when the report names no state at all)
+                raise posting.Refused("bad_transition", f"The extension can't make a post {named}." if named else
+                                      "The extension didn't say where the post stands.", job)
             progress = body.get("progress")
             if isinstance(progress, bool) or not isinstance(progress, (int, float)) or not math.isfinite(progress):
                 progress = None
@@ -1079,7 +1117,10 @@ def status() -> int:
     print(f"  id         {EXTENSION_ID}")
     browsers = paired(read_store())
     for i, p in enumerate(browsers):
-        seen = fmt_ago(p.get("last_seen")) if isinstance(p.get("last_seen"), str) else "never"
+        try:
+            seen = fmt_ago(p["last_seen"])
+        except (KeyError, TypeError, ValueError):  # none, or not a time ReelForge wrote: the file can be edited
+            seen = "never"
         version = f" · v{p['version']}" if p.get("version") else ""
         label = "connected " if i == 0 else " " * 10
         print(f"  {label} {p.get('name') or 'A browser'}{version} · last seen {seen}")

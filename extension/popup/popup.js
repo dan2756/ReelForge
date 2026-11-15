@@ -2,7 +2,7 @@
 //
 // A post started here goes through two screens before anything opens: choose the platforms, then read the
 // exact text and the account for each one. Only the second screen's button opens the upload pages.
-import { PLATFORMS, PRESS_PLATFORMS, platformName, isFinal, advice, stateLine } from "../shared/consts.js"
+import { PLATFORMS, PRESS_PLATFORMS, ACCOUNT_SHOWN, platformName, isFinal, advice, stateLine } from "../shared/consts.js"
 import { h } from "../shared/dom.js"
 
 const main = document.getElementById("main")
@@ -69,7 +69,7 @@ function texts(text) {
 function connectionScreen() {
   const screens = {
     not_running: ["ReelForge is not running", "Open ReelForge on this computer. This extension only works together with the app: it attaches your finished video and fills in the text, here in your own browser."],
-    not_connected: ["Not connected yet", "ReelForge is open, but this browser is not paired with it. In ReelForge, go to Publish and connect your browser, or type reelforge extension in a terminal. ReelForge opens a page here that pairs the two."],
+    not_connected: ["Not connected yet", "ReelForge is open, but this browser is not paired with it. In ReelForge, go to Publish and connect your browser, or type reelforge extension pair in a terminal. ReelForge opens a page here that pairs the two."],
     demo: ["ReelForge is showing its demo", "Posting is off while ReelForge shows example videos. Open your own channel to post."],
     extension_outdated: ["This extension is too old for your ReelForge", "Open your browser's extensions page and press Reload on ReelForge. That loads the newer copy from your ReelForge folder."],
     app_outdated: ["Your ReelForge is too old for this extension", "Update ReelForge, then look again."],
@@ -271,6 +271,11 @@ function confirm() {
     view.jobs.map(job => h("div", { class: "panel stack tight", data: { confirm: job.platform } },
       h("div", { class: "row" }, h("h3", { class: "grow", text: platformName(job.platform) }),
         h("span", { class: "small soft", text: job.handle ? `as ${job.handle}` : "no account set in ReelForge" })),
+      // "as @handle" is only checked where the upload page shows its account. Elsewhere it is ReelForge's
+      // word about the channel, and the post goes to whichever account that tab is on.
+      job.via === "extension" && job.handle && !ACCOUNT_SHOWN.includes(job.platform)
+        ? h("p", { class: "small soft", data: { unchecked: job.platform }, text: `${platformName(job.platform)}'s upload page does not show its account, so ReelForge cannot check it. Look at which account the tab is on before you press ${PLATFORMS[job.platform]?.button || "Post"}.` })
+        : null,
       texts(job.text).map(({ label, value }) => [h("span", { class: "small soft", text: label }), h("pre", { class: "quote", text: value })]),
       h("p", { class: "small soft", text: job.via !== "extension" ? "ReelForge posts this one itself, through the platform's own API."
         : job.press && PRESS_PLATFORMS.includes(job.platform) && ui.press[job.platform] ? "ReelForge presses Post for you once everything is in."
@@ -281,6 +286,12 @@ function confirm() {
     h("div", { class: "row" },
       mine.length ? button(mine.length > 1 ? "Open the upload pages" : "Open the upload page", "start", async () => {
         const answer = await ask("ui.start", { port: view.port, batch: view.batch })
+        if (answer?.state === "error:not_claimed") {
+          // Nothing is left to confirm here: the list is where to start again.
+          await leave()
+          flash = "These posts waited more than ten minutes, or another browser took them. Nothing was opened. Press Post again."
+          return
+        }
         if (answer?.state !== "started") {
           flash = "ReelForge did not start this post. Is it still open?"
           return

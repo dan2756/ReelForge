@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 
 from . import config
@@ -258,6 +259,41 @@ def approval(path: Path, cfg: dict) -> dict[str, str]:
         state, line = "stale", (f"QA and the review can't be checked against this video ({type(e).__name__}: {e}). "
                                 "Run the pipeline's qa step again.")
     return {"state": state, "line": line}
+
+
+SHOWN_FOR = 300.0  # seconds an approval is shown at most without being worked out again
+_shown: dict[str, tuple[tuple, float, dict[str, str]]] = {}  # video -> (its files' marks, when, its approval)
+
+
+def approval_shown(path: Path, cfg: dict) -> dict[str, str]:
+    """approval(), for showing it: the same answer for as long as the files it is read from are the same, and for
+    five minutes at most. With review receipts approval hashes the video and everything delivered with it, and a
+    list that redraws every few seconds (the extension's popup, for twenty videos) would read every video in full
+    each time. Never the answer a post goes by: starting one works it out afresh (posting.create_batch)."""
+    folder = episode_dir(path, cfg)
+    files = [path]
+    if folder is not None:  # what QA, the review and a receipt are about: the episode's own files and what it delivered
+        for part in (folder, folder / "final", folder / "build" / "qa"):
+            try:
+                files += sorted(f for f in part.iterdir() if not f.is_dir())
+            except OSError:
+                pass
+        files.append(folder / "build" / "scene.blend")
+    marks = []
+    for f in files:
+        try:
+            st = f.stat()
+            marks.append((str(f), st.st_size, st.st_mtime_ns))
+        except OSError:
+            marks.append((str(f), None, None))
+    known, now = _shown.get(str(path)), time.monotonic()
+    if known and known[0] == tuple(marks) and now - known[1] < SHOWN_FOR:
+        return known[2]
+    if len(_shown) > 200:  # videos that left the list long ago
+        _shown.clear()
+    answer = approval(path, cfg)
+    _shown[str(path)] = (tuple(marks), now, answer)
+    return answer
 
 
 def _reviewed(path: Path, folder: Path, spec: dict, qa: dict, publish_check) -> tuple[str, str]:

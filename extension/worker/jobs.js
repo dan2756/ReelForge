@@ -80,7 +80,7 @@ function ledger(change) {
 function remember(job) {
   return ledger(all => {
     if (isLive(job)) {
-      all[job.id] = { port: job.port, app_id: job.app_id, profile_key: job.profile_key, platform: job.platform, state: job.state, pressed: job.pressedByPerson === true, at: Date.now() }
+      all[job.id] = { port: job.port, app_id: job.app_id, profile_key: job.profile_key, platform: job.platform, state: job.state, step: job.step, pressed: job.pressedByPerson === true, at: Date.now() }
     } else {
       delete all[job.id]
     }
@@ -95,10 +95,12 @@ export async function orphans() {
   for (const [id, entry] of Object.entries(held)) {
     if (await getJob(id)) continue
     const p = platformName(entry.platform)
-    const pressed = entry.state === "posting" || (entry.state === "ready" && entry.pressed)
+    const pressed = entry.state === "posting" || entry.pressed
     const body = pressed
       ? { install, state: "unknown", error_code: "unknown_outcome", error_message: `The browser was closed after Post was pressed on ${p}, before any confirmation. Check your profile before you post again.` }
       : { install, state: "failed", error_code: "tab_closed", error_message: `The browser was closed, or the extension reloaded, ${entry.state === "ready" ? "before Post was pressed" : "before the post was ready"}. Nothing was posted.` }
+    // The step the job had reached when this was last written down (it is kept at each change of state).
+    if (entry.step) body.step = entry.step
     try {
       await withApp({ ...entry }, found => app.api(found, `/v1/jobs/${id}/event`, { method: "POST", body }))
     } catch {
@@ -171,6 +173,13 @@ async function onTabRemoved(tabId) {
 // Puts the platform script in the job's tab. It runs again after every full page load there (YouTube's upload
 // address redirects into Studio), and the script itself refuses to start twice in one document.
 async function inject(job) {
+  const p = platformName(job.platform)
+  // Only into a page of the job's own platform. This extension can also see the other three platforms and
+  // ReelForge's own pages, and a job's tab that was taken to one of those gets no script: the script would
+  // be handed the job's text and video there. (An address this extension may not see reads as none, and the
+  // browser refuses the script by itself.)
+  const now = await chrome.tabs.get(job.tabId).catch(() => null)
+  if (now?.url && !allowedPage(job.platform, now.url)) return leftPage(job, "tab_closed", `This tab left ${p} before the post was ready. Nothing was posted.`)
   try {
     await chrome.scripting.executeScript({ target: { tabId: job.tabId }, files: SCRIPTS(job.platform) })
   } catch (error) {
@@ -178,7 +187,6 @@ async function inject(job) {
     // closed one is gone, and the other is still there with an address this extension is not allowed to see.
     await new Promise(resolve => setTimeout(resolve, 400))
     const tab = await chrome.tabs.get(job.tabId).catch(() => null)
-    const p = platformName(job.platform)
     if (!tab) return tabGone(job)
     if (/error page/i.test(String(error?.message || error))) return leftPage(job, "platform_error", `${p}'s page did not load. Check your connection, then post again.`)
     // Still on the platform: the page was between two loads. The next load brings the script in.
@@ -188,15 +196,19 @@ async function inject(job) {
   }
 }
 
+// Post was pressed, by ReelForge or by the person. The person's press can come before the page is called
+// ready: the video only has to be on it (YouTube publishes while a video is still going up).
+const wasPressed = job => job.state === "posting" || job.pressedByPerson === true
+
 // The job's tab is showing something the script cannot run on.
 function leftPage(job, code, message) {
-  if (job.state === "posting" || (job.state === "ready" && job.pressedByPerson)) return unsure(job)
+  if (wasPressed(job)) return unsure(job)
   if (job.state === "ready") return finish(job.id, "failed", "tab_closed", "The upload page was left before Post was pressed. Nothing was posted.")
   return finish(job.id, "failed", code, message)
 }
 
 function tabGone(job) {
-  if (job.state === "posting" || (job.state === "ready" && job.pressedByPerson)) return unsure(job)
+  if (wasPressed(job)) return unsure(job)
   const when = job.state === "ready" ? "before Post was pressed" : "before the post was ready"
   return finish(job.id, "failed", "tab_closed", `The tab was closed ${when}. Nothing was posted.`)
 }
@@ -207,10 +219,11 @@ function unsure(job) {
     `Post was pressed on ${platformName(job.platform)} and no confirmation was seen. Check your profile before you post again.`)
 }
 
-async function stopTab(job, message) {
+// `posted`: the job is over because ReelForge has the post as up, which the note says in place of "Stopped".
+async function stopTab(job, message, posted = false) {
   if (job.tabId == null) return
   try {
-    await chrome.tabs.sendMessage(job.tabId, { t: "stop", message })
+    await chrome.tabs.sendMessage(job.tabId, { t: "stop", message, posted })
   } catch {
     // No script is listening there: the tab is closed or showing another page.
   }
@@ -238,15 +251,19 @@ async function withApp(job, call) {
 async function flush(job) {
   const install = await app.install()
   while (job.outbox.length) {
+    let res
     try {
-      await withApp(job, found => app.api(found, `/v1/jobs/${job.id}/event`, { method: "POST", body: { install, ...job.outbox[0] } }))
+      res = await withApp(job, found => app.api(found, `/v1/jobs/${job.id}/event`, { method: "POST", body: { install, ...job.outbox[0] } }))
     } catch {
       job.offline = true
       return
     }
+    job.offline = false
+    // ReelForge is there but could not take it just now (its database was busy, or something went wrong
+    // inside): the report waits here for the next tick, like one that found nobody.
+    if (res.status >= 500) return
     // A refusal is not sent again: the app sees this job differently (cancelled in the window, say), and the
     // next tick takes its word for it.
-    job.offline = false
     job.outbox.shift()
   }
 }
@@ -287,10 +304,12 @@ export function report(id, event) {
   })
 }
 
+// An ending the worker itself decides (a closed tab, a page that went quiet). Every failure carries its step:
+// where no other is named it is the one the job was on, which ReelForge would otherwise show as none at all.
 async function finish(id, state, code, message, step) {
   const job = await getJob(id)
   if (!job || isFinal(job.state)) return
-  await report(id, { state, error_code: code, error_message: message, step })
+  await report(id, { state, error_code: code, error_message: message, step: step || job.step })
   await stopTab(job, message)
 }
 
@@ -298,11 +317,32 @@ async function finish(id, state, code, message, step) {
 
 let starting = Promise.resolve()
 
+const pressKey = batch => "press:" + batch
+
+// Press Post for me is allowed for a batch only once a person has said so for that batch in this browser: with
+// the popup's own button, or with a real click on the "press Post for me" button of ReelForge's post page.
+// What the app's job says, and the switch in Settings, are not enough: both can be there with nobody at the
+// computer. Kept with the jobs, for the worker's next start.
+async function pressSaid(batch) {
+  return (await session.get(pressKey(batch)))[pressKey(batch)] === true
+}
+
+// `port`: the ReelForge whose post page the click was on. A page of anything else on that port says nothing.
+export async function sayPress(port, batch) {
+  if (!BATCH_ID.test(String(batch))) return "error:bad_batch"
+  if (!(await app.at(port))?.paired) return "unpaired"
+  await session.set({ [pressKey(batch)]: true })
+  return "ok"
+}
+
 // A batch handed over by the local post page or the popup. Handing the same batch over twice (a reloaded
 // page, a second copy of it) opens nothing new: a job already held here is skipped, and the app grants a
-// claim only once.
-export function startBatch(port, batch) {
-  const run = starting.then(() => doStartBatch(port, batch))
+// claim only once. `press`: the person started it with the popup's own button.
+export function startBatch(port, batch, press = false) {
+  const run = starting.then(async () => {
+    if (press === true) await sayPress(port, batch)
+    return doStartBatch(port, batch)
+  })
   starting = run.catch(() => {})
   return run
 }
@@ -323,12 +363,19 @@ async function doStartBatch(port, batch) {
   if (!res.ok || !Array.isArray(res.data?.jobs)) return "error:" + (res.data?.error || "http_" + res.status)
   await beat(found)
   let front = !(await allJobs()).some(isLive)
+  let waiting = false
   for (const job of res.data.jobs) {
-    if (job.via !== "extension" || job.state !== "queued" || !JOB_ID.test(String(job.id))) continue
+    // "claimed" is tried too: this browser may have taken it and been stopped before it wrote that down.
+    // The app answers such a claim a second time, and nobody else's.
+    if (job.via !== "extension" || !["queued", "claimed"].includes(job.state) || !JOB_ID.test(String(job.id))) continue
     if (await getJob(job.id)) continue
+    waiting ||= job.state === "queued"
     if (await startJob(found, job.id, front)) front = false
   }
-  return "started"
+  // Posts that were waiting, and none of them is this browser's now: they waited more than ten minutes, or
+  // another browser took them. Saying "started" would leave the person looking at nothing.
+  const held = (await Promise.all(res.data.jobs.map(job => getJob(String(job.id))))).some(Boolean)
+  return waiting && !held ? "error:not_claimed" : "started"
 }
 
 async function startJob(found, id, front) {
@@ -353,12 +400,14 @@ async function startJob(found, id, front) {
   await remember(job)
   listenToTabs()
   await settle()
-  if (!PLATFORMS[job.platform] || !allowedPage(job.platform, claimed.upload_url) || !(job.video.size > 0)) {
+  // The one address this extension opens for a platform is its own. ReelForge names it too, and a ReelForge
+  // that names another is one this extension does not know.
+  if (!PLATFORMS[job.platform] || claimed.upload_url !== PLATFORMS[job.platform].upload || !(job.video.size > 0)) {
     await finish(id, "failed", "extension_outdated", "ReelForge asked for something this extension does not know. Reload the extension from your ReelForge folder.", "open_tab")
     return false
   }
   // The first tab of a batch comes to the front; the others load behind it.
-  const tab = await chrome.tabs.create({ url: claimed.upload_url, active: front }).catch(() => null)
+  const tab = await chrome.tabs.create({ url: PLATFORMS[job.platform].upload, active: front }).catch(() => null)
   if (!tab) {
     await finish(id, "failed", "tab_closed", "The browser could not open a tab for this post. Nothing was posted.", "open_tab")
     return false
@@ -378,8 +427,11 @@ async function pressSwitch(platform) {
   return PRESS_PLATFORMS.includes(platform) && press[platform] === true
 }
 
-// The script in a job's tab asks who it is working for. A tab with no live job gets no answer and does nothing.
-export async function tabHello(tabId) {
+// The script in a job's tab asks who it is working for. A tab with no live job gets no answer and does nothing,
+// and so does a page that is not on the job's own platform: the answer carries the job's text.
+export async function tabHello(tabId, url) {
+  const held = await jobOfTab(tabId)
+  if (!held || !allowedPage(held.platform, url)) return { ok: false }
   const job = await patchLive(tabId, { touched: Date.now() })
   if (!job) return { ok: false }
   return {
@@ -390,8 +442,10 @@ export async function tabHello(tabId) {
       id: job.id, platform: job.platform, name: platformName(job.platform), text: job.text, video: job.video, handle: job.handle,
       state: job.state, attached: job.attached === true, accountOk: job.accountOk === true,
       pressedByPerson: job.pressedByPerson === true, pressAsked: job.pressAsked === true,
-      // Press for me needs all three: the person switched it on here, switched "stop before posting" off for
-      // this post, and it is not X. The app still has the last word when the press is asked for.
+      // Press for me needs all of: the person switched it on here, switched "stop before posting" off for
+      // this post, said yes to it for this batch in this browser, and it is not X. The app still has the last
+      // word when the press is asked for. (The yes may still come while the page is being filled in, so it
+      // is looked at when the press is asked for, not here.)
       press: job.press && !job.pressAsked && await pressSwitch(job.platform),
     },
   }
@@ -437,6 +491,7 @@ export async function tabPress(tabId) {
   const no = (error, message) => ({ ok: false, error, message })
   if (!job || job.state !== "ready") return no("not_ready", "This post is not ready to be pressed.")
   if (!job.press || !(await pressSwitch(job.platform))) return no("press_not_allowed", "Press Post for me is off for this post.")
+  if (!(await pressSaid(job.batch))) return no("press_not_allowed", "nobody said yes to it for this post in this browser.")
   const first = await locked(job.id, async () => {
     const fresh = await getJob(job.id)
     if (!fresh || fresh.pressAsked) return false
@@ -542,6 +597,8 @@ export async function nudge() {
   for (const job of await allJobs()) {
     if (isLive(job)) await sync(job)
     else if (job.outbox.length) await resend(job.id)
+    // "Not sure" is settled in ReelForge. Once it is, the popup must not go on asking for the answer.
+    else if (job.state === "unknown") await sync(job)
   }
 }
 
@@ -582,11 +639,12 @@ async function watch(job, now) {
 }
 
 // Sends what is waiting and takes the app's word when it has already ended the job (cancelled in the window,
-// expired, answered by the person there).
+// expired, answered by the person there, found by a stats read). A job nobody was sure of ends here as "not
+// sure" and is settled only in ReelForge, so for that one the app's later word is taken too.
 async function sync(job) {
   await locked(job.id, async () => {
     const fresh = await getJob(job.id)
-    if (!fresh || isFinal(fresh.state)) return
+    if (!fresh || (isFinal(fresh.state) && fresh.state !== "unknown")) return
     await flush(fresh)
     let theirs = null
     try {
@@ -595,7 +653,7 @@ async function sync(job) {
     } catch {
       fresh.offline = true
     }
-    if (theirs && isFinal(theirs.state)) {
+    if (theirs && isFinal(theirs.state) && theirs.state !== fresh.state) {
       Object.assign(fresh, {
         state: theirs.state, detail: theirs.detail ?? fresh.detail, error_code: theirs.error_code ?? null,
         error_message: theirs.error_message ?? null, post_id: theirs.post_id ?? fresh.post_id, url: theirs.url ?? fresh.url,
@@ -603,7 +661,9 @@ async function sync(job) {
       })
       await save(fresh)
       await remember(fresh)
-      await stopTab(fresh, "This post was ended in ReelForge.")
+      // Ended there can also mean it is up: the person said so in ReelForge, or a stats read found the post.
+      const up = theirs.state === "posted"
+      await stopTab(fresh, up ? "ReelForge has this post as posted." : "This post was ended in ReelForge.", up)
       return
     }
     await save(fresh)
@@ -686,8 +746,9 @@ export async function peek(port, batch) {
   }
 }
 
-// The popup's Cancel on the confirm step: the jobs were written but nothing was opened. The app lets a waiting
-// job be cancelled only by the browser that holds it, so a refusal is followed by claim, then cancel.
+// The popup's Cancel on the confirm step: the jobs were written but nothing was opened. The app lets any
+// connected browser call off a job that is still waiting, and that leaves no trace of it there: no claim, and
+// no line in ReelForge's upload log that a later post could be filed under.
 export async function discard(port, batch) {
   const found = await app.at(port)
   if (!found?.paired || !BATCH_ID.test(String(batch))) return { ok: false }
@@ -696,11 +757,7 @@ export async function discard(port, batch) {
     const res = await app.api(found, `/v1/batch/${batch}`)
     for (const job of res.data?.jobs || []) {
       if (job.state !== "queued" || !JOB_ID.test(String(job.id)) || await getJob(job.id)) continue
-      const body = { install, state: "cancelled", detail: "cancelled before it started" }
-      const first = await app.api(found, `/v1/jobs/${job.id}/event`, { method: "POST", body })
-      if (first.ok) continue
-      const claim = await app.api(found, `/v1/jobs/${job.id}/claim`, { method: "POST", body: { install } })
-      if (claim.ok) await app.api(found, `/v1/jobs/${job.id}/event`, { method: "POST", body })
+      await app.api(found, `/v1/jobs/${job.id}/event`, { method: "POST", body: { install, state: "cancelled", detail: "cancelled before it started" } })
     }
   } catch {
     // The app is gone. Jobs nobody claims expire there by themselves after ten minutes.

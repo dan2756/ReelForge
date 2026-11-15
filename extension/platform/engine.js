@@ -292,7 +292,30 @@
 
   // ---- doing -----------------------------------------------------------------------------------------------
 
-  rf.click = el => el.click()
+  // True for the platform's own final button (Post, Publish, Share), and for anything around or inside it.
+  // The rules are written in each platform's script, not in selectors.json: the hook for the final button, a
+  // fixed selector where the sources give one, and the words the button carries.
+  rf.isFinal = el => {
+    const flow = rf.flows[rf.job.platform]
+    const button = rf.probe(flow.final)
+    if (button && (button === el || button.contains(el) || el.contains(button))) return true
+    if (flow.last.css && (el.closest(flow.last.css) || el.querySelector(flow.last.css))) return true
+    return names(el).some(name => flow.last.names.includes(name))
+  }
+
+  // A click on the way to the final screen (Next, Create, OK). It is never a click on the final button,
+  // whatever a hook found: a list of hooks that pointed "Next" at Publish would otherwise publish with nobody
+  // having asked for it. The one place the final button is pressed is rf.pressFinal, which run.js calls only
+  // with the person's switch, their yes and ReelForge's grant.
+  rf.click = el => {
+    if (rf.isFinal(el)) {
+      throw new Stop("hook_not_found", `${rf.job.name} has changed its page: a step on the way led to its ${rf.flows[rf.job.platform].button} button, which ReelForge did not press. You can finish by hand in this tab.`,
+        { detail: "a step's hook found the final button" })
+    }
+    el.click()
+  }
+
+  rf.pressFinal = el => el.click()
 
   rf.readText = el => (/^(textarea|input)$/.test(el.localName) ? el.value : el.innerText)
 
@@ -446,8 +469,9 @@
   `
 
   // The small note in the corner of the upload page. It lives in a shadow root with its own style sheet, so the
-  // page's styles cannot reach it and its styles cannot leak out. It is built node by node: some of these pages
-  // forbid HTML from strings.
+  // page's styles cannot reach it and its styles cannot leak out. The root is closed: the note can name the
+  // account ReelForge has for the platform, which the page's own scripts were never told. It is built node by
+  // node: some of these pages forbid HTML from strings.
   let note = null
   rf.say = (line, tone = "work", more = "") => {
     if (!note) {
@@ -456,7 +480,7 @@
       for (const [property, value] of [["all", "initial"], ["position", "fixed"], ["right", "16px"], ["bottom", "16px"], ["z-index", "2147483647"]]) {
         host.style.setProperty(property, value, "important")
       }
-      const root = host.attachShadow({ mode: "open" })
+      const root = host.attachShadow({ mode: "closed" })
       const sheet = new CSSStyleSheet()
       sheet.replaceSync(NOTE_CSS)
       root.adoptedStyleSheets = [sheet]

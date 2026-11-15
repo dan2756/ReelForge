@@ -201,6 +201,57 @@ class Making(LedgerTest):
         self.assertEqual(posting.get(job["id"])["state"], "posted")  # set aside, not rewritten
         self.assertEqual(self.events(job)[-1], ("posted", None, "set aside: posted again"))
 
+    def test_a_post_again_that_ends_without_a_post_leaves_the_first_post_standing(self):
+        # Post again, and then the page didn't open, nobody picked it up, it failed, or you called it off: the
+        # video is still up there as far as ReelForge knows, and a plain Post has to go on being refused.
+        first = self.walk(self.job(), *STEPS)
+        posting.advance(first["id"], "posted", install=CHROME, url="https://www.tiktok.com/@me/video/730000000001")
+
+        def ends(how: str) -> dict:
+            again = self.job(force=["tiktok"])
+            self.assertEqual(posting.get(first["id"])["superseded"], 1)
+            if how == "the page didn't open":
+                posting.cancel(again["id"], "the posting page didn't open", by="app")
+            elif how == "nobody picked it up":
+                self.age(again, 11, "created_at")
+                self.assertEqual(posting.expire_stale(), 1)
+            elif how == "it failed":
+                self.walk(again, "opening")
+                posting.advance(again["id"], "failed", install=CHROME, error_code="hook_not_found")
+            else:
+                self.walk(again, *STEPS)
+                posting.cancel(again["id"], "you cancelled it")
+            return again
+
+        for how in ("the page didn't open", "nobody picked it up", "it failed", "you called it off"):
+            again = ends(how)
+            self.assertIn(self.state(again), posting.FREE, how)
+            back = posting.get(first["id"])
+            self.assertEqual((back["state"], back["superseded"]), ("posted", 0), how)
+            self.assertEqual(self.events(first)[-1],
+                             ("posted", None, "stands again: the new try ended without a post"))
+            (block,) = self.batch()["blocked"]
+            self.assertEqual((block["reason"], block["job"]), ("posted", first["id"]), how)
+            self.assertEqual(posting.for_files([self.video])[self.video]["tiktok"]["id"], first["id"])
+        # Said again about a try that is over (you posted that one by hand instead): nothing more to bring back,
+        # and nothing in the way of the next Post again.
+        over = ends("it failed")
+        posting.cancel(over["id"], "posted by hand")
+        newest = self.walk(self.job(force=["tiktok"]), *STEPS, "posted")
+        posting.cancel(over["id"], "posted by hand")
+        self.assertEqual((posting.get(first["id"])["superseded"], posting.get(newest["id"])["superseded"]), (1, 0))
+
+    def test_a_job_nobody_is_sure_of_stands_again_too(self):
+        unsure = self.walk(self.job(), *STEPS, "unknown")
+        again = self.job(force=["tiktok"])
+        posting.cancel(again["id"])
+        self.assertEqual((self.state(unsure), posting.get(unsure["id"])["superseded"]), ("unknown", 0))
+        (block,) = self.batch()["blocked"]
+        self.assertEqual(block["reason"], "unknown")  # still yours to say whether it posted
+        # "It didn't post" ends it without a post, and there was nothing before it: the way is free.
+        posting.resolve(unsure["id"], False)
+        self.assertEqual(self.job()["state"], "queued")
+
     def test_an_unknown_job_blocks_until_it_is_settled_or_you_post_again(self):
         job = self.walk(self.job(), *STEPS, "unknown")
         (block,) = self.batch()["blocked"]
@@ -223,11 +274,15 @@ class Making(LedgerTest):
         # A post that goes up in the next hours is filed under the video whose upload was last started there. A job
         # that never reached a browser started nothing.
         expired, cancelled, begun = self.job("tiktok"), self.job("youtube"), self.job("instagram")
+        taken = self.job("x")
         self.age(expired, 11, "created_at")
         posting.expire_stale()
         posting.cancel(cancelled["id"])
         self.walk(begun, "opening")
         posting.cancel(begun["id"])  # its tab was opened: you may well finish that one by hand
+        # A browser took this one and called it off before it opened anything (it says "opening" when it has).
+        posting.claim(taken["id"], CHROME)
+        posting.advance(taken["id"], "cancelled", install=CHROME, detail="cancelled before it started")
         self.assertEqual([(u["platform"], u["status"]) for u in db.uploads()], [("instagram", "extension")])
         went_up = (db.parse(expired["created_at"]) + timedelta(minutes=20)).isoformat(timespec="seconds")
         db.record_snapshot("tiktok", Account("@me", 100), [Post("7300000000000000001", "Something else entirely",
@@ -353,6 +408,28 @@ class Making(LedgerTest):
         self.assertEqual(len(db.episodes()), 1)
 
 
+    def test_trying_again_finds_a_video_that_was_moved(self):
+        # The pipeline moves a delivered video to completed videos/: same name, same bytes, still on the list.
+        job = self.walk(self.job(), "opening")
+        posting.advance(job["id"], "failed", install=CHROME, error_code="timeout")
+        moved = self.root / "completed" / "ep01 - Gravity" / "ep01.mp4"
+        moved.parent.mkdir(parents=True)
+        self.video.rename(moved)
+        other = moved.with_name("other.mp4")
+        other.write_bytes(b"another one..")  # as long, and not it
+        self.assertEqual(posting.whereabouts(job, self.cfg), moved.resolve())
+        (again,) = posting.retry(job["id"], self.cfg)["jobs"]
+        self.assertEqual((again["video_path"], again["video_sha256"], again["text"]),
+                         (str(moved.resolve()), job["video_sha256"], job["text"]))
+        # Gone for good: it says so, and makes nothing.
+        posting.cancel(again["id"])
+        moved.unlink()
+        self.assertEqual(posting.whereabouts(job, self.cfg), self.video)
+        made = posting.retry(job["id"], self.cfg)
+        self.assertEqual((made["jobs"], made["blocked"][0]["reason"]), ([], "missing"))
+        self.assertEqual(made["blocked"][0]["message"], "ep01.mp4 isn't there any more.")
+
+
 class Moving(LedgerTest):
     def test_the_whole_way_from_queued_to_posted(self):
         job = self.job()
@@ -388,8 +465,9 @@ class Moving(LedgerTest):
     def test_any_job_under_way_can_fail_or_be_cancelled_and_then_it_is_over(self):
         for old in posting.IN_FLIGHT:
             for end in ("failed", "cancelled"):
-                for by in ("extension", "app"):
-                    self.assertTrue(posting.allowed(old, end, by), f"{old} -> {end} by {by}")
+                self.assertTrue(posting.allowed(old, end, "app"), f"{old} -> {end} by app")
+                # The one exception: once Post was pressed for you, the browser can't call the job over.
+                self.assertEqual(posting.allowed(old, end, "extension"), old != "posting", f"{old} -> {end}")
             self.assertTrue(posting.allowed(old, "cancelled", "person"))
         may_say = {"app": (*posting.LIVE, *posting.FREE), "extension": posting.EXTENSION_STATES,
                    "person": ("posted", "cancelled"), "reconcile": ("posted",)}
@@ -416,11 +494,25 @@ class Moving(LedgerTest):
         self.refused("bad_transition", posting.resolve, job["id"], True)
         self.assertEqual(self.job()["state"], "queued")
 
-    def test_only_queued_expires_and_only_ready_or_posting_goes_unknown(self):
+    def test_only_queued_expires_and_only_a_job_a_browser_has_goes_unknown(self):
+        held = ("claimed", "opening", "uploading", "filling", "ready", "posting", "unknown")
         for old in (*posting.LIVE, *posting.FREE):
             self.assertEqual(posting.allowed(old, "expired", "app"), old in ("queued", "expired"), old)
-            self.assertEqual(posting.allowed(old, "unknown", "app"), old in ("ready", "posting", "unknown"), old)
-            self.assertEqual(posting.allowed(old, "unknown", "extension"), old in ("ready", "posting", "unknown"), old)
+            self.assertEqual(posting.allowed(old, "unknown", "app"), old in held, old)
+            self.assertEqual(posting.allowed(old, "unknown", "extension"), old in held, old)
+
+    def test_your_own_press_before_the_post_was_ready_is_not_sure_too(self):
+        # YouTube takes a press of Publish while the video is still going up. The extension saw the press and then
+        # lost the page: it says "not sure", and the ledger has to take that, or the job would stay under way.
+        for at in ("opening", "uploading", "filling"):
+            self.video.write_bytes(f"a video lost at {at}".encode())
+            job = self.walk(self.job("youtube"), at)
+            said = posting.advance(job["id"], "unknown", install=CHROME, error_code="unknown_outcome",
+                                   error_message="Post was pressed on YouTube and no confirmation was seen.")
+            self.assertEqual((said["state"], said["error_code"]), ("unknown", "unknown_outcome"))
+            (block,) = self.batch("youtube")["blocked"]
+            self.assertEqual(block["reason"], "unknown")
+        self.refused("not_yours", posting.advance, self.job("tiktok")["id"], "unknown", install=CHROME)  # not claimed
 
     def test_the_extension_reports_states_but_never_grants_itself_one(self):
         for new in ("queued", "claimed", "posting", "expired"):
@@ -449,7 +541,9 @@ class Moving(LedgerTest):
     def test_its_posted_is_your_word_once_the_post_was_ready_to_go(self):
         for old in posting.IN_FLIGHT:
             self.assertEqual(posting.allowed(old, "posted", "person"), old in ("ready", "posting"), old)
-            self.assertEqual(posting.allowed(old, "posted", "reconcile"), old in ("ready", "posting"), old)
+            # A stats read that found the post is believed from the moment the video was on the page.
+            self.assertEqual(posting.allowed(old, "posted", "reconcile"),
+                             old in ("uploading", "filling", "ready", "posting"), old)
         job = self.walk(self.job(), "uploading")
         self.refused("bad_transition", posting.resolve, job["id"], True)
         self.assertEqual(posting.cancel(job["id"])["state"], "cancelled")
@@ -515,7 +609,19 @@ class Claiming(LedgerTest):
 
     def test_a_job_nobody_reported_on_cannot_be_moved_by_a_browser(self):
         job = self.job()
-        self.refused("not_yours", posting.advance, job["id"], "opening", install=CHROME)  # not claimed yet
+        for state in ("opening", "ready", "posted", "failed", "unknown"):
+            self.refused("not_yours", posting.advance, job["id"], state, install=CHROME)  # not claimed yet
+        self.assertEqual(self.state(job), "queued")
+
+    def test_any_connected_browser_can_call_off_a_job_that_is_still_waiting(self):
+        # The popup's Cancel on its question: the jobs were made, and nothing was opened.
+        job = self.job()
+        called_off = posting.advance(job["id"], "cancelled", install=EDGE, detail="cancelled before it started")
+        self.assertEqual((called_off["state"], called_off["claimed_by"]), ("cancelled", None))
+        self.assertEqual(db.uploads(), [])
+        taken = self.job()
+        posting.claim(taken["id"], CHROME)
+        self.refused("not_yours", posting.advance, taken["id"], "cancelled", install=EDGE)  # Chrome's by now
 
     def test_what_cannot_be_claimed(self):
         over = self.job()
@@ -548,6 +654,29 @@ class Pressing(LedgerTest):
         self.refused("already_pressed", posting.grant_press, job["id"], CHROME)
         posting.advance(job["id"], "posted", install=CHROME)
         self.refused("already_pressed", posting.grant_press, job["id"], CHROME)
+
+    def test_after_the_press_the_browser_can_only_say_posted_or_not_sure(self):
+        # The extension gives up when the page shows nothing within seconds of its click. The click may have been
+        # taken all the same, so that is never a job to try again: a second try would press Post a second time.
+        self.earlier_post()
+        for end in ("failed", "cancelled"):
+            job = self.walk(self.job(press=True), *STEPS)
+            posting.grant_press(job["id"], CHROME)
+            said = posting.advance(job["id"], end, install=CHROME, step="press", error_code="press_rejected",
+                                   error_message="TikTok did not react to the press.")
+            self.assertEqual((said["state"], said["step"], said["error_code"], said["error_message"]),
+                             ("unknown", "press", "press_rejected", "TikTok did not react to the press."))
+            self.refused("bad_transition", posting.retry, job["id"], self.cfg)
+            (block,) = self.batch(press=True)["blocked"]
+            self.assertEqual((block["reason"], block["job"]), ("unknown", job["id"]))
+            self.refused("bad_transition", posting.advance, job["id"], "failed", install=CHROME)  # nor afterwards
+            # Yours to say: "It didn't post" frees the video, and only then.
+            self.assertEqual(posting.resolve(job["id"], False)["state"], "cancelled")
+            self.video.write_bytes(self.video.read_bytes() + b"+")
+        # ReelForge itself still can (an upload through a platform's own API hears the platform's word).
+        job = self.walk(self.job(press=True), *STEPS)
+        posting.grant_press(job["id"], CHROME)
+        self.assertEqual(posting.advance(job["id"], "failed", by="app", error_code="timeout")["state"], "failed")
 
     def test_two_asks_at_once_get_one_grant(self):
         self.earlier_post()
@@ -638,10 +767,48 @@ class Clock(LedgerTest):
         unknown = posting.get(job["id"])
         self.assertEqual((unknown["state"], unknown["detail"]), ("unknown", "no confirmation after Post was pressed"))
 
-    def test_the_clock_leaves_every_other_state_alone(self):
-        job = self.walk(self.job(), "uploading")
+    def test_a_browser_that_went_silent_before_the_video_was_on_a_page_has_failed(self):
+        # The browser crashed, was closed for good, or the extension was removed: no report ever comes again.
+        taken, opening = self.job("tiktok"), self.walk(self.job("youtube"), "opening")
+        posting.claim(taken["id"], CHROME)
+        for job in (taken, opening):
+            self.age(job, 19)
+        self.assertEqual(posting.expire_stale(), 0)
+        for job in (taken, opening):
+            self.age(job, 20)
+        self.assertEqual(posting.expire_stale(), 2)
+        for job in (taken, opening):
+            failed = posting.get(job["id"])
+            self.assertEqual((failed["state"], failed["error_code"]), ("failed", "timeout"))
+            self.assertIn("Nothing was posted", failed["error_message"])
+        self.assertEqual(posting.active_batches(), [])
+        # The one whose tab was never opened started nothing: its line in the upload log is gone.
+        self.assertEqual([(u["platform"], u["ts"]) for u in db.uploads()], [("youtube", opening["created_at"])])
+        self.assertEqual([j["state"] for j in self.batch("tiktok", "youtube")["jobs"]], ["queued", "queued"])  # free
+
+    def test_a_browser_that_went_silent_with_the_video_on_the_page_is_unknown(self):
+        # The platform's own Post button was there to press, so nobody can say nothing was posted.
+        uploading, filling = self.walk(self.job("tiktok"), "uploading"), self.walk(self.job("youtube"), "filling")
+        alive = self.walk(self.job("instagram"), "uploading")
+        for job in (uploading, filling, alive):
+            self.age(job, 44)
+        self.assertEqual(posting.expire_stale(), 0)
+        for job in (uploading, filling, alive):
+            self.age(job, 45)
+        posting.advance(alive["id"], "uploading", install=CHROME, step="upload", progress=0.4)  # still at work
+        self.assertEqual(posting.expire_stale(), 2)
+        self.assertEqual([self.state(j) for j in (uploading, filling, alive)], ["unknown", "unknown", "uploading"])
+        self.assertEqual(posting.get(filling["id"])["detail"],
+                         "no word from the browser since the video was on the page")
+        (block,) = self.batch("tiktok")["blocked"]
+        self.assertEqual(block["reason"], "unknown")  # asked about, never tried again by itself
+        self.assertEqual(posting.resolve(uploading["id"], False)["state"], "cancelled")
+        self.assertEqual(self.job("tiktok")["state"], "queued")
+
+    def test_the_clock_leaves_an_upload_through_an_api_to_the_reelforge_that_runs_it(self):
+        job = self.job("youtube", via={"youtube": "api"})
+        posting.advance(job["id"], "uploading", by="app")
         self.age(job, 600)
-        self.age(job, 600, "created_at")
         self.assertEqual(posting.expire_stale(), 0)
         self.assertEqual(self.state(job), "uploading")
         self.assertEqual(posting.expire_stale(datetime.now(timezone.utc) + timedelta(days=1)), 0)
@@ -700,10 +867,26 @@ class Reconciling(LedgerTest):
         db.add_post("tiktok", f"manual-{job['episode_id']}", job["episode_id"], CAPTION, None)  # typed-in numbers
         self.assertEqual(posting.reconcile(), 0)
         self.assertEqual(self.state(job), "ready")
-        early = self.walk(self.job("instagram"), "uploading")            # not waiting on a post yet
+        early = self.walk(self.job("instagram"), "opening")              # no video on any page yet
         self.spot(early, "3500000000000000001")
+        api = self.job("x", via={"x": "api"})                            # ReelForge's own upload, still going
+        posting.advance(api["id"], "uploading", by="app")
+        self.spot(api, "1900000000000000001")
         self.assertEqual(posting.reconcile(), 0)
-        self.assertEqual(self.state(early), "uploading")
+        self.assertEqual((self.state(early), self.state(api)), ("opening", "uploading"))
+
+    def test_a_job_whose_video_was_on_the_page_is_settled_too(self):
+        # You pressed the platform's button before the extension called the post ready, and then the browser was
+        # gone: the job never heard. The read that finds the post ends it, so the video isn't blocked for good.
+        for i, at in enumerate(("uploading", "filling")):
+            video = self.root / "videos" / f"video{i}.mp4"
+            video.write_bytes(f"video {i}".encode())
+            job = self.walk(posting.create_batch(video, ["youtube"], f"Video number {i}", TAGS, self.cfg)["jobs"][0],
+                            at)
+            self.spot(job, f"abcdefghij{i}")
+            self.assertEqual(posting.reconcile(), 1)
+            self.assertEqual((self.state(job), posting.get(job["id"])["post_id"]), ("posted", f"abcdefghij{i}"))
+            self.refused("bad_transition", posting.advance, job["id"], "ready", install=CHROME)  # the late report
 
     def test_a_post_with_another_caption_is_still_this_videos_by_when_it_went_up(self):
         # You changed the caption on the platform's page before pressing Post: the caption matcher has nothing to go
@@ -747,6 +930,24 @@ class Posted(LedgerTest):
         posting.advance(job["id"], "posted", install=CHROME, post_id="dQw4w9WgXcQ")  # said twice
         self.assertEqual(len(db.posts_latest()), 1)
 
+    def test_an_id_the_page_showed_before_the_post_went_up_is_filed_when_it_does(self):
+        # YouTube shows a video's link in its upload dialog, so the extension reports the id with "ready".
+        job = self.walk(self.job("youtube"), "opening", "uploading", "filling")
+        ready = posting.advance(job["id"], "ready", install=CHROME, post_id="dQw4w9WgXcQ",
+                                url="https://youtu.be/dQw4w9WgXcQ")
+        self.assertEqual((ready["post_id"], db.posts_latest()), ("dQw4w9WgXcQ", []))  # a draft is not a post
+        posting.advance(job["id"], "posted", install=CHROME)
+        (post,) = db.posts_latest()
+        self.assertEqual((post["post_id"], post["episode_id"], post["link"], post["url"]),
+                         ("dQw4w9WgXcQ", job["episode_id"], "publish", "https://youtu.be/dQw4w9WgXcQ"))
+        # Your own "It's posted" on a job that has its id files it too.
+        video = self.root / "videos" / "ep02.mp4"
+        video.write_bytes(b"another one")
+        other = self.walk(posting.create_batch(video, ["youtube"], "Another one", TAGS, self.cfg)["jobs"][0], *STEPS)
+        posting.advance(other["id"], "ready", install=CHROME, post_id="abcdefghijk")
+        posting.resolve(other["id"], True)
+        self.assertEqual({p["post_id"] for p in db.posts_latest()}, {"dQw4w9WgXcQ", "abcdefghijk"})
+
     def test_an_id_the_stats_reader_would_not_use_is_left_out(self):
         job = self.walk(self.job("instagram"), *STEPS)
         done = posting.advance(job["id"], "posted", install=CHROME, post_id="DBx3kQwPabc",  # a shortcode, not the pk
@@ -754,6 +955,37 @@ class Posted(LedgerTest):
         self.assertEqual((done["state"], done["post_id"], done["url"]),
                          ("posted", None, "https://www.instagram.com/reel/DBx3kQwPabc/"))
         self.assertEqual(db.posts_latest(), [])  # the reader files it, under its own id
+
+    def test_an_id_reelforge_has_as_another_videos_post_is_not_taken(self):
+        # The page showed last week's video (the newest on the profile), and the extension read its id.
+        old = db.create_episode("What if rain doubled every 2 seconds?", "ep00.mp4")
+        week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat(timespec="seconds")
+        db.record_snapshot("tiktok", Account("@me", 100), [Post(
+            "7300000000000000001", "What if rain doubled every 2 seconds?",
+            "https://www.tiktok.com/@me/video/7300000000000000001", week_ago, views=46000)])
+        db.link_post("tiktok", "7300000000000000001", old, "caption")
+        # ... and a newer post you filed under another video yourself.
+        db.record_snapshot("tiktok", Account("@me", 100), [Post("7300000000000000002", "Something of mine", None,
+                                                                 db.now_iso())])
+        db.set_post_episode("tiktok", "7300000000000000002", old)
+        for taken in ("7300000000000000001", "7300000000000000002"):
+            self.video.write_bytes(f"the video said to be {taken}".encode())
+            job = self.walk(self.job(), *STEPS)
+            done = posting.advance(job["id"], "posted", install=CHROME, post_id=taken,
+                                   url=f"https://www.tiktok.com/@me/video/{taken}")
+            self.assertEqual((done["state"], done["post_id"], done["url"]), ("posted", None, None))
+        with db.connect() as c:
+            self.assertEqual({tuple(r) for r in c.execute("SELECT post_id, episode_id, link FROM posts")},
+                             {("7300000000000000001", old, "caption"), ("7300000000000000002", old, "hand")})
+        self.assertEqual(posting.spotted("ep00.mp4")["tiktok"]["post_id"], "7300000000000000001")
+        self.assertEqual(posting.spotted("ep01.mp4"), {})
+        # A post the read has seen but nobody has filed, that went up after the job was made, is this job's.
+        self.video.write_bytes(b"one more")
+        job = self.walk(self.job(), *STEPS)
+        db.record_snapshot("tiktok", Account("@me", 100), [Post("7300000000000000003", "New", None, db.now_iso())])
+        done = posting.advance(job["id"], "posted", install=CHROME, post_id="7300000000000000003")
+        self.assertEqual(done["post_id"], "7300000000000000003")
+        self.assertEqual(posting.spotted("ep01.mp4")["tiktok"]["post_id"], "7300000000000000003")
 
     def test_the_id_can_follow_the_news_that_it_posted(self):
         job = self.walk(self.job(), *STEPS, "posted")
@@ -802,7 +1034,10 @@ class Standing(LedgerTest):
                                    ({**before, "state": "uploading"}, post, "uploading"),  # a live job has the say
                                    ({**before, "state": "posted"}, post, "posted"),
                                    ({**before, "state": "failed"}, post, "spotted"),  # it failed, then went up by hand
-                                   ({**after, "state": "failed"}, post, "failed"),    # a new try since, which failed
+                                   # A post again since, which failed or was called off: the video is still up.
+                                   ({**after, "state": "failed"}, post, "spotted"),
+                                   ({**after, "state": "cancelled"}, post, "spotted"),
+                                   ({**after, "state": "unknown"}, post, "unknown"),
                                    ({**after, "state": "cancelled"}, None, "cancelled")):
             self.assertEqual(posting.standing(job, found), stands, (job, found))
 
@@ -982,6 +1217,54 @@ class Approval(unittest.TestCase):
             self.assertIn("can't be read", self.line)
         report.write_bytes(b"\xff\xfe\x00broken")
         self.assertEqual(self.state(), "qa_failed")
+
+    def test_the_approval_shown_is_worked_out_again_only_when_a_file_changed(self):
+        approve(self.ep, self.video)
+        self.assertEqual(self.state(), "approved")
+        with mock.patch.object(videos, "approval", wraps=videos.approval) as worked_out:
+            for _ in range(5):  # a list that redraws every few seconds
+                self.assertEqual(videos.approval_shown(self.video, self.cfg)["state"], "approved")
+            self.assertEqual(worked_out.call_count, 1)
+            outside = self.root / "videos" / "clip.mp4"  # no episode: nothing but the file itself to watch
+            outside.parent.mkdir()
+            outside.write_bytes(b"a clip")
+            for _ in range(3):
+                self.assertEqual(videos.approval_shown(outside, self.cfg)["state"], "none")
+            self.assertEqual(worked_out.call_count, 2)
+            # Each of these changes what it is read from, and shows at the next look.
+            (self.ep / "build" / "qa" / "review.md").write_text("Too dark.\nREJECTED: too dark", "utf-8")
+            self.assertEqual(videos.approval_shown(self.video, self.cfg)["state"], "rejected")
+            approve(self.ep, self.video)
+            self.assertEqual(videos.approval_shown(self.video, self.cfg)["state"], "approved")
+            self.video.write_bytes(b"a second cut, longer")
+            self.assertEqual(videos.approval_shown(self.video, self.cfg)["state"], "stale")
+            (self.ep / "final" / "cover.jpg").write_bytes(b"a new cover")  # what a receipt would be about
+            calls = worked_out.call_count
+            videos.approval_shown(self.video, self.cfg)
+            (self.ep / "facts.md").write_text("Every claim, with its source.", "utf-8")
+            videos.approval_shown(self.video, self.cfg)
+            self.assertEqual(worked_out.call_count, calls + 2)
+            # And after five minutes whatever happened (the channel's settings are part of a receipt too).
+            videos.approval_shown(self.video, self.cfg)
+            self.assertEqual(worked_out.call_count, calls + 2)
+            later = time.monotonic() + videos.SHOWN_FOR + 1
+            with mock.patch.object(videos.time, "monotonic", lambda: later):
+                videos.approval_shown(self.video, self.cfg)
+            self.assertEqual(worked_out.call_count, calls + 3)
+
+    def test_a_post_never_goes_by_a_remembered_approval(self):
+        self.addCleanup(setattr, db, "_path", db._path)
+        db.init(self.root / "stats.db")
+        approve(self.ep, self.video)
+        self.assertEqual(videos.approval_shown(self.video, self.cfg)["state"], "approved")
+        review = self.ep / "build" / "qa" / "review.md"
+        with mock.patch.object(videos, "SHOWN_FOR", 10 ** 9), \
+                mock.patch.object(videos, "_shown", {str(self.video): ((), time.monotonic(), {
+                    "state": "approved", "line": "QA passed and the review says APPROVED."})}):
+            review.write_text("REJECTED: wrong video", "utf-8")
+            made = posting.create_batch(self.video, ["tiktok"], CAPTION, TAGS, self.cfg)
+        self.assertEqual((made["jobs"], made["blocked"][0]["reason"]), ([], "review"))
+        self.assertIn("REJECTED", made["blocked"][0]["message"])
 
     def test_a_demo_is_never_postable(self):
         (self.ep / "episode.json").write_text(json.dumps({**self.spec, "demo": True}), encoding="utf-8")

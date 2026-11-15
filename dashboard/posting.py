@@ -9,15 +9,15 @@ A job moves along ORDER and never backwards:
 
 Steps may be skipped (the extension goes from claimed straight to uploading). ready means everything is filled in and
 the platform's own Post button is waiting for you; posting means the extension was allowed to press it. From
-anywhere before posted a job can end as failed or cancelled; a queued one nobody picked up in 10 minutes expires
-(nothing happened). The state that matters most is unknown: Post was pressed, or was about to be, and no confirmation
+anywhere before posting a job can end as failed or cancelled; a queued one nobody picked up in 10 minutes expires
+(nothing happened). The state that matters most is unknown: Post was pressed, or may have been, and no confirmation
 came. Nothing ever retries such a job. Only you ("It's posted" / "It didn't post") or a stats read that finds the
-post settle it.
+post settle it. Once the extension was allowed to press, it can only end the job as posted or unknown.
 
 A video is the SHA-256 of its bytes, never its file name, and it can have one live job per platform: while a job is
 queued, under way, posted or unknown, a second one for the same video and platform is refused (the unique index
 post_jobs_one_live holds that even between two windows). Posting again takes saying so (force), which sets the old
-row aside as superseded.
+row aside as superseded. It stands again if the new try ends without a post.
 
 Everything here is a plain function on the database dashboard.db has open, so the window, the local server for the
 extension and the tests all drive the same code. Each change of state is one transaction, leaves a row in post_events
@@ -46,10 +46,16 @@ FREE = ("failed", "cancelled", "expired")    # over without a post: a new job ma
 LIVE = (*ORDER, "unknown")                   # every state that stands in the way of a new job
 EXTENSION_STATES = ("opening", "uploading", "filling", "ready", "posted", "failed", "cancelled", "unknown")
 WAITING = ("ready", "posting", "unknown")    # a post may be up without ReelForge having heard: a stats read can tell
+ON_THE_PAGE = ("uploading", "filling")       # the video is on the platform's page, whose own Post button you can press
 
 QUEUED_FOR = timedelta(minutes=10)   # a job nobody picked up in this long expires
 READY_FOR = timedelta(minutes=45)    # filled in and then silent this long: you may have pressed Post yourself
 POSTING_FOR = timedelta(minutes=15)  # Post pressed for you and then silent this long
+# A browser that took a job and then says nothing more (it crashed, was closed for good, the extension was removed).
+# Both are longer than the extension itself ever stays silent while it works: it waits 15 minutes for your answer
+# about another account, and 30 for a platform to take a video in.
+OPENING_FOR = timedelta(minutes=20)  # ... before the video was on any page: nothing was posted
+FILLING_FOR = timedelta(minutes=45)  # ... with the video on the page: you may have pressed Post yourself
 CLOCK_SLACK = timedelta(minutes=2)   # a platform's clock and this computer's needn't agree to the second
 
 X_LIMIT = videos.X_LIMIT
@@ -80,7 +86,7 @@ FAILURES = {
     "platform_error": "{name} showed an error",
     "timeout": "nothing happened in time",
     "tab_closed": "the tab was closed before it posted",
-    "press_rejected": "{name} didn't take the press: press Post yourself in the tab",
+    "press_rejected": "{name} showed no reaction to the press: check your profile there before you post again",
     "changed": "the video file changed after you pressed Post here",
     "unknown_outcome": "ReelForge can't tell whether it posted: check your profile there",
 }
@@ -133,6 +139,22 @@ def unchanged(job: dict) -> bool:
         return path.stat().st_size == job["video_size"] and digest(path) == job["video_sha256"]
     except OSError:
         return False
+
+
+def whereabouts(job: dict, cfg: dict) -> Path:
+    """The file a job's video is in now: where it was when the job was made, else a video on the Publish list with
+    the same bytes (the pipeline moves a delivered video to completed videos/, and a ReelForge folder can be moved
+    whole). When neither is there, the path it had."""
+    path = Path(job["video_path"])
+    if path.is_file():
+        return path
+    for f in videos.find(cfg):
+        try:
+            if f.stat().st_size == job["video_size"] and digest(f) == job["video_sha256"]:
+                return f
+        except OSError:
+            continue
+    return path
 
 
 # ---- the text
@@ -226,11 +248,12 @@ def for_files(paths: list[Path]) -> dict[Path, dict[str, dict]]:
 
 def standing(job: dict | None, post: dict | None) -> str:
     """Where a video stands on a platform, from its job (current) and the post a stats read has filed under its
-    episode: "none", "spotted" (the read found it and no job says more), or the job's state. A live job has the say;
-    one that ended without a post only counts when it's newer than the post."""
+    episode: "none", "spotted" (the read found it and no job says more), or the job's state. A live job has the say.
+    One that ended without a post never hides a post the read found, whichever came first: the video is up there,
+    and a try at posting it again that failed or was called off doesn't change that."""
     if job and job["state"] in LIVE:
         return job["state"]
-    if post and not (job and job["created_at"] > (post["published_at"] or "")):
+    if post:
         return "spotted"
     return job["state"] if job else "none"
 
@@ -321,7 +344,7 @@ def retry(job_id: str, cfg: dict, demo: bool = False) -> dict:
     if job is None or job["state"] not in FREE:
         raise Refused("bad_transition", "Only a post that failed, expired or was cancelled can be tried again.", job)
     text, platform = json.loads(job["text"]), job["platform"]
-    return _create(Path(job["video_path"]), {platform: text}, headline(text), cfg, bool(job["press"]), (),
+    return _create(whereabouts(job, cfg), {platform: text}, headline(text), cfg, bool(job["press"]), (),
                    {platform: job["via"]}, {platform: json.loads(job["options"])}, demo)
 
 
@@ -448,13 +471,19 @@ def allowed(old: str, new: str, by: str) -> bool:
     if old == "unknown":  # only you, or a stats read, can say what happened
         return by in ("person", "reconcile") and new in ("posted", "cancelled")
     if by in ("person", "reconcile") and new == "posted":
-        return old in WAITING  # "It's posted" makes sense once the post was ready to go
+        # "It's posted" makes sense once the post was ready to go. A stats read that found the post is believed
+        # from the moment the video was on the page: some platforms take a press of Post while it is going up.
+        return old in WAITING or (by == "reconcile" and old in ON_THE_PAGE)
+    if old == "posting" and by == "extension" and new in ("failed", "cancelled"):
+        return False  # Post was pressed for you: what the browser calls over is "not sure" (see advance)
     if new in ("failed", "cancelled"):
         return True
     if new == "expired":
         return old == "queued"
     if new == "unknown":
-        return old in ("ready", "posting")
+        # From any state a browser has the job in: your own press of Post can come before the extension calls
+        # the post ready (the video only has to be on the page), and the clock gives up on a silent browser.
+        return old in IN_FLIGHT and old != "queued"
     return new in ORDER and ORDER.index(new) > ORDER.index(old)
 
 
@@ -464,20 +493,42 @@ def advance(job_id: str, state: str, *, by: str = "extension", install: str | No
             strategy: str | None = None) -> dict:
     """Move a job to a state (or say again where it is, with its step and progress). Returns the job as it is now.
     strategy: how the extension found what it was looking for on the page ("caption=role"), kept in the job's log
-    only. Refused: no such job ("not_found"), another browser has it ("not_yours", with install), or not a move a
-    job can make ("bad_transition")."""
+    only. Refused: no such job ("not_found"), not this browser's ("not_yours", with install: only the browser that
+    claimed a job reports on it), or not a move a job can make ("bad_transition")."""
     with db.connect() as c:
         c.execute("BEGIN IMMEDIATE")
         old = _locked(c, job_id)
-        if install is not None and old["claimed_by"] != install:
+        # (A job still waiting is nobody's yet: any connected browser may call it off, as the popup's Cancel does
+        # for the posts it asked about.)
+        if install is not None and old["claimed_by"] != install and (old["state"], state) != ("queued", "cancelled"):
             raise Refused("not_yours", "Another browser took this post.", old)
+        if by == "extension" and old["state"] == "posting" and state in ("failed", "cancelled"):
+            # The press was granted, so the click may have landed whatever the page showed afterwards. A browser
+            # that gives up from here leaves a job nobody is sure of, with its own word on why: free again only
+            # on your "It didn't post", or settled by a stats read. Never free for a retry that would press twice.
+            state = "unknown"
         if not allowed(old["state"], state, by):
             raise Refused("bad_transition", f"A post that is {old['state']} can't become {state}.", old)
+        if post_id and by != "reconcile" and _anothers(c, old, str(post_id)):
+            post_id = url = None  # the page showed some other post: a stats read finds this job's own (reconcile)
         new = _write(c, old, state, by, step=step, progress=progress, detail=detail, error_code=error_code,
                      error_message=error_message, post_id=post_id, url=url)
         if strategy:  # when a platform changes its page, this is where it shows first
             _event(c, old["id"], new["updated_at"], new["state"], new["step"], f"found by {strategy}")
     return _settled(old, new, by)
+
+
+def _anothers(c: sqlite3.Connection, job: dict, post_id: str) -> bool:
+    """Whether a post id the extension read off the page is a post ReelForge already has as another's: one that
+    went up before this job was made (the page showed an older video), or one that you, or ReelForge, filed under
+    another video. Such a post stays where it is."""
+    known = c.execute("SELECT episode_id, link, published_at FROM posts WHERE platform = ? AND post_id = ?",
+                      (job["platform"], post_id)).fetchone()
+    if known is None:
+        return False
+    since = (db.parse(job["created_at"]) - CLOCK_SLACK).isoformat(timespec="seconds")
+    return (known["published_at"] or "") < since or \
+        (known["link"] in ("hand", "publish") and known["episode_id"] != job["episode_id"])
 
 
 def claim(job_id: str, install: str) -> dict:
@@ -537,19 +588,35 @@ def resolve(job_id: str, posted: bool) -> dict:
 
 
 def expire_stale(now: datetime | None = None) -> int:
-    """What the clock decides, to be run every so often: a job nobody picked up in 10 minutes expires, and one that
-    was ready (for 45 minutes) or being posted (for 15) without a word since becomes unknown. Returns how many."""
-    now = (now or _now()).astimezone(timezone.utc)  # as the rows' times are written
-    rules = (("queued", "created_at", QUEUED_FOR, "expired", "not picked up in time"),
-             ("ready", "updated_at", READY_FOR, "unknown", "no word since it was ready to post"),
-             ("posting", "updated_at", POSTING_FOR, "unknown", "no confirmation after Post was pressed"))
+    """What the clock decides, to be run every so often. Returns how many jobs it moved.
 
-    def stale(c: sqlite3.Connection) -> list[tuple[dict, str, str]]:
+    A job nobody picked up in 10 minutes expires. One that was ready (for 45 minutes) or being posted (for 15)
+    without a word since becomes unknown. And a job a browser took and then went silent on doesn't stay under way
+    for ever, blocking its video: before the video was on a page (20 minutes) it has failed, and nothing was
+    posted; with the video on the page (45 minutes) it is unknown, because the platform's own Post button was
+    there to press. Those two are for the extension's jobs: an upload through a platform's API is ended by the
+    ReelForge that runs it."""
+    now = (now or _now()).astimezone(timezone.utc)  # as the rows' times are written
+    gone = {"error_code": "timeout",
+            "error_message": "The browser stopped reporting before the video was on the page. Nothing was posted."}
+    quiet = {"detail": "no word from the browser since the video was on the page"}
+    # (state, the time that counts, how long, what it becomes, with what, the extension's jobs only)
+    rules = (("queued", "created_at", QUEUED_FOR, "expired", {"detail": "not picked up in time"}, False),
+             ("ready", "updated_at", READY_FOR, "unknown", {"detail": "no word since it was ready to post"}, False),
+             ("posting", "updated_at", POSTING_FOR, "unknown", {"detail": "no confirmation after Post was pressed"},
+              False),
+             ("claimed", "updated_at", OPENING_FOR, "failed", gone, True),
+             ("opening", "updated_at", OPENING_FOR, "failed", gone, True),
+             ("uploading", "updated_at", FILLING_FOR, "unknown", quiet, True),
+             ("filling", "updated_at", FILLING_FOR, "unknown", quiet, True))
+
+    def stale(c: sqlite3.Connection) -> list[tuple[dict, str, dict]]:
         found = []
-        for state, column, limit, to, detail in rules:
+        for state, column, limit, to, fields, extension in rules:
             cut = (now - limit).isoformat(timespec="seconds")
-            found += [(dict(row), to, detail) for row in c.execute(
-                f"SELECT * FROM post_jobs WHERE state = ? AND {column} <= ?", (state, cut)).fetchall()]
+            found += [(dict(row), to, fields) for row in c.execute(
+                f"SELECT * FROM post_jobs WHERE state = ? AND {column} <= ?"
+                + (" AND via = 'extension'" if extension else ""), (state, cut)).fetchall()]
         return found
 
     moved = 0
@@ -559,8 +626,8 @@ def expire_stale(now: datetime | None = None) -> int:
         if not stale(c):
             return 0
         c.execute("BEGIN IMMEDIATE")
-        for old, to, detail in stale(c):
-            _write(c, old, to, "app", detail=detail)
+        for old, to, fields in stale(c):
+            _write(c, old, to, "app", **fields)
             moved += 1
     if moved:
         db.bump()
@@ -568,14 +635,15 @@ def expire_stale(now: datetime | None = None) -> int:
 
 
 def reconcile() -> int:
-    """After a stats read: a job that may have posted without ReelForge hearing of it (ready, posting or unknown) is
-    posted once the read has filed a post under its episode, on its platform, that went up after the job was made.
-    Returns how many it settled."""
+    """After a stats read: a job that may have posted without ReelForge hearing of it (ready, posting or unknown, or
+    one of the extension's whose video was on the page) is posted once the read has filed a post under its episode,
+    on its platform, that went up after the job was made. Returns how many it settled."""
     found = []
     with db.connect() as c:
-        marks = ",".join("?" * len(WAITING))
-        for j in c.execute(f"SELECT * FROM post_jobs WHERE superseded = 0 AND episode_id IS NOT NULL "
-                           f"AND state IN ({marks})", WAITING).fetchall():
+        marks, early = ",".join("?" * len(WAITING)), ",".join("?" * len(ON_THE_PAGE))
+        for j in c.execute(f"SELECT * FROM post_jobs WHERE superseded = 0 AND episode_id IS NOT NULL AND (state IN "
+                           f"({marks}) OR (via = 'extension' AND state IN ({early})))",
+                           (*WAITING, *ON_THE_PAGE)).fetchall():
             since = (db.parse(j["created_at"]) - CLOCK_SLACK).isoformat(timespec="seconds")
             # Not a post another job already stands for (the one you posted again over), nor typed-in numbers.
             post = c.execute(
@@ -629,9 +697,10 @@ def _write(c: sqlite3.Connection, old: dict, state: str, by: str, **fields) -> d
         given = {k: v for k, v in given.items() if k in ("step", "progress", "detail") or not old[k]}
     else:
         new.update(state=state, step=None, progress=None, detail=None)
-        if old["state"] == "queued" and state in FREE:
-            # Nobody picked it up, so nothing was opened anywhere: its line in the upload log goes, or a post that
-            # happens to go up in the next hours would be filed under this video (analytics.auto_link).
+        if old["state"] in ("queued", "claimed") and state in FREE:
+            # Nobody picked it up, or the browser that did hadn't opened its tab yet (it says "opening" when it
+            # has). So nothing was opened anywhere: its line in the upload log goes, or a post that happens to go
+            # up in the next hours would be filed under this video (analytics.auto_link).
             c.execute("DELETE FROM uploads WHERE ts = ? AND platform = ? AND video = ? AND status = ?",
                       (old["created_at"], old["platform"], old["video"], old["via"]))
     if "post_id" in given and by != "reconcile" and not re.fullmatch(POST_ID.get(old["platform"], ".+"),
@@ -647,14 +716,35 @@ def _write(c: sqlite3.Connection, old: dict, state: str, by: str, **fields) -> d
         _event(c, old["id"], new["updated_at"], new["state"], new["step"], new["detail"])
     else:
         c.execute(f"UPDATE meta SET value = CAST(value AS INTEGER) + 1 WHERE key = '{CHANGES}'")
+    if state in FREE and old["state"] not in FREE:
+        _stands_again(c, new)
     return new
+
+
+def _stands_again(c: sqlite3.Connection, job: dict) -> None:
+    """A job just ended without a post. If it was a post again, the posted or unknown job it set aside stands
+    again: as far as ReelForge knows the video is still up there (or still to be asked about), and a plain Post
+    must go on being refused. Without this, a Post again that never got anywhere would quietly forget the post
+    before it."""
+    aside = c.execute(
+        """SELECT id, state FROM post_jobs WHERE video_sha256 = ? AND platform = ? AND superseded = 1
+           AND state IN ('posted', 'unknown') AND rowid < (SELECT rowid FROM post_jobs WHERE id = ?)
+           ORDER BY rowid DESC LIMIT 1""", (job["video_sha256"], job["platform"], job["id"])).fetchone()
+    live = c.execute(f"SELECT 1 FROM post_jobs WHERE video_sha256 = ? AND platform = ? AND superseded = 0 "
+                     f"AND state IN ({','.join('?' * len(LIVE))})", (job["video_sha256"], job["platform"], *LIVE))
+    if aside and not live.fetchone():  # (a newer try that is under way has the say until it ends)
+        c.execute("UPDATE post_jobs SET superseded = 0 WHERE id = ?", (aside["id"],))
+        _event(c, aside["id"], job["updated_at"], aside["state"], None,
+               "stands again: the new try ended without a post")
 
 
 def _settled(old: dict, new: dict, by: str) -> dict:
     """After the transaction: every window redraws for a change of state, and a post whose id the extension read
     off the page goes into the stats as this episode's, so it shows before the next read (which fills in its
     numbers and never files it anywhere else)."""
-    if new["state"] == "posted" and new["post_id"] and not old["post_id"] and by != "reconcile":
+    # (Its id may have come before the post did: YouTube shows a video's link while it is still a draft.)
+    if new["state"] == "posted" and new["post_id"] and by != "reconcile" and \
+            (old["state"] != "posted" or not old["post_id"]):
         db.add_post(new["platform"], new["post_id"], new["episode_id"], headline(json.loads(new["text"])),
                     new["url"])
     if (new["state"], new["post_id"], new["url"]) != (old["state"], old["post_id"], old["url"]):

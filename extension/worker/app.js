@@ -60,17 +60,45 @@ async function json(response) {
   }
 }
 
-// What answers on one port, or null when it is not ReelForge. `paired` is the app's own word that our token
-// is good, so a token it has forgotten shows as "not connected" and not as a list of failing buttons.
-async function hello(port, token) {
+const hex = bytes => [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, "0")).join("")
+
+// What ReelForge answers to a nonce when it is the ReelForge a token came from: an HMAC over the nonce, the port
+// it listens on and its id, keyed with the token's SHA-256 (which is all ReelForge keeps of the token).
+async function proofFor(token, nonce, port, appId) {
+  const text = new TextEncoder()
+  const digest = await crypto.subtle.digest("SHA-256", text.encode(token))
+  const key = await crypto.subtle.importKey("raw", digest, { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
+  return hex(await crypto.subtle.sign("HMAC", key, text.encode(`reelforge hello\n${nonce}\n${port}\n${appId}`)))
+}
+
+// The ports that have just proven to be the ReelForge a token came from, and when. Ten ports on this computer
+// are easy for another program to listen on, and anyone can learn a ReelForge's id by asking it. So nothing is
+// believed, and the token is sent nowhere, until the port has answered a fresh nonce the way only that
+// ReelForge can. The port is part of the answer: the real ReelForge's answer, passed on by a program on
+// another port, does not fit there.
+const PROOF_FOR = 2000
+const proven = new Map()
+
+// What answers on one port, or null when it is not ReelForge. `paired` is true only with the proof, so a
+// ReelForge that has forgotten this browser, and a program that only says it is ReelForge, both show as "not
+// connected". No token is sent here.
+export async function at(port) {
+  if (!PORTS.includes(port)) return null
+  proven.delete(port)
+  const nonce = hex(crypto.getRandomValues(new Uint8Array(16)))
   let response
   try {
-    response = await request(port, "/v1/hello", { token, timeout: 1500 })
+    response = await request(port, `/v1/hello?install=${encodeURIComponent(await install())}&nonce=${nonce}`, { timeout: 1500 })
   } catch {
     return null
   }
   const data = response.ok ? await json(response) : null
   if (!data || data.app !== "reelforge" || typeof data.app_id !== "string") return null
+  // Which side is behind, so the message can say what to update.
+  const mismatch = data.protocol === PROTOCOL ? null : data.protocol > PROTOCOL ? "extension" : "app"
+  const token = await tokenFor(data.app_id)
+  const itIs = Boolean(token) && typeof data.proof === "string" && data.proof === await proofFor(token, nonce, port, data.app_id)
+  if (itIs) proven.set(port, { app_id: data.app_id, at: Date.now() })
   return {
     port,
     app_id: data.app_id,
@@ -78,22 +106,17 @@ async function hello(port, token) {
     protocol: data.protocol,
     profile: { key: String(data.profile?.key || ""), name: String(data.profile?.name || "") },
     demo: data.demo === true,
-    paired: data.paired === true,
-    // Which side is behind, so the message can say what to update.
-    mismatch: data.protocol === PROTOCOL ? null : data.protocol > PROTOCOL ? "extension" : "app",
+    paired: itIs && !mismatch && data.demo !== true,
+    mismatch,
   }
 }
 
-// The app on one port, with `paired` checked against the token we hold for it.
-export async function at(port) {
-  if (!PORTS.includes(port)) return null
-  const first = await hello(port)
-  if (!first) return null
-  const token = await tokenFor(first.app_id)
-  // The token goes only to an app that has just named itself as the one it belongs to.
-  if (!token || first.mismatch || first.demo) return first
-  const second = await hello(port, token)
-  return second && second.app_id === first.app_id ? second : first
+// True when this port has proven, just now, to be the ReelForge the token for `appId` came from.
+async function trusted(port, appId) {
+  const have = proven.get(port)
+  if (have && have.app_id === appId && Date.now() - have.at < PROOF_FOR) return true
+  await at(port)
+  return proven.get(port)?.app_id === appId
 }
 
 let found = null
@@ -112,18 +135,19 @@ export function forget() {
   found = null
 }
 
-// The window a job belongs to. Its port can change when ReelForge is closed and opened again mid-job.
+// The window a job belongs to. Its port can change when ReelForge is closed and opened again mid-job. The one
+// that proved itself comes first: another program can give the same id and name on a lower port.
 export async function find(appId, profileKey, fresh = false) {
-  const apps = await discover(fresh)
-  return apps.find(a => a.app_id === appId && a.profile.key === profileKey) || null
+  const apps = (await discover(fresh)).filter(a => a.app_id === appId && a.profile.key === profileKey)
+  return apps.find(a => a.paired) || apps[0] || null
 }
 
 // The window the popup shows: the one the person picked, else the first connected one, else the first.
 export async function current() {
   const apps = await discover()
   const { selected } = await local.get("selected")
-  return apps.find(a => selected && a.app_id === selected.app_id && a.profile.key === selected.profile_key)
-    || apps.find(a => a.paired) || apps[0] || null
+  const picked = apps.filter(a => selected && a.app_id === selected.app_id && a.profile.key === selected.profile_key)
+  return picked.find(a => a.paired) || picked[0] || apps.find(a => a.paired) || apps[0] || null
 }
 
 export async function select(port) {
@@ -131,16 +155,23 @@ export async function select(port) {
   if (app) await local.set({ selected: { app_id: app.app_id, profile_key: app.profile.key } })
 }
 
+// The token for a call, once the port has proven itself. Otherwise AppDown: to this extension a port that
+// cannot prove it is ReelForge is a port with no ReelForge on it.
+async function tokenTo(app) {
+  if (!(await trusted(app.port, app.app_id))) throw new AppDown("nothing on this port proved to be the connected ReelForge")
+  return tokenFor(app.app_id)
+}
+
 // A call that needs the token. Returns { ok, status, data }. Throws AppDown when nothing answers.
 export async function api(app, path, { method = "GET", body, timeout } = {}) {
-  const token = await tokenFor(app.app_id)
+  const token = await tokenTo(app)
   const response = await request(app.port, path, { method, token, body, timeout })
   return { ok: response.ok, status: response.status, data: await json(response) }
 }
 
 // One piece of a job's video. The ETag is the file's SHA-256, so a file swapped between two pieces shows.
 export async function filePiece(app, jobId, offset, length) {
-  const token = await tokenFor(app.app_id)
+  const token = await tokenTo(app)
   const response = await request(app.port, `/v1/jobs/${jobId}/file`, {
     token, range: `bytes=${offset}-${offset + length - 1}`, timeout: 25000,
   })
@@ -156,7 +187,8 @@ export async function filePiece(app, jobId, offset, length) {
   return { ok: true, bytes, etag: (response.headers.get("ETag") || "").replace(/^W\//, "").replace(/"/g, "") }
 }
 
-// Pairing: the pair page's secret buys a token, once. Only the token's owner (this app) ever gets it back.
+// Pairing: the pair page's secret buys a token, once. From then on the token goes only to a port that proves
+// it is the ReelForge that gave it out.
 export async function pair(port, secret) {
   const app = await at(port)
   if (!app) return "app_unreachable"

@@ -4,8 +4,11 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { EXTENSION_ID } from "./fake_app.mjs"
 import { EXTENSION_DIR, equal, ok } from "./harness.mjs"
+import { ACCOUNT_SHOWN, PACKED_HOOKS, PLATFORMS } from "../shared/consts.js"
 
 const manifest = JSON.parse(readFileSync(join(EXTENSION_DIR, "manifest.json"), "utf8"))
+const selectors = JSON.parse(readFileSync(join(EXTENSION_DIR, "selectors.json"), "utf8"))
+const source = name => readFileSync(join(EXTENSION_DIR, name), "utf8")
 
 export const tests = {
   // Chrome's rule: SHA-256 of the public key, first 16 bytes, each hex digit moved to the letters a to p.
@@ -31,6 +34,30 @@ export const tests = {
       const png = readFileSync(join(EXTENSION_DIR, manifest.icons[size]))
       equal(png.readUInt32BE(16), Number(size), `icon ${size} width`)
     }
+  },
+
+  "where the account is said to be checked, the page has a hook for it"() {
+    const hooked = Object.keys(selectors.platforms).filter(platform => selectors.platforms[platform].hooks.account)
+    equal([...ACCOUNT_SHOWN].sort(), hooked.sort(), "platforms with an account hook")
+  },
+
+  "every hook a script clicks is one a newer list from the app cannot replace"() {
+    const packed = PACKED_HOOKS
+    equal(Object.keys(packed).sort(), Object.keys(PLATFORMS).sort(), "platforms")
+    for (const platform of Object.keys(PLATFORMS)) {
+      const script = source(`platform/${platform}.js`)
+      const final = /final: "(\w+)"/.exec(script)[1]
+      // rf.click(await rf.find("create")), rf.click(rf.probe("create_post")), and the hooks a loop picks from.
+      const clicked = new Set([final])
+      for (const [, hook] of script.matchAll(/rf\.click\((?:await )?rf\.(?:find|probe)\("(\w+)"\)\)/g)) clicked.add(hook)
+      if (platform === "youtube") clicked.add("next_button")
+      if (platform === "instagram") for (const hook of ["reels_ok", "next"]) clicked.add(hook)
+      equal([...packed[platform]].sort(), [...clicked].sort(), `${platform}'s clicked hooks`)
+      for (const hook of packed[platform]) ok(selectors.platforms[platform].hooks[hook], `${platform} has the hook ${hook}`)
+      // And no click in a platform's script goes around the guard.
+      ok(!/\.click\(\)/.test(script), `${platform}.js clicks only through rf.click`)
+    }
+    ok(source("platform/run.js").includes("rf.pressFinal(button)") && !/rf\.click\(/.test(source("platform/run.js")), "run.js presses the final button in one place only")
   },
 
   "the description says what it needs and what it does"() {

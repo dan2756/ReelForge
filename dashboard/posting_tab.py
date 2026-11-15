@@ -39,7 +39,9 @@ from .view import BAD, GOOD, MUTED, TYPICAL, Text
 
 FAINT = "#5c6370"
 AMBER = TYPICAL  # in progress, and anything waiting for you
-ON_WITHIN = timedelta(minutes=3)   # the extension counts as there while it has said so this recently
+# The extension counts as there while it has said so this recently. With nothing to post it says hello every five
+# minutes (extension/worker/jobs.js), so this is a little over two of those: one that got lost doesn't turn it amber.
+ON_WITHIN = timedelta(minutes=11)
 QUIET_AFTER = timedelta(minutes=3)  # a job under way with no news for this long says so
 HINT = "extension_hint_dismissed"   # meta: you closed the "set up the extension" hint on the Publish tab
 # A job's state in a few words. An API upload has no extension to wait for.
@@ -149,11 +151,13 @@ class PostingTab:
     def review_of(self, video: Path, fresh: bool = False) -> dict:
         """The picked video's approval (videos.approval). It reads files, and with review receipts it hashes the
         video, so it's kept between looks: read again (fresh) when the Publish tab is opened, every half minute
-        while it is open, and when a post is asked for."""
+        while it is open, and when a post is asked for. Even then the video is only read in full again when one of
+        the episode's files has changed (videos.approval_shown); what a post goes by is worked out anew (post_info
+        and posting.create_batch)."""
         if self.demo:
             return {"state": "demo", "line": "This is the demo: nothing is posted from it."}
         if fresh or self.picked_review is None or self.picked_review[0] != video:
-            self.picked_review = (video, videos.approval(video, self.cfg))
+            self.picked_review = (video, videos.approval_shown(video, self.cfg))
         return self.picked_review[1]
 
     def spotted_posts(self, video: Path) -> dict[str, dict]:
@@ -176,6 +180,7 @@ class PostingTab:
         for p in extension_api.paired(extension_api.read_store()):
             try:
                 seen = db.parse(p["last_seen"])
+                seen = seen if seen.tzinfo else None  # written in by hand without its zone: as good as never
             except (KeyError, TypeError, ValueError):
                 seen = None
             theirs = p.get("protocol", posting.PROTOCOL)
@@ -317,12 +322,17 @@ class PostingTab:
     def mind_the_jobs(self) -> None:
         """At start and every half minute: what the clock decides (a job nobody picked up expires, one that went
         silent after it was ready becomes unknown: posting.expire_stale), a post a stats read found while this
-        window wasn't looking, the extension's "seen 2m ago", and the picked video's review as it stands now."""
-        if not self.demo:
-            self._safe(posting.expire_stale, 0)
-            self._safe(posting.reconcile, 0)
-        self.update_extension()
-        self.update_posting(fresh=self.tab == "publish")
+        window wasn't looking, the extension's "seen 2m ago", and the picked video's review as it stands now.
+        Whatever goes wrong in here is for the log and the next half minute: the extension is an extra, and neither
+        the window's start nor its clock stops for it."""
+        try:
+            if not self.demo:
+                self._safe(posting.expire_stale, 0)
+                self._safe(posting.reconcile, 0)
+            self.update_extension()
+            self.update_posting(fresh=self.tab == "publish")
+        except Exception:
+            traceback.print_exc()
 
     def settle_jobs(self) -> None:
         """After a stats read, here or anywhere: a post it found settles the job that was waiting to hear."""

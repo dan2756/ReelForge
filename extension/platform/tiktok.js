@@ -5,6 +5,7 @@
   rf.flows.tiktok = {
     final: "post_button",
     button: "Post",
+    last: { css: "[data-e2e='post_video_button']", names: ["post"] },
     fields: ["caption"],
 
     async fill(job) {

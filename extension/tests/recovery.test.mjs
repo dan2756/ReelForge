@@ -19,13 +19,15 @@ export const tests = {
     await (await t.browser.tab("www.tiktok.com")).close()
     await until(() => `the job to stop (it is ${job.state})`, () => job.state === "failed")
     equal([job.error_code, job.error_message], ["tab_closed", "The tab was closed before the post was ready. Nothing was posted."], "error")
+    // The worker ends this one, not the page's script. Its report still says which step the post was on.
+    ok(["fill_caption", "upload"].includes(job.step), `the step the failure carries (${job.step})`)
   },
 
   async "a tab closed at ready, before Post was pressed: tab_closed, nothing posted"(t) {
     const { job, tab } = await toReady(t, "tiktok", t.video())
     await tab.close()
     await until(() => `the job to stop (it is ${job.state})`, () => job.state === "failed")
-    equal([job.error_code, job.error_message], ["tab_closed", "The tab was closed before Post was pressed. Nothing was posted."], "error")
+    equal([job.error_code, job.error_message, job.step], ["tab_closed", "The tab was closed before Post was pressed. Nothing was posted.", "ready"], "error and step")
   },
 
   async "a tab closed after the person pressed Post, with no confirmation seen: unknown, not failed"(t) {
@@ -39,6 +41,46 @@ export const tests = {
     equal(job.error_code, "unknown_outcome", "error code")
     // An unknown job still holds its place: the app will not make a second one for this video and platform.
     equal(t.app.createBatch(t.app.videos[0], ["tiktok"]).blocked.length, 1, "a second job is blocked")
+  },
+
+  async "a tab closed after the person's press, before the page was called ready: unknown, not \"nothing was posted\""(t) {
+    // YouTube takes a press of Save while the video is still going up. This copy shows nothing after it.
+    t.site.mode.youtube = "slow_mute"
+    const job = await start(t, "youtube", t.video())
+    await until(() => `the last screen (it is ${job.state} ${job.step})`, () => job.step === "upload" && job.events.some(event => event.step === "visibility"), 30000)
+    const tab = await t.browser.tab("studio.youtube.com")
+    await tab.locator("#done-button").click()
+    await until("the press to be noticed", async () => (await t.browser.jobRecord(job.id)).pressedByPerson === true)
+    equal(job.state, "filling", "what the app knows when the tab goes")
+    await tab.close()
+    await until(() => `the job to end (it is ${job.state})`, () => job.state !== "filling")
+    equal([job.state, job.error_code], ["unknown", "unknown_outcome"], "state and code")
+    equal((await t.browser.jobRecord(job.id)).outbox, [], "nothing is left unsaid")
+  },
+
+  async "a report ReelForge could not take just then (its database was busy) is sent again"(t) {
+    const { job, tab } = await toReady(t, "tiktok", t.video())
+    t.app.busy = 2
+    await tab.locator(FINAL).click()
+    await until("the first try", () => t.app.requests("POST", /\/event$/).some(entry => entry.status === 503))
+    equal([job.state, (await t.browser.jobRecord(job.id)).outbox.map(report => report.state)], ["ready", ["posted"]], "the app's state, and what the browser still has to say")
+    // Nobody asks twice: the popup opening (or the half-minute check) brings it.
+    const popup = await t.browser.popup()
+    await until(() => `the app to hear (it is ${job.state})`, () => job.state === "posted", 45000)
+    await until("the browser's outbox to be empty", async () => (await t.browser.jobRecord(job.id)).outbox.length === 0)
+    await popup.close()
+  },
+
+  async "a job's tab taken to another site this extension can see gets no script and none of the job's text"(t) {
+    t.site.mode.tiktok = "slow"
+    const job = await start(t, "tiktok", t.video())
+    await until("the caption step", () => job.state === "filling")
+    const tab = await t.browser.tab("www.tiktok.com")
+    await tab.goto("https://x.com/compose/post")
+    await until(() => `the job to stop (it is ${job.state})`, () => job.state === "failed", 20000)
+    equal([job.error_code, job.error_message], ["tab_closed", "This tab left TikTok before the post was ready. Nothing was posted."], "error")
+    await sleep(700)
+    equal([await note(tab), await tab.evaluate(() => [fixture.files.length, document.querySelector("[data-reelforge-note]") !== null])], [null, [0, false]], "what the extension put on X's page")
   },
 
   async "a full page load to the platform's posted page is seen as posted"(t) {
@@ -65,7 +107,7 @@ export const tests = {
     t.app.pressUnlocked.add("tiktok")
     const settings = await t.browser.popup()
     await settings.evaluate(() => chrome.storage.local.set({ press: { tiktok: true } }))
-    const { job, tab } = await toReady(t, "tiktok", t.video(), { press: true })
+    const { job, tab } = await toReady(t, "tiktok", t.video(), { press: true, yes: true })
     await until("the press", () => job.state === "posting")
     await until("the page's question", async () => (await note(tab)).line === "TikTok is asking you something")
     await tab.reload()
@@ -144,6 +186,19 @@ export const tests = {
     await popup.close()
   },
 
+  async "a post this browser took just before its worker was stopped is taken up when the batch is handed over again"(t) {
+    equal(await t.browser.pair(t.app), "ok", "pairing")
+    const made = t.app.createBatch(t.video(), ["tiktok", "x"])
+    // The claim was granted and the worker stopped before it wrote the job down: ReelForge has the job as this
+    // browser's, and the browser knows nothing of it. The other job is another browser's.
+    Object.assign(made.jobs[0], { state: "claimed", claimed_by: t.app.paired[0].install })
+    Object.assign(made.jobs[1], { state: "claimed", claimed_by: "another-browser" })
+    const page = await t.browser.post(t.app, made.batch)
+    equal(await page.evaluate(() => document.documentElement.dataset.rfBatchState), "started", "what the page is told")
+    await until(() => `TikTok to be ready (it is ${made.jobs[0].state})`, () => made.jobs[0].state === "ready", 30000)
+    equal([made.jobs[1].state, made.jobs[1].claimed_by, t.browser.tabs("x.com").length], ["claimed", "another-browser", 0], "the other browser's job, and tabs opened for it")
+  },
+
   async "with no post under way, the person's own tabs do not wake the worker"({ browser }) {
     const page = await browser.popup()
     await sleep(800)
@@ -185,6 +240,8 @@ export const tests = {
       await until(() => `TikTok to be ended (it is ${tiktok.state})`, () => tiktok.state === "failed", 20000)
       await until(() => `X to be ended (it is ${x.state})`, () => x.state === "unknown", 20000)
       equal([tiktok.error_code, tiktok.error_message], ["tab_closed", "The browser was closed, or the extension reloaded, before the post was ready. Nothing was posted."], "TikTok's ending")
+      // The step is the one written down when the job last changed state, before the browser closed.
+      equal(tiktok.step, "fill_caption", "the step TikTok's ending carries")
       equal(x.error_code, "unknown_outcome", "X's ending")
       await sleep(700)
       equal(t.app.requests("POST", /^\/v1\/jobs\/.*\/claim$/).length, 2, "claims")
@@ -213,6 +270,17 @@ export const tests = {
     await until("the note to say so", async () => (await note(tab)).line === "Stopped")
     equal((await note(tab)).more, "This post was ended in ReelForge.", "what the note says")
     ok((await tab.locator(FINAL).evaluate(el => getComputedStyle(el).outlineStyle)) === "none", "the outline is gone")
+    await popup.close()
+  },
+
+  async "a post ReelForge has as posted says so in its tab, not that it was stopped"(t) {
+    const { job, tab } = await toReady(t, "tiktok", t.video())
+    // The person says "It's posted" in ReelForge, or a stats read finds the post.
+    Object.assign(job, { state: "posted", detail: "you said it's posted" })
+    const popup = await t.browser.popup()
+    await until("the browser to take the app's word", async () => (await t.browser.jobRecord(job.id)).state === "posted")
+    await until("the note to say so", async () => (await note(tab)).line === "Posted")
+    equal(await note(tab), { tone: "good", line: "Posted", more: "ReelForge has this post as posted." }, "the note")
     await popup.close()
   },
 }

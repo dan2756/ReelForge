@@ -11,6 +11,7 @@
   rf.flows.youtube = {
     final: "done_button",
     button: "Publish or Save",
+    last: { css: "#done-button", names: ["publish", "save", "schedule"] },
     fields: ["title", "description"],
 
     async fill(job) {

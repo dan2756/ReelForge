@@ -1,10 +1,13 @@
 // The page hooks each platform script looks for. They are data: lists of ways to find an element. The steps
-// themselves live in this extension's code, so a newer list can only change where the code looks.
+// themselves live in this extension's code.
 //
 // The list packed with the extension is used unless the ReelForge app on this computer has a newer one, which
-// lets a fixed hook reach the browser before the person has pressed Reload on the extension.
+// lets a fixed hook reach the browser before the person has pressed Reload on the extension. Not everything
+// comes from the newer list. Where the code looks decides what it clicks, so the hooks whose element is
+// clicked (Next, Create, OK and the final button itself) and the platform's signs that a post went out are
+// always the packed ones: they change only when the person reloads the extension.
 import * as app from "./app.js"
-import { PLATFORMS } from "../shared/consts.js"
+import { PLATFORMS, PACKED_HOOKS } from "../shared/consts.js"
 
 const local = chrome.storage.local
 const LIMIT = 64 * 1024
@@ -44,7 +47,16 @@ async function active() {
 
 export async function selectorsFor(platform) {
   const all = await active()
-  return { version: all.version, ...(all.platforms[platform] || { hooks: {} }) }
+  const own = (await builtIn()).platforms[platform] || { hooks: {} }
+  const theirs = all.platforms[platform] || { hooks: {} }
+  const hooks = { ...theirs.hooks }
+  for (const name of PACKED_HOOKS[platform] || []) {
+    if (own.hooks[name]) hooks[name] = own.hooks[name]
+    else delete hooks[name]
+  }
+  // The signs that a post went out are the packed ones too. Only how long to wait for them may differ.
+  const success = own.success ? { ...own.success, ...(theirs.success?.timeout_ms > 0 ? { timeout_ms: theirs.success.timeout_ms } : {}) } : undefined
+  return { version: all.version, ...theirs, hooks, success }
 }
 
 // Called after a heartbeat, with the version the app says it has.

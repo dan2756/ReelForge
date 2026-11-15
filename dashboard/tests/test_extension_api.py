@@ -7,6 +7,8 @@ the extension's folder and the stats database are scratch ones."""
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import hmac
 import http.client
 import inspect
 import io
@@ -24,7 +26,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-from dashboard import config, db, desktop, extension_api, posting
+from dashboard import config, db, desktop, extension_api, posting, posting_tab
 from dashboard.config import PLATFORM_KEYS
 from dashboard.service import Dashboard
 from dashboard.tests.test_posting import CAPTION, CHROME, EDGE, TAGS, LedgerTest, approve
@@ -180,6 +182,33 @@ class Rules(ApiTest):
         self.assertTrue(self.ask("GET", "/v1/hello", token=token).json["paired"])
         self.assertFalse(self.ask("GET", "/v1/hello", token=token[:-1] + "x").json["paired"])
         self.assertFalse(self.ask("GET", "/v1/hello", token="").json["paired"])
+
+    def test_hello_proves_which_reelforge_this_is_to_a_connected_browser(self):
+        token, nonce = self.pair(), "0123456789abcdef" * 2
+        app_id = json.loads(self.store.read_text("utf-8"))["app_id"]
+
+        def expected(port: int) -> str:
+            said = f"reelforge hello\n{nonce}\n{port}\n{app_id}".encode()
+            return hmac.new(hashlib.sha256(token.encode()).digest(), said, hashlib.sha256).hexdigest()
+
+        hello = self.ask("GET", f"/v1/hello?install={CHROME}&nonce={nonce}")  # no token is sent for it
+        self.assertEqual((hello.status, hello.json["proof"], hello.json["paired"]), (200, expected(self.port), False))
+        # Another ReelForge window (another port, the same connections) proves itself with another answer, so
+        # passing this one on from there proves nothing.
+        other = extension_api.Server(self.app, ports=(0,))
+        self.assertTrue(other.start())
+        self.addCleanup(other.stop)
+        theirs = ask(other.port, "GET", f"/v1/hello?install={CHROME}&nonce={nonce}").json["proof"]
+        self.assertEqual(theirs, expected(other.port))
+        self.assertNotEqual(theirs, hello.json["proof"])
+        for query in (f"install={EDGE}&nonce={nonce}", f"install={CHROME}", f"install={CHROME}&nonce=abc",
+                      f"install={CHROME}&nonce={nonce.upper()}", f"nonce={nonce}", ""):  # nobody it knows, no nonce
+            self.assertNotIn("proof", self.ask("GET", f"/v1/hello?{query}").json, query)
+        self.ask("POST", "/v1/unpair", {}, token=token, origin=EXTENSION)
+        self.assertNotIn("proof", self.ask("GET", f"/v1/hello?install={CHROME}&nonce={nonce}").json)  # forgotten
+        self.pair()
+        self.app.demo = True
+        self.assertNotIn("proof", self.ask("GET", f"/v1/hello?install={CHROME}&nonce={nonce}").json)
 
     def test_only_its_own_name_and_port_is_served(self):
         for host in (f"localhost:{self.port}", f"evil.example:{self.port}", "127.0.0.1", f"127.0.0.1:{self.port + 1}",
@@ -680,6 +709,17 @@ class Jobs(ApiTest):
         self.assertEqual((made.status, made.json["batch"], made.json["jobs"]), (200, None, []))
         self.assertEqual([b["reason"] for b in made.json["blocked"]], ["review"])
 
+    def test_an_open_popup_does_not_have_every_video_checked_again_every_few_seconds(self):
+        from dashboard import videos
+
+        with mock.patch.object(videos, "approval", wraps=videos.approval) as worked_out:
+            for _ in range(4):
+                self.assertTrue(self.get("/v1/state").json["videos"][0]["postable"])
+            self.assertEqual(worked_out.call_count, 1)
+            # Post itself never goes by what the list remembered.
+            self.post("/v1/batches", {"video": posting.digest(self.video), "platforms": ["tiktok"]})
+            self.assertEqual(worked_out.call_count, 2)
+
     def test_post_in_the_popup_makes_the_jobs_with_the_videos_saved_text(self):
         self.video.with_suffix(".json").write_text(json.dumps({"caption": CAPTION, "tags": TAGS}), "utf-8")
         sha = posting.digest(self.video)
@@ -774,6 +814,9 @@ class Jobs(ApiTest):
         for state in ("posting", "claimed", "queued", "expired", "nonsense", None, 7):  # not the extension's to say
             refused = self.event(job, state)
             self.assertEqual((refused.status, refused.error), (409, "bad_transition"), state)
+            # The sentence names what was said, and says so when nothing was (never "a post None").
+            self.assertEqual(refused.json["message"], f"The extension can't make a post {state}." if
+                             isinstance(state, str) else "The extension didn't say where the post stands.")
         other = self.event(job, "filling", token=self.pair(EDGE))
         self.assertEqual((other.status, other.error), (409, "not_yours"))
         self.assertEqual(self.event({"id": "pj_0000000000000000"}, "opening").status, 404)
@@ -789,6 +832,18 @@ class Jobs(ApiTest):
         self.assertEqual(self.event(job, "failed").status, 409)  # a post that is up stays up
         log = [detail for _, _, detail in self.events(job) if detail and detail.startswith("found by")]
         self.assertEqual(log, ["found by tab=upload_url", "found by caption=role,post=text"])
+
+    def test_the_popups_cancel_calls_waiting_posts_off_and_leaves_no_trace_of_them(self):
+        made = self.post("/v1/batches", {"video": posting.digest(self.video), "platforms": ["tiktok", "x"]}).json
+        self.assertEqual(len(db.uploads()), 2)
+        for job in made["jobs"]:  # no claim first: nothing was opened, and nothing should look as if it had been
+            answer = self.event(job, "cancelled", detail="cancelled before it started")
+            self.assertEqual((answer.status, answer.json["state"]), (200, "cancelled"))
+        self.assertEqual([e[0] for e in self.events(made["jobs"][0])], ["queued", "cancelled"])
+        # An unrelated post that goes up later has no upload of this video to be filed under.
+        self.assertEqual(db.uploads(), [])
+        self.assertEqual(self.post("/v1/batches", {"video": posting.digest(self.video),
+                                                   "platforms": ["tiktok"]}).status, 201)
 
     def test_what_the_extension_says_is_cleaned_before_it_is_kept(self):
         job = self.job()
@@ -806,7 +861,15 @@ class Jobs(ApiTest):
                           ("https://evil.example/www.tiktok.com", False),
                           ("https://www.tiktok.com@evil.example/", False),
                           ("file:///etc/passwd", False), ("https://youtu.be/dQw4w9WgXcQ", False), ("", False),
-                          ("https://[::1", False)):
+                          ("https://[::1", False),
+                          # What a browser reads as another site than Python does, or with a log-in in it.
+                          ("https://evil.example\\@tiktok.com/@me/video/1", False),
+                          ("https://evil.example\\.tiktok.com/x", False),
+                          ("https://www.tiktok.com/@me\\video/1", False),
+                          ("https://me:secret@www.tiktok.com/@me/video/1", False),
+                          ("https://www.tiktok.com:8443/@me/video/1", False),
+                          ("https://WWW.TIKTOK.COM/@me/video/1", False), ("https://www.tiktok.com", True),
+                          ("https://www.tiktok.com/@me/video/1?lang=en#top", True)):
             self.assertEqual(extension_api.post_url("tiktok", url) is not None, kept, url)
         short = "https://youtu.be/dQw4w9WgXcQ"
         self.assertEqual(extension_api.post_url("youtube", short), short)
@@ -997,6 +1060,25 @@ class Pages(ApiTest):
                          ["no-referrer", "no-store", "DENY"])
         self.assertNotIn("set-cookie", page.headers)
 
+    def test_the_post_page_has_the_one_button_the_extension_takes_as_your_yes_to_a_press(self):
+        # The extension presses Post only after a real click on the element the page marks data-rf-press. One
+        # button carries the mark, it starts out of sight, and the page's own script never clicks it.
+        page = self.ask("GET", self.url.split(str(self.port), 1)[1]).body.decode()
+        self.assertEqual(page.count("data-rf-press"), 1)
+        self.assertRegex(page, r'<section id="press"[^>]* hidden>')
+        self.assertIn('<button type="button" id="press-yes" class="btn small" data-rf-press>Yes, press Post for me'
+                      "</button>", page)
+        script = (extension_api.WEB / "page.js").read_text("utf-8")
+        self.assertIn('"reelforge:press"', script)  # it hears the extension's answer
+        self.assertNotRegex(script, r"\.click\(\)|dispatchEvent")
+        pair = self.ask("GET", self.server.pair_url().split(str(self.port), 1)[1]).body.decode()
+        self.assertNotIn("data-rf-press", pair)
+        # The page is told which posts asked for the press, so it knows when to ask.
+        asked = self.job("instagram", press=True)
+        told = self.ask("GET", self.server.post_url(asked["batch"]).split(str(self.port), 1)[1]
+                        .replace("/post/", "/v1/page/batch/")).json
+        self.assertEqual([j["press"] for j in told["jobs"]], [True])
+
     def test_a_page_needs_its_own_key(self):
         other = self.job("x")
         theirs = self.server.post_url(other["batch"]).split("?k=")[1]
@@ -1070,6 +1152,18 @@ class Pages(ApiTest):
         self.assertEqual(note, "TikTok changed its page, so the extension lost its way: post this one by hand. You "
                                "can finish in the tab that is open, or press Post by hand.")
         self.assertIn("TikTok said no. You can", words(state="failed", error_message="TikTok said no")[1])
+        # The extension's own sentence often says the tab can be finished by hand. The page says it once.
+        lost = "TikTok has changed its page: ReelForge could not find the Post button. You can finish by hand in this tab."
+        self.assertEqual(words(state="failed", error_code="hook_not_found", error_message=lost)[1],
+                         lost + " Or press Post by hand.")
+        # Where the failure itself says there is no tab to finish in, the page doesn't send you to one.
+        closed = "The tab was closed before the post was ready. Nothing was posted."
+        self.assertEqual(words(state="failed", step="upload", error_code="tab_closed", error_message=closed),
+                         ("Failed at uploading", closed + " Start it again from ReelForge, or press Post by hand.",
+                          "bad", True))
+        for code in extension_api.NO_TAB:
+            self.assertNotIn("tab that is open", words(state="failed", error_code=code)[1], code)
+            self.assertIn(code, posting.FAILURES)
         self.assertIn("then post again. You can", words(state="failed", error_message="check it, then post again.")[1])
         line, note, tone, by_hand = words(state="unknown")
         self.assertEqual((line, tone, by_hand), ("ReelForge can't tell whether this posted", "ask", False))
@@ -1105,6 +1199,20 @@ class Pages(ApiTest):
         self.assertEqual(self.state(self.tiktok), "queued")
         self.assertEqual(self.manual("youtube").status, 200)  # pressed again: the same again, still set aside
         self.assertGreaterEqual(self.app.changes, 2)
+
+    def test_by_hand_shows_a_video_that_was_moved_and_says_so_when_it_is_gone(self):
+        moved = self.root / "completed" / "ep01 - Gravity" / "ep01.mp4"
+        moved.parent.mkdir(parents=True)
+        self.video.rename(moved)
+        answer = self.manual("tiktok")
+        self.assertEqual(self.revealed, [moved.resolve()])
+        self.assertIn(f"drag ep01.mp4 in from {desktop.FILES_WINDOW}", answer.json["message"])
+        moved.unlink()
+        answer = self.manual("youtube")
+        self.assertEqual((answer.status, answer.json["opened"], self.revealed), (200, True, [moved.resolve()]))
+        self.assertIn("The title is copied: paste it there. ReelForge can't find ep01.mp4 any more, so you have to "
+                      "find the video yourself.", answer.json["message"])
+        self.assertNotIn("drag", answer.json["message"])
 
     def test_by_hand_with_no_browser_says_so_and_notes_no_page(self):
         self.browser = False
@@ -1228,6 +1336,61 @@ class WindowServes(PostingTest):
             w.svc.stop()
             stop.assert_called_once_with()
 
+    def started(self) -> Window:
+        """Your own window (not the demo), started the way the real one starts: by started() itself."""
+        w = PublishTest.window(self, {key: Reader(key, name) for key, name in NAMES.items()}, ready=True,
+                               extension_ports=(0,))
+        w.svc.demo = False
+        self.addCleanup(w.svc.stop_serving)
+        with mock.patch.object(Dashboard, "start_updates"):  # (it would look for a new ReelForge)
+            w.call("ready")
+        return w
+
+    def ticking(self, w: Window) -> set[str]:
+        """What the window does by the clock from now on."""
+        return {getattr(t.fn, "__name__", "") for _, _, t in w.loop.timers}
+
+    def test_your_own_window_starts_listening_and_shows_the_extension(self):
+        self.extension()
+        w = self.started()
+        self.assertIsInstance(w.svc.extension_port, int)
+        self.assertEqual((w.view("extension")["state"], w.view("extension")["port"]), ("on", w.svc.extension_port))
+        self.assertEqual(w.view("posting")["video"]["name"], "ep01.mp4")
+        self.assertEqual(ask(w.svc.extension_port, "GET", "/v1/hello").json["demo"], False)
+
+    def test_a_connected_extension_stays_green_between_two_of_its_hellos(self):
+        # With nothing to post, the extension says hello every five minutes.
+        for minutes, state in ((0.2, "on"), (6, "on"), (10, "on"), (12, "waiting"), (600, "waiting")):
+            self.extension(seen_minutes_ago=minutes)
+            w = self.serving(connect=False)
+            w.svc.update_extension()
+            self.assertEqual(w.view("extension")["state"], state, minutes)
+            w.close()
+
+    def test_the_window_starts_whatever_the_connections_file_holds(self):
+        # The file can be edited by hand (extension_ids). A time without its zone, a name that isn't text: the
+        # window starts all the same, with its first refresh, its timers and its once-a-second look.
+        for entry in ({"last_seen": "2026-11-15T10:00:00"}, {"last_seen": 7, "name": 5, "version": ["1"]},
+                      {"accounts": "x", "protocol": "1", "last_seen": "soon"}):
+            self.extension(**entry)
+            w = self.started()
+            self.assertLessEqual({"tick", "keep_in_step", "welcome_back"}, self.ticking(w), entry)
+            (install,) = w.view("extension")["installs"]
+            self.assertEqual((install["seen"], install["on"]), ("never", False), entry)
+            self.assertEqual(w.view("extension")["state"], "old" if "protocol" in entry else "waiting")
+            self.store.write_text(self.store.read_text("utf-8") + " ", "utf-8")
+            w.svc.keep_in_step()  # every second afterwards
+            w.close()
+
+    def test_a_fault_in_the_extensions_views_never_stops_the_window_starting_or_its_clock(self):
+        self.extension()
+        with mock.patch.object(posting_tab.PostingTab, "update_extension", side_effect=TypeError("boom")), \
+                contextlib.redirect_stderr(io.StringIO()) as log:
+            w = self.started()
+            self.assertLessEqual({"tick", "keep_in_step", "welcome_back"}, self.ticking(w))
+            w.svc.tick()  # the half-minute clock goes on too
+        self.assertIn("TypeError: boom", log.getvalue())  # and the window's log has it
+
     def test_the_demo_never_listens(self):
         w = PublishTest.window(self)  # the tests' plain window is the demo
         w.svc.extension_ports = (0,)
@@ -1307,6 +1470,31 @@ class WindowServes(PostingTest):
         self.assertEqual((toast["title"], toast["severity"]), ("Nothing was posted", "warning"))
         self.assertIn("ReelForge couldn't open your browser, so it couldn't open the posting page", toast["body"])
         self.assertEqual([j["state"] for j in posting.recent()], ["cancelled"])
+
+    def test_post_again_with_no_browser_leaves_the_video_posted(self):
+        # Two posts ReelForge knows of: one it helped with (a link, no numbers yet) and one a stats read found.
+        w = self.serving()
+        (job,) = w.call("post_with_extension", ["tiktok"], CAPTION, TAGS, True, None)["jobs"]
+        posting.claim(job["id"], "install-chrome")
+        posting.advance(job["id"], "ready", install="install-chrome")
+        posting.advance(job["id"], "posted", install="install-chrome", url=TIKTOK_URL)
+        db.add_post("youtube", "dQw4w9WgXcQ", posting.get(job["id"])["episode_id"], CAPTION,
+                    "https://youtu.be/dQw4w9WgXcQ")
+        w.svc.reload()
+        w.call("form_changed", CAPTION, TAGS)
+        self.browser = False
+        for platform, state in (("tiktok", "posted"), ("youtube", "spotted")):
+            w.call("post_action", self.rows(w)[platform]["job"] or platform, "post_again")
+            self.assertEqual(w.sent("toast")[-1]["title"], "Nothing was posted")
+            row = self.rows(w)[platform]
+            self.assertEqual((row["state"], row["actions"]), (state, ["open_post", "post_again"]), platform)
+            self.assertTrue("".join(seg[0] for seg in row["line"]).startswith("✓ posted"), platform)
+            self.assertTrue(w.view("posted")["done"][platform])  # the POSTED line keeps its tick
+            # A plain Post is still refused: nothing forgot the post that is up.
+            self.assertEqual(posting.preview(self.video, [platform], CAPTION, TAGS, w.svc.cfg)["blocked"][platform]
+                             ["reason"], state)
+        self.assertEqual([(j["platform"], j["state"], j["superseded"]) for j in posting.recent()],
+                         [("tiktok", "posted", 0), ("tiktok", "cancelled", 0), ("youtube", "cancelled", 0)])
 
     def test_what_the_extension_does_shows_in_the_window_at_once(self):
         w = self.serving(connect=False)
@@ -1448,6 +1636,11 @@ class CommandLine(ApiTest):
         code, said = self.run_main()
         self.assertIn("connected  Chrome on macOS · v0.1.0 · last seen 5m ago", said)
         self.assertIn("Edge on Windows · last seen never", said)
+        # A time someone wrote in by hand, without its zone or not a time at all, is "never" and not an error.
+        for odd in ("2026-11-15T10:00:00", "yesterday", 7):
+            extension_api.change_store(lambda s: s["paired"][0].update(last_seen=odd))
+            self.assertIn("connected  Chrome on macOS · v0.1.0 · last seen never", self.run_main()[1], odd)
+        extension_api.change_store(lambda s: s["paired"][0].update(last_seen=seen))
         self.assertNotIn("ab", said.replace("able", "").replace("about", ""))  # nothing of a token's
         (self.folder / "manifest.json").unlink()
         code, said = self.run_main()
@@ -1569,6 +1762,15 @@ class CommandLine(ApiTest):
             for word in ("create_batch", "retry(", "advance(", "claim(", "grant_press"):
                 self.assertNotIn(word, source, fn.__name__)
         self.assertIn("None of these starts a post", extension_api.USAGE)
+        # Nor does anything else a command line reaches: the reelforge command, the pipeline, the scripts. What
+        # makes a job is called from the window's own buttons and from the popup's Post (which needs the token).
+        for folder in ("studio", "pipeline", "scripts"):
+            for path in sorted((KIT / folder).rglob("*.py")):
+                if "tests" in path.parts or "tools" in path.parts:
+                    continue
+                source = path.read_text("utf-8", errors="replace")
+                for word in ("create_batch", "post_with_extension", "grant_press", "posting.retry"):
+                    self.assertNotIn(word, source, f"{path.relative_to(KIT)} can start a post")
 
     def test_the_reelforge_command_knows_it(self):
         from studio.__main__ import __doc__ as usage
@@ -1688,6 +1890,13 @@ class Ships(unittest.TestCase):
 
         for rel in ["manifest.json", "selectors.json", *named(manifest)]:
             self.assertIn(f"extension/{rel}", shipped)
+        # The manifest names only some of it. The platform scripts, the worker's modules and the popup's own
+        # script and style are loaded by other files, and one of them missing breaks the extension as surely.
+        for path in sorted((KIT / "extension").rglob("*")):
+            rel = path.relative_to(KIT).as_posix()
+            if path.is_file() and path.suffix in (".js", ".json", ".html", ".css", ".png") \
+                    and not rel.startswith("extension/tests/"):
+                self.assertIn(rel, shipped)
         self.assertEqual(extension_api.manifest_id(KIT / "extension"), extension_api.EXTENSION_ID)
 
     def test_an_update_replaces_the_folder_and_keeps_your_connections(self):

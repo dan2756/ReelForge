@@ -51,6 +51,8 @@ const routes = {
       return { state }
     },
     batch: async (message, from) => ({ state: await jobs.startBatch(portOf(from), message.batch) }),
+    // A real click on the post page's "press Post for me" button (content/local.js checks that it is one).
+    "batch.press": async (message, from) => ({ state: await jobs.sayPress(portOf(from), message.batch) }),
   },
   // The website learns three things and nothing else: is the app there, is this browser paired, its version.
   site: {
@@ -61,7 +63,7 @@ const routes = {
   },
   // The script in a tab this worker opened for a job.
   tab: {
-    "job.hello": (message, from) => jobs.tabHello(from.tab.id),
+    "job.hello": (message, from) => jobs.tabHello(from.tab.id, from.url),
     "job.alive": (message, from) => jobs.tabAlive(from.tab.id),
     "job.event": (message, from) => jobs.tabEvent(from.tab.id, message),
     "job.press": (message, from) => jobs.tabPress(from.tab.id),
@@ -72,7 +74,8 @@ const routes = {
     "ui.select": async message => { await app.select(Number(message.port)); return panel.state() },
     "ui.prepare": message => jobs.prepare(message.video, Array.isArray(message.platforms) ? message.platforms : [], message.press),
     "ui.batch": message => jobs.peek(Number(message.port), message.batch),
-    "ui.start": async message => ({ state: await jobs.startBatch(Number(message.port), message.batch) }),
+    // The popup's own button, pressed by the person: the one start that can lead to a press of Post.
+    "ui.start": async message => ({ state: await jobs.startBatch(Number(message.port), message.batch, true) }),
     "ui.discard": message => jobs.discard(Number(message.port), message.batch),
     "ui.override": message => jobs.override(String(message.job), message.go === true),
     "ui.focus": message => jobs.focus(String(message.job)),
