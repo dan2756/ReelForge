@@ -129,7 +129,7 @@ def read_store() -> dict:
     """The connections file, or {} while there is none (or it can't be read: then nothing is connected)."""
     try:
         data = json.loads(store_path().read_text("utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # (the last: brackets nested deeper than any such file has)
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -152,8 +152,8 @@ def change_store(change: Callable[[dict], object]):
         try:
             try:
                 store = json.loads(path.read_text("utf-8"))
-            except (FileNotFoundError, ValueError):  # none yet, or not JSON any more: a new one takes its place
-                store = None
+            except (FileNotFoundError, ValueError, RecursionError):  # none yet, or not JSON any more (brackets
+                store = None                                           # nested too deep too): a new one takes its place
             # (any other trouble reading it goes to the caller: a file that can't be read just now is never
             # written over, or every browser would have to connect again)
             had = json.dumps(store, sort_keys=True) if isinstance(store, dict) else None
@@ -1093,8 +1093,9 @@ def check() -> tuple[bool, str]:
             store = json.loads(path.read_text("utf-8"))
             if not isinstance(store, dict):
                 raise ValueError("it isn't a list of connections")
-        except (OSError, ValueError) as e:
-            return False, (f"{path} can't be read ({e}), so no browser counts as connected. Connect yours again: "
+        except (OSError, ValueError, RecursionError) as e:
+            why = "its brackets are nested too deep" if isinstance(e, RecursionError) else e
+            return False, (f"{path} can't be read ({why}), so no browser counts as connected. Connect yours again: "
                            "reelforge extension pair")
     n = len(paired(read_store()))
     return True, f"in extension/, " + (f"connected in {n} browser{'s' if n != 1 else ''}" if n else

@@ -597,6 +597,22 @@ class Store(ApiTest):
             self.assertEqual(self.ask("GET", "/v1/state", token=token, origin=EXTENSION).status, 401)
             self.assertEqual(extension_api.paired(extension_api.read_store()), [])
 
+    def test_a_file_of_brackets_nested_too_deep_is_not_json_either(self):
+        # json.loads gives up on such a file with a RecursionError, which is no ValueError: it went up through the
+        # window as a pop-up of its own words, and through "reelforge extension" as a traceback.
+        token = self.pair()
+        self.store.write_text("[" * 300_000, "utf-8")
+        self.assertEqual(extension_api.read_store(), {})
+        self.assertEqual(self.ask("GET", "/v1/state", token=token).status, 401)
+        ok, said = extension_api.check()  # doctor's row says it in plain words
+        self.assertEqual((ok, said), (False, f"{self.store} can't be read (its brackets are nested too deep), so no "
+                                             "browser counts as connected. Connect yours again: reelforge extension "
+                                             "pair"))
+        self.assertEqual(extension_api.change_store(lambda s: len(s["paired"])), 0)  # a new one takes its place
+        self.assertEqual(json.loads(self.store.read_text("utf-8"))["paired"], [])
+        self.pair()
+        self.assertEqual(len(self.paired()), 1)
+
     def test_a_file_that_cannot_be_read_just_now_is_never_written_over(self):
         self.pair()
         before = self.store.read_text("utf-8")
