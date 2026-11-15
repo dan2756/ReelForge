@@ -71,6 +71,18 @@ class InstallTest(unittest.TestCase):
         for rel in ("dashboard/service.py", "ui/src/main.tsx", "ui/bun.lock", "studio/__init__.py", "README.md"):
             self.assertFalse(update.kept(rel), rel)
 
+    def test_the_codex_settings_you_edited_stay_and_come_where_there_are_none(self):
+        # .codex/config.toml ships with the kit and says "raise it further if your model supports that"
+        mine = 'model_reasoning_effort = "xhigh"\n'
+        self.kit("1.0.0", self.root, **{".codex/config.toml": mine})
+        new = self.kit("1.1.0", self.dir / "new", **{".codex/config.toml": 'model_reasoning_effort = "high"\n'})
+        update._copy_tree(new, self.root, lambda *a: None)
+        self.assertEqual((self.root / ".codex" / "config.toml").read_text(encoding="utf-8"), mine)
+        older = self.kit("1.0.0", self.dir / "older")               # a copy from before the kit shipped one
+        update._copy_tree(new, older, lambda *a: None)
+        self.assertEqual((older / ".codex" / "config.toml").read_text(encoding="utf-8"),
+                         'model_reasoning_effort = "high"\n')
+
     def test_zip_update_copies_kit_files_and_leaves_yours(self):
         mine = {"my-studio/studio.toml": "my settings", "CLAUDE.md": "my instructions",
                 "dashboard/config.toml": "my handles", "episodes/ep01/episode.json": "{}"}
@@ -323,6 +335,17 @@ class GitPullTest(unittest.TestCase):
         self.assertEqual((self.copy / "README.md").read_text(encoding="utf-8"), "1.1\n")
         self.assertEqual((self.copy / "CLAUDE.md").read_text(encoding="utf-8"), "my channel\n")
         self.assertEqual((self.copy / "AGENTS.md").read_text(encoding="utf-8"), "my channel\n")
+
+    def test_codex_settings_you_edited_dont_stop_it_and_stay(self):
+        (self.kit / ".codex").mkdir()
+        self.commit({".codex/config.toml": 'model_reasoning_effort = "high"\n'})
+        self.git(self.copy, "pull", "-q")
+        (self.copy / ".codex" / "config.toml").write_text('model_reasoning_effort = "xhigh"\n', encoding="utf-8")
+        self.commit({"README.md": "1.1\n"})
+        update._git_pull(self.copy, lambda *a: None)                # "You've changed files in this copy", before
+        self.assertEqual((self.copy / "README.md").read_text(encoding="utf-8"), "1.1\n")
+        self.assertEqual((self.copy / ".codex" / "config.toml").read_text(encoding="utf-8"),
+                         'model_reasoning_effort = "xhigh"\n')
 
     def test_other_changes_stop_it(self):
         (self.copy / "README.md").write_text("edited\n", encoding="utf-8")

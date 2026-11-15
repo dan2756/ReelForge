@@ -47,6 +47,9 @@ RESTART = 75  # the exit code that asks the reelforge launcher to start ReelForg
 KEEP = ("my-studio/", "episodes/", "completed videos/", "research/", "tools/", ".venv/", "ui/node_modules/", ".git/",
         ".claude/", "assets/sfx/mixkit/", "assets/sfx/_cache/", "dashboard/data/", "dashboard/videos/",
         "dashboard/config.toml", "CLAUDE.md", "AGENTS.md", "profiles/")
+# Shipped with the kit, and yours from then on: its own first lines invite you to edit it (the reasoning effort Codex
+# is asked for). An update puts one in place only where there is none.
+STARTERS = (".codex/config.toml",)
 VERSION_FILE = "studio/__init__.py"  # names this copy's version (read_version): an update puts it in place last
 BUSY_WAIT = 10.0  # seconds an update waits for a file another program has open (a virus scanner, another window)
 
@@ -300,9 +303,9 @@ def _copy_tree(src: Path, root: Path, progress: Progress) -> None:
     for i, f in enumerate(files, 1):
         rel = f.relative_to(src).as_posix()
         progress("Copying the new files", i, len(files))
-        if kept(rel) or (rel == VERSION_FILE and busy):
-            continue
         dest = root / rel
+        if kept(rel) or (rel in STARTERS and dest.exists()) or (rel == VERSION_FILE and busy):
+            continue
         tmp = dest.with_name(dest.name + ".rf-new")
         try:
             if dest.exists() and dest.stat().st_size == f.stat().st_size and dest.read_bytes() == f.read_bytes():
@@ -347,7 +350,7 @@ def _git_pull(root: Path, progress: Progress) -> None:
     changed = [p for p in diff.stdout.split("\0") if p]
     # Onboarding rewrites CLAUDE.md and AGENTS.md, which the kit ships as placeholders: they're set aside for the
     # pull and put back after it. Any other file you changed stops the update.
-    yours = {p: (root / p).read_bytes() for p in changed if kept(p) and (root / p).is_file()}
+    yours = {p: (root / p).read_bytes() for p in changed if (kept(p) or p in STARTERS) and (root / p).is_file()}
     if diff.returncode != 0 or any(p not in yours for p in changed):
         raise UpdateError("You've changed files in this copy (git status lists them). Commit or stash them, "
                           "then update again.")
