@@ -143,6 +143,39 @@ class FactoryReset(ResetScratch):
         self.assertTrue(profiles.main().onboarded)
         self.assertIsNone(reset.pending())   # it isn't tried again by surprise the next time ReelForge opens
 
+    def with_the_hourly_read(self, move=None, on_again=("on", "on")):
+        """A factory reset of a folder whose hourly stats read is on, with a stand-in for the scheduler. Returns
+        what the scheduler was asked in turn, each with whether the stats were still in place, and the reset."""
+        asked = []
+
+        def note(what, answer):
+            asked.append((what, (self.root / "dashboard/data/stats.db").is_file()))
+            return answer
+
+        with mock.patch("studio.stats_schedule.status", side_effect=on_again), \
+                mock.patch("studio.stats_schedule.disable", lambda: note("off", "Background stats are off.")), \
+                mock.patch("studio.stats_schedule.enable", lambda: note("on", "on again")), \
+                mock.patch.object(reset, "_wait_for_reads", lambda say: note("wait", None)), \
+                mock.patch.object(reset, "_move", side_effect=move or REAL_MOVE):
+            done = self.quiet(reset.factory_reset)
+        return asked, done
+
+    def test_the_hourly_read_goes_off_before_anything_moves(self):
+        """Turned off only afterwards, a read the scheduler started in between opened the stats as they went into
+        the backup, or made a new, empty store where they had been."""
+        asked, done = self.with_the_hourly_read()
+        self.assertEqual(asked, [("off", True), ("wait", True)])   # and it stays off: first-time setup turns it on
+        self.assertEqual(done.problems, [])
+        self.assertFalse((self.root / "dashboard/data").exists())
+
+    def test_one_that_changed_nothing_puts_the_hourly_read_back(self):
+        asked, done = self.with_the_hourly_read(move=in_use("dashboard/data"))
+        self.assertEqual(asked, [("off", True), ("wait", True), ("on", True)])
+        self.assertEqual((len(done.problems), done.unchanged), (1, True))
+        asked, done = self.with_the_hourly_read(move=in_use("dashboard/data"), on_again=("on", "off"))
+        self.assertIn("the hourly stats read is off now", done.problems[-1])   # it couldn't be: that is a change
+        self.assertFalse(done.unchanged)
+
     def test_in_a_terminal_reelforge_opens_again_on_settings_after_one_that_changed_nothing(self):
         reset.request("reset")
         with mock.patch.object(reset, "_move", side_effect=in_use("my-studio")), \
@@ -217,6 +250,16 @@ class Uninstall(ResetScratch):
         self.assertTrue((keep / "README.txt").is_file())
         self.assertFalse((self.root / "episodes/ep01_duck").exists())
         self.assertTrue((self.root / "dashboard/data/stats.db").is_file())   # goes to the bin with the folder
+
+    def test_a_read_under_way_finishes_before_the_folder_goes(self):
+        """The hourly read is off by then (which stops one it had just started); a read still under way, a window's
+        last one say, has the stats open and works by the folder's name."""
+        order = []
+        with mock.patch.object(reset, "system_off", side_effect=lambda say=print: order.append("off") or []), \
+                mock.patch.object(reset, "_wait_for_reads", side_effect=lambda say: order.append("wait")), \
+                mock.patch.object(reset, "bin_folder", side_effect=lambda kept, say=print: order.append("bin")):
+            self.quiet(reset.uninstall, False)
+        self.assertEqual(order, ["off", "wait", "bin"])
 
     def test_a_video_that_cant_be_moved_out_stops_it_and_changes_nothing(self):
         binned, turned_off = [], []

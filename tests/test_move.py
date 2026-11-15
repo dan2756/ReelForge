@@ -237,6 +237,59 @@ class AtOnce(MoveScratch):
         self.assertFalse((self.root / move.STATE).exists())
         self.assertIn("didn't move (in use)", self.said)
 
+    def with_the_hourly_read(self, rename=None, on_again=("on",)):
+        """Move a folder whose hourly stats read is on, with a stand-in for the scheduler. Returns what was done
+        in turn, each with the place ReelForge was in at that moment, and what go() answered."""
+        done = []
+        real = move.rename
+
+        def note(what, answer=None):
+            done.append((what, self.root if self.root.is_dir() else self.home))
+            return answer
+
+        def renamed(p, wait=10):
+            note("rename")
+            return rename or real(p, wait)
+
+        p = move.plan()
+        self.assertFalse(any(p.system.values()))   # STUDIO_DRY_SYSTEM: the tests' own plan never has a job
+        p.system["stats"] = True                   # as plan() finds it when the hourly job is this folder's
+        with mock.patch.object(P, "WINDOWS", False), mock.patch.object(P, "dry_system", lambda: False), \
+                mock.patch.object(move.subprocess, "run", self.finish_there), mock.patch.object(move.os, "chdir"), \
+                mock.patch.object(move, "rename", renamed), \
+                mock.patch.object(reset, "_wait_for_reads", lambda say: note("wait")), \
+                mock.patch("studio.stats_schedule.disable", lambda: note("off", "Background stats are off.")), \
+                mock.patch("studio.stats_schedule.enable", lambda: note("on", "stats ok")), \
+                mock.patch("studio.stats_schedule.status", side_effect=on_again):
+            answer = self.quiet(move.go, p)
+        return done, answer
+
+    def test_the_hourly_read_is_off_before_the_folder_is_renamed_and_on_again_from_the_new_place(self):
+        """A read the scheduler started as the folder was renamed ran from the old folder by name, and put a stub
+        of it back. So the job goes off first (which stops a read it has just started), a read under way gets its
+        time to finish, and only then is the folder renamed."""
+        done, answer = self.with_the_hourly_read()
+        self.assertEqual(answer, (0, True))
+        self.assertEqual(done, [("off", self.root), ("wait", self.root), ("rename", self.root), ("on", self.home)])
+        self.assertEqual(move.take_marker()["problems"], [])
+
+    def test_a_move_that_doesnt_happen_puts_the_hourly_read_back(self):
+        done, answer = self.with_the_hourly_read(rename="in use")
+        self.assertEqual(answer, (1, False))
+        self.assertEqual(done, [("off", self.root), ("wait", self.root), ("rename", self.root), ("on", self.root)])
+        self.assertIn("didn't move (in use), and nothing else changed.", self.said)
+        self.assertNotIn("hourly", self.said)
+        done, answer = self.with_the_hourly_read(rename="in use", on_again=("off",))   # ... and says so if it can't
+        self.assertIn("The hourly stats read is off now, and couldn't be turned on again: reelforge stats on does it.",
+                      self.said)
+
+    def test_a_folder_without_the_hourly_read_leaves_the_scheduler_alone(self):
+        with mock.patch("studio.stats_schedule.disable") as off, mock.patch("studio.stats_schedule.enable") as on:
+            code, moved, _ = self.go()
+        self.assertEqual((code, moved), (0, True))
+        off.assert_not_called()
+        on.assert_not_called()
+
     def test_a_move_that_doesnt_happen_leaves_the_settings_naming_the_folders_they_did(self):
         # A folder written in full inside ReelForge is pointed at the new place before the folder moves. When the
         # move then failed it stayed that way, and the Publish tab read a folder that doesn't exist.
@@ -277,6 +330,20 @@ class OnWindows(MoveScratch):
         state = json.loads((self.root / move.STATE).read_text(encoding="utf-8"))
         self.assertEqual((state["from"], state["to"], state["reopen"]), (str(self.root), str(self.home), True))
         self.assertIn("A small window moves ReelForge", self.said)
+
+    def test_the_hourly_read_stays_on_until_the_small_window_has_moved_the_folder(self):
+        """Windows can't rename a folder a read is running from, so the small window waits for one, and the job is
+        pointed at the new place once the folder is there. Taken off here, it would stay off if the folder never
+        came free."""
+        p = move.plan()
+        p.system["stats"] = True
+        with mock.patch.object(P, "WINDOWS", True), mock.patch.object(move.subprocess, "Popen") as popen, \
+                mock.patch("studio.stats_schedule.disable") as off:
+            self.assertEqual(self.quiet(move.go, p, pause=False), (0, False))
+        args = popen.call_args.args[0]
+        self.addCleanup(lambda: Path(args[args.index("-File") + 1]).unlink(missing_ok=True))
+        off.assert_not_called()
+        self.assertTrue(json.loads((self.root / move.STATE).read_text(encoding="utf-8"))["system"]["stats"])
 
     @unittest.skipUnless(sys.platform == "win32", "the small window is PowerShell, on Windows")
     def test_the_small_window_waits_for_the_folder_then_moves_it_and_finishes_from_there(self):
