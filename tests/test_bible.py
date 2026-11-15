@@ -67,6 +67,42 @@ class Slate(Scratch):
         self.assertIn("- a supervolcano *(suggested)*", ideas)
         self.assertTrue(all(ln.endswith("*(suggested)*") for ln in ideas[5:]))
 
+    def test_a_new_idea_is_added_though_another_idea_has_its_words(self):
+        # an idea counted as there already when its words stood anywhere in the slate, so these two never arrived
+        text = self.bible().replace("- a snowball\n", "- ~~the Moon landing~~ (ep02)\n")
+        P.BIBLE.write_text(text, encoding="utf-8")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**self.answers(), "subjects": "a jump's height\na snowball\nthe Moon"})
+        # "a snowball rolling downhill" is the format's suggestion, "the Moon landing" one the AI added and used
+        self.assertEqual(self.slate()[:5], ["- a jump's height", "- ~~the Moon landing~~ (ep02)", "- a snowball",
+                                            "- the Moon", "- a snowball rolling downhill *(suggested)*"])
+        # and an idea is the same one however it's marked: none of these comes back as new
+        for marked in ("- ~~a snowball~~", "- ~~a snowball~~ ep03, 2M views", "- a snowball (ep03)",
+                       "- [x] A Snowball"):
+            with self.subTest(marked=marked):
+                P.BIBLE.write_text(self.bible().replace(self.slate()[2] + "\n", marked + "\n"), encoding="utf-8")
+                with redirect_stdout(io.StringIO()):
+                    generate.write_all(self.answers())
+                self.assertEqual(self.slate()[:4], ["- a jump's height", "- ~~the Moon landing~~ (ep02)", marked,
+                                                    "- the Moon"])
+
+    def test_an_idea_you_take_out_of_your_answers_leaves_the_slate_unless_its_been_marked(self):
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**self.answers(), "subjects": "a jump's height\na snowball\na volcano"})
+        self.ai_edits()                                             # a snowball is marked used
+        # The slate kept every idea of yours for good once it was on it, so `reelforge channel` could no longer
+        # take one off, and your AI went on picking it. The answers file edited in place counts too: what you had
+        # listed before is read from studio.toml, which still has it.
+        P.ANSWERS.write_text(json.dumps({**self.answers(), "subjects": "a jump's height"}), encoding="utf-8")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all(self.answers())
+        self.assertEqual(self.slate()[:4], ["- a jump's height", "- ~~a snowball~~ (ep01)", "- the Moon's distance",
+                                            "- a snowball rolling downhill *(suggested)*"])
+        self.assertNotIn("- a volcano", self.slate())               # untouched, and no longer in your answers
+        with redirect_stdout(io.StringIO()):
+            generate.write_all(self.answers())                      # again: what the AI added is never taken out
+        self.assertEqual(self.slate()[:3], ["- a jump's height", "- ~~a snowball~~ (ep01)", "- the Moon's distance"])
+
     def test_writing_it_again_unchanged_keeps_no_copy(self):
         self.ai_edits()
         text = self.bible()

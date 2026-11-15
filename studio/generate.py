@@ -328,19 +328,31 @@ def _slate(bible: str) -> tuple[int, int]:
     return (head.end() + idea.start() if idea else end), end
 
 
-def _keep_yours(old: str, new: str) -> str:
+def _idea(line: str) -> str:
+    """The idea a slate line holds, without what's marked on it: "- ~~a snowball~~ (ep03)", "- [x] a snowball" and
+    "- a snowball *(suggested)*" all hold "a snowball"."""
+    text = re.sub(r"^[-*] (\[.\] )?", "", line.removesuffix(SUGGESTED))
+    struck = re.search(r"~~(.+?)~~", text)
+    text = re.sub(r"(\s*\([^()]*\))+$", "", (struck.group(1) if struck else text).rstrip())
+    return " ".join(text.split()).casefold()
+
+
+def _keep_yours(old: str, new: str, taken_out: list[str] | None = None) -> str:
     """A newly rendered channel bible with what your AI keeps in it carried over from the old one: the slate (its
     ideas in their order, with whatever was added or marked on them) and the research notes. The slate still gains an
     idea the new answers bring (yours ahead of the format's suggestions), and loses a suggestion nobody touched that
-    the format no longer makes. An idea counts as there already when a line has its words, however it's marked
-    ("~~a snowball~~ (ep03)"), so marking one used never brings it back as new."""
+    the format no longer makes, and an idea of yours nobody touched that you've taken out of your answers
+    (taken_out). An idea counts as there already when a line holds that very idea, however it's marked (_idea), so
+    marking one used never brings it back as new. A line that only has its words in it ("a snowball rolling
+    downhill" for "a snowball") is another idea."""
     (a, b), (c, d) = _slate(old), _slate(new)
     if a >= 0 and c >= 0:
         fresh = new[c:d].rstrip().splitlines()
-        ideas = [ln for ln in old[a:b].rstrip().splitlines() if not ln.endswith(SUGGESTED) or ln in fresh]
-        have = "\n".join(ideas).casefold()
-        more = [ln for ln in fresh if not re.search(
-            r"(?<![\w'])" + re.escape(ln.removeprefix("- ").removesuffix(SUGGESTED).casefold()) + r"(?![\w'])", have)]
+        gone = {f"- {x}" for x in taken_out or ()}
+        ideas = [ln for ln in old[a:b].rstrip().splitlines()
+                 if ln not in gone and (not ln.endswith(SUGGESTED) or ln in fresh)]
+        have = {_idea(ln) for ln in ideas}
+        more = [ln for ln in fresh if _idea(ln) not in have]
         first = next((i for i, ln in enumerate(ideas) if ln.endswith(SUGGESTED)), len(ideas))
         ideas[first:first] = [ln for ln in more if not ln.endswith(SUGGESTED)]
         ideas += [ln for ln in more if ln.endswith(SUGGESTED)]
@@ -382,7 +394,12 @@ def write_all(answers: dict, profile=None) -> list[Path]:
     bible = render("channel-bible.md.j2", context(a, s, "claude", w.profile))
     old = w.bible.read_text(encoding="utf-8", errors="replace") if w.bible.exists() else None
     if old is not None:
-        bible = _keep_yours(old, bible)
+        try:    # studio.toml isn't written again yet, so it still lists the ideas of the answers before these
+            before = S.load(w.settings)["format"]["subjects"]
+        except (OSError, ValueError):
+            before = []
+        taken_out = [x for x in before if x not in s["format"]["subjects"]] if isinstance(before, list) else []
+        bible = _keep_yours(old, bible, taken_out)
     out(w.bible, bible)
     _guides(a, s, w, out)
     log = w.completed / "production-log.md"
