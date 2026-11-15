@@ -250,6 +250,31 @@ class RefreshTest(StoreTest):
                                         "again at the next one."])
         self.assertEqual(broke.details, ["the refresh stopped: OperationalError: database is locked"])
 
+    def test_a_platform_that_needs_a_log_in_keeps_its_own_sentence_in_the_pop_up(self):
+        """X logged ReelForge's browser out and YouTube couldn't be reached: the one pop-up used to say "X and
+        YouTube weren't read this time. ReelForge tries again at the next refresh." X isn't read again until you
+        log in."""
+        class LoggedOut(Fake):
+            def fetch(self):
+                raise PlatformError(f"{self.name} logged ReelForge's browser out. Log in again on the Accounts tab.",
+                                    needs_login=True)
+
+        again = "ReelForge tries again at the next refresh."
+        log_in = "X: X logged ReelForge's browser out. Log in again on the Accounts tab."
+        ps = {"x": LoggedOut("x", "X"), "youtube": Unreachable("youtube", "YouTube")}
+        result = sync.refresh(ps, self.cfg)
+        self.assertEqual(result.failed, {"X": "login", "YouTube": "offline"})
+        self.assertEqual(sync.sum_up(result),
+                         f"{log_in} YouTube couldn't be reached (is this computer online?). {again}")
+        ps = {"tiktok": Fake("tiktok", "TikTok", error="TikTok didn't load @me's profile"), **ps}
+        result = sync.refresh(ps, self.cfg, True, True)
+        self.assertEqual(sync.sum_up(result), f"{log_in} TikTok and YouTube weren't read this time. {again} Each "
+                                              "one's panel on the Accounts tab says why.")
+        ps = {"instagram": LoggedOut("instagram", "Instagram"), "x": ps["x"]}  # both: each says so, nothing else
+        self.assertEqual(sync.sum_up(sync.refresh(ps, self.cfg, True, True)),
+                         "Instagram: Instagram logged ReelForge's browser out. Log in again on the Accounts tab. "
+                         + log_in)
+
     def test_the_change_count_goes_up_once_per_read_that_saved_something(self):
         ps = self.fakes()
         self.assertEqual(db.changes(), 0)

@@ -51,7 +51,9 @@ class Result:
     busy: bool = False         # another ReelForge was reading: this one left it to that one, or stopped waiting
     waited: str | None = None  # who this one waited for (WHO), when it had to
     changes: int | None = None  # the store's change count (db.bump) once this read was saved
-    failed: dict[str, str] = field(default_factory=dict)  # each platform that wasn't read: name -> kind (base.KINDS)
+    # Each platform that wasn't read: name -> kind (base.KINDS, "said" for one that says why itself, or "login" for
+    # one that isn't read again until you've logged in).
+    failed: dict[str, str] = field(default_factory=dict)
     details: list[str] = field(default_factory=list)  # every error's own words, for data/refresh.log (see log)
 
 
@@ -72,19 +74,21 @@ def listed(names: list[str]) -> str:
 
 def sum_up(result: Result) -> str:
     """Everything that went wrong in a refresh as one message, for one pop-up: the one sentence there is, or the
-    platforms that weren't read named together (why each wasn't is on its panel on the Accounts tab)."""
+    platforms that weren't read named together (why each wasn't is on its panel on the Accounts tab). A platform
+    that needs a log-in keeps its own sentence: "ReelForge tries again at the next refresh" isn't true of it."""
     if len(result.errors) <= 1:
         return "".join(result.errors)
-    said = result.errors[len(result.failed):]  # what isn't about one platform
-    kinds = set(result.failed.values())
-    if len(result.failed) == 1:
-        said.insert(0, result.errors[0])
+    own = dict(zip(result.failed, result.errors))  # each platform's own sentence
+    said = [own[name] for name, kind in result.failed.items() if kind == "login"]
+    again = [name for name, kind in result.failed.items() if kind != "login"]  # read again by the next refresh
+    kinds = {result.failed[name] for name in again}
+    if len(again) == 1:
+        said.append(own[again[0]])
     elif len(kinds) == 1 and kinds <= {"slow", "offline", "busy"}:  # no internet, say: every platform the same way
-        said.insert(0, KINDS[kinds.pop()].format(name=listed(list(result.failed))))
-    elif result.failed:
-        said.insert(0, f"{listed(list(result.failed))} weren't read this time. {AGAIN} Each one's panel on the "
-                       "Accounts tab says why.")
-    return " ".join(said)
+        said.append(KINDS[kinds.pop()].format(name=listed(again)))
+    elif again:
+        said.append(f"{listed(again)} weren't read this time. {AGAIN} Each one's panel on the Accounts tab says why.")
+    return " ".join(said + result.errors[len(result.failed):])  # ... then what isn't about one platform
 
 
 LOG_LINES = 200  # how many lines data/refresh.log keeps
@@ -367,9 +371,10 @@ def _refresh(platforms: dict[str, Platform], cfg: dict, manual: bool, force: boo
                     kind, msg = kind_of(error), explain(error, p.name)
                     last_errors[p.key] = (db.now_iso(), msg)
                     errors.append(f"{p.name}: {msg}" if kind == "said" else msg)
-                    failed[p.name] = kind
+                    needs_login = getattr(error, "needs_login", False)
+                    failed[p.name] = "login" if needs_login else kind
                     details.append(f"{p.name}: {detail(error)}")
-                    if getattr(error, "needs_login", False):
+                    if needs_login:
                         _tell(lambda: notify.add("login", f"Log in to {p.name} again", msg, key=f"login:{p.key}"))
                     continue
                 last_errors.pop(p.key, None)
