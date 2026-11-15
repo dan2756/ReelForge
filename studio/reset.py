@@ -28,6 +28,10 @@ there. It renames the folder into the Recycle Bin and writes the bin's record of
 delete calls quietly delete a folder too big for the bin for good. A test copy (TEST-COPY.txt) or STUDIO_DRY_SYSTEM=1
 leaves the computer's settings alone; a git copy of ReelForge (one you work on) can't be uninstalled from inside.
 
+Neither can reach into your browser. With a browser connected to the extension (docs/EXTENSION.md), each says the
+one thing that leaves for you to do there, before and after: connect it again after a reset, remove the extension
+yourself after an uninstall.
+
 Standard library only.
 """
 
@@ -57,6 +61,15 @@ BIN = "Recycle Bin" if P.WINDOWS else "Trash"
 BOOTSTRAP_MARK = "reelforge-bootstrap"       # the same as studio.generate.BOOTSTRAP_MARK: first-time setup's to replace
 INNO_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{39D29FF3-A243-4140-8CD2-E69CC877A496}_is1"
 EMPTY = {".gitkeep", "README.md"}            # what a fresh download's episodes/, completed videos/ and research/ hold
+# With a browser connected to the extension: what a reset and an uninstall leave for you to do in it, as each says
+# it before and after (and only then: browsers_connected).
+EXTENSION_RESET = (" The browser extension stays in your browser, and has to be connected again afterwards.",
+                   "Your browser is no longer connected to the extension: connect it again on Publish, or with "
+                   "reelforge extension pair.")
+EXTENSION_UNINSTALL = (" Uninstalling can't take the extension out of your browser: remove it yourself, on your "
+                       "browser's extensions page.",
+                       "Uninstalling didn't take the extension out of your browser: remove it yourself, on your "
+                       "browser's extensions page.")
 
 
 def _same(a: Path, b: Path) -> bool:
@@ -164,6 +177,18 @@ def git_copy() -> bool:
     return (ROOT / ".git").exists()
 
 
+def browsers_connected() -> int:
+    """How many browsers are connected to the extension, counted as dashboard/extension_api.py counts them: the
+    entries under "paired" in dashboard/data/extension.json, one file for every channel of this folder. 0 while
+    there is no such file or it can't be read. Only the number is used: nothing in the file is ever shown."""
+    try:
+        store = json.loads((ROOT / "dashboard" / "data" / "extension.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    listed = store.get("paired") if isinstance(store, dict) else None
+    return len([b for b in listed if isinstance(b, dict)]) if isinstance(listed, list) else 0
+
+
 def confirm_word(profile: profiles.Profile | None = None) -> str:
     """What you type to confirm: the channel's name (the one on the profile button)."""
     return (profile or profiles.current()).name
@@ -202,10 +227,11 @@ def reset_items() -> list[tuple[Path, str]]:
 def reset_keeps() -> tuple[str, str]:
     """What a factory reset leaves where it is, the dialog's and the command's last word on it: (the gist, the rest)."""
     rest = " (episodes and completed videos), and so do Blender, ffmpeg and the sounds, so nothing is downloaded again."
+    again = EXTENSION_RESET[0] if browsers_connected() else ""   # its connections go into the backup with the stats
     if profiles.extra():
         return "Your first channel's videos stay where they are", rest + (" Your other channels go into the backup "
-                                                                          "whole, videos included.")
-    return "Your videos stay where they are", rest
+                                                                          "whole, videos included.") + again
+    return "Your videos stay where they are", rest + again
 
 
 def bootstrap_note(when: str, backup: str) -> str:
@@ -287,6 +313,7 @@ def factory_reset(say=print) -> Done:
     off the hourly stats read (first-time setup turns it on again). The first channel's videos stay."""
     done = Done()
     items = reset_items()
+    browsers = browsers_connected()   # counted now: the file that lists them is about to go into the backup
     dest = _free(BACKUPS, f"factory-reset-{_stamp()}")
     for path, what in items:
         say(f"  {P.rel(path)}: {what}")
@@ -329,6 +356,8 @@ def factory_reset(say=print) -> Done:
     if unchecked:
         done.lines.append(unchecked)
     done.lines.append(f"Everything it cleared is in {P.rel(dest)}." if items else "There was nothing to clear.")
+    if browsers:
+        done.lines.append(EXTENSION_RESET[1])
     return done
 
 
@@ -430,7 +459,8 @@ def uninstall_info() -> dict:
     plan = keep_plan()
     return {
         "root": str(ROOT), "bin": BIN, "keep_to": str(keep_folder()), "git": git_copy(),
-        "test": P.test_copy(), "system": system_sentence(),
+        # (the extension in a connected browser is one more thing outside the folder, and the one left to you)
+        "test": P.test_copy(), "system": system_sentence() + (EXTENSION_UNINSTALL[0] if browsers_connected() else ""),
         "videos": sum(k.files for k in plan), "videos_size": fmt_size(sum(k.bytes for k in plan)),
         "outside": [str(f) for k in plan for f in k.outside],
         "channels": [{"name": k.profile.name, "folders": [P.rel(f) for f in k.folders]} for k in plan if k.folders],
@@ -649,6 +679,7 @@ def uninstall(keep: bool = True, say=print) -> Done:
     """Everything uninstall does, in order: the videos you're keeping (when they can't all be moved out, it stops
     there and nothing has changed), the computer's settings, then the folder."""
     done = Done()
+    browsers = browsers_connected()   # counted now: the file that lists them goes to the bin with the folder
     if keep:
         say("Keeping your videos and channels...")
         kept = keep_videos(say)
@@ -664,6 +695,8 @@ def uninstall(keep: bool = True, say=print) -> Done:
     err = bin_folder(done.where, say)
     if err:
         done.problems.append(err)
+    elif browsers:
+        done.lines.append(EXTENSION_UNINSTALL[1])
     return done
 
 

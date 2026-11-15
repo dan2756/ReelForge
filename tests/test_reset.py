@@ -1,7 +1,8 @@
 """Factory reset and uninstall (studio/reset.py), in a scratch ReelForge folder: what each moves and where, that videos
 are kept and nothing is deleted, that something in use leaves everything as it was, the name you type, a git copy
-refusing to uninstall, and the window asking for either (the launcher does it at once, or never). The Settings tab
-itself is tested in ui/test/settings.test.tsx."""
+refusing to uninstall, the window asking for either (the launcher does it at once, or never), and what each says
+about the browser extension while a browser is connected. The Settings tab itself is tested in
+ui/test/settings.test.tsx."""
 
 import io
 import json
@@ -220,6 +221,84 @@ class FactoryReset(ResetScratch):
         self.assertTrue(reset.matches("night  PHYSICS "))
         self.assertFalse(reset.matches("Night"))
         self.assertFalse(reset.matches(""))
+
+
+class WithABrowserConnected(ResetScratch):
+    """Neither can reach into the browser, so with a browser connected to the extension each says the one thing
+    left for you to do there, before and after. With none connected, neither says a word about it."""
+
+    HASH = "ab" * 32   # what the connections file keeps of a browser's token: never shown
+
+    def connect(self) -> None:
+        from dashboard import extension_api
+
+        extension_api.change_store(lambda s: s["paired"].append({"install": "chrome", "name": "Chrome on this PC",
+                                                                 "token_sha256": self.HASH}))
+
+    def said(self, fn, *args) -> str:
+        with redirect_stdout(io.StringIO()) as out:
+            fn(*args)
+        self.assertNotIn(self.HASH, out.getvalue())
+        return out.getvalue()
+
+    def reset_command(self) -> str:
+        with mock.patch.object(reset, "_interactive", return_value=False):
+            return self.said(reset.reset_main, ["--yes"])
+
+    def uninstall_command(self, binned: str | None = None) -> str:
+        keep = reset.keep_folder()
+        self.addCleanup(lambda: __import__("shutil").rmtree(keep, ignore_errors=True))
+        with mock.patch.object(reset, "system_off", return_value=[]), \
+                mock.patch.object(reset, "bin_folder", return_value=binned):
+            return self.said(reset.uninstall_main, ["--yes"])
+
+    def test_a_reset_says_to_connect_it_again(self):
+        self.assertEqual(reset.browsers_connected(), 0)
+        self.connect()
+        self.assertEqual(reset.browsers_connected(), 1)
+        before = " The browser extension stays in your browser, and has to be connected again afterwards."
+        self.assertTrue("".join(reset.reset_keeps()).endswith(before))   # the dialog's and the command's last word
+        said = self.reset_command()
+        self.assertIn(f"videos included.{before} Close every other ReelForge window first.\n", said)
+        self.assertIn("\nYour browser is no longer connected to the extension: connect it again on Publish, or with "
+                      "reelforge extension pair.\n", said)
+        self.assertEqual(reset.browsers_connected(), 0)   # its file went into the backup with the stats
+
+    def test_a_reset_that_changed_nothing_leaves_the_browser_connected_and_says_nothing_after(self):
+        self.connect()
+        with mock.patch.object(reset, "_move", side_effect=in_use("dashboard/data")):
+            said = self.reset_command()
+        self.assertIn("didn't happen, and nothing was changed", said)
+        self.assertNotIn("no longer connected", said)
+        self.assertEqual(reset.browsers_connected(), 1)
+
+    def test_an_uninstall_says_to_remove_the_extension_yourself(self):
+        self.connect()
+        before = (" Uninstalling can't take the extension out of your browser: remove it yourself, on your browser's "
+                  "extensions page.")
+        self.assertTrue(reset.uninstall_info()["system"].endswith(f"are left alone.{before}"))   # (STUDIO_DRY_SYSTEM)
+        said = self.uninstall_command()
+        self.assertIn(before + "\n", said)
+        self.assertTrue(said.endswith("\nUninstalling didn't take the extension out of your browser: remove it "
+                                      "yourself, on your browser's extensions page.\n"))
+
+    def test_an_uninstall_that_didnt_finish_doesnt_say_it_is_over(self):
+        self.connect()
+        said = self.uninstall_command(binned="couldn't move it to the Trash")
+        self.assertIn("Uninstalling didn't finish:", said)
+        self.assertNotIn("didn't take the extension out", said)
+
+    def test_with_no_browser_connected_neither_mentions_the_extension(self):
+        self.assertNotIn("extension", "".join(reset.reset_keeps()))
+        self.assertNotIn("extension", reset.uninstall_info()["system"])
+        self.assertNotIn("extension", self.uninstall_command())
+        self.assertNotIn("extension", self.reset_command())
+        # ... and a connections file with nobody in it, or one that can't be read, connects nothing
+        store = self.root / "dashboard" / "data" / "extension.json"
+        for text in ('{"app_id": "x", "paired": []}', '{"paired": "chrome"}', "[]", "{not json"):
+            store.parent.mkdir(parents=True, exist_ok=True)
+            store.write_text(text, encoding="utf-8")
+            self.assertEqual(reset.browsers_connected(), 0, text)
 
 
 class Uninstall(ResetScratch):

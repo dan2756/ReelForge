@@ -18,6 +18,10 @@ folder that syncs) moves there in one step on the same drive, so nothing is copi
      ReelForge's icon, Windows Terminal's ReelForge profile and the hourly stats read, each only if it was this
      folder's. The window that opens next says where ReelForge is now.
 
+One thing can't follow it: the browser extension (docs/EXTENSION.md), which your browser loads from the folder by
+its old place. With a browser connected, the move says before and after that the extension has to be loaded again
+from the new folder.
+
 It doesn't move a test copy (TEST-COPY.txt: it never changes the computer), a git copy (one being worked on), a copy
 the old Windows installer made (Windows' list of apps knows it by its folder), one on another drive (that would mean
 copying everything: copy it yourself, then run setup in the copy), or into a folder with something in it. Your AI's
@@ -47,6 +51,9 @@ STATE = ".reelforge-moving.json"   # in the folder while it moves: where to, and
 MARKER = Path("dashboard") / "data" / "moved.json"   # once it has moved: the next window says so, once
 KEYS = ("videos_dir", "episodes_dir", "completed_dir")   # dashboard/config.toml's folders (see dashboard/config.py)
 STALE = 86400   # seconds after which the note of a move that never happened is tidied away
+# With a browser connected to the extension, what the move leaves for you to do in it, as it is said beforehand.
+EXTENSION_BEFORE = ("After the move, load the browser extension again from the new folder, and connect it again if it "
+                    "then says it isn't connected.")
 
 
 def home() -> Path:
@@ -155,13 +162,16 @@ class Plan:
     configs: list[tuple[Path, dict[str, str]]] = field(default_factory=list)  # config.toml -> {key: its full path}
     outside: list[Path] = field(default_factory=list)   # the folders the Publish tab reads outside ReelForge (stay)
     system: dict[str, bool] = field(default_factory=dict)
+    browsers: int = 0   # connected to the extension: each has to load it again from the new folder
     was: list[tuple[Path, str]] = field(default_factory=list)   # each config.toml prepare() rewrote, as it was before
 
 
 def plan(target: Path | None = None) -> Plan:
     """The move to target (its own folder, by default)."""
+    from . import reset
+
     target = Path(os.path.abspath(str(target or home())))
-    out = Plan(ROOT, target, system=_system())
+    out = Plan(ROOT, target, system=_system(), browsers=reset.browsers_connected())
     for p in profiles.every():
         cfg, change = _toml(p.config), {}
         for key in KEYS:
@@ -206,7 +216,16 @@ def summary(p: Plan) -> list[str]:
     if p.outside:
         lines.append("The Publish tab's folders outside ReelForge stay where they are:")
         lines += [f"  {f}" for f in p.outside]
+    if p.browsers:
+        lines.append(EXTENSION_BEFORE)
     return lines
+
+
+def extension_again(new: Path) -> str:
+    """After a move with a browser connected to the extension: the one thing left for you to do, with the folder to
+    pick."""
+    return (f"Load the browser extension again from {new / 'extension'} (Load unpacked on your browser's extensions "
+            "page), and connect it again if it then says it isn't connected.")
 
 
 # ---------------------------------------------------------------- doing it
@@ -501,11 +520,16 @@ def finish(say=print) -> int:
                     problems.append(f"{name} ({e})")
     if problems:
         say("These couldn't follow it: " + "; ".join(problems) + ". Run setup in the new folder to fix them.")
+    from . import reset
+
+    again = extension_again(new) if reset.browsers_connected() else ""   # (the file that lists them moved along)
+    if again:
+        say(again)
     try:
         marker = ROOT / MARKER
         marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(json.dumps({"from": str(old), "to": str(new), "ts": time.time(), "problems": problems}),
-                          encoding="utf-8")
+        marker.write_text(json.dumps({"from": str(old), "to": str(new), "ts": time.time(), "problems": problems,
+                                      "extension": again}), encoding="utf-8")
         state.unlink()
     except OSError:
         pass
@@ -513,7 +537,8 @@ def finish(say=print) -> int:
 
 
 def take_marker(root: Path | None = None) -> dict | None:
-    """Where the last move took ReelForge ({from, to, problems}), once: the next window says so."""
+    """Where the last move took ReelForge ({from, to, problems, extension}), once: the next window says so.
+    extension: the sentence about loading the extension again, "" when no browser is connected."""
     marker = (root or ROOT) / MARKER
     try:
         data = json.loads(marker.read_text(encoding="utf-8"))

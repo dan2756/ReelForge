@@ -430,6 +430,8 @@ class SettingsTab:
         note.append("\n\nReelForge closes, the folder moves" + (" (a small window does it, and waits while anything "
                     "still has a file in it open)" if desktop.WINDOWS else "") + ", and ReelForge opens again from its "
                     "new folder. If you open it in Claude Code or Codex, open the new folder from now on.", MUTED)
+        if p.browsers:   # connected to the extension, which each of them loads from this folder
+            note.append(f" {move.EXTENSION_BEFORE}", MUTED)
         return {"note": note.json(), "to": str(p.target), "problem": problem}
 
     @rpc

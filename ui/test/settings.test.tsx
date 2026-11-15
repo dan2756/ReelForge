@@ -7,7 +7,7 @@
 
 import { TextAttributes } from "@opentui/core"
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { headless, type Headless } from "../scripts/headless"
@@ -473,6 +473,36 @@ describe("the danger zone on a channel that's set up", () => {
     expect(asked()?.to).toMatch(/-home[\\/]ReelForge$/)
     expect(h.exits.map((e) => e.code)).toEqual([75]) // the launcher starts the move as it starts ReelForge again
     expect(existsSync(join(tmp, "my-studio", "answers.json"))).toBe(true) // nothing moved by the window itself
+  })
+
+  test("with a browser connected to the extension, each dialog says the one thing that leaves for you to do in it", async () => {
+    const h = await settings()
+    /** What a dialog says: the words inside its box, as one line. */
+    const said = async (button: string, title: string) => {
+      await clickText(h, button)
+      await until(h, title)
+      const rows = frame(h).split("\n").map((r) => [...r])
+      const top = rows.findIndex((r, y) => y > 3 && r.includes("╭")) // (the header has the Publish button's box)
+      const [left, right] = [rows[top]!.indexOf("╭"), rows[top]!.lastIndexOf("╮")]
+      const bottom = rows.findIndex((r, y) => y > top && r[left] === "╰")
+      await clickText(h, "Cancel")
+      await h.settle(500)
+      return rows.slice(top + 1, bottom).map((r) => r.slice(left + 1, right).join("")).join(" ").replace(/\s+/g, " ")
+    }
+    // Nobody connected: not a word about it (the dialogs are long enough).
+    for (const [button, title] of [["Move…", "MOVE REELFORGE"], ["Factory reset…", "FACTORY RESET"], ["Uninstall…", "UNINSTALL REELFORGE"]] as const)
+      expect(await said(button, title)).not.toContain("extension")
+    // (Each dialog shows all it says. Uninstall's indented lines were counted a row short, and its last row went
+    // under a scrollbar: "... and ReelForge in your app menu are left alone.")
+    expect(await said("Uninstall…", "UNINSTALL REELFORGE")).toContain("are left alone. Your videos and channels")
+    // A browser connects (dashboard/extension_api.py's file, as it writes one; only its SHA-256 of the token is kept).
+    mkdirSync(join(tmp, "dashboard", "data"), { recursive: true })
+    writeFileSync(join(tmp, "dashboard", "data", "extension.json"), JSON.stringify({ app_id: "a", extension_ids: [], paired: [{ install: "chrome", name: "Chrome on this PC", token_sha256: "ab".repeat(32) }] }))
+    expect(await said("Move…", "MOVE REELFORGE")).toContain("After the move, load the browser extension again from the new folder, and connect it again if it then says it isn't connected.")
+    expect(await said("Factory reset…", "FACTORY RESET")).toContain("The browser extension stays in your browser, and has to be connected again afterwards.")
+    const uninstall = await said("Uninstall…", "UNINSTALL REELFORGE")
+    expect(uninstall).toContain("Uninstalling can't take the extension out of your browser: remove it yourself, on your browser's extensions page.")
+    expect(uninstall).not.toContain("abab")
   })
 
   test(`Open in ${FILES} beside ReelForge's folder opens that folder`, async () => {

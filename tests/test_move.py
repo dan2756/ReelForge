@@ -2,8 +2,9 @@
 ReelForge folder on a "Desktop", its own folder waiting in a "home" folder, and video folders outside it. What stops a
 move, the Publish tab's outside folders written in full so they name the same places, the rename done at once (macOS,
 Linux) or by the small window once ReelForge has closed (Windows: the script itself is run here too), what follows the
-folder, a move that never finished, and the window asking for one (the launcher starts it). The Settings tab's row and
-dialog are tested in dashboard/tests/test_settings.py and ui/test/settings.test.tsx."""
+folder, a move that never finished, the window asking for one (the launcher starts it), and what it says about the
+browser extension while a browser is connected. The Settings tab's row and dialog are tested in
+dashboard/tests/test_settings.py and ui/test/settings.test.tsx."""
 
 import io
 import json
@@ -27,6 +28,15 @@ from studio import paths as P
 from test_profiles import ANSWERS
 
 KIT = Path(__file__).resolve().parent.parent
+TOKEN_HASH = "ab" * 32   # what the connections file keeps of a browser's token: never shown
+
+
+def connect_a_browser() -> None:
+    """A browser connected to the extension, as dashboard/extension_api.py files one."""
+    from dashboard import extension_api
+
+    extension_api.change_store(lambda s: s["paired"].append({"install": "chrome", "name": "Chrome on this PC",
+                                                             "token_sha256": TOKEN_HASH}))
 
 
 class MoveScratch(unittest.TestCase):
@@ -160,6 +170,19 @@ class WhereItGoes(MoveScratch):
         self.assertIn(f"  {self.box / 'rendered' / 'episodes'}", lines)
         self.assertEqual(move.follows({"command": True, "stats": True}), ["the reelforge command",
                                                                           "the hourly stats read"])
+
+    def test_with_a_browser_connected_it_says_the_extension_has_to_be_loaded_again(self):
+        # The browser loads the extension from the folder, by its old place: the one thing that can't follow it.
+        self.assertEqual(move.plan().browsers, 0)
+        self.assertNotIn("extension", "\n".join(move.summary(move.plan())))   # nothing to do, so nothing is said
+        connect_a_browser()
+        p = move.plan()
+        self.assertEqual(p.browsers, 1)
+        self.assertEqual(move.summary(p)[-1], "After the move, load the browser extension again from the new folder, "
+                                              "and connect it again if it then says it isn't connected.")
+        self.assertNotIn(TOKEN_HASH, "\n".join(move.summary(p)))
+        (self.root / "dashboard" / "data" / "extension.json").write_text("{not json", encoding="utf-8")
+        self.assertEqual(move.plan().browsers, 0)   # a file that can't be read connects nothing
 
 
 MOVE_HOME = move.home   # the real one (the tests patch it)
@@ -407,6 +430,35 @@ class Finish(MoveScratch):
         self.assertIn(f"ReelForge is in {self.home} now.", self.said)
         self.assertFalse((self.home / move.STATE).exists())
         self.assertEqual(move.take_marker()["problems"], [])
+
+    def test_with_a_browser_connected_it_says_where_to_load_the_extension_from_and_so_does_the_next_window(self):
+        from dashboard import service
+
+        connect_a_browser()
+        self.moved({})
+        self.assertEqual(self.quiet(move.finish), 0)
+        again = (f"Load the browser extension again from {self.home / 'extension'} (Load unpacked on your browser's "
+                 "extensions page), and connect it again if it then says it isn't connected.")
+        self.assertEqual(self.said.splitlines(), [f"ReelForge is in {self.home} now.", again])
+        # The window that opens next: its pop-up, and the notification that stays once the pop-up has gone.
+        window = mock.Mock(demo=False, _safe=lambda fn, default=None: fn())
+        with mock.patch.object(service.notify, "add") as kept:
+            service.Dashboard.say_moved(window)
+        self.assertTrue(window.notify.call_args.args[0].endswith(f"open this folder from now on. {again}"))
+        self.assertEqual(kept.call_args.args[2], f"From {self.root} to {self.home}. {again}")
+        self.assertIsNone(move.take_marker())   # said once
+
+    def test_with_no_browser_connected_nothing_is_said_about_the_extension(self):
+        from dashboard import service
+
+        self.moved({})
+        self.assertEqual(self.quiet(move.finish), 0)
+        self.assertEqual(self.said.splitlines(), [f"ReelForge is in {self.home} now."])
+        window = mock.Mock(demo=False, _safe=lambda fn, default=None: fn())
+        with mock.patch.object(service.notify, "add") as kept:
+            service.Dashboard.say_moved(window)
+        self.assertTrue(window.notify.call_args.args[0].endswith("open this folder from now on."))
+        self.assertEqual(kept.call_args.args[2], f"From {self.root} to {self.home}.")
 
     def test_what_couldnt_follow_it_is_said(self):
         self.moved({"stats": True})
