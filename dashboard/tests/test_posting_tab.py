@@ -634,6 +634,10 @@ class ExtensionView(PostingTest):
         self.assertEqual((install["install"], install["name"], install["version"], install["on"]),
                          (CHROME, "Chrome on this PC", "0.1.0", True))
         self.assertNotIn("token_sha256", install)  # nothing of the secret goes to the window
+        # When it connected goes along: the same browser connecting again is the same row with a new time.
+        self.assertEqual(install["paired"], json.loads(self.store.read_text(encoding="utf-8"))["paired"][0]["paired_at"])
+        self.extension(seen_minutes_ago=0, paired_at="2026-11-15T10:00:00+00:00")
+        self.assertEqual(self.view(w)["installs"][0]["paired"], "2026-11-15T10:00:00+00:00")
 
     def test_connected_but_quiet_is_waiting_and_post_still_works(self):
         self.extension(seen_minutes_ago=30)

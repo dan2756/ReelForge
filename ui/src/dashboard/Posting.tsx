@@ -332,12 +332,14 @@ export function ExtensionDialog({ from, close }: { from?: "post"; close: () => v
   const { width } = useTerminalDimensions()
   const [leaving, setLeaving] = useState<string | null>(null) // the browser Disconnect was pressed for
   const [waiting, setWaiting] = useState(false) // the page that connects a browser was opened
-  const count = ext?.installs.length ?? 0
-  const before = useRef(count)
+  // Each connected browser with when it connected. One that connects again keeps its place in the list and gets a new
+  // time, so this, not how many there are, says that the page that opened has connected a browser.
+  const pairs = (ext?.installs ?? []).map((b) => `${b.install} ${b.paired}`)
+  const before = useRef(pairs)
   useEffect(() => {
-    if (count > before.current) setWaiting(false) // it connected
-    before.current = count
-  }, [count])
+    if (pairs.some((p) => !before.current.includes(p))) setWaiting(false) // it connected
+    before.current = pairs
+  }, [pairs.join("\n")])
   if (!ext) {
     return (
       <Modal name="extension" title="BROWSER EXTENSION" width={WIDTH}>

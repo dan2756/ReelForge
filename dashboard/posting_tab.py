@@ -224,6 +224,9 @@ class PostingTab:
                              "seen": fmt_ago(p.get("last_seen")) if seen else "never",
                              "on": bool(seen and now - seen <= ON_WITHIN),
                              "old": theirs != posting.PROTOCOL, "at": seen, "protocol": theirs,
+                             # When it connected. The same browser connecting again keeps its place in the list
+                             # and gets a new time: how the window's dialog knows to stop waiting for it.
+                             "paired": str(p.get("paired_at") or ""),
                              # What that browser was last seen signed in to. It is the extension's word about its
                              # own browser, and says nothing about the accounts connected in ReelForge.
                              "accounts": p.get("accounts") if isinstance(p.get("accounts"), dict) else {}})

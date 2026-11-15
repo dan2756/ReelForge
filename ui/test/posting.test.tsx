@@ -513,6 +513,30 @@ describe("the extension's dialog", () => {
     expect(flat(h)).toContain("Chrome on this PC is disconnected.")
   })
 
+  test("a browser that connects again is seen too: the dialog stops waiting for it", async () => {
+    const h = await kit({ extension: "on" })
+    await clickText(h, "Browsers…", 2)
+    await until(h, () => frame(h).includes("CONNECTED BROWSERS"))
+    await clickText(h, "▐ Connect another browser ▌", 3)
+    await until(h, () => listed("opened.txt").some((l) => l.includes("/pair?k=")))
+    expect(dialog(h)).toContain("Waiting for your browser")
+    // The page that opened is taken by the extension in the browser that is connected already (after Reload on its
+    // card, say), the way the extension does it: its secret for a token, from the extension's own address. That is
+    // the same browser connected anew, so there is one in the list before and one after.
+    const url = listed("opened.txt").at(-1)!
+    const secret = (await (await fetch(url)).text()).match(/data-rf-secret="([^"]+)"/)![1]
+    const claim = await fetch(new URL("/v1/pair/claim", url), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "chrome-extension://pikflpmjggoledmjbgbkjigbnincplgb" },
+      body: JSON.stringify({ secret, install: "install-chrome", name: "Chrome on this PC", extension_version: "0.1.0", protocol: 1 }),
+    })
+    expect(claim.status).toBe(200)
+    await until(h, () => !dialog(h).includes("Waiting for your browser"))
+    expect(dialog(h)).not.toContain("Waiting for your browser")
+    expect(dialog(h)).toContain("● Browser extension connected Chrome on this PC · v0.1.0")
+    expect(h.bridge.view<ExtensionView>("extension")!.installs.map((b) => b.install)).toEqual(["install-chrome"])
+  })
+
   test("a window that isn't listening says why, instead of starting a post it can't hand over", async () => {
     const h = await kit({ extension: "on" }, [150, 45], {}) // as the tests run by default: no local server
     const why = "ReelForge isn't listening for the extension here (it is switched off)."

@@ -244,6 +244,7 @@ export interface ExtensionInstall {
   install: string
   name: string
   version: string
+  paired: string // when it connected: new when the same browser connects again
   seen: string
   on: boolean
   old: boolean
