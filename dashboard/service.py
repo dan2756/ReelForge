@@ -632,7 +632,7 @@ class Dashboard(StatsTab, SettingsTab, Service):
         self.loop.set_timer(45, self.welcome_back)
 
     def stop(self) -> None:
-        for w in self.loop.workers.values():
+        for w in self.loop.live():
             w.is_cancelled = True
         self.let_go_of_profile()
 
