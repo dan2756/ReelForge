@@ -88,6 +88,25 @@ describe("what you type in the form", () => {
   })
 })
 
+describe("a field narrower than what's in it", () => {
+  test("shows its start while it doesn't have the keyboard, and typing still goes on at the end", async () => {
+    const h = await demo([100, 30])
+    for (let i = 0; i < 30 && !find(h, "What if everyone"); i++) await h.settle(100)
+    const caption = () => frame(h).split("\n")[find(h, "Caption")![1] + 2]!
+    expect(caption()).toContain("What if everyone on Earth jumped at the same") // (it showed only its tail: "e on Earth jumped at the same time?")
+    expect(frame(h)).toContain("#fyp #whatif #science #physics #earth")
+    await clickText(h, "What if everyone", 3)
+    await h.t.mockInput.typeText(" Yes.")
+    await h.settle(400)
+    expect(caption()).toContain("at the same time? Yes.") // with the keyboard, its end, where the typing went
+    h.t.mockInput.pressKey("ESCAPE")
+    await h.settle(300)
+    expect(caption()).toContain("What if everyone on Earth jumped") // and its start again
+    const x = h.bridge.view<{ rows: { name: string; text: string }[] }>("preview")!.rows.find((r) => r.name === "X")!.text
+    expect(x).toBe("What if everyone on Earth jumped at the same time? Yes.")
+  })
+})
+
 describe("headings", () => {
   test("are all bold in the window's one text colour, whoever writes them", async () => {
     const h = await demo([150, 56])
