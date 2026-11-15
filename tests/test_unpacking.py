@@ -209,7 +209,7 @@ class SetupPython(unittest.TestCase):
             venv = kit / ".venv" / "bin" / "python"
             venv.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
             venv.chmod(0o755)
-            self.assertEqual(self.find_python(kit, programs), str((kit / ".venv" / "bin" / "python").resolve()))
+            self.assertEqual(self.find_python(kit, programs), str(venv))
             self.assertIsNone(self.find_python(kit, programs, STUDIO_OWN_PYTHON="1"))   # the tests' switch still holds
             # one a setup that stopped part way left without pip is made again (bootstrap.py), which takes a Python
             venv.write_text(f'#!/bin/sh\n[ "$1" = -m ] && exit 1\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
