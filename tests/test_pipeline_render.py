@@ -4,6 +4,7 @@ that is already there)."""
 
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -322,7 +323,7 @@ class RenderPasses(Steps):
             line = make_episode.render_progress(self.frames, TOTAL)
             self.assertEqual(line(), f"frames 10/{TOTAL}, the first one is still rendering")
             self.rendered(range(11, 21), stamp)
-            self.assertEqual(line(), f"frames 20/{TOTAL}, 1.8 s a frame, about 18 s left")
+            self.assertEqual(line(), f"frames 20/{TOTAL}, 1.80 s a frame, about 18 s left")
 
 
 class RunningAStep(unittest.TestCase):
@@ -363,6 +364,11 @@ class RunningAStep(unittest.TestCase):
     def test_a_step_without_a_log_still_fails_with_its_exit_code(self):
         with self.assertRaisesRegex(SystemExit, "step failed with exit code 4$"):
             self.run_step("import sys; sys.exit(4)")
+
+    @unittest.skipIf(os.name == "nt", "Windows has no signals to report")
+    def test_a_step_that_was_killed_says_so(self):
+        with self.assertRaisesRegex(SystemExit, "step was stopped by signal 9"):
+            self.run_step("import os, signal; os.kill(os.getpid(), signal.SIGKILL)", log=self.log)
 
     def test_progress_is_printed_while_the_step_runs(self):
         with mock.patch.object(make_episode, "PROGRESS_EVERY", 0.05):

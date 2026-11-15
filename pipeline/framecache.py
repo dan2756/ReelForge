@@ -174,7 +174,7 @@ def why(state, what):
     """The sentence half that follows "the frames in build/frames ..." for a state that can't be trusted."""
     if state == "changed":
         return "were rendered from an older scene (changed since: " + (", ".join(what) or "the scene") + ")"
-    return "have no record of the scene they were rendered from, and the scene has been built again since"
+    return "have no record of the scene they were rendered from, so they may be older than the scene as it is built now"
 
 
 # ---------------------------------------------------------------- the files
@@ -300,4 +300,4 @@ def progress(done, total, made, seconds):
     each = seconds / made
     left = (total - done) * each
     eta = f"about {left / 60:.0f} min left" if left >= 90 else f"about {max(left, 0):.0f} s left"
-    return f"frames {done}/{total}, {each:.1f} s a frame, {eta}"
+    return f"frames {done}/{total}, {each:.2f} s a frame, {eta}"

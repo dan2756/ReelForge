@@ -67,7 +67,8 @@ def run(cmd, log=None, progress=None):
         if log:
             print(log_tail(log, start), flush=True)
         hint = f" (see {log})" if log else ""
-        raise SystemExit(f"step failed with exit code {code}{hint}")
+        how = f"was stopped by signal {-code}" if code < 0 else f"failed with exit code {code}"
+        raise SystemExit(f"step {how}{hint}")
     print(f"  done in {time.time() - t0:.0f}s", flush=True)
 
 
@@ -281,9 +282,9 @@ def render(build, spec, rerender="", keep=False):
                          "the other frames)")
     stamp = built_scene(build, spec, "render")
     frames.mkdir(exist_ok=True)
-    swept = framecache.sweep_empty(frames)
+    swept = len(framecache.sweep_empty(frames))
     if swept:
-        print(f"  removed {len(swept)} empty or cut-off frames that a stopped render left behind")
+        print(f"  removed {swept} empty or cut-off frame{'s' if swept > 1 else ''} that a stopped render left behind")
     state, what = framecache.frames_state(build)
     if rerender == "all":
         print(f"  deleted {framecache.delete(frames, [(1, float('inf'))])} frames: rendering every frame again")
@@ -362,7 +363,7 @@ def status(ep, spec):
     frames = f"{len(framecache.present(frames_dir) & set(range(1, total + 1)))} of {total}" + {
         "none": "", "match": ", they match the scene",
         "changed": f", rendered from an older scene (changed since: {', '.join(what) or 'the scene'})",
-        "unstamped": ", with no record of the scene they show (it has been built again since)",
+        "unstamped": ", with no record of the scene they show",
         "unbuilt": ", but the last build did not finish",
         "untracked": ", not checked against the scene (it has no stamp)"}[state]
     broken = sum(not framecache.whole(f) for f in frames_dir.glob("f_*.jpg"))

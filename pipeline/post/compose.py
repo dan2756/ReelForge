@@ -183,9 +183,10 @@ class Episode:
             raise SystemExit(f"{step}: the frames in build/frames {framecache.why(state, what)}.\n"
                              "  Render first: --steps render --rerender all, or --rerender SECONDS for the shots "
                              "that changed,\n  or --keep-frames if the picture is the same.")
-        swept = framecache.sweep_empty(self.frames_dir)
+        swept = len(framecache.sweep_empty(self.frames_dir))
         if swept:
-            print(f"  removed {len(swept)} empty or cut-off frames that a stopped render left behind", flush=True)
+            print(f"  removed {swept} empty or cut-off frame{'s' if swept > 1 else ''} that a stopped render left "
+                  "behind", flush=True)
         gone = framecache.ranges(set(numbers) - framecache.present(self.frames_dir))
         if gone:
             verb = "is" if framecache.count(gone) == 1 else "are"

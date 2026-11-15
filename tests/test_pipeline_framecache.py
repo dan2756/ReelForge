@@ -176,8 +176,8 @@ class FrameFiles(unittest.TestCase):
         self.assertIn("and 2 more ranges", framecache.describe([(n, n) for n in range(1, 17, 2)], 30))
 
     def test_the_progress_line(self):
-        for (done, made, seconds), line in (((412, 400, 360.0), "frames 412/1935, 0.9 s a frame, about 23 min left"),
-                                            ((1930, 100, 90.0), "frames 1930/1935, 0.9 s a frame, about 4 s left"),
+        for (done, made, seconds), line in (((412, 400, 360.0), "frames 412/1935, 0.90 s a frame, about 23 min left"),
+                                            ((1930, 100, 15.0), "frames 1930/1935, 0.15 s a frame, about 1 s left"),
                                             ((12, 0, 40.0), "frames 12/1935, the first one is still rendering")):
             self.assertEqual(framecache.progress(done, 1935, made, seconds), line)
 
