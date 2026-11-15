@@ -93,7 +93,8 @@ def main():
     ap.add_argument("--stills", default="", help="comma-separated seconds for preview stills, or `lines`: every "
                     "story line's start and end, both sides of each cut, and the cover")
     ap.add_argument("--rerender", default="", metavar="all|SECONDS",
-                    help="render: all frames again, or only these seconds (12-15.5,31-33) keeping the rest")
+                    help="render: all frames again, or only these seconds (12-15.5,31-33) keeping the rest; "
+                    "if it is stopped, the same command carries on")
     ap.add_argument("--keep-frames", action="store_true",
                     help="render: keep the frames on disk although the scene was built again since")
     ap.add_argument("--status", action="store_true",
@@ -286,15 +287,28 @@ def render(build, spec, rerender="", keep=False):
     if swept:
         print(f"  removed {swept} empty or cut-off frame{'s' if swept > 1 else ''} that a stopped render left behind")
     state, what = framecache.frames_state(build)
-    if rerender == "all":
-        print(f"  deleted {framecache.delete(frames, [(1, float('inf'))])} frames: rendering every frame again")
-    elif rerender:
+    if rerender:
         try:
-            spans = framecache.frames_for(rerender, fps, total)
+            spans = [(1, float("inf"))] if rerender == "all" else framecache.frames_for(rerender, fps, total)
         except ValueError as exc:
             raise SystemExit(f"render: --rerender {exc}") from None
-        framecache.delete(frames, spans)
-        print(f"  rendering {framecache.describe(spans, fps)} again; the other frames are kept")
+        # A re-render that is stopped is started again with the same command, and that must not delete what the
+        # stopped run rendered. So the request is noted beside the frames until every frame is in: the same
+        # request for the same scene then carries on.
+        note = frames / framecache.RERENDER
+        asked = {"frames": "all" if rerender == "all" else [list(s) for s in spans],
+                 "scene": stamp["fingerprint"] if stamp else None}
+        try:
+            under_way = json.loads(note.read_text(encoding="utf-8")) == asked
+        except (OSError, ValueError):
+            under_way = False
+        if under_way:
+            print("  carrying on the re-render that was stopped: nothing is deleted a second time")
+        else:
+            gone = framecache.delete(frames, spans)
+            note.write_text(json.dumps(asked), encoding="utf-8")
+            print(f"  deleted {gone} frames: rendering every frame again" if rerender == "all" else
+                  f"  rendering {framecache.describe(spans, fps)} again; the other frames are kept")
     elif state in ("changed", "unstamped"):
         n = len(framecache.present(frames))
         if not keep:
@@ -328,6 +342,7 @@ def render(build, spec, rerender="", keep=False):
         verb = "is" if framecache.count(todo) == 1 else "are"
         raise SystemExit(f"render: {framecache.describe(todo, fps)} {verb} still missing after going back once. "
                          "The end of build/render.log should say why.")
+    (frames / framecache.RERENDER).unlink(missing_ok=True)      # a re-render, if this was one, is complete
     print(f"  all {total} frames are in build/frames")
 
 

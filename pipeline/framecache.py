@@ -19,6 +19,7 @@ from pathlib import Path
 
 SCENE = "scene.json"    # in build/: the stamp of the scene that build/scene.blend holds
 STAMP = ".scene"        # in build/frames and build/stills: the stamp of the scene those pictures show
+RERENDER = ".rerender"  # in build/frames while a --rerender is under way: what was asked, and of which scene
 
 
 class Recorder(dict):

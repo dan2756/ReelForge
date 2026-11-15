@@ -67,7 +67,8 @@ pipeline uses the stamp so that **nothing needs deleting by hand**:
   this scene's. If the scene was built again since, it stops, names what changed, and asks:
   `--rerender all` renders every frame again, `--rerender 12-15.5,31-33` renders only those seconds and keeps the
   rest (also the way to redo one shot), and `--keep-frames` keeps them all when the change did not touch the
-  picture.
+  picture. A re-render that is stopped carries on as well: run the same command again, and what it has rendered
+  since is not deleted a second time.
 - The frames a killed render leaves empty or cut off are deleted before a render and before the video step.
 - While it renders, a line every 20 seconds gives the frames done, the seconds a frame takes and the time left.
   When Blender exits, the step checks that every frame is there, goes back once for any that are missing, and

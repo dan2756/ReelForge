@@ -202,7 +202,8 @@ them on purpose, so they can't be posted. Never work round that; `new-episode` g
 6. **Render:** `--steps render` (about 15 minutes to an hour on a fast graphics card; run it in the background). It
    says how far it is and carries on where a stopped render left off. If the scene was built again since the frames
    were rendered, it stops and asks: `--rerender all`, `--rerender 12-15.5` for one shot, or `--keep-frames` when the
-   picture did not change. **Nothing needs deleting by hand.**{% if codex %} If your shell stops a long
+   picture did not change. A re-render that is stopped carries on too when the same command is run again.
+   **Nothing needs deleting by hand.**{% if codex %} If your shell stops a long
    command, run it again: it carries on where it stopped.{% endif %}
 
 7. **Post-production:** `--steps post` (sound, video, cover, captions, then QA -> `build/qa/report.md`). It stops on

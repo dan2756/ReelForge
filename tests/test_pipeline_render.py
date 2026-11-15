@@ -208,6 +208,52 @@ class RenderGuard(Steps):
         self.render()                                   # the rest now counts as this scene's: nothing to ask
         self.assertEqual(self.shows(1), "earlier")
 
+    def test_a_rerender_that_was_stopped_carries_on_with_the_same_command(self):
+        """A shell that stops long commands runs `--rerender all` again and again: each run has to add to the last,
+        not delete what it rendered."""
+        self.rendered(range(1, TOTAL + 1), self.built())
+        self.spec["world"]["type"] = "plaza"
+        self.built()
+        self.lost, self.exit = [set(range(12, TOTAL + 1))], [-15]           # stopped after eleven frames
+        with self.assertRaises(SystemExit):
+            self.render(rerender="all")
+        self.assertEqual(sorted(framecache.present(self.frames)), list(range(1, 12)))
+        out = self.render(rerender="all")
+        self.assertNotIn("rendering every frame again", out)
+        self.assertIn("carrying on the re-render that was stopped", out)
+        self.assertIn(b"pass 1", (self.frames / "f_0011.jpg").read_bytes())  # the first run's frames are still there
+        self.assertIn(b"pass 2", (self.frames / "f_0012.jpg").read_bytes())
+        self.assertFalse((self.frames / framecache.RERENDER).exists())      # done: the next one starts afresh
+        self.assertIn(f"deleted {TOTAL} frames", self.render(rerender="all"))
+
+    def test_a_stopped_rerender_of_some_seconds_carries_on_too(self):
+        self.rendered(range(1, TOTAL + 1), self.built())
+        self.lost, self.exit = [set(range(14, TOTAL + 1))], [-15]
+        with self.assertRaises(SystemExit):
+            self.render(rerender="1-1.5")                                   # frames 11-16
+        self.assertIn("carrying on the re-render that was stopped", self.render(rerender=" 1 - 1.5 "))
+        self.assertEqual([n for n in range(1, TOTAL + 1) if b"pass 1" in (self.frames / f"f_{n:04d}.jpg").read_bytes()],
+                         [11, 12, 13])
+        self.assertEqual([n for n in range(1, TOTAL + 1) if b"pass 2" in (self.frames / f"f_{n:04d}.jpg").read_bytes()],
+                         [14, 15, 16])
+
+    def test_a_stopped_rerender_starts_again_for_other_seconds_or_another_scene(self):
+        self.rendered(range(1, TOTAL + 1), self.built())
+        self.lost, self.exit = [set(range(14, TOTAL + 1))], [-15]
+        with self.assertRaises(SystemExit):
+            self.render(rerender="1-1.5")                                   # frames 11-16: 11, 12 and 13 came out
+        self.lost, self.exit = [set(range(15, TOTAL + 1))], [-15]
+        with self.assertRaises(SystemExit):
+            self.render(rerender="1.2-1.5")                                 # other seconds: 13 goes, 13 and 14 come
+        self.assertIn(b"pass 1", (self.frames / "f_0012.jpg").read_bytes())
+        self.assertIn(b"pass 2", (self.frames / "f_0013.jpg").read_bytes())
+        self.spec["effect"]["subject"] = "donut"
+        self.built()                                                        # the scene was built again
+        self.lost, self.exit = [set(range(1, TOTAL + 1))], [-15]
+        with self.assertRaises(SystemExit):
+            self.render(rerender="1.2-1.5")                                 # the same seconds, of another scene
+        self.assertEqual(framecache.missing(self.frames, TOTAL), [(13, 16)])
+
     def test_keep_frames_accepts_them_as_they_are(self):
         self.rendered(range(1, 13), self.built())
         self.spec["world"]["type"] = "plaza"
