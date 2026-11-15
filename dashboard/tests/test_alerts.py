@@ -272,6 +272,22 @@ class DayBadgeTest(unittest.TestCase):
                          [])
 
 
+    def test_days_from_thinned_history_count(self):
+        """Today is compared with every earlier day ReelForge measured, the old ones it keeps one reading a day
+        for included (they used to be left out as gaps, about half of them)."""
+        now = datetime.now(timezone.utc).astimezone().replace(hour=18, minute=0, second=0, microsecond=0)
+        rows, total = [], 1000
+        t = now - timedelta(days=58)
+        while t < now - timedelta(days=28):  # as thinned: a reading a day, each 40 seconds later in the day
+            rows.append({"ts": t.astimezone(timezone.utc).isoformat(timespec="seconds"), "followers": total,
+                         "views": None})
+            t, total = t + timedelta(days=1, seconds=40), total + 10
+        today, earlier = badges.day_gains(rows, "followers", now)
+        self.assertIsNone(today)  # nothing read today
+        self.assertEqual(len(earlier), 28)
+        self.assertTrue(all(abs(g - 10) < 0.1 for g in earlier))
+
+
 class BadgeNotesTest(DbTest):
     def test_moving_up_is_told_once_and_the_first_look_is_quiet(self):
         platforms = {"tiktok": SimpleNamespace(name="TikTok")}

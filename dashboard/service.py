@@ -1868,8 +1868,7 @@ class Dashboard(StatsTab, SettingsTab, Service):
         ys = [v for v in b.totals if v is not None]
         if not ys:
             return None
-        longest = max(trends.GAP, fr.step)
-        holes = [(t0, t1) for (t0, _), (t1, _) in zip(pts, pts[1:]) if t1 - t0 > longest]
+        holes = [(t0, t1) for (t0, _), (t1, _) in zip(pts, pts[1:]) if t1 - t0 > trends.spaced(t0, fr.step, fr.now)]
         guessed = [any(t0 < a + (z - a) / 2 < t1 for t0, t1 in holes) for a, z in zip(fr.starts, fr.ends)]
         est: list[list[int]] = []
         for i, guess in enumerate(guessed):

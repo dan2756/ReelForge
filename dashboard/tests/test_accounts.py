@@ -8,10 +8,11 @@ from __future__ import annotations
 import shutil
 import tempfile
 import unittest
+from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
-from dashboard import config, db, demo, notify, sync
+from dashboard import analytics, config, db, demo, notify, sync
 from dashboard import service as service_module
 from dashboard.config import PLATFORM_KEYS
 from dashboard.platforms import Instagram, TikTok, X, YouTube, browser, build, connected
@@ -177,6 +178,25 @@ class WindowTest(unittest.TestCase):
             self.assertIn("Every platform is hidden", w.view("trends")["metrics"][metric]["empty"])
         w.call("toggle_line", "tiktok")
         self.assertTrue(w.view("trends")["metrics"]["views"]["variants"])
+
+    def test_the_followers_chart_doesnt_hatch_thinned_history(self):
+        """Old readings are kept one a day (db.compact), a day and a few seconds apart: those days were measured, so
+        the chart doesn't draw them as estimates. Days nothing was read on still are."""
+        now = analytics.now()
+        with db.connect() as c:
+            c.execute("DELETE FROM account_stats WHERE platform = 'tiktok'")
+            t, followers = now - timedelta(days=45), 1000
+            while t < now - timedelta(days=27):
+                c.execute("INSERT INTO account_stats (platform, ts, handle, followers) VALUES ('tiktok', ?, '@me', ?)",
+                          (t.isoformat(timespec="seconds"), followers))
+                t, followers = t + timedelta(days=1, seconds=40), followers + 5
+            c.execute("INSERT INTO account_stats (platform, ts, handle, followers) VALUES ('tiktok', ?, '@me', 2000)",
+                      (now.isoformat(timespec="seconds"),))
+        w = self.open(demo.platforms())
+        guessed = self.panel(w, "tiktok")["chart"]["guessed"]
+        self.assertEqual(len(guessed), 30)
+        self.assertFalse(guessed[0])  # 29 days ago: read the day before and the day after
+        self.assertTrue(guessed[15])  # nothing was read for four weeks after that
 
     def test_sign_up_guides(self):
         w = self.open(demo.platforms(unconnected=("x",)))

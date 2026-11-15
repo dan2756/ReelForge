@@ -24,6 +24,7 @@ from studio.bridge import rpc
 
 from . import db, trends
 from .analytics import fmt_age, fmt_clock
+from .trends import spaced
 from .view import BAD, GOOD, MUTED, SHORT, Text, act, chip, parts
 
 METRICS = ("views", "followers", "likes")
@@ -40,20 +41,6 @@ MOST_SLOTS = 180  # All's buckets: the finest that keep it to this many
 STALE = timedelta(hours=3)  # a platform not read for this long says when it last was, in its breakdown
 LATE = timedelta(hours=12)  # a counted platform whose readings start this much after the others' gets a note
 TOTAL = "#e8eaed"  # the total's colour: the window's own white, as on the All platforms tile
-# How far apart db.compact leaves old account readings: the newest of each 3 hours once they're 14 days old, of each
-# day after 26 days and of each week after 72. Readings two of those blocks apart are thinned history, not a gap.
-THINNED = ((timedelta(days=72), timedelta(weeks=1)), (timedelta(days=26), timedelta(days=1)),
-           (timedelta(days=14), timedelta(hours=3)))
-
-
-def spaced(t0: datetime, step: timedelta, now: datetime) -> timedelta:
-    """How long after a reading at t0 the next one can come before the stretch between them is a gap: trends.GAP, a
-    bucket, or two of thinned history's blocks at t0's age, whichever is longest."""
-    age = now - t0
-    thin = next((2 * block for older, block in THINNED if age >= older), timedelta(0))
-    return max(trends.GAP, step, thin)
-
-
 def level_at(pts: trends.Points, t: datetime, step: timedelta, now: datetime) -> float | None:
     """A platform's running total at moment t, from its readings (oldest first): between two readings close enough
     together (spaced), the straight line joining them; at or after the newest, the newest while it's recent. None
