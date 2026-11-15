@@ -526,6 +526,12 @@ class WindowTest(unittest.TestCase):
             w = self.open(every, demo_mode=False)
             eid = str(w.call("log_stats", "instagram")["episodes"][0]["id"])
             typed = lambda: [p["views"] for p in db.posts_latest() if p["platform"] == "instagram"]  # noqa: E731
+
+            def readings() -> list[int]:
+                with db.connect() as c:
+                    return [r[0] for r in c.execute("SELECT views FROM post_stats WHERE platform = 'instagram' AND "
+                                                    "post_id = ? ORDER BY ts, rowid", (f"manual-{eid}",))]
+
             self.assertIsNone(w.call("save_logged_stats", "instagram", "120", {eid: "32,000"}))
             self.assertEqual(typed(), [32_000])
             self.assertEqual(w.call("log_stats", "instagram")["last"]["instagram"]["views"], {eid: 32_000})
@@ -535,8 +541,10 @@ class WindowTest(unittest.TestCase):
             self.assertEqual(typed(), [32_000])  # nothing is stored yet
             self.assertEqual(w.call("save_logged_stats", "instagram", "120", {eid: "3500"}),
                              asks.replace("3,400", "3,500"))  # another number: asked about again
+            self.assertEqual(readings(), [32_000])
             self.assertIsNone(w.call("save_logged_stats", "instagram", "120", {eid: "3500"}))  # Save again
             self.assertEqual(typed(), [3_500])
+            self.assertEqual(readings(), [3_500, 3_500])  # the 32,000 it replaces, and the new reading
             self.assertIsNone(w.call("save_logged_stats", "instagram", "125", {eid: "3,600"}))  # up: nothing to ask
             self.assertEqual(typed(), [3_600])
             other = str(w.call("log_stats", "instagram")["episodes"][1]["id"])

@@ -479,12 +479,15 @@ class TypedInTest(DbTest):
     """Numbers typed in for a platform ReelForge can't read yet (a manual-<episode> post each: the Accounts tab's Type
     in stats)."""
 
-    def typed(self, platform: str, numbers: dict[int, int], minutes: float) -> None:
-        """Save typed-in views per episode, the way the dialog's Save stores them."""
+    def typed(self, platform: str, numbers: dict[int, int], minutes: float, put_right: bool = True) -> None:
+        """Save typed-in views per episode, the way the dialog's Save stores them. put_right: as it does once
+        you've said a lower number is the right one (it asks first)."""
         titles = {e["id"]: e["title"] for e in db.episodes()}
         for eid in numbers:
             db.add_post(platform, f"manual-{eid}", eid, titles[eid], None, at(0))
-        read(platform, [post(f"manual-{eid}", titles[eid], 0, views=n) for eid, n in numbers.items()], minutes=minutes)
+        account = SimpleNamespace(handle="@yourchannel", followers=100, views=None, likes=None, posts=None)
+        db.record_snapshot(platform, account, [post(f"manual-{eid}", titles[eid], 0, views=n)
+                                               for eid, n in numbers.items()], at(minutes), put_right=put_right)
 
     def posts(self, platform: str) -> list[str]:
         with db.connect() as c:
@@ -609,6 +612,23 @@ class TypedInTest(DbTest):
         self.assertEqual([r["views"] for r in db.account_series("instagram", "")],
                          [10_900, 20_900, 30_900, 4_300, 4_300, 34_900])
         self.assertEqual(db.latest_accounts()["instagram"]["views"], 34_900)
+
+    def test_a_lower_number_changes_nothing_saved_before_until_you_say_its_right(self):
+        """The dialog asks before a lower number replaces the one saved. Stored without that say, it's one more
+        reading: the list shows it, and every reading from before is as it was."""
+        kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
+        jump = db.create_episode(REAL["jump"][0], video(REAL["jump"][1]), at(-50))
+        week = 7 * 24 * 60
+        for n, views in enumerate((10_000, 20_000, 30_000, 32_000), start=1):
+            self.typed("instagram", {kite: views, jump: 900}, n * week)
+        self.typed("instagram", {kite: 3_400, jump: 900}, 5 * week, put_right=False)
+        self.assertEqual(self.readings("instagram", f"manual-{kite}"), [10_000, 20_000, 30_000, 32_000, 3_400])
+        self.assertEqual([r["views"] for r in db.account_series("instagram", "")],
+                         [10_900, 20_900, 30_900, 32_900, 4_300])
+        self.assertEqual(next(p["views"] for p in db.posts_latest() if p["post_id"] == f"manual-{kite}"), 3_400)
+        self.typed("instagram", {kite: 34_000, jump: 900}, 5 * week + 5)  # the right one: nothing was lost
+        self.assertEqual([v for _, v in db.post_series(at(-1000))["instagram", f"manual-{kite}"]],
+                         [10_000, 20_000, 30_000, 32_000, 32_000, 34_000])
 
     def test_a_slip_put_right_days_later_leaves_the_accounts_total_too(self):
         """A slip saved twice within minutes (the second Save was for the other video) and put right days later. By

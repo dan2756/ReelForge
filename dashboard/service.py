@@ -2348,7 +2348,7 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
             return "Nothing to save yet."
         # A number lower than the one saved for that video replaces it, in the readings it was saved in too
         # (db._correct_typed): fine for a slip being put right, but the lower one may be the slip (3400 for 34000).
-        # So it's said first, and stored when Save is pressed again with the same numbers.
+        # So it's said first, and stored that way only when Save is pressed again with the same numbers.
         saved = {q["episode_id"]: q["views"] for q in self.posts
                  if q["platform"] == key and q["post_id"].startswith(db.TYPED) and q["views"] is not None}
         lower = [(n, saved[e]) for e, n in views.items() if n < saved.get(e, 0)]
@@ -2363,12 +2363,12 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
                     f"replaces the {was:,}.")
         self.lower_asked = None
         try:
-            self._save_logged(key, followers, views)
+            self._save_logged(key, followers, views, put_right=bool(lower))
         except sqlite3.OperationalError as e:
             return f"The stats database is busy ({e}). Try again in a moment."
         return None
 
-    def _save_logged(self, key: str, followers: int | None, views: dict[int, int]) -> None:
+    def _save_logged(self, key: str, followers: int | None, views: dict[int, int], put_right: bool = False) -> None:
         p = self.every[key]
         episodes = {e["id"]: e for e in db.episodes()}
         posts = []
@@ -2386,7 +2386,7 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
                                   likes=None, comments=None, shares=None))
         if followers is None and self.latest.get(key):
             followers = self.latest[key]["followers"]
-        db.record_snapshot(key, Account(handle=p.handle, followers=followers), posts)
+        db.record_snapshot(key, Account(handle=p.handle, followers=followers), posts, put_right=put_right)
         self.tell_others()
         self.notify(f"{p.name} stats saved.", timeout=3)
         self.reload()

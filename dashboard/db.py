@@ -261,13 +261,15 @@ def parse(ts: str) -> datetime:
 
 
 def record_snapshot(platform: str, account, posts: list, ts: str | None = None,
-                    conn: sqlite3.Connection | None = None) -> str | None:
+                    conn: sqlite3.Connection | None = None, put_right: bool = False) -> str | None:
     """Store one refresh: the account totals plus every post's current numbers.
 
     A read that misses numbers never wipes known ones: a post keeps its last known counts and its views never go down
     (RSS counts lag and dip), while post_stats keeps what was read. Without the platform's own totals, the account gets
     the sum over every post ReelForge knows there (one page load only shows the newest), or its last totals if no posts
-    came. Numbers you typed in are taken as typed, so a slip can be put right (see _correct_typed).
+    came. Numbers you typed in are taken as typed. put_right: you've said a typed-in number lower than the one saved
+    is the right one (the window asks first), so the readings that held the higher one come down to it (see
+    _correct_typed). Without that a lower number is only stored, and nothing saved before it is changed.
 
     Returns the @handle the platform's stats were read under before, when this read is under another one and shows
     that to be another account (see _handle_change): the two are stored together from here on, so a copy of the
@@ -275,7 +277,7 @@ def record_snapshot(platform: str, account, posts: list, ts: str | None = None,
     """
     ts = ts or now_iso()
     if conn is not None:
-        _record(conn, platform, account, posts, ts)  # the demo writes its history in one go
+        _record(conn, platform, account, posts, ts, put_right)  # the demo writes its history in one go
         return None
     with connect() as db:
         change = _handle_change(db, platform, account.handle, posts, ts)
@@ -284,7 +286,7 @@ def record_snapshot(platform: str, account, posts: list, ts: str | None = None,
     with connect() as db:  # what the read showed about the handle is stored with the read, or not at all
         if change:
             _note_change(db, platform, account.handle, change)
-        _record(db, platform, account, posts, ts)
+        _record(db, platform, account, posts, ts, put_right)
     return change["before"] if change else None
 
 
@@ -525,10 +527,10 @@ def forget_old_handle(platform: str) -> dict | None:
             "posts": len(posts), "episodes": len(emptied)}
 
 
-def _record(db: sqlite3.Connection, platform: str, account, posts: list, ts: str) -> None:
+def _record(db: sqlite3.Connection, platform: str, account, posts: list, ts: str, put_right: bool = False) -> None:
     # Typed-in numbers (manual-<episode> posts) and the platform's own posts are never added together.
     typed = bool(posts) and all(p.post_id.startswith("manual-") for p in posts)
-    if typed:
+    if typed and put_right:
         _correct_typed(db, platform, posts)
     db.executemany(
         """INSERT INTO posts (platform, post_id, title, url, published_at,
@@ -585,8 +587,8 @@ def _correct_typed(db: sqlite3.Connection, platform: str, posts: list) -> None:
 
     Readings from before the slip stay as they are. Every earlier reading above the new number used to come down,
     so a number typed too low by mistake (3400 for 34000) flattened the video's whole history and the account's;
-    now it costs the newest step at most. The window asks before it stores a number lower than the one saved
-    (Dashboard.save_logged_stats), so that step is replaced with your say."""
+    now it costs the newest step at most, and only with your say: this runs when the window has asked about the
+    lower number and you've pressed Save again (Dashboard.save_logged_stats, record_snapshot's put_right)."""
     typed_only = not db.execute("SELECT 1 FROM posts WHERE platform = ? AND post_id NOT LIKE 'manual-%' LIMIT 1",
                                 (platform,)).fetchone()
     for p in posts:
