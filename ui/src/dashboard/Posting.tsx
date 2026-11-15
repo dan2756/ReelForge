@@ -417,8 +417,10 @@ export function ExtensionDialog({ from, close }: { from?: "post"; close: () => v
                   {b.old ? <span fg={DASH.bad}>{" · needs an update"}</span> : null}
                 </text>
                 {leaving === b.install ? (
+                  // Keep it comes up where Disconnect was, as wide as it, and the red button beside it. In that place
+                  // the red one took the second click of a double click on Disconnect, and the browser was
+                  // disconnected before the question under its name could be read.
                   <>
-                    <Button id={`ext-keep-${i}`} label="Keep it" autoFocus onPress={() => setLeaving(null)} />
                     <Button
                       id={`ext-drop-${i}`}
                       label="Disconnect"
@@ -428,6 +430,7 @@ export function ExtensionDialog({ from, close }: { from?: "post"; close: () => v
                         s.bridge.send("unpair_extension", b.install)
                       }}
                     />
+                    <Button id={`ext-keep-${i}`} label="Keep it" minWidth={14} autoFocus onPress={() => setLeaving(null)} />
                   </>
                 ) : (
                   <Button id={`ext-disconnect-${i}`} label="Disconnect" onPress={() => setLeaving(b.install)} />

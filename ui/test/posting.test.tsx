@@ -573,8 +573,20 @@ describe("the extension's dialog", () => {
     expect(store()).toBe(1) // asked, not done
     await clickText(h, "Keep it", 2)
     expect(dialog(h)).not.toContain("Disconnect Chrome on this PC?")
+    // A double click on Disconnect, on any column of it, asks and then lands on Keep it, which comes up in its place.
+    // The red Disconnect came up there, and the browser was disconnected before the question could be read.
+    const at = find(h, "▐ Disconnect ▌")!
+    for (const dx of [0, 6, 13]) {
+      await h.t.mockMouse.click(at[0] + dx, at[1])
+      await h.settle(150)
+      expect(dialog(h)).toContain("Disconnect Chrome on this PC?")
+      await h.t.mockMouse.click(at[0] + dx, at[1])
+      await h.settle(400)
+      expect([dx, store(), dialog(h).includes("Disconnect Chrome on this PC?")]).toEqual([dx, 1, false])
+    }
     await clickText(h, "▐ Disconnect ▌", 3)
-    await clickText(h, "▐ Disconnect ▌", 3) // the red one, in its place now
+    expect(frame(h)).toMatch(/▐ Disconnect ▌ ▐  Keep it   ▌/) // as wide as the button it takes the place of
+    await clickText(h, "▐ Disconnect ▌", 3) // the red one, beside Keep it
     await until(h, () => store() === 0)
     expect(store()).toBe(0)
     await until(h, () => frame(h).includes("SET IT UP, ONCE"))
