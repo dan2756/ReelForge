@@ -21,7 +21,8 @@ Nothing here touches this computer or the network. No browser opens: each page t
 REELFORGE_OPENED's file. Nothing is copied: REELFORGE_COPIED's file gets it. No file manager opens. ReelForge's own
 browser is a stand-in that only remembers whether it is logged in. The extension's part is played by the test,
 through the test_extension call added here. A local server only listens when the test sets
-REELFORGE_EXTENSION_PORT=0 (any free port)."""
+REELFORGE_EXTENSION_PORT=0 (any free port): the window the tests draw has it off otherwise (ui/scripts/headless.tsx),
+whatever the variable is where they run."""
 
 from __future__ import annotations
 

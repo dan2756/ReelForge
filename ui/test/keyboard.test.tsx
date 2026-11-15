@@ -149,14 +149,18 @@ describe("Page Up and Page Down", () => {
 
   test("in a table that has the keyboard they move through its rows, as they always did", async () => {
     const h = await window("videos", [140, 30])
-    const titles = h.bridge.view<{ rows: { cells: [string, string][][] }[] }>("videos")!.rows.map((r) => r.cells[1]![0]![0])
+    // Each row as the table draws its start: "● TT  What if your coffee ". The platform is part of it because a video
+    // has a row for each platform it is on, and the row a page down can be the first row's video on another one:
+    // which row is where follows the demo's views, from one minute to the next. (By the title alone, the highlight
+    // on "● IG  What if your coffee …", six rows under "● TT  What if your coffee …", read as not having moved.)
+    const drawn = h.bridge.view<{ rows: { cells: [string, string][][] }[] }>("videos")!.rows.map((r) => `${r.cells[0]![0]![0].padEnd(4)}  ${r.cells[1]![0]![0].slice(0, 20)}`)
     h.t.mockInput.pressKey("TAB")
     await h.settle(150)
     h.t.mockInput.pressKey(PAGE_DOWN)
     await h.settle(300)
     const lit = frame(h).split("\n").find((r) => r.includes("▌●")) ?? ""
-    expect(lit).not.toContain(titles[0]!.slice(0, 20)) // the highlight moved down a page of rows
-    expect(titles.some((t, i) => i > 2 && lit.includes(t.slice(0, 20)))).toBe(true)
+    expect(lit).not.toContain(drawn[0]!) // the highlight moved down a page of rows
+    expect(drawn.some((d, i) => i > 2 && lit.includes(d))).toBe(true)
   })
 })
 

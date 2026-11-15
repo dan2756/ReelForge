@@ -78,6 +78,20 @@ async function until(h: Headless, text: string) {
   }
 }
 
+/** On the Videos tab, put the highlight on the newest video: sorted by Age the oldest come first, so End lands on it.
+ * Fix episode lists the videos newest first under "Not one of my videos", so its dialog then opens on its second row
+ * at any hour. Left alone, the highlight is on the demo's top video by score, and which one that is follows the clock
+ * (dashboard/demo.py posts at 11 am and 7 pm): from two and a half hours after the morning's post until as long after
+ * the evening's it is the oldest video, the list's last row, with no row under it for Down to move to and, in a short
+ * window, the list's first row scrolled out of sight above it. */
+async function highlightNewestVideo(h: Headless) {
+  await clickText(h, "Age", 1) // its header: the table is sorted by it, and has the keyboard
+  await until(h, "Age ▼")
+  expect(frame(h)).toContain("Age ▼")
+  h.t.mockInput.pressKey("END")
+  await h.settle(500)
+}
+
 describe("the Overview fits", () => {
   for (const [w, hh, drawer] of [
     [110, 40, false],
@@ -140,6 +154,7 @@ describe("the Compare tab in an 80-column window", () => {
 describe("a dialog in a window 24 rows tall", () => {
   test("keeps its words whole and its buttons in view: the list gives way, not the lines above it", async () => {
     const h = await window("videos", [80, 24])
+    await highlightNewestVideo(h)
     await clickText(h, " Fix episode ", 2)
     await until(h, "WHICH VIDEO IS THIS?")
     const flat = frame(h).replace(/[│┃]/g, " ").replace(/\s+/g, " ")
@@ -616,6 +631,7 @@ describe("dialogs", () => {
 
   test("Fix episode opens with its list holding the keyboard: the arrows move, Enter picks", async () => {
     const h = await window("videos")
+    await highlightNewestVideo(h)
     await clickText(h, " Fix episode ", 2)
     await until(h, "WHICH VIDEO IS THIS?")
     /** The option the list's lit edge is on, inside the dialog. */

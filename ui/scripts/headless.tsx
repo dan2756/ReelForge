@@ -27,7 +27,10 @@ export async function headless(
   height: number,
   env: Record<string, string> = {},
 ): Promise<Headless> {
-  const sides = new Sides({ STUDIO_DRY_SYSTEM: "1", ...env }, "")
+  // Nothing on this computer changes, and the window doesn't listen for the browser extension unless `env` asks
+  // (REELFORGE_EXTENSION_PORT: "0", any free port). Both are said here, so a test's window is the same whatever the
+  // two variables are where the tests run: with the port set outside, every window of a set-up channel listened.
+  const sides = new Sides({ STUDIO_DRY_SYSTEM: "1", REELFORGE_EXTENSION_PORT: "off", ...env }, "")
   const opened = await sides.open<Init | SetupInit>(screen, options)
   const bridge = opened.bridge
   sides.adopt(bridge)
