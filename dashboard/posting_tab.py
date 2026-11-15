@@ -594,6 +594,8 @@ class WindowApp(extension_api.App):
     """This window, as the local server sees it. The server's requests run on threads of their own: what they read
     here is read in one step, and anything that touches the window runs on the window's loop."""
 
+    wait = 10.0  # seconds a request waits for the window's loop to do something for it
+
     def __init__(self, window) -> None:
         self.window = window
 
@@ -618,18 +620,21 @@ class WindowApp(extension_api.App):
         self.window.loop.call_soon(self.window.heard_from_extension)
 
     def by_hand(self, job: dict, name: str) -> dict | None:
-        """The by-hand flow, run on the window's loop while this thread waits for it (None: it didn't answer in
-        ten seconds, or it failed there, where the window says so)."""
-        done = threading.Event()
+        """The by-hand flow, run on the window's loop while this thread waits for it. None: the window didn't get to
+        it in time (then it never does it, so a page that is told "try again" isn't answered twice), or it failed
+        there, where the window says so."""
+        done, late = threading.Event(), threading.Event()
         answer: list[dict] = []
 
         def run() -> None:
             try:
-                answer.append(self.window.post_by_hand(job, name))
+                if not late.is_set():
+                    answer.append(self.window.post_by_hand(job, name))
             finally:
                 done.set()
 
         self.window.loop.call_soon(run)
-        if not done.wait(10):
-            print("extension: the window didn't run a by-hand post in time", file=sys.stderr)
+        if not done.wait(self.wait):
+            late.set()
+            print("extension: the window didn't get to a by-hand post in time", file=sys.stderr)
         return answer[0] if answer else None

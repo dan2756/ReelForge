@@ -1352,6 +1352,27 @@ class WindowServes(PostingTest):
         self.assertEqual(row["state"], "cancelled")
         self.assertIn("posted by hand", "".join(seg[0] for seg in row["line"]))
 
+    def test_a_window_too_busy_for_a_by_hand_post_never_does_it_late(self):
+        w = self.serving()
+        (job,) = w.call("post_with_extension", ["tiktok"], CAPTION, TAGS, True, None)["jobs"]
+        self.opened.clear()
+        app = w.svc.extension_server.app
+        app.wait = 0.05
+        self.assertIsNone(app.by_hand(posting.get(job["id"]), "TikTok"))  # the loop isn't running: no answer in time
+        w.pump(0.2)  # ... and when it gets to it, the page has long been told to try again
+        self.assertEqual((self.opened, self.copied, db.uploads()[0]["status"]), ([], [], "extension"))
+        answers = []
+        port = w.svc.extension_port
+        self.assertEqual(posting.get(job["id"])["state"], "queued")
+        key = w.svc.extension_server.post_url(job_batch := posting.get(job["id"])["batch"]).split("?k=")[1]
+        thread = threading.Thread(target=lambda: answers.append(ask(
+            port, "POST", "/v1/page/manual", {"k": key, "batch": job_batch, "platform": "tiktok"},
+            origin=f"http://127.0.0.1:{port}")))
+        thread.start()
+        thread.join(5)  # nobody pumps the window's loop meanwhile
+        self.assertEqual((answers[0].status, answers[0].error), (503, "busy"))
+        self.assertEqual(posting.get(job["id"])["state"], "queued")  # nothing was set aside either
+
     def test_connecting_a_browser_opens_the_pair_page_or_hands_you_its_address(self):
         w = self.serving(connect=False)
         self.assertTrue(w.call("pair_extension"))
