@@ -328,10 +328,17 @@ class View(ApiPosting):
         info = w.call("youtube_api_info", CAPTION, TAGS)
         self.assertEqual((info["can_post"], info["review"]["state"]), (False, "unreviewed"))
         self.assertIn("no review yet", info["why"])
+        # Its row offers no Post with API…, as Post… is greyed out for it: the POST line says why, and the button
+        # only opened a question with nothing but Close to press.
+        row = self.rows(w)["youtube"]
+        self.assertEqual((row["actions"], row.get("api")), ([], None))
+        self.assertIn("no review yet", w.view("posting")["why"])
         made = self.api_post(w)
         self.assertEqual((made["started"], [b["reason"] for b in made["blocked"]]), (False, ["review"]))
         self.assertEqual(self.google.starts, [])
         approve(ep, video)
+        w.svc.update_posting(fresh=True)
+        self.assertEqual(self.rows(w)["youtube"]["actions"], ["post_api"])  # reviewed: the button is there
         self.assertEqual(self.posted(w)["review"], "approved")
 
 

@@ -442,6 +442,10 @@ class YouTubeApiTab:
         its question."""
         state = "off" if self.demo else youtube_api.status()["state"]
         connected = state == "on"
+        # A video that can't be posted (QA passed but not reviewed, say) has no button for it, as Post… is greyed
+        # out for it: the POST line says why. The button opened the whole question, with only Close to press.
+        review = self.picked_review[1]["state"] if self.picked_review else "none"
+        postable = review in videos.POSTABLE
         for row in rows:
             job, post = jobs.get(row["key"]), posts.get(row["key"])
             if job is not None and job["via"] == "api" and row["job"] == job["id"]:
@@ -458,9 +462,10 @@ class YouTubeApiTab:
             if row["key"] != "youtube" or not (again or row["state"] in ("none", *posting.FREE)):
                 continue
             if connected:
-                row["api"] = {"force": again}
-                if not again:
-                    row["actions"].append("post_api")
+                if postable:
+                    row["api"] = {"force": again}
+                    if not again:
+                        row["actions"].append("post_api")
             elif state == "again":
                 row["actions"].append("connect_api")
 

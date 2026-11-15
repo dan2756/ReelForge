@@ -431,14 +431,20 @@ describe("the question before a post", () => {
     const h = await kit({ api: { client: "on" } })
     await clickText(h, "ep02_duck.mp4", 2)
     await until(h, () => posting(h).video?.name === "ep02_duck.mp4" && posting(h).review.state === "unreviewed")
-    await ask(h)
-    expect(dialog(h)).toContain("ep02_duck.mp4 0.0 MB ! QA passed, but there is no review yet")
-    expect(dialog(h)).toContain("Who can see it Private Made for kids") // nothing to choose: it can't go
-    expect(dialog(h)).toContain("▐ Close ▌")
-    await clickText(h, "Post to YouTube", 2) // greyed out
-    await h.settle(500)
-    expect(frame(h)).toContain("POST TO YOUTUBE THROUGH ITS API")
+    // Its row has no Post with API…, as Post… is greyed out for it, and the POST line says why. (The button was
+    // drawn as pressable, and opened the whole question with only Close to press.)
+    expect(flat(h)).toContain("! QA passed, but there is no review yet")
+    expect(row(h)).toBe("YouTube ○ not posted")
+    expect(youtube(h).actions).toEqual([])
+    expect(frame(h)).not.toContain("Post with API…")
+    // The question itself, asked for all the same, has nothing to choose and nothing to press but Close.
+    const info = await h.bridge.call<{ can_post: boolean; why: string }>("youtube_api_info", CAPTION, TAGS)
+    expect([info.can_post, info.why.startsWith("QA passed, but there is no review yet")]).toEqual([false, true])
     expect([jobsMade(), (await google(h)).starts]).toEqual([0, []])
+    // A video that is reviewed has the button.
+    await clickText(h, "ep03_hail.mp4", 2)
+    await until(h, () => youtube(h).actions.includes("post_api"))
+    expect(frame(h)).toContain("▐ Post with API… ▌")
   })
 })
 
