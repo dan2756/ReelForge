@@ -23,7 +23,7 @@
     if (String(port) !== location.port || location.hostname !== "127.0.0.1") return "error:bad_page"
     if (Number(root.dataset.rfProtocol) !== PROTOCOL) return Number(root.dataset.rfProtocol) > PROTOCOL ? "error:extension_outdated" : "error:protocol"
     try {
-      const answer = await chrome.runtime.sendMessage({ ...message, port })
+      const answer = await chrome.runtime.sendMessage(message)
       return String(answer?.state || "error:no_answer")
     } catch {
       return "error:no_answer"

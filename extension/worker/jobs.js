@@ -680,8 +680,10 @@ export async function prepare(video, platforms, press) {
   const found = await app.current()
   if (!found?.paired) return { ok: false, message: "ReelForge is not connected." }
   try {
+    // ReelForge reads the whole video to fingerprint it before it answers, so this call gets more time.
     const res = await app.api(found, "/v1/batches", {
-      method: "POST", body: { video: String(video), platforms: platforms.map(String), press: press === true, install: await app.install() },
+      method: "POST", timeout: 30000,
+      body: { video: String(video), platforms: platforms.map(String), press: press === true, install: await app.install() },
     })
     if (!res.ok) return { ok: false, message: String(res.data?.message || "ReelForge could not prepare this post.") }
     return { ok: true, port: found.port, batch: res.data.batch, jobs: res.data.jobs || [], blocked: res.data.blocked || [] }

@@ -36,17 +36,21 @@ function sender(from) {
   return "tab"
 }
 
+// A local page speaks only for the ReelForge it was served by: the port is read from its address, not from
+// what it says.
+const portOf = from => Number(new URL(from.url).port)
+
 const routes = {
   // ReelForge's own pages on this computer.
   local: {
-    pair: async message => {
-      const state = await app.pair(Number(message.port), String(message.secret || ""))
+    pair: async (message, from) => {
+      const state = await app.pair(portOf(from), String(message.secret || ""))
       // A first pairing starts the heartbeat, and the first beat goes out now.
-      if (state === "ok") await jobs.beat(await app.at(Number(message.port)))
+      if (state === "ok") await jobs.beat(await app.at(portOf(from)))
       await jobs.settle()
       return { state }
     },
-    batch: async message => ({ state: await jobs.startBatch(Number(message.port), message.batch) }),
+    batch: async (message, from) => ({ state: await jobs.startBatch(portOf(from), message.batch) }),
   },
   // The website learns three things and nothing else: is the app there, is this browser paired, its version.
   site: {
