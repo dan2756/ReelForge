@@ -199,6 +199,17 @@ class AtOnce(MoveScratch):
         self.assertIsNone(move.take_marker())                  # once
         execv.assert_not_called()
 
+    def test_the_browsers_connected_to_the_extension_stay_connected(self):
+        from dashboard import extension_api
+
+        extension_api.change_store(lambda s: s["paired"].append({"install": "chrome", "name": "Chrome"}))
+        before = extension_api.read_store()
+        self.assertEqual(extension_api.store_path(), self.root / "dashboard" / "data" / "extension.json")
+        self.go()
+        self.assertEqual(extension_api.store_path(), self.home / "dashboard" / "data" / "extension.json")
+        self.assertEqual(extension_api.read_store(), before)  # the same ReelForge to the extension, at its new place
+        self.assertEqual(extension_api.folder(), self.home / "extension")  # (the folder to load again in the browser)
+
     def test_from_the_window_reelforge_opens_again_from_the_new_place(self):
         self.write("bin/reelforge", "#!/bin/sh\n")
         code, moved, execv = self.go(reopen=True)

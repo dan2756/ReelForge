@@ -1604,5 +1604,108 @@ class DoctorRow(ApiTest):
         with mock.patch.object(extension_api, "check", side_effect=RuntimeError("boom")):
             self.assertEqual(self.row(), (doctor.WARN, "Browser extension", "couldn't be checked (RuntimeError: boom)"))
 
+
+class Ships(unittest.TestCase):
+    """The extension's folder goes out with every release and is replaced by every update; the file of connected
+    browsers is yours and stays."""
+
+    def setUp(self) -> None:
+        import tempfile
+
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+
+    def package(self):
+        sys.path.insert(0, str(KIT / "scripts"))
+        self.addCleanup(sys.path.remove, str(KIT / "scripts"))
+        import package
+
+        return package
+
+    def test_the_downloads_hold_the_extensions_folder_when_there_is_one(self):
+        package = self.package()
+        repo = self.dir / "kit"
+        files = {"extension/manifest.json": "{}", "extension/background.js": "", "extension/selectors.json": "{}",
+                 "extension/icons/icon128.png": "png", "extension/platform/tiktok.js": "", "studio/__init__.py": "",
+                 ".github/workflows/test.yml": "", ".gitignore": "tools/\n*.log\n",
+                 "extension/tools/make_icons.py": "", "extension/debug.log": ""}
+        for rel, text in files.items():
+            (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (repo / rel).write_text(text, "utf-8")
+        for command in (["git", "init", "-q"], ["git", "add", "-A"]):
+            subprocess.run(command, cwd=repo, check=True, capture_output=True)
+        with mock.patch.object(package, "ROOT", repo):
+            shipped = package.tracked()
+            archive = self.dir / "ReelForge-0-Windows.zip"
+            package.build_zip(archive, "ReelForge-0", shipped, package.extras("windows", "0"))
+        self.assertEqual([f for f in shipped if f.startswith("extension/")],
+                         ["extension/background.js", "extension/icons/icon128.png", "extension/manifest.json",
+                          "extension/platform/tiktok.js", "extension/selectors.json"])
+        with zipfile.ZipFile(archive) as z:
+            self.assertIn("ReelForge-0/extension/manifest.json", z.namelist())
+
+    @unittest.skipUnless((KIT / "extension" / "manifest.json").is_file() and (KIT / ".git").exists(),
+                         "this copy has no extension folder (or isn't a git checkout)")
+    def test_everything_the_real_manifest_names_is_in_the_downloads(self):
+        # (.gitignore has patterns such as tools/ and *.log that also match inside extension/: a file they catch
+        # would silently stay out of every release)
+        shipped = set(self.package().tracked())
+        manifest = json.loads((KIT / "extension" / "manifest.json").read_text("utf-8"))
+
+        def named(value):
+            if isinstance(value, dict):
+                for v in value.values():
+                    yield from named(v)
+            elif isinstance(value, list):
+                for v in value:
+                    yield from named(v)
+            elif isinstance(value, str) and (KIT / "extension" / value).is_file():
+                yield value
+
+        for rel in ["manifest.json", "selectors.json", *named(manifest)]:
+            self.assertIn(f"extension/{rel}", shipped)
+        self.assertEqual(extension_api.manifest_id(KIT / "extension"), extension_api.EXTENSION_ID)
+
+    def test_an_update_replaces_the_folder_and_keeps_your_connections(self):
+        self.assertFalse(update.kept("extension/manifest.json"))
+        self.assertFalse(update.kept("extension/platform/tiktok.js"))
+        self.assertFalse(update.kept("dashboard/web/page.js"))
+        self.assertTrue(update.kept("dashboard/data/extension.json"))
+        self.assertTrue(update.kept("dashboard/data/extension.json.lock"))
+        root = self.dir / "ReelForge"
+        mine = {"dashboard/data/extension.json": '{"app_id": "mine", "paired": [{"install": "chrome"}]}',
+                "dashboard/data/stats.db": "my stats"}
+        for rel, text in {**mine, "studio/__init__.py": 'KIT_VERSION = "1.0.0"\n',
+                          "extension/manifest.json": '{"version": "0.1.0"}',
+                          "extension/selectors.json": '{"version": 1}'}.items():
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(text, "utf-8")
+        archive = self.dir / "ReelForge-1.1.0-Windows.zip"
+        with zipfile.ZipFile(archive, "w") as z:
+            for rel, text in {"studio/__init__.py": 'KIT_VERSION = "1.1.0"\n',
+                              "extension/manifest.json": '{"version": "0.2.0"}',
+                              "extension/selectors.json": '{"version": 2}', "extension/platform/x.js": "// new\n",
+                              "dashboard/web/page.js": "// new\n",
+                              "dashboard/data/extension.json": '{"app_id": "the kit\'s", "paired": []}'}.items():
+                z.writestr(f"ReelForge-1.1.0/{rel}", text)
+        work = self.dir / "work"
+        work.mkdir()
+        update._copy_release(archive, root, work, lambda *a: None)
+        self.assertEqual((root / "extension/manifest.json").read_text("utf-8"), '{"version": "0.2.0"}')
+        self.assertEqual((root / "extension/selectors.json").read_text("utf-8"), '{"version": 2}')
+        self.assertTrue((root / "extension/platform/x.js").is_file())
+        self.assertTrue((root / "dashboard/web/page.js").is_file())
+        for rel, text in mine.items():
+            self.assertEqual((root / rel).read_text("utf-8"), text, rel)
+
+    def test_the_connections_file_is_in_the_data_folder_that_is_never_part_of_the_kit(self):
+        with mock.patch.object(config, "APP_DIR", self.dir / "dashboard"):
+            self.assertEqual(extension_api.store_path(), self.dir / "dashboard" / "data" / "extension.json")
+            self.assertEqual(extension_api.folder(), self.dir / "extension")
+        ignored = (KIT / ".gitignore").read_text("utf-8").splitlines()
+        self.assertIn("dashboard/data/", ignored)
+
+
 if __name__ == "__main__":
     unittest.main()

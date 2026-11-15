@@ -83,6 +83,18 @@ class FactoryReset(ResetScratch):
         self.assertFalse(profiles.main().onboarded)
         self.assertEqual(profiles.every(), [profiles.main()])
 
+    def test_the_browsers_connected_to_the_extension_go_to_the_backup_with_the_stats(self):
+        from dashboard import extension_api
+
+        store = extension_api.store_path()
+        self.assertEqual(store, self.root / "dashboard" / "data" / "extension.json")
+        extension_api.change_store(lambda s: s["paired"].append({"install": "chrome", "name": "Chrome"}))
+        kept = store.read_text(encoding="utf-8")
+        done = self.quiet(reset.factory_reset)
+        self.assertEqual((done.where / "dashboard/data/extension.json").read_text(encoding="utf-8"), kept)
+        self.assertFalse(store.exists())
+        self.assertEqual(extension_api.read_store(), {})  # brand-new: no browser is connected, until one connects again
+
     def test_a_second_reset_leaves_the_bootstrap_notes_where_they_are(self):
         self.quiet(reset.factory_reset)
         items = [p.name for p, _ in reset.reset_items()]
