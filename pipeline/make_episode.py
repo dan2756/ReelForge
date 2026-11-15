@@ -91,6 +91,8 @@ def main():
                     help="render: all frames again, or only these seconds (12-15.5,31-33) keeping the rest")
     ap.add_argument("--keep-frames", action="store_true",
                     help="render: keep the frames on disk although the scene was built again since")
+    ap.add_argument("--status", action="store_true",
+                    help="say where the episode stands (built, frames, audio, video, QA, review, delivered) and stop")
     args = ap.parse_args()
 
     ep = args.episode.resolve()
@@ -102,6 +104,9 @@ def main():
     build.mkdir(exist_ok=True)
     final.mkdir(exist_ok=True)
     fps = spec["fps"]
+    if args.status:
+        print(status(ep, spec))
+        return
 
     steps = []
     for s in args.steps.split(","):
@@ -330,6 +335,78 @@ def render_progress(frames, total):
         done = len(framecache.present(frames))
         return framecache.progress(done, total, done - before, time.time() - t0)
     return line
+
+
+def status(ep, spec):
+    """Where an episode stands, one line for each place there was to look: is the scene built and is it still the
+    scene episode.json describes, how many frames are rendered and are they this scene's, the mix, the video, QA,
+    the review, the copy in completed videos. It only reads."""
+    build, final = ep / "build", ep / "final"
+    total = int(round(spec["render_until"] * spec["fps"]))
+
+    stamp = framecache.read_stamp(build / framecache.SCENE)
+    if not (build / "scene.blend").exists():
+        built = "no (run --steps build)"
+    elif stamp is None:
+        built = "yes, without a stamp (an older ReelForge built it, or the last build did not finish)"
+    else:
+        old = framecache.outdated(stamp, spec, config.PIPELINE / "blender")
+        built = f"yes, but {', '.join(old)} changed since: build again" if old else "yes"
+
+    frames_dir = build / "frames"
+    state, what = framecache.frames_state(build)
+    frames = f"{len(framecache.present(frames_dir) & set(range(1, total + 1)))} of {total}" + {
+        "none": "", "match": ", they match the scene",
+        "changed": f", rendered from an older scene (changed since: {', '.join(what) or 'the scene'})",
+        "unstamped": ", with no record of the scene they show (it has been built again since)",
+        "unbuilt": ", but the last build did not finish",
+        "untracked": ", not checked against the scene (it has no stamp)"}[state]
+    broken = sum(not framecache.whole(f) for f in frames_dir.glob("f_*.jpg"))
+    if broken:
+        frames += f"; {broken} empty or cut off (the render step sweeps them)"
+
+    audio = "no"
+    if (build / "audio.wav").exists():
+        import wave
+        with wave.open(str(build / "audio.wav")) as w:
+            audio = f"yes, {w.getnframes() / w.getframerate():.1f} s"
+
+    video_file = final / f"{spec['id']}.mp4"
+    video = "no"
+    if video_file.exists():
+        st = video_file.stat()
+        video = (f"final/{video_file.name}, {st.st_size / 1e6:.0f} MB, made "
+                 f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(st.st_mtime))}")
+    qa_file = build / "qa" / "qa.json"
+    qa_line = "not run"
+    if qa_file.exists():
+        import qa
+        report = json.loads(qa_file.read_text(encoding="utf-8"))
+        fails = [c["check"] for c in report.get("checks", []) if c["status"] == "FAIL"]
+        qa_line = "passed" if report.get("pass") else f"FAILED ({', '.join(fails) or 'see build/qa/report.md'})"
+        if not video_file.exists() or report.get("fingerprint") != qa.video_fingerprint(video_file):
+            qa_line += ", but on an earlier video: run --steps qa"
+        elif report.get("pass"):
+            qa_line += " on this video"
+
+    from studio.publish_check import review_state
+    review = {"approved": "APPROVED", "rejected": "REJECTED", "unreviewed": "not written yet (build/qa/review.md)",
+              "stale": "APPROVED, but of an earlier cut: the video changed after it"}[review_state(ep)]
+
+    copy = completed_dir(spec) / video_file.name
+    delivered = "no"
+    if copy.exists():
+        same = video_file.exists() and (copy.stat().st_size, int(copy.stat().st_mtime)) == \
+            (video_file.stat().st_size, int(video_file.stat().st_mtime))
+        delivered = f"yes, in completed videos/{copy.parent.name}/" if same else \
+            f"an earlier cut is in completed videos/{copy.parent.name}/, this one is not"
+
+    rows = [("built", built), ("frames", frames), ("audio", audio), ("video", video), ("QA", qa_line),
+            ("review", review), ("delivered", delivered)]
+    head = f"{spec['id']}  {' '.join(str(spec.get('title', '')).split())}"
+    if spec.get("demo"):
+        head += "  (a demo: it can't ship)"
+    return "\n".join([head] + [f"  {name:<10} {text}" for name, text in rows])
 
 
 def check_publish(ep):
