@@ -187,6 +187,12 @@ class WindowTest(Folder):
         for said in ("Post…", "BY HAND", "you check it and press Post there", "optional",
                      "not yet on the live sites"):
             self.assertIn(said, about["publish"][1])
+        # The two timed looks for a new post come after a by-hand button only (record_manual): the help says so for
+        # by hand, and for Post… what its row goes by. It said "either way".
+        post, by_hand = about["publish"][1].split("Under BY HAND", 1)
+        self.assertIn("ReelForge checks for the new post 10 and 30 minutes later", by_hand)
+        self.assertNotIn("10 and 30 minutes", post)
+        self.assertIn("Its row shows the post when the extension reports it, or when a refresh finds it.", post)
         self.assertIn("Log out", about["accounts"][1])
         self.assertEqual(dict(KEYS)["1-7"], "switch tabs")
         self.assertIn("Publish", dict(KEYS)["u"])
