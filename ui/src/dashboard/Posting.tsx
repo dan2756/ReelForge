@@ -79,7 +79,7 @@ export function PostBlock() {
         <text fg={DASH.text} attributes={TextAttributes.BOLD} wrapMode="none" flexShrink={0}>
           {"POST  "}
         </text>
-        <Wrapped segs={head} />
+        <Wrapped segs={head} width={Math.max(width - 6, 0)} />
       </box>
       {(v?.rows ?? []).map((row) => (
         <PostRow key={row.key} row={row} labels={v!.labels} nameWidth={nameWidth} room={width - nameWidth} />
@@ -123,7 +123,8 @@ function PostRow({ row, labels, nameWidth, room }: { row: PostingRow; labels: Re
       </text>
       <box flexDirection={beside ? "row" : "column"} flexGrow={1} flexShrink={1} minWidth={0}>
         <box flexDirection="row" flexGrow={beside ? 1 : 0} flexShrink={beside ? 1 : 0}>
-          <Wrapped segs={row.line} />
+          {/* (under the name, the words have the row's measured width: see Wrapped) */}
+          <Wrapped segs={row.line} width={beside ? undefined : Math.max(room, 0)} />
         </box>
         {row.actions.length ? (
           <box flexDirection="row" height={1} flexShrink={0} gap={1}>

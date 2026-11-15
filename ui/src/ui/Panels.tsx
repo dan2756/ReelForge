@@ -438,11 +438,14 @@ export function Markdown({ text, heading, spaced }: { text: string; heading?: st
   }
 }
 
-/** Styled text that wraps at spaces to its width. */
-export function Wrapped({ segs, flexGrow = 1 }: { segs: Segs; flexGrow?: number }) {
+/** Styled text that wraps at spaces to its width. width: the columns it has, where whoever draws it has measured
+ * them. Inside a scrolling area a text keeps the width it was first laid out with, which is from before the
+ * scrollbar showed and a column or two more than it has: a line that filled that width lost its last letter at the
+ * area's edge. Given its width, it wraps to that. */
+export function Wrapped({ segs, flexGrow = 1, width }: { segs: Segs; flexGrow?: number; width?: number }) {
   const theme = useTheme()
   return (
-    <text fg={theme.text} wrapMode="word" flexGrow={flexGrow} flexShrink={1}>
+    <text fg={theme.text} wrapMode="word" width={width || undefined} flexGrow={width ? 0 : flexGrow} flexShrink={width ? 0 : 1}>
       {segs.map((s, i) => {
         const st = parseStyle(s[1])
         return (

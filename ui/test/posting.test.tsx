@@ -164,6 +164,32 @@ describe("where each post stands", () => {
     expect(listed("opened.txt")).toEqual(["https://example.invalid/instagram/1"])
   })
 
+  test("a row whose words wrap keeps every letter, whatever length its lines come to", async () => {
+    // The form scrolls, and a text in a scrolling area is laid out a column or two wider than it has: a line that
+    // came to exactly that width lost its last letter at the form's edge ("ReelForg sent no answer").
+    const h = await kit({ extension: "on" })
+    const view = posting(h)
+    for (let n = 70; n <= 90; n++) {
+      const said = `✓ posted ${"x".repeat(n - 19)} ReelForge sent no answer to that, because you haven't given one, so this is your channel's own setting.`
+      h.bridge.emit("posting", { ...view, rows: view.rows.map((r) => (r.key === "youtube" ? { ...r, state: "posted", line: [[said, ""]], actions: ["open_post", "post_again"] } : r)) })
+      await h.settle(120)
+      expect(row(h, "YouTube")).toContain(said)
+    }
+    // The review's own line beside POST wraps the same way.
+    const head = () => {
+      const rows = frame(h).split("\n")
+      const at = rows.findIndex((r) => r.includes("┃ POST  "))
+      const text = (r: string) => r.slice(r.lastIndexOf("┃") + 1).replace(/[█▀▄]\s*$/, "").trim()
+      return rows.slice(at, rows.findIndex((r) => /┃ TikTok +[○●✓×?]/.test(r))).map(text).join(" ").replace(/\s+/g, " ")
+    }
+    for (let n = 70; n <= 90; n++) {
+      const said = `! ${"x".repeat(n - 12)} ReelForge has to see a review that says APPROVED for this cut before it posts it.`
+      h.bridge.emit("posting", { ...view, review: { state: "unreviewed", line: [[said, ""]] } })
+      await h.settle(120)
+      expect(head()).toBe(`POST ${said}`)
+    }
+  })
+
   test("everything that starts a post shows in a window 120 columns by 30 rows", async () => {
     const h = await kit({}, [120, 30])
     const f = frame(h)
