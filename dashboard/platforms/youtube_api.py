@@ -452,7 +452,7 @@ def read_client(path: Path) -> dict:
         data = json.loads(path.read_text("utf-8-sig"))
     except FileNotFoundError:
         raise ApiError("client_file", f"There is no file at {path}.") from None
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # (the last: brackets nested deeper than any client file has)
         raise ApiError("client_file", f"{name} isn't a client file from Google Cloud. Download the JSON of your "
                                       "Desktop app client there and pick that file.") from None
     if isinstance(data, dict) and "installed" not in data and "web" in data:

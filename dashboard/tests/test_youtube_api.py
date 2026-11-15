@@ -258,6 +258,9 @@ class Connecting(ApiTest):
         said = self.refused("client_file", youtube_api.connect, web).message
         self.assertIn("Web application client", said)
         self.assertIn("Desktop app client", said)
+        deep = self.root / "deep.json"
+        deep.write_text("[" * 60000, "utf-8")
+        self.assertIn("deep.json isn't a client file", self.refused("client_file", youtube_api.connect, deep).message)
         half = self.root / "half.json"
         half.write_text(json.dumps({"installed": {"client_id": CLIENT_ID}}), "utf-8")
         self.refused("client_file", youtube_api.connect, half)
