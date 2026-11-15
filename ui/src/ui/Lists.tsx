@@ -303,7 +303,10 @@ export function OptionList(props: OptionListProps) {
       onMouseDown={() => focus()}
       onMouseScroll={(e) => {
         const d = e.scroll?.direction === "up" ? -1 : e.scroll?.direction === "down" ? 1 : 0
-        setOffset((o) => Math.min(Math.max(o + d, 0), Math.max(items.length - 1, 0)))
+        const next = Math.min(Math.max(offset + d, 0), Math.max(items.length - 1, 0))
+        // While the list itself has further to go, the wheel is its own: a page it sits in stays where it is.
+        if (next !== offset && totalLines > height) e.stopPropagation()
+        setOffset(next)
       }}
       onSizeChange={function (this: Renderable) {
         setHeight(this.height)

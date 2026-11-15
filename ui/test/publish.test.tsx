@@ -9,7 +9,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { headless, type Headless } from "../scripts/headless"
-import { clickText } from "../scripts/shots"
+import { clickText, find } from "../scripts/shots"
 import { ROOT } from "../src/bridge"
 import { toasts } from "../src/ui/Panels"
 
@@ -114,6 +114,27 @@ describe("posting by hand", () => {
       "https://x.com/compose/post",
     ])
     expect(listed("copied.txt").slice(4)).toEqual([`${CAPTION} ${TAGS}`, "-- copied --"]) // the TikTok text
+  })
+
+  test("in a narrow window the videos go above the form, and the wheel scrolls their list before it scrolls the page", async () => {
+    const h = await demo([80, 24])
+    const at = (text: string) => frame(h).split("\n").findIndex((r) => r.includes(text))
+    expect(at("VIDEOS  3")).toBeGreaterThan(0)
+    expect(at("VIDEOS  3")).toBeLessThan(at("Caption")) // above the form, which keeps the window's width
+    expect(frame(h)).toContain("demo_doubling_duck.mp4")
+    expect(frame(h)).not.toContain("demo_disaster_pov.mp4") // two show, and the list scrolls to the third
+    const [x, y] = find(h, "demo_everyone_jumps.mp4")!
+    await h.t.mockMouse.scroll(x + 2, y, "down")
+    await h.settle(300)
+    expect(frame(h)).toContain("demo_disaster_pov.mp4")
+    expect(at("VIDEOS  3")).toBeGreaterThan(0) // the page stayed where it was
+    for (let i = 0; i < 30 && at("BY HAND") < 0; i++) {
+      await h.t.mockMouse.scroll(x + 2, 20, "down") // over the form: the page
+      await h.settle(100)
+    }
+    expect(frame(h)).toContain("▐ Post… ▌")
+    expect(frame(h)).toContain("BY HAND")
+    expect(at("VIDEOS  3")).toBe(-1) // scrolled away
   })
 
   test("Tab brings a button that is out of sight into view before Enter can press it", async () => {
