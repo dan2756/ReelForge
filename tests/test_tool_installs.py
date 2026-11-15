@@ -129,6 +129,21 @@ class Ffmpeg(Scratch):
         self.assertTrue(os.access(self.tools / "ffmpeg" / "bin" / "ffprobe", os.X_OK) or os.name == "nt")
         self.assertEqual(self.left(), ["ffmpeg"])
 
+    def test_the_windows_zips_go_in_the_same_way(self):
+        # Windows gets .zip downloads, with .exe programs: the same staging, by pretending to be Windows
+        build, top = "ffmpeg-7.1-essentials_build", f"blender-{tools.BLENDER_VERSION}-windows-x64"
+        with mock.patch.object(tools, "WINDOWS", True), mock.patch.object(tools, "arm", lambda: False):
+            self.serve(self.zip("half.zip", f"{build}/bin/ffmpeg.exe"),
+                       self.zip("ffmpeg.zip", f"{build}/bin/ffmpeg.exe", f"{build}/bin/ffprobe.exe"),
+                       self.zip("blender.zip", f"{top}/blender.exe", f"{top}/4.5/scripts/startup.py"))
+            with self.assertRaises(RuntimeError):
+                tools.install_ffmpeg()
+            self.assertIsNone(tools.find_ffmpeg())
+            self.assertEqual(self.rel(tools.install_ffmpeg()), "ffmpeg/bin/ffmpeg.exe")
+            self.assertTrue(tools.has_ffprobe(tools.find_ffmpeg()))
+            self.assertEqual(self.rel(tools.install_blender()), "blender/blender.exe")
+        self.assertEqual(self.left(), ["blender", "ffmpeg"])
+
     def test_a_copy_with_its_ffprobe_is_found_before_one_without(self):
         for folder, both in (("ffmpeg", False), ("ffmpeg-7.1-full_build", True)):
             (self.tools / folder / "bin").mkdir(parents=True)
