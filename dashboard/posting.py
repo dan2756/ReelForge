@@ -17,7 +17,7 @@ post settle it. Once the extension was allowed to press, it can only end the job
 A video is the SHA-256 of its bytes, never its file name, and it can have one live job per platform: while a job is
 queued, under way, posted or unknown, a second one for the same video and platform is refused (the unique index
 post_jobs_one_live holds that even between two windows). Posting again takes saying so (force), which sets the old
-row aside as superseded.
+row aside as superseded. It stands again if the new try ends without a post.
 
 Everything here is a plain function on the database dashboard.db has open, so the window, the local server for the
 extension and the tests all drive the same code. Each change of state is one transaction, leaves a row in post_events
@@ -232,11 +232,12 @@ def for_files(paths: list[Path]) -> dict[Path, dict[str, dict]]:
 
 def standing(job: dict | None, post: dict | None) -> str:
     """Where a video stands on a platform, from its job (current) and the post a stats read has filed under its
-    episode: "none", "spotted" (the read found it and no job says more), or the job's state. A live job has the say;
-    one that ended without a post only counts when it's newer than the post."""
+    episode: "none", "spotted" (the read found it and no job says more), or the job's state. A live job has the say.
+    One that ended without a post never hides a post the read found, whichever came first: the video is up there,
+    and a try at posting it again that failed or was called off doesn't change that."""
     if job and job["state"] in LIVE:
         return job["state"]
-    if post and not (job and job["created_at"] > (post["published_at"] or "")):
+    if post:
         return "spotted"
     return job["state"] if job else "none"
 
@@ -684,7 +685,26 @@ def _write(c: sqlite3.Connection, old: dict, state: str, by: str, **fields) -> d
         _event(c, old["id"], new["updated_at"], new["state"], new["step"], new["detail"])
     else:
         c.execute(f"UPDATE meta SET value = CAST(value AS INTEGER) + 1 WHERE key = '{CHANGES}'")
+    if state in FREE and old["state"] not in FREE:
+        _stands_again(c, new)
     return new
+
+
+def _stands_again(c: sqlite3.Connection, job: dict) -> None:
+    """A job just ended without a post. If it was a post again, the posted or unknown job it set aside stands
+    again: as far as ReelForge knows the video is still up there (or still to be asked about), and a plain Post
+    must go on being refused. Without this, a Post again that never got anywhere would quietly forget the post
+    before it."""
+    aside = c.execute(
+        """SELECT id, state FROM post_jobs WHERE video_sha256 = ? AND platform = ? AND superseded = 1
+           AND state IN ('posted', 'unknown') AND rowid < (SELECT rowid FROM post_jobs WHERE id = ?)
+           ORDER BY rowid DESC LIMIT 1""", (job["video_sha256"], job["platform"], job["id"])).fetchone()
+    live = c.execute(f"SELECT 1 FROM post_jobs WHERE video_sha256 = ? AND platform = ? AND superseded = 0 "
+                     f"AND state IN ({','.join('?' * len(LIVE))})", (job["video_sha256"], job["platform"], *LIVE))
+    if aside and not live.fetchone():  # (a newer try that is under way has the say until it ends)
+        c.execute("UPDATE post_jobs SET superseded = 0 WHERE id = ?", (aside["id"],))
+        _event(c, aside["id"], job["updated_at"], aside["state"], None,
+               "stands again: the new try ended without a post")
 
 
 def _settled(old: dict, new: dict, by: str) -> dict:

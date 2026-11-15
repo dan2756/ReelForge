@@ -1320,6 +1320,31 @@ class WindowServes(PostingTest):
         self.assertIn("ReelForge couldn't open your browser, so it couldn't open the posting page", toast["body"])
         self.assertEqual([j["state"] for j in posting.recent()], ["cancelled"])
 
+    def test_post_again_with_no_browser_leaves_the_video_posted(self):
+        # Two posts ReelForge knows of: one it helped with (a link, no numbers yet) and one a stats read found.
+        w = self.serving()
+        (job,) = w.call("post_with_extension", ["tiktok"], CAPTION, TAGS, True, None)["jobs"]
+        posting.claim(job["id"], "install-chrome")
+        posting.advance(job["id"], "ready", install="install-chrome")
+        posting.advance(job["id"], "posted", install="install-chrome", url=TIKTOK_URL)
+        db.add_post("youtube", "dQw4w9WgXcQ", posting.get(job["id"])["episode_id"], CAPTION,
+                    "https://youtu.be/dQw4w9WgXcQ")
+        w.svc.reload()
+        w.call("form_changed", CAPTION, TAGS)
+        self.browser = False
+        for platform, state in (("tiktok", "posted"), ("youtube", "spotted")):
+            w.call("post_action", self.rows(w)[platform]["job"] or platform, "post_again")
+            self.assertEqual(w.sent("toast")[-1]["title"], "Nothing was posted")
+            row = self.rows(w)[platform]
+            self.assertEqual((row["state"], row["actions"]), (state, ["open_post", "post_again"]), platform)
+            self.assertTrue("".join(seg[0] for seg in row["line"]).startswith("✓ posted"), platform)
+            self.assertTrue(w.view("posted")["done"][platform])  # the POSTED line keeps its tick
+            # A plain Post is still refused: nothing forgot the post that is up.
+            self.assertEqual(posting.preview(self.video, [platform], CAPTION, TAGS, w.svc.cfg)["blocked"][platform]
+                             ["reason"], state)
+        self.assertEqual([(j["platform"], j["state"], j["superseded"]) for j in posting.recent()],
+                         [("tiktok", "posted", 0), ("tiktok", "cancelled", 0), ("youtube", "cancelled", 0)])
+
     def test_what_the_extension_does_shows_in_the_window_at_once(self):
         w = self.serving(connect=False)
         self.assertEqual(w.view("posting")["extension"]["state"], "off")

@@ -201,6 +201,57 @@ class Making(LedgerTest):
         self.assertEqual(posting.get(job["id"])["state"], "posted")  # set aside, not rewritten
         self.assertEqual(self.events(job)[-1], ("posted", None, "set aside: posted again"))
 
+    def test_a_post_again_that_ends_without_a_post_leaves_the_first_post_standing(self):
+        # Post again, and then the page didn't open, nobody picked it up, it failed, or you called it off: the
+        # video is still up there as far as ReelForge knows, and a plain Post has to go on being refused.
+        first = self.walk(self.job(), *STEPS)
+        posting.advance(first["id"], "posted", install=CHROME, url="https://www.tiktok.com/@me/video/730000000001")
+
+        def ends(how: str) -> dict:
+            again = self.job(force=["tiktok"])
+            self.assertEqual(posting.get(first["id"])["superseded"], 1)
+            if how == "the page didn't open":
+                posting.cancel(again["id"], "the posting page didn't open", by="app")
+            elif how == "nobody picked it up":
+                self.age(again, 11, "created_at")
+                self.assertEqual(posting.expire_stale(), 1)
+            elif how == "it failed":
+                self.walk(again, "opening")
+                posting.advance(again["id"], "failed", install=CHROME, error_code="hook_not_found")
+            else:
+                self.walk(again, *STEPS)
+                posting.cancel(again["id"], "you cancelled it")
+            return again
+
+        for how in ("the page didn't open", "nobody picked it up", "it failed", "you called it off"):
+            again = ends(how)
+            self.assertIn(self.state(again), posting.FREE, how)
+            back = posting.get(first["id"])
+            self.assertEqual((back["state"], back["superseded"]), ("posted", 0), how)
+            self.assertEqual(self.events(first)[-1],
+                             ("posted", None, "stands again: the new try ended without a post"))
+            (block,) = self.batch()["blocked"]
+            self.assertEqual((block["reason"], block["job"]), ("posted", first["id"]), how)
+            self.assertEqual(posting.for_files([self.video])[self.video]["tiktok"]["id"], first["id"])
+        # Said again about a try that is over (you posted that one by hand instead): nothing more to bring back,
+        # and nothing in the way of the next Post again.
+        over = ends("it failed")
+        posting.cancel(over["id"], "posted by hand")
+        newest = self.walk(self.job(force=["tiktok"]), *STEPS, "posted")
+        posting.cancel(over["id"], "posted by hand")
+        self.assertEqual((posting.get(first["id"])["superseded"], posting.get(newest["id"])["superseded"]), (1, 0))
+
+    def test_a_job_nobody_is_sure_of_stands_again_too(self):
+        unsure = self.walk(self.job(), *STEPS, "unknown")
+        again = self.job(force=["tiktok"])
+        posting.cancel(again["id"])
+        self.assertEqual((self.state(unsure), posting.get(unsure["id"])["superseded"]), ("unknown", 0))
+        (block,) = self.batch()["blocked"]
+        self.assertEqual(block["reason"], "unknown")  # still yours to say whether it posted
+        # "It didn't post" ends it without a post, and there was nothing before it: the way is free.
+        posting.resolve(unsure["id"], False)
+        self.assertEqual(self.job()["state"], "queued")
+
     def test_an_unknown_job_blocks_until_it_is_settled_or_you_post_again(self):
         job = self.walk(self.job(), *STEPS, "unknown")
         (block,) = self.batch()["blocked"]
@@ -912,7 +963,10 @@ class Standing(LedgerTest):
                                    ({**before, "state": "uploading"}, post, "uploading"),  # a live job has the say
                                    ({**before, "state": "posted"}, post, "posted"),
                                    ({**before, "state": "failed"}, post, "spotted"),  # it failed, then went up by hand
-                                   ({**after, "state": "failed"}, post, "failed"),    # a new try since, which failed
+                                   # A post again since, which failed or was called off: the video is still up.
+                                   ({**after, "state": "failed"}, post, "spotted"),
+                                   ({**after, "state": "cancelled"}, post, "spotted"),
+                                   ({**after, "state": "unknown"}, post, "unknown"),
                                    ({**after, "state": "cancelled"}, None, "cancelled")):
             self.assertEqual(posting.standing(job, found), stands, (job, found))
 
