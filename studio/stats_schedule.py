@@ -267,8 +267,20 @@ def _drop_cron_line() -> None:
         pass
 
 
+def _stop_read() -> None:
+    """Stop a read the systemd timer has started. Turning the timer off leaves one alone: the service is a oneshot,
+    under way from the moment it starts until its read is over. A read left running goes on in a folder that may be
+    about to move or go (reelforge move, uninstall), and one caught as it starts up there puts a stub of the old
+    folder back. On a Mac taking the job off (launchctl bootout) stops its read as well."""
+    try:
+        _systemctl("stop", f"{UNIT}.service")
+    except (OSError, subprocess.SubprocessError):
+        pass  # it didn't stop in time: whoever moves the folder still waits for the read's own lock
+
+
 def disable() -> str:
-    """Stop this folder's hourly job (one that belongs to another ReelForge folder stays). Returns a sentence."""
+    """Stop this folder's hourly job (one that belongs to another ReelForge folder stays). With systemd and on a Mac
+    a read the job has under way stops with it. Returns a sentence."""
     if P.test_copy():
         return TEST_COPY_NOTE
     if _dry():
@@ -294,6 +306,7 @@ def disable() -> str:
     if (units / f"{UNIT}.timer").exists() or (units / f"{UNIT}.service").exists():
         if shutil.which("systemctl"):
             _systemctl("disable", "--now", f"{UNIT}.timer")
+            _stop_read()
         for name in (f"{UNIT}.timer", f"{UNIT}.service"):
             (units / name).unlink(missing_ok=True)
         if shutil.which("systemctl"):

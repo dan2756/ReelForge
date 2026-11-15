@@ -261,6 +261,18 @@ def _wait_for_reads(say, wait: float = 120) -> None:
         time.sleep(1)
 
 
+def _stats_on_again() -> bool:
+    """Put the hourly stats read back on after a reset or a move that took it off and then didn't happen. False: it
+    couldn't be."""
+    from . import stats_schedule
+
+    try:
+        stats_schedule.enable()
+        return stats_schedule.status() == "on"
+    except Exception:
+        return False
+
+
 @dataclass
 class Done:
     """What a factory reset or an uninstall did, for the window's notice or the terminal."""
@@ -278,6 +290,17 @@ def factory_reset(say=print) -> Done:
     dest = _free(BACKUPS, f"factory-reset-{_stamp()}")
     for path, what in items:
         say(f"  {P.rel(path)}: {what}")
+    # The hourly stats read goes off before anything moves, and a read it has just started is stopped with it: one
+    # starting up as the stats go into the backup would make a new, empty store where they were.
+    job_was_on, unchecked = False, ""
+    try:
+        from . import stats_schedule
+
+        if stats_schedule.status() == "on":
+            job_was_on = True
+            say("  " + stats_schedule.disable())
+    except Exception as e:  # the scheduler isn't there: nothing to turn off
+        unchecked = f"The hourly stats read couldn't be checked ({e})."
     _wait_for_reads(say)
     done.problems, done.unchanged = _move_all([(p, dest / p.relative_to(ROOT)) for p, _ in items], dest)
     if done.problems:
@@ -285,6 +308,10 @@ def factory_reset(say=print) -> Done:
             BACKUPS.rmdir()   # when this made it for the backup, and it's empty again
         except OSError:
             pass
+        if job_was_on and not _stats_on_again():   # nothing was reset, so the hourly read goes on as it did
+            done.problems.append("the hourly stats read is off now, and couldn't be turned on again: reelforge stats "
+                                 "on does it")
+            done.unchanged = False
         return done
     done.where = dest
     if any(p.name in ("CLAUDE.md", "AGENTS.md") for p, _ in items):
@@ -299,13 +326,8 @@ def factory_reset(say=print) -> Done:
             + f"\nTo undo it, close {KIT_NAME} and move them back into the {KIT_NAME} folder, to the same places.\n"
               "The log-ins in dashboard/data/browser are your own: delete this folder once you're sure you don't "
               "need it.\n", encoding="utf-8")
-    try:
-        from . import stats_schedule
-
-        if stats_schedule.status() == "on":
-            say("  " + stats_schedule.disable())
-    except Exception as e:  # the scheduler isn't there: nothing to turn off
-        done.lines.append(f"The hourly stats read couldn't be checked ({e}).")
+    if unchecked:
+        done.lines.append(unchecked)
     done.lines.append(f"Everything it cleared is in {P.rel(dest)}." if items else "There was nothing to clear.")
     return done
 
@@ -638,6 +660,7 @@ def uninstall(keep: bool = True, say=print) -> Done:
     off, binned = system_items()
     say(f"Turning off {_and(off)}, and putting {_and(binned)} in the {BIN}...")
     done.problems += system_off(say)
+    _wait_for_reads(say)   # the hourly read is off now; one still under way finishes before its folder goes
     err = bin_folder(done.where, say)
     if err:
         done.problems.append(err)

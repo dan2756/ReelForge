@@ -201,6 +201,35 @@ class HourlyJob(unittest.TestCase):
         with mock.patch.object(P, "MAC", False), mock.patch.object(stats_schedule, "_units", return_value=folder):
             self.assertEqual(stats_schedule._job(), self.script)
 
+    def test_turning_it_off_on_linux_stops_a_read_the_timer_has_started(self):
+        """The timer's service is a oneshot: turning the timer off leaves a read it started a moment ago running,
+        from a folder that reelforge move is about to rename or an uninstall to put in the Trash."""
+        folder = self.root / "units"
+        folder.mkdir()
+        both = ["reelforge-stats.service", "reelforge-stats.timer"]
+        for slow in (False, True):   # (a read that takes its time to stop doesn't keep the job on)
+            for name, text in stats_schedule.systemd_units(self.py, self.script).items():
+                (folder / name).write_text(text, encoding="utf-8")
+            asked = []
+
+            def systemctl(*args):
+                asked.append((args, sorted(f.name for f in folder.iterdir())))
+                if args[0] == "stop" and slow:
+                    raise subprocess.TimeoutExpired("systemctl", 30)
+                return subprocess.CompletedProcess(args, 0, "", "")
+
+            with mock.patch.object(P, "MAC", False), mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": ""}), \
+                    mock.patch.object(P, "TEST_COPY", self.root / "no-marker"), \
+                    mock.patch.object(stats_schedule, "_units", return_value=folder), \
+                    mock.patch.object(stats_schedule, "_systemctl", systemctl), \
+                    mock.patch.object(stats_schedule.shutil, "which",
+                                      lambda name: "/usr/bin/systemctl" if name == "systemctl" else None):
+                self.assertEqual(stats_schedule.status(), "on")
+                self.assertEqual(stats_schedule.disable(), "Background stats are off.")
+            # the timer first, so nothing new starts; then the read under way, while systemd still knows its service
+            self.assertEqual(asked, [(("disable", "--now", "reelforge-stats.timer"), both),
+                                     (("stop", "reelforge-stats.service"), both), (("daemon-reload",), [])])
+
     def test_crontab_line(self):
         line = stats_schedule.cron_line(self.py, self.script)
         self.assertTrue(line.startswith("0 * * * * cd "))
@@ -319,7 +348,8 @@ class Browser(unittest.TestCase):
                 mock.patch.object(browsers.subprocess, "run", run):
             self.assertEqual([browsers.major_version(chrome) for _ in range(3)], [153, 153, 153])
             self.assertIn("Chrome/153.0.0.0", browsers.user_agent(chrome))
-        self.assertEqual(asked, [["/opt/somewhere/chrome", "--version"]])
+        # the program as this system writes its path: \opt\somewhere\chrome on Windows
+        self.assertEqual(asked, [[str(chrome.exe), "--version"]])
 
     def test_the_version_follows_the_browser_when_it_is_updated(self):
         """The version was kept for as long as ReelForge ran, so a window left open across a browser update went on

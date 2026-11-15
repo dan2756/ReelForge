@@ -11,7 +11,9 @@ folder that syncs) moves there in one step on the same drive, so nothing is copi
      full first, so they still name the same folders afterwards.
   2. The folder is renamed. A running program's folder can't be renamed on Windows, so there a small window does it
      once ReelForge has closed, waiting while anything still has a file in it open; elsewhere it's done at once, and
-     the .venv's links to a Python inside the folder (setup's private one in tools/python) follow it.
+     the .venv's links to a Python inside the folder (setup's private one in tools/python) follow it. There the
+     hourly stats read is taken off the computer's schedule first, and a read it has just started is stopped: one
+     starting up in the old folder as it is renamed would put a stub of that folder back.
   3. What named the old place follows it (`reelforge move --finish`, run from the new place): the reelforge command,
      ReelForge's icon, Windows Terminal's ReelForge profile and the hourly stats read, each only if it was this
      folder's. The window that opens next says where ReelForge is now.
@@ -284,6 +286,25 @@ def rename(p: Plan, wait: float = 10) -> str | None:
             time.sleep(0.5)
 
 
+def _stats_off(p: Plan, say=print) -> bool:
+    """Just before the rename (macOS, Linux): take this folder's hourly stats read off the computer's schedule, which
+    also stops a read it has just started, then give a read that is under way its time to finish. finish() puts the
+    job on again from the new place. Without this a read the schedule starts in these moments runs from the old
+    folder by name (its Python, its script, where it keeps its log), and makes that folder again once it has been
+    renamed. Returns whether there was a job to take off. Never in a test copy or with STUDIO_DRY_SYSTEM: plan()
+    finds no job of this folder's there."""
+    if not p.system.get("stats"):
+        return False
+    from . import reset, stats_schedule
+
+    try:
+        stats_schedule.disable()
+    except Exception:   # no scheduler to ask any more: there's nothing left to stop
+        pass
+    reset._wait_for_reads(say)
+    return True
+
+
 def repair_venv(old: Path, new: Path) -> None:
     """A .venv made from a Python inside the folder (setup's private one in tools/python, on a Mac or Linux) names
     that Python in full: in its pyvenv.cfg and, outside Windows, in the links in .venv/bin and the first line of its
@@ -422,10 +443,16 @@ def go(p: Plan, reopen: bool = False, pause: bool = True, say=print) -> tuple[in
             + (" and opens ReelForge again." if reopen else "."))
         return 0, False
     os.chdir(p.target.parent)   # not inside the folder that's moving
+    stats = _stats_off(p, say)
     err = rename(p)
     if err:
         _undo(p)
         say(f"{KIT_NAME} didn't move ({err}), and nothing else changed.")
+        if stats:   # it goes back on, where it was
+            from . import reset
+
+            if not reset._stats_on_again():
+                say("The hourly stats read is off now, and couldn't be turned on again: reelforge stats on does it.")
         return 1, False
     repair_venv(p.source, p.target)
     code = subprocess.run([str(p.target / ".venv" / "bin" / "python"), str(p.target / "bin" / "reelforge.py"), "move",

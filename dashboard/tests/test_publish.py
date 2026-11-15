@@ -41,7 +41,9 @@ class PublishTest(unittest.TestCase):
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp.cleanup)
-        self.root = Path(tmp.name)
+        # In its real spelling, the one the video list uses (dashboard.videos.find resolves each file): a temporary
+        # folder is named through a link on macOS (/var) and by its short name on Windows (RUNNER~1)
+        self.root = Path(tmp.name).resolve()
         self.addCleanup(setattr, db, "_path", db._path)
         db.init(self.root / "stats.db")
         for state in (sync._attempted, sync.last_errors):

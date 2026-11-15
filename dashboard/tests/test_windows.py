@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -395,6 +396,50 @@ class HourlyJobTest(StoreTest):
             subprocess.run([sys.executable, str(kit / "refresh.pyw")], cwd=self.dir, check=True, timeout=60)
             added = (log.read_text("utf-8").splitlines() if log.exists() else [])[len(before):]
             self.assertEqual([line.split("  ", 1)[1] for line in added], [logged] if logged else [])
+
+    @unittest.skipIf(os.name == "nt", "Windows keeps a running program's folder where it is")
+    def test_refresh_pyw_makes_nothing_where_its_folder_was(self):
+        """reelforge move renamed the folder while the script the scheduler had just started was still starting
+        up. The run then fails (its files are gone from under the name it knows them by), and it used to log
+        that in data/refresh.log by the old path, folders and all: a stub of the old ReelForge folder was back
+        beside the new one. Here the stand-in dashboard renames its own ReelForge folder, then fails the way an
+        import does once the folder has gone."""
+        old, new = self.dir / "old place", self.dir / "new place"
+        kit = old / "dashboard"
+        kit.mkdir(parents=True)
+        shutil.copy(ROOT / "dashboard" / "refresh.pyw", kit / "refresh.pyw")
+        (kit / "__init__.py").write_text("", "utf-8")
+        (kit / "__main__.py").write_text(
+            "import os\nfrom pathlib import Path\n\n"
+            "here = Path(__file__).resolve().parent.parent\n"
+            "os.rename(here, here.with_name('new place'))\n"
+            "import dashboard.sync  # not loaded yet, and no longer where Python looks for it\n", "utf-8")
+        ran = subprocess.run([sys.executable, str(kit / "refresh.pyw")], cwd=self.dir, timeout=60,
+                             capture_output=True, text=True)
+        self.assertEqual((ran.returncode, ran.stdout, ran.stderr), (0, "", ""))  # and not a word about it
+        self.assertFalse(old.exists())
+        # Nor is anything new at the new place: no log, and none of Python's bytecode files either. Python makes
+        # the folders on the way to one of those, so a run that wrote them put the old folder back that way too.
+        self.assertEqual(sorted(f.name for f in (new / "dashboard").iterdir()),
+                         ["__init__.py", "__main__.py", "refresh.pyw"])
+
+    def test_a_read_whose_folder_has_gone_stops_and_makes_no_folder_there(self):
+        """The same read, caught a moment later or as it finishes: everything it needs is loaded, and what it does
+        next it does by the old folder's name. Loading the settings made a folder for fresh ones (with nothing to
+        put in it: the example they are copied from went with the rest), and looking for new videos made the
+        videos folder. Either put a stub of the old ReelForge folder back."""
+        gone = self.dir / "old place" / "dashboard"
+        cfg = {**self.cfg, "videos_dir": str(gone / "videos"), "episodes_dir": str(self.dir / "none"),
+               "completed_dir": str(self.dir / "none")}
+        out = io.StringIO()
+        with mock.patch.object(config, "APP_DIR", gone), mock.patch.object(config, "DATA_DIR", gone / "data"), \
+                mock.patch.object(config, "CONFIG_PATH", gone / "config.toml"), contextlib.redirect_stdout(out):
+            self.assertEqual(launcher.main(["refresh"]), 1)
+            self.assertEqual(notify.check_videos(cfg), 0)
+        self.assertEqual(out.getvalue(), "")
+        self.assertFalse((self.dir / "old place").exists())
+        notify.check_videos(cfg)  # while ReelForge is where it was started, the look makes the folder as ever
+        self.assertTrue((gone / "videos").is_dir())
 
 
 class WindowsTest(unittest.TestCase):

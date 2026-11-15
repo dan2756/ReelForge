@@ -264,22 +264,27 @@ def _fetch_text(url: str) -> str:
 
 
 def untar(archive: Path, dest: Path) -> list[str]:
-    """Unpack a tar archive into dest and nowhere else; returns the names in it. Python 3.12 (and 3.11 from 3.11.4)
-    checks that itself, with tarfile's "data" filter. Python 3.11.0 to 3.11.3, which Debian 12 ships, has no filters
-    at all (asking for one is a TypeError), so there every entry is checked here first: no path or link that leaves
-    dest, by itself or by way of another link in the archive, and nothing but files, folders and links. Raises
-    tarfile.TarError for an archive that tries."""
+    """Unpack a tar archive into dest and nowhere else; returns the names in it. Every entry is checked here first,
+    before anything is unpacked: no path or link that leaves dest, by itself or by way of another link in the
+    archive, and nothing but files, folders and links. An archive that tries is refused whole (tarfile.TarError),
+    with nothing of it on disk. Then Python unpacks it, with tarfile's "data" filter where it has one (3.12, and
+    3.11 from 3.11.4).
+
+    The filter isn't relied on alone. Python 3.11.0 to 3.11.3, which Debian 12 ships, has none (asking for one is a
+    TypeError). And the filter judges a link by where it leads on disk as it comes to it, which on Windows drops the
+    ".." in its target before following the links already unpacked: a few links that each stay inside got past it
+    there and led out together."""
     with tarfile.open(archive) as t:
         names = t.getnames()
-        if hasattr(tarfile, "data_filter"):
-            t.extractall(dest, filter="data")
-            return names
         root = os.path.realpath(dest)
         members = t.getmembers()
         links = {os.path.normpath(m.name) for m in members if m.issym() or m.islnk()}
 
         def inside(path: str) -> bool:
-            return os.path.commonpath([root, os.path.realpath(os.path.join(root, path))]) == root
+            try:
+                return os.path.commonpath([root, os.path.realpath(os.path.join(root, path))]) == root
+            except ValueError:   # on another drive (Windows), so not in dest
+                return False
 
         def by_a_link(path: str, then_up: bool = False) -> bool:
             """A folder on the way to path is one of the archive's own links (then_up: and the path climbs with ".."
@@ -301,7 +306,10 @@ def untar(archive: Path, dest: Path) -> list[str]:
             if not (m.isfile() or m.isdir() or link) or not inside(m.name) or not inside(link) \
                     or by_a_link(m.name) or by_a_link(link, then_up=True):
                 raise tarfile.TarError(f"{m.name} isn't something to unpack here")
-        t.extractall(dest)
+        if hasattr(tarfile, "data_filter"):
+            t.extractall(dest, filter="data")
+        else:
+            t.extractall(dest)
         return names
 
 

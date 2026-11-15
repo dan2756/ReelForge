@@ -22,7 +22,9 @@ class Steps(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.root = Path(tmp.name)
+        # In its real spelling, the one make_episode works with: it resolves the episode folder it is given, and a
+        # temporary folder is named through a link on macOS (/var) and by its short name on Windows (RUNNER~1)
+        self.root = Path(tmp.name).resolve()
         self.code = self.root / "pipeline" / "blender"
         self.code.mkdir(parents=True)
         (self.code / "rf_common.py").write_text("HAZE = 1\n", encoding="utf-8")

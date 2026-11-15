@@ -102,8 +102,13 @@ def read_text(path: Path) -> str:
 def load_config() -> dict:
     path = config_path()
     if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(APP_DIR / "config.example.toml", path)
+        example = APP_DIR / "config.example.toml"
+        # Its folder is made only when there is an example to put in it. With none, the ReelForge folder was moved or
+        # removed after this process started (the hourly stats read, caught as it starts), and making the folder
+        # would put a stub of the old one back. The copy then fails as it did before, with nothing made.
+        if example.is_file():
+            path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(example, path)
     text = read_text(path)
     try:
         cfg = tomllib.loads(text)

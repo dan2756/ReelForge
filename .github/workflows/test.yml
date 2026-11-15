@@ -125,8 +125,17 @@ jobs:
         run: |
           cd ~
           export PATH="$HOME/.local/bin:$PATH"
+          why() {   # the folder that should have gone is still there: what is in it, and what the hourly job did
+            ls -laR "$1" | head -n 50
+            cat "$1/dashboard/data/refresh.log" || true
+            if [ "$RUNNER_OS" = Linux ]; then
+              systemctl --user status reelforge-stats.service reelforge-stats.timer || true
+              journalctl --user -u reelforge-stats.service --no-pager | tail -n 40
+            fi
+          }
           ~/ReelForge/bin/reelforge stats on
           ~/ReelForge/bin/reelforge move ~/Apps/ReelForge --yes
+          [ ! -e ~/ReelForge ] || why ~/ReelForge
           test ! -e ~/ReelForge
           ~/Apps/ReelForge/.venv/bin/python -c "import sys, numpy; assert 'Apps/ReelForge/tools/python' in sys.base_prefix, sys.base_prefix"
           readlink ~/.local/bin/reelforge | grep -q "Apps/ReelForge/bin/reelforge"
@@ -137,6 +146,7 @@ jobs:
           cat ~/Apps/ReelForge/dashboard/data/moved.json
           reelforge move --yes
           test -f ~/ReelForge/studio/__init__.py
+          [ ! -e ~/Apps/ReelForge ] || why ~/Apps/ReelForge
           test ! -e ~/Apps/ReelForge
           reelforge stats | grep -q "Background stats: on"
           reelforge stats off

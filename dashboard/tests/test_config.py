@@ -77,6 +77,33 @@ class Encodings(ConfigTest):
         self.assertEqual(dashboard_config.handles(profile)["tiktok"], "@mine")
 
 
+class NoneYet(unittest.TestCase):
+    """No config.toml yet: it is made from config.example.toml, in a folder made for it if need be."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        self.kit = Path(tmp.name) / "ReelForge" / "dashboard"
+
+    def load(self, path: Path) -> dict:
+        with mock.patch.object(config, "APP_DIR", self.kit), mock.patch.object(config, "CONFIG_PATH", path):
+            return config.load_config()
+
+    def test_a_new_profiles_settings_are_made_from_the_example_folder_and_all(self):
+        self.kit.mkdir(parents=True)
+        (self.kit / "config.example.toml").write_bytes(TEXT.encode("utf-8"))
+        path = self.kit.parent / "profiles" / "night-physics" / "dashboard" / "config.toml"
+        self.assertEqual(self.load(path)["tiktok"]["handle"], "@mine")
+        self.assertEqual(path.read_bytes(), TEXT.encode("utf-8"))
+
+    def test_no_folder_is_made_when_there_is_no_example_to_put_in_it(self):
+        """A ReelForge folder that was moved or removed after this process started: the hourly stats read, caught
+        starting up. Making the folder for the settings put a stub of the old ReelForge folder back."""
+        with self.assertRaises(FileNotFoundError):
+            self.load(self.kit / "config.toml")
+        self.assertFalse(self.kit.parent.exists())
+
+
 class Typos(ConfigTest):
     def test_a_windows_path_in_quotes_says_to_use_forward_slashes(self):
         for line in (r'''videos_dir = "C:\Users\DJ'S PC\Videos"''', r"""videos_dir = 'C:\Users\DJ'S PC\Videos'"""):
