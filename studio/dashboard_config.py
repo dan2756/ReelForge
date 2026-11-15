@@ -117,21 +117,37 @@ def config_toml(profile=None) -> Path:
     return P.DASHBOARD / "config.toml" if profile.main else profile.config
 
 
-def write(s: dict, profile=None) -> list[Path]:
+def _checked(target: Path, text: str) -> str:
+    """Never write a config the dashboard can't read. A typo already in config.toml, on a line setup doesn't manage,
+    is what makes the new text unreadable: the error names the file and where the typo is."""
+    try:
+        tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise ValueError(f"{target} has a typo ({e}). Fix it in a text editor, then try again.") from None
+    return text
+
+
+def rendered(s: dict, profile=None) -> tuple[Path, str] | None:
+    """A profile's dashboard settings as these studio settings make them: (the file, its new text), nothing written
+    yet. None when there's no config.toml and no example to start one from. Raises ValueError (see _checked)."""
     example = P.DASHBOARD / "config.example.toml"
     target = config_toml(profile)
     if not example.exists() and not target.exists():
-        return []
+        return None
     base = target.read_text(encoding="utf-8") if target.exists() else example.read_text(encoding="utf-8")
     known = _known_keys(example) if example.exists() else None
     values = wanted(s)
     if known is not None:          # only touch keys this version of the dashboard understands
         values = {sec: {k: v for k, v in kv.items() if k in known.get(sec, set())} for sec, kv in values.items()}
-    text = set_keys(base, values)
-    tomllib.loads(text)            # never write a config the dashboard can't read
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(text, encoding="utf-8", newline="\n")
-    return [target]
+    return target, _checked(target, set_keys(base, values))
+
+
+def write(s: dict, profile=None) -> list[Path]:
+    out = rendered(s, profile)
+    if out is None:
+        return []
+    P.write_atomic(*out)           # all at once: the hourly job may be reading it
+    return [out[0]]
 
 
 def handles(profile=None) -> dict[str, str] | None:
@@ -154,11 +170,7 @@ def set_handle(platform: str, handle: str, target: Path | None = None) -> list[P
     if not example.exists() and not target.exists():
         return []
     base = target.read_text(encoding="utf-8") if target.exists() else example.read_text(encoding="utf-8")
-    text = set_keys(base, {platform: {"handle": handle}})
-    tomllib.loads(text)            # never write a config the dashboard can't read
-    tmp = target.with_suffix(".tmp")
-    tmp.write_text(text, encoding="utf-8", newline="\n")
-    tmp.replace(target)            # all at once: the hourly job may be reading it
+    P.write_atomic(target, _checked(target, set_keys(base, {platform: {"handle": handle}})))
     return [target]
 
 

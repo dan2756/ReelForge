@@ -11,7 +11,7 @@ import hashlib
 import json
 
 from . import net
-from .paths import SFX
+from .paths import SFX, write_atomic
 
 MIXKIT_LICENSE = "https://mixkit.co/license/#sfxFree"
 
@@ -50,8 +50,7 @@ def fetch_mixkit(log=lambda s: print(s, flush=True), progress=None) -> list[str]
             data = net.fetch_bytes(url)
             if meta.get("sha256") and _sha256(data) != meta["sha256"]:
                 raise RuntimeError("checksum mismatch (Mixkit may have changed the file)")
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(data)
+            write_atomic(dest, data)      # whole or not at all: a sound cut short would count as downloaded
             if progress:
                 progress(f"Downloaded sound {k} of {len(todo)}: {name}", k, len(todo))
             else:

@@ -74,6 +74,42 @@ def keep_runnable() -> None:
             pass
 
 
+def replace(src: Path, dest: Path, wait: float = 3.0) -> None:
+    """os.replace, trying again for a moment while another program has dest open: Windows refuses to replace a file
+    someone is reading (the hourly stats job, another ReelForge window, a virus scanner), and they let go of it in
+    well under a second. Raises the last PermissionError once wait seconds are up."""
+    import time
+
+    end = time.monotonic() + wait
+    while True:
+        try:
+            os.replace(src, dest)
+            return
+        except PermissionError:
+            if time.monotonic() >= end:
+                raise
+            time.sleep(0.1)
+
+
+def write_atomic(path: Path, data: str | bytes) -> None:
+    """Write a whole file in one step: into a temporary file beside it, which then takes its place. Whoever reads the
+    file meanwhile (the hourly stats job reads the settings) gets the old one or the new one, never half of it, and a
+    write cut short (a full disk, the power going) leaves the old file as it was. Text goes out as UTF-8 with Unix
+    line endings, the way every file ReelForge writes does."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with tmp.open("wb") as f:
+            f.write(data if isinstance(data, bytes) else data.encode("utf-8"))
+            f.flush()
+            os.fsync(f.fileno())
+        replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 def venv_python() -> str:
     """The command that runs the kit's Python, written the way this OS spells it (for docs and messages)."""
     return r".venv\Scripts\python" if WINDOWS else ".venv/bin/python"

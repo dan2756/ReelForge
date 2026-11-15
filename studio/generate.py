@@ -59,8 +59,7 @@ def write_claude_settings(s: dict) -> Path | None:
     data.setdefault("model", CLAUDE_MODEL)
     if not effort:
         data["effortLevel"] = CLAUDE_EFFORT
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
+    P.write_atomic(path, json.dumps(data, indent=2) + "\n")
     return path
 
 
@@ -308,13 +307,27 @@ def _guides(a: dict, s: dict, w: SimpleNamespace, out) -> None:
         _backup_if_foreign(target, w.backups)
         text = render("context.md.j2", context(a, s, who, w.profile))
         if who == "codex" and len(text.encode("utf-8")) > 30_000:
-            raise RuntimeError(f"AGENTS.md came out at {len(text.encode()) // 1024} KiB; Codex reads only 32 KiB")
+            raise ValueError(f"AGENTS.md came out at {len(text.encode()) // 1024} KiB, and Codex reads only 32 KiB: "
+                             "shorten your format's description or the look's notes in your answers")
         out(target, text)
+
+
+NOTES = "## Research notes"
+
+
+def _keep_yours(old: str, new: str) -> str:
+    """A newly rendered channel bible with the research notes your AI added to the old one carried over."""
+    if NOTES in old and NOTES in new:
+        notes = old[old.index(NOTES) + len(NOTES):].strip()
+        if notes:
+            new = new[:new.index(NOTES) + len(NOTES)] + "\n\n" + notes + "\n"
+    return new
 
 
 def write_all(answers: dict, profile=None) -> list[Path]:
     """Validate the answers and write every file, for a profile (the one this process works on, by default). Returns
-    the paths written. Raises ValueError on bad answers."""
+    the paths written. Raises ValueError on bad answers, or when a file can't be made right (the message says which),
+    before any file has changed."""
     w = _where(profile)
     first = not w.settings.exists()                     # first-time setup: the channel isn't set up yet
     a, problems = validate(answers)
@@ -330,39 +343,41 @@ def write_all(answers: dict, profile=None) -> list[Path]:
     # The answers file is often the one being read (my-studio/answers.json), with no date yet: today, then.
     a["_created"] = a.get("_created") or dt.date.today().isoformat()
     s = settings_from(a)
-    written: list[Path] = []
-    w.my_studio.mkdir(parents=True, exist_ok=True)
+    files: list[tuple[Path, str]] = []
 
     def out(path: Path, text: str):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8", newline="\n")
-        written.append(path)
+        files.append((path, text))
 
     out(w.answers, json.dumps({k: v for k, v in a.items()}, indent=2, ensure_ascii=False) + "\n")
     out(w.settings, "# Your studio's settings, from first-time setup. The pipeline and the dashboard read this file.\n" +
         S.dump_toml(s, SETTINGS_COMMENTS))
     bible = render("channel-bible.md.j2", context(a, s, "claude", w.profile))
-    if w.bible.exists():
-        # keep the research notes your AI added, and a copy of the old bible
-        old = w.bible.read_text(encoding="utf-8", errors="replace")
-        w.backups.mkdir(parents=True, exist_ok=True)
-        (w.backups / f"channel-bible.{dt.datetime.now():%Y%m%d-%H%M%S}.md").write_text(old, encoding="utf-8")
-        head = "## Research notes"
-        if head in old and head in bible:
-            notes = old[old.index(head) + len(head):].strip()
-            if notes:
-                bible = bible[:bible.index(head) + len(head)] + "\n\n" + notes + "\n"
+    old = w.bible.read_text(encoding="utf-8", errors="replace") if w.bible.exists() else None
+    if old is not None:
+        bible = _keep_yours(old, bible)
     out(w.bible, bible)
     _guides(a, s, w, out)
     log = w.completed / "production-log.md"
     if not log.exists():
         out(log, render("production-log.md.j2", context(a, s, "claude", w.profile)))
+    from . import dashboard_config
+    config = dashboard_config.rendered(s, w.profile)
+
+    # Every file is rendered and checked by now, so whatever stops this (answers to fix, a typo in the dashboard's
+    # config.toml, notes too long for Codex) has stopped it above, with every file still as it was.
+    if old is not None:      # a copy of the bible as it was
+        P.write_atomic(w.backups / f"channel-bible.{dt.datetime.now():%Y%m%d-%H%M%S}.md", old)
+    written: list[Path] = []
+    for path, text in files:
+        P.write_atomic(path, text)
+        written.append(path)
     if w.profile.main and first:  # Claude Code's for the ReelForge folder, where your AI works on every channel
         cs = write_claude_settings(s)
         if cs:
             written.append(cs)
-    from . import dashboard_config
-    written += dashboard_config.write(s, w.profile)
+    if config:
+        P.write_atomic(*config)
+        written.append(config[0])
     if not w.profile.main:
         written += write_guides(profiles.main())  # the first channel's notes list this one
     return written
@@ -382,7 +397,7 @@ def write_guides(profile=None, *, saved_settings: bool = False) -> list[Path]:
     written: list[Path] = []
 
     def out(path: Path, text: str):
-        path.write_text(text, encoding="utf-8", newline="\n")
+        P.write_atomic(path, text)
         written.append(path)
 
     s = S.load(w.settings) if saved_settings and w.settings.is_file() else settings_from(a)

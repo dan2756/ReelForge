@@ -87,22 +87,19 @@ class NewProfile(Scratch):
     def test_a_new_profile_whose_files_cant_be_written_leaves_no_folder_behind(self):
         self.onboard_main()
         answers = {**ANSWERS, "channel_name": "Second Channel", "handle_tiktok": "@second"}
-        for error, shown in ((ValueError("that answer needs fixing"), "that answer needs fixing"),
-                             (RuntimeError("AGENTS.md came out too long"), "AGENTS.md came out too long")):
-            with self.subTest(error=error):
-                real = generate._guides
+        real = generate._guides
 
-                def guides(a, s, w, out, error=error):
-                    if not w.profile.main:
-                        raise error
-                    return real(a, s, w, out)
+        def guides(a, s, w, out):
+            if not w.profile.main:
+                raise ValueError("AGENTS.md came out too long")
+            return real(a, s, w, out)
 
-                with mock.patch.object(generate, "_guides", guides):
-                    code, said = self.new(answers)
-                self.assertEqual(code, 1)
-                self.assertIn(shown, said)
-                self.assertEqual(profiles.extra(), [])
-                self.assertFalse((profiles.FOLDER / "second-channel").exists())
+        with mock.patch.object(generate, "_guides", guides):
+            code, said = self.new(answers)
+        self.assertEqual(code, 1)
+        self.assertIn("AGENTS.md came out too long", said)
+        self.assertEqual(profiles.extra(), [])
+        self.assertFalse((profiles.FOLDER / "second-channel").exists())
         # the same command works once whatever stopped it is fixed: before, the half-made profile had the name taken
         code, said = self.new(answers)
         self.assertEqual(code, 0, said)

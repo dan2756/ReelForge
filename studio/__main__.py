@@ -163,7 +163,7 @@ def onboard(argv: list[str], *, preserve_settings: bool = False) -> int:
         except Exception as e:
             if target is not None:      # the new profile never got its files: its folder goes again, so the same
                 shutil.rmtree(target.folder, ignore_errors=True)   # command works once the answers are fixed
-            if not isinstance(e, (ValueError, RuntimeError)):
+            if not isinstance(e, ValueError):
                 raise
             print(e)
             return 1
