@@ -123,11 +123,16 @@ def load_config() -> dict:
     for key in PLATFORM_KEYS:
         if not isinstance(cfg.get(key), dict):
             cfg[key] = {}
-    # A value of the wrong kind is said here, by name, instead of going wrong somewhere in the window later.
+    # Two values that aren't of the kind asked for are read the way ReelForge 2.2.1 read them, which had no check
+    # here: a file it opened with must not stop the window, and the hourly read with it, after an update.
+    if isinstance(cfg.get("refresh_minutes"), bool):
+        cfg["refresh_minutes"] = int(cfg["refresh_minutes"])  # false: only when you press Refresh. true: 1 minute
+    tags = cfg.get("default_tags")
+    if isinstance(tags, list) and all(isinstance(t, str) for t in tags):  # (the form studio.toml has them in)
+        cfg["default_tags"] = " ".join("#" + t.lstrip("#") for t in tags if t.strip("# "))
+    # Any other value of the wrong kind is said here, by name, instead of going wrong somewhere in the window later.
     minutes = cfg.get("refresh_minutes", 30)
     try:
-        if isinstance(minutes, bool):
-            raise ValueError
         float(minutes)
     except (TypeError, ValueError):
         raise ConfigError(f"refresh_minutes in {path.name} should be a number of minutes, like refresh_minutes = 30 "

@@ -134,10 +134,25 @@ class Kinds(ConfigTest):
         self.saved("refresh_minutes = -5\n")
         self.assertEqual(config.load_config()["refresh_minutes"], 0)
 
+    def test_what_the_released_version_opened_with_still_opens(self):
+        """ReelForge 2.2.1 had no check of these kinds. A config.toml it ran with must not stop the window, and the
+        hourly read with it, on the first start after an update."""
+        youtube = YouTube({"handle": "@me"})
+        for line, minutes in (("refresh_minutes = false", 0), ("refresh_minutes = true", 1)):
+            self.saved(line + "\n")
+            cfg = config.load_config()
+            self.assertEqual((cfg["refresh_minutes"], type(cfg["refresh_minutes"])), (minutes, float), line)
+            self.assertEqual(sync.gap_minutes(youtube, cfg, manual=False), minutes)
+        for line, tags in (('default_tags = ["#fyp", "#whatif"]', "#fyp #whatif"),
+                           ('default_tags = ["fyp", "whatif", ""]', "#fyp #whatif"), ("default_tags = []", "")):
+            self.saved(line + "\n")
+            self.assertEqual(config.load_config()["default_tags"], tags, line)
+
     def test_a_value_of_the_wrong_kind_is_named(self):
         for line, key in (('refresh_minutes = "often"', "refresh_minutes"),
-                          ("refresh_minutes = true", "refresh_minutes"), ("videos_dir = 5", "videos_dir"),
-                          ("completed_dir = ['a']", "completed_dir"), ("default_tags = 3", "default_tags")):
+                          ("refresh_minutes = [30]", "refresh_minutes"), ("videos_dir = 5", "videos_dir"),
+                          ("completed_dir = ['a']", "completed_dir"), ("default_tags = 3", "default_tags"),
+                          ("default_tags = [1, 2]", "default_tags"), ("videos_dir = ['a']", "videos_dir")):
             self.saved(line + "\n")
             said = self.refused()
             self.assertTrue(said.startswith(f"{key} in config.toml should be "), said)
