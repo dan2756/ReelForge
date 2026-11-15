@@ -24,22 +24,41 @@ def cue_sounds(cues):
     return names | {name for s in cues.get("scatter", []) for name in s.get("pool", [])}
 
 
-def build_cache(force=False):
+def build_cache(force=False, needed=None):
+    """Convert the manifest's sounds that aren't in the cache yet. `needed` is the set of sounds a mix uses
+    (cue_sounds): only one of those being absent or unreadable stops it, so a single download that failed or was
+    withdrawn no longer blocks every episode. Without `needed` (this script run by hand) every sound is required."""
     manifest = json.loads((SFX / "manifest.json").read_text(encoding="utf-8"))
+    sounds = manifest["sounds"]
     (SFX / "_cache").mkdir(exist_ok=True)
-    missing = [n for n, m in manifest["sounds"].items() if not (SFX / m["file"]).exists() and not cached(n).exists()]
+    unknown = sorted(set(needed or ()) - set(sounds))
+    if unknown:
+        raise FileNotFoundError(f"the cue sheet names sounds that aren't in assets/sfx/manifest.json: "
+                                f"{', '.join(unknown)}")
+    missing = [n for n, m in sounds.items() if not (SFX / m["file"]).exists() and not cached(n).exists()]
+    wanted = [n for n in missing if needed is None or n in needed]
+    if wanted:
+        raise FileNotFoundError(f"{len(wanted)} sounds aren't downloaded yet ({', '.join(wanted[:4])}"
+                                f"{', ...' if len(wanted) > 4 else ''}). Run setup again, or: python -m studio sounds")
     if missing:
-        raise FileNotFoundError(f"{len(missing)} sounds aren't downloaded yet ({', '.join(missing[:4])}"
-                                f"{', ...' if len(missing) > 4 else ''}). Run setup again, or: python -m studio sounds")
-    for name, meta in manifest["sounds"].items():
+        print(f"  note: {len(missing)} sounds aren't downloaded ({', '.join(missing[:4])}"
+              f"{', ...' if len(missing) > 4 else ''}); this episode doesn't use them")
+    for name, meta in sounds.items():
         src = SFX / meta["file"]
         out = cached(name)
         if out.exists() and not force:
             continue
         if not src.exists():
             continue
-        subprocess.run([config.require_ffmpeg(), "-v", "error", "-y", "-i", str(src), "-ac", "2", "-ar", str(config.SAMPLE_RATE),
-                        "-c:a", "pcm_s16le", str(out)], check=True)
+        try:
+            subprocess.run([config.require_ffmpeg(), "-v", "error", "-y", "-i", str(src), "-ac", "2", "-ar",
+                            str(config.SAMPLE_RATE), "-c:a", "pcm_s16le", str(out)], check=True)
+        except subprocess.CalledProcessError:
+            out.unlink(missing_ok=True)
+            if needed is None or name in needed:
+                raise
+            print(f"  note: {meta['file']} could not be read; this episode doesn't use it")
+            continue
         print(f"  cached {name}")
     return manifest
 
