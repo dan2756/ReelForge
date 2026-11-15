@@ -42,8 +42,9 @@ class YouTubePages(unittest.TestCase):
 
     def site(self, **answers) -> list[str]:
         """Stand in for YouTube. answers: what a kind of page ("channel", "feed", "shorts", "watch", or one video's
-        id) gives instead of its usual page: a status code, a page's text, or an error to raise. Returns the list the
-        addresses asked for are added to."""
+        id) gives instead of its usual page: a status code, a page's text, or an error to raise (or something to
+        call for one of those, each time the page is asked for). Returns the list the addresses asked for are added
+        to."""
         asked: list[str] = []
 
         def answer(request: httpx.Request) -> httpx.Response:
@@ -53,6 +54,8 @@ class YouTubePages(unittest.TestCase):
                 ("shorts", SHORTS) if url.endswith("/shorts") else \
                 ("watch", WATCH) if "watch?v=" in url else ("channel", CHANNEL)
             given = answers.get(url.rsplit("=", 1)[-1], answers.get(kind, usual))
+            if callable(given):
+                given = given()
             if isinstance(given, Exception):
                 raise given
             return httpx.Response(given, text="") if isinstance(given, int) else httpx.Response(200, text=given)
@@ -108,6 +111,28 @@ class YouTubePages(unittest.TestCase):
         self.site(shorts=httpx.ConnectError("reset"))
         account, posts = public.youtube("somechannel")
         self.assertEqual((account.followers, len(posts), account.warning), (1200, 15, ""))
+
+    def test_videos_pages_that_dont_answer_are_given_up_on(self):
+        """A page that doesn't answer takes the client's 15 seconds, and every window's refresh waits for the read.
+        All ten were tried, two and a half minutes of it, where the first used to end the read. Now the videos'
+        own pages get 20 seconds between them, and the rest wait for the next read."""
+        clock = Clock()
+        with mock.patch.object(public, "time", clock):
+            asked = self.site(watch=lambda: clock.sleep(15) or httpx.ReadTimeout("timed out"))
+            account, posts = public.youtube("somechannel")
+            self.assertEqual(self.watched(asked), OLDER[:2])  # the second was started 15 seconds in, the third not
+            self.assertEqual((account.followers, len(posts), account.warning), (1200, 15, ""))  # the feed's are kept
+            # Slow all the way, the feed too: said, with what was given up on in the log.
+            self.site(feed=httpx.ReadTimeout("timed out"),
+                      watch=lambda: clock.sleep(15) or httpx.ReadTimeout("timed out"))
+            account, posts = public.youtube("somechannel")
+            self.assertEqual((posts, account.warning),
+                             ([], f"YouTube's videos weren't read this time, only its subscribers. {AGAIN}"))
+            self.assertIn("the videos' pages from feed0000002 on: left for the next read after 20s", account.detail)
+            # Pages that answer, each in a second and a half, are all read.
+            asked = self.site(watch=lambda: clock.sleep(1.5) or WATCH)
+            _, posts = public.youtube("somechannel")
+            self.assertEqual((len(self.watched(asked)), len(posts)), (10, 25))
 
     def test_no_videos_at_all_is_said(self):
         self.site(feed=httpx.ReadTimeout("timed out"), shorts=httpx.ConnectError("reset"))

@@ -9,6 +9,7 @@ from __future__ import annotations
 import html
 import json
 import re
+import time
 
 import httpx
 
@@ -48,6 +49,10 @@ def tiktok(handle: str) -> tuple[Account, list[Post]]:
 
 
 WATCH_PAGES = 10  # how many videos' own pages one read of YouTube opens, at most
+# ... and how many seconds it gives them before the rest wait for the next read. Each page that doesn't answer
+# takes the client's 15 seconds, and every window's refresh waits for the read: ten of those were two and a half
+# minutes, where the first one used to end the read.
+WATCH_SECONDS = 20
 
 
 def youtube(handle: str, last_read: dict[str, str] | None = None) -> tuple[Account, list[Post]]:
@@ -56,7 +61,8 @@ def youtube(handle: str, last_read: dict[str, str] | None = None) -> tuple[Accou
     when), so a new upload the feed hasn't got yet comes first and the older ones take turns.
 
     Only the channel page has to answer. The feed, the Shorts tab and each video's page are extras: one that fails
-    is left out of this read and the rest is kept."""
+    is left out of this read and the rest is kept. The videos' own pages get WATCH_SECONDS between them: the ones
+    not reached by then come first next time, having been read longest ago."""
     with _client() as c:
         page = c.get(f"https://www.youtube.com/@{handle}")
         channel = re.search(r'<link rel="canonical" href="https://www\.youtube\.com/channel/(UC[\w-]{22})"', page.text)
@@ -102,7 +108,11 @@ def youtube(handle: str, last_read: dict[str, str] | None = None) -> tuple[Accou
         except httpx.HTTPError as e:
             missed.append(f"the Shorts tab: {detail(e)}")
         ids = [v for v in dict.fromkeys(ids) if v not in known]  # newest first, as the tab lists them
+        started = time.monotonic()
         for vid in sorted(ids, key=lambda v: (last_read or {}).get(v, ""))[:WATCH_PAGES]:
+            if time.monotonic() - started > WATCH_SECONDS:  # YouTube is slow right now: the rest would be too
+                missed.append(f"the videos' pages from {vid} on: left for the next read after {WATCH_SECONDS}s")
+                break
             try:
                 post = _youtube_video(c, vid)
             except httpx.HTTPError as e:
