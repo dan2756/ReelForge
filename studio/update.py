@@ -232,9 +232,11 @@ def _download(url: str, dest: Path, size: int, progress: Progress) -> Path:
 
 
 def _verify(rel: Release, name: str, path: Path, progress: Progress) -> None:
-    """Check the file against the release's SHA256SUMS.txt when it publishes one."""
+    """Check the file against the release's SHA256SUMS.txt. Every release has one (the install lines insist on it
+    too), so a release without it is not installed."""
     if "SHA256SUMS.txt" not in rel.assets:
-        return
+        raise UpdateError(f"The {rel.version} release has no SHA256SUMS.txt to check its download against, so it "
+                          f"wasn't installed. See {rel.url}")
     progress("Checking the download", 0, 0)
     try:
         with _get(rel.assets["SHA256SUMS.txt"][0], 30, accept="application/octet-stream") as r:

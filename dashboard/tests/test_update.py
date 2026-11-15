@@ -232,6 +232,15 @@ class InstallTest(unittest.TestCase):
         # still out of step, which is what the next start goes by (bin/reelforge.py, tests/test_studio.py)
         self.assertEqual((self.root / ".venv" / "installed.txt").read_text(encoding="utf-8"), "a\n")
 
+    def test_a_release_without_checksums_isnt_installed(self):
+        archive = self.dir / "ReelForge-9.0.0-Linux.tar.gz"
+        archive.write_bytes(b"not checked")
+        rel = update.Release("9.0.0", "v9.0.0", assets={archive.name: ("https://x/z", 11)})
+        with self.assertRaises(update.UpdateError) as stopped:
+            update._verify(rel, archive.name, archive, lambda *a: None)
+        self.assertIn("no SHA256SUMS.txt", str(stopped.exception))
+        self.assertFalse(stopped.exception.partial)
+
     def test_something_else_is_refused(self):
         archive = self.dir / "other.zip"
         with zipfile.ZipFile(archive, "w") as z:
