@@ -54,6 +54,30 @@ NOT_SET = ("ReelForge doesn't set the altered-content answer, tags, a thumbnail 
            "Studio.")
 STUDIO = "Check YouTube Studio before trying again."
 PRIVATE = "It is private, as you chose. Change who can see it in YouTube Studio when you're ready."
+# What the window's dialog for the connection says beside its controls (the view's "words"), and the question before
+# a post. Written here, beside what the controls do, so the window only draws them.
+# On the Publish tab's one line, while a post is on offer there. Short: it has to fit beside "● YouTube API connected"
+# and the line's button in a window 120 columns wide. The question before a post says it in full (UNPROVEN).
+CAVEAT = "tested on a stand-in only"
+FILE = ("The client file you downloaded from your Google Cloud project (client_secret_....json): type or paste where "
+        "it is. ReelForge keeps the client's id and its secret from it, then opens Google's consent page.")
+GONE_FILE = ("Google no longer knows the client on file. Type or paste where the client file of one that exists in "
+             "your Google Cloud project is (client_secret_....json). ReelForge keeps its id and its secret, then opens "
+             "Google's consent page.")
+WAITING = ("Google's consent page is open in your browser. Pick the Google account your channel belongs to and "
+           "allow ReelForge to upload videos. Google says it hasn't verified the app: the app is your own Google "
+           "Cloud project. You have ten minutes, and the browser has to be on this computer. After that, connect "
+           "again.")
+LEAVE = {True: ("Disconnect? ReelForge forgets the client, then tells Google that this window's access has ended. "
+                "No ReelForge window can post through the API until you give the client file again."),
+         False: ("Disconnect? ReelForge forgets the client. This window is not connected, so there is nothing to end "
+                 "at Google. No ReelForge window can post through the API until you give the client file again.")}
+START_AS = "A new post starts as the one you pick here. You can choose otherwise for one post, in its question."
+KIDS_ASK = ("\"Made for kids\" is a declaration you make to YouTube, so ReelForge never makes it for you. Until you "
+            "answer, a post sends none and your channel's own audience setting in YouTube Studio applies.")
+HOW = ("ReelForge uploads the video to YouTube itself, through Google's API, with exactly this. The YouTube row shows "
+       "the percent. Keep ReelForge open until it says posted.")
+AGAIN_ASK = "Posting it makes a second video on your channel."
 
 
 # ---- one job's upload
@@ -337,7 +361,15 @@ class YouTubeApiTab:
                 "lines": [t.json() for t in lines], "client": said["client"], "channel": said["channel"],
                 "privacy": said["privacy"], "made_for_kids": said["made_for_kids"],
                 "privacies": [{"key": key, "label": WHO[key]} for key in PRIVACY], "docs": DOCS,
-                "note": UNPROVEN}
+                "note": UNPROVEN,
+                # Connecting takes a client file: none is on file, or Google no longer knows the one that is. (To
+                # change to another client otherwise, disconnect first.)
+                "wants_file": not said["client"] or said.get("why") == "client",
+                # The sentences beside the dialog's controls. caveat: for the Publish tab's line, while a post is on
+                # offer ("": none is). leave: what Disconnect asks first, by whether this window has a sign-in.
+                "words": {"caveat": CAVEAT if said["state"] == "on" else "",
+                          "file": GONE_FILE if said["client"] else FILE, "waiting": WAITING,
+                          "leave": LEAVE[said["state"] == "on"], "start_as": START_AS, "kids": KIDS_ASK}}
 
     def _api_line(self, said: dict) -> tuple[Text, list[Text]]:
         if said["state"] == "on":
@@ -423,12 +455,12 @@ class YouTubeApiTab:
         "send" ({"title", "description", "privacy", "made_for_kids" (None: none is sent, because you haven't
         answered), "category"}), the same as "fields" to show,
         "left" (what ReelForge doesn't set), whether it can start ("can_post", "why"), and whether it would be a
-        post again ("force": the video is up there, or may be). With no caption and hashtags given, the form's as
-        last typed."""
+        post again ("force": the video is up there, or may be), with what happens after your yes ("how") and what
+        a post again means ("again"). With no caption and hashtags given, the form's as last typed."""
         if not caption and not tags:
             caption, tags = self.form_text
         out = {**self.youtube_api_view(), "video": None, "review": None, "send": None, "fields": [],
-               "left": NOT_SET, "can_post": False, "force": False, "blocked": None}
+               "left": NOT_SET, "can_post": False, "force": False, "blocked": None, "how": HOW, "again": AGAIN_ASK}
         video = self.selected_file
         if self.demo:
             return {**out, "why": "The demo doesn't post anything."}
@@ -445,11 +477,12 @@ class YouTubeApiTab:
         again = bool(block and block["reason"] in ("posted", "spotted", "unknown"))
         send = {"title": text["title"], "description": text["description"], "privacy": out["privacy"],
                 "made_for_kids": out["made_for_kids"], "category": youtube_api.CATEGORY}
-        fields = [{"label": "Title", "text": send["title"] or "—"},
-                  {"label": "Description", "text": send["description"] or "—"},
-                  {"label": "Who can see it", "text": WHO[send["privacy"]]},
-                  {"label": "Made for kids", "text": KIDS[send["made_for_kids"]]},
-                  {"label": "Category", "text": "People & Blogs"}]
+        # (key: which of "send" a row shows. The window puts the choice for this one post on the "privacy" row.)
+        fields = [{"key": "title", "label": "Title", "text": send["title"] or "—"},
+                  {"key": "description", "label": "Description", "text": send["description"] or "—"},
+                  {"key": "privacy", "label": "Who can see it", "text": WHO[send["privacy"]]},
+                  {"key": "made_for_kids", "label": "Made for kids", "text": KIDS[send["made_for_kids"]]},
+                  {"key": "category", "label": "Category", "text": "People & Blogs"}]
         said = youtube_api.status()  # (the view may say "connecting" over a connection that is good)
         if said["state"] != "on":
             why = AGAIN[said["why"]] if said["state"] == "again" else "Connect YouTube's API first."

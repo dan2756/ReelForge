@@ -141,6 +141,7 @@ class View(ApiPosting):
         self.assertEqual([(f["label"], f["text"]) for f in info["fields"]],
                          [("Title", TITLE), ("Description", TAGS), ("Who can see it", "Private"),
                           ("Made for kids", "No"), ("Category", "People & Blogs")])
+        self.assertEqual([f["key"] for f in info["fields"]], list(info["send"]))  # each row is one thing sent
         self.assertEqual((info["can_post"], info["why"], info["force"], info["blocked"]), (True, "", False, None))
         self.assertEqual((info["video"]["name"], info["review"]["state"], info["note"]), ("ep01.mp4", "none", UNPROVEN))
         self.assertIn("altered-content", info["left"])
@@ -188,8 +189,9 @@ class View(ApiPosting):
         self.assertIsNone(w.view("youtube_api")["made_for_kids"])
         info = w.call("youtube_api_info", CAPTION, TAGS)
         self.assertIsNone(info["send"]["made_for_kids"])
-        self.assertEqual(info["fields"][3], {"label": "Made for kids", "text": "Not sent: you haven't answered, so "
-                                                                               "your channel's own setting applies"})
+        self.assertEqual(info["fields"][3], {"key": "made_for_kids", "label": "Made for kids",
+                                             "text": "Not sent: you haven't answered, so your channel's own setting "
+                                                     "applies"})
         job = self.posted(w)
         self.assertEqual(self.google.starts[0]["body"]["status"], {"privacyStatus": "private"})  # as the question said
         self.assertEqual(json.loads(job["options"]), {"privacy": "private", "made_for_kids": None})
@@ -219,6 +221,59 @@ class View(ApiPosting):
                                         "audience in YouTube Studio.")
         self.assertIn(youtube_api_tab.AMBER, self.rows(w)["youtube"]["line"][-1][1])
         self.assertEqual(w.sent("toast")[-1]["severity"], "warning")
+
+    def test_the_view_has_the_sentences_the_windows_dialog_puts_beside_its_controls(self):
+        """The window draws these and writes none of them: what the box for the client file is for, what waiting
+        for Google's page means, what Disconnect asks first, and the two choices for posts to come."""
+        w = self.window(api=False)
+        words = w.view("youtube_api")["words"]
+        self.assertEqual(set(words), {"caveat", "file", "waiting", "leave", "start_as", "kids"})
+        self.assertEqual((words["caveat"], words["file"]), ("", youtube_api_tab.FILE))  # no post on offer yet
+        self.assertIn("client_secret_....json", words["file"])
+        self.assertTrue(w.view("youtube_api")["wants_file"])  # nothing to connect with yet
+        self.assertIn("You have ten minutes", words["waiting"])
+        self.assertEqual(youtube_api.CONSENT_FOR, 10 * 60)  # (the ten minutes that sentence promises)
+        self.assertIn("the browser has to be on this computer", words["waiting"])
+        self.assertIn("ReelForge never makes it for you", words["kids"])
+        self.assertIn("You can choose otherwise for one post, in its question.", words["start_as"])
+        # Connected: the Publish tab's line says how far this is tested, since the row now offers a post, and
+        # Disconnect says that Google is told.
+        self.connect_api()
+        w.svc.follow_youtube_api(changed=True)
+        words = w.view("youtube_api")["words"]
+        self.assertEqual((words["caveat"], w.view("youtube_api")["wants_file"]), ("tested on a stand-in only", False))
+        self.assertIn("then tells Google that this window's access has ended", words["leave"])
+        # A ReelForge opened since has no sign-in, so there is none to end, and no post on offer.
+        self.reopen()
+        w.svc.follow_youtube_api(changed=True)
+        words = w.view("youtube_api")["words"]
+        view = w.view("youtube_api")
+        self.assertEqual((view["state"], words["caveat"], view["wants_file"]), ("again", "", False))  # Connect will do
+        self.assertIn("This window is not connected, so there is nothing to end at Google.", words["leave"])
+        for said in words.values():
+            self.assertNotIn("—", said)
+
+    def test_a_client_google_no_longer_knows_asks_for_another_client_file(self):
+        self.google.start_script = [(403, "quotaExceeded")]
+        w = self.window()
+        self.posted(w)
+        self.google.token_script = ["invalid_client"]  # the client was deleted in Google Cloud
+        youtube_api._access.clear()
+        self.posted(w)
+        view = w.view("youtube_api")
+        self.assertEqual((view["state"], view["client"], view["wants_file"]), ("again", True, True))
+        self.assertEqual(plain(view["lines"][0]), AGAIN["client"])
+        self.assertEqual(view["words"]["file"], youtube_api_tab.GONE_FILE)
+        self.assertIn("Google no longer knows the client on file.", view["words"]["file"])
+
+    def test_the_question_says_what_happens_after_your_yes_and_what_again_means(self):
+        w = self.window()
+        info = w.call("youtube_api_info", CAPTION, TAGS)
+        self.assertEqual(info["how"], "ReelForge uploads the video to YouTube itself, through Google's API, with "
+                                      "exactly this. The YouTube row shows the percent. Keep ReelForge open until "
+                                      "it says posted.")
+        self.assertEqual(info["again"], "Posting it makes a second video on your channel.")
+        self.assertEqual(info["words"], w.view("youtube_api")["words"])
 
     def test_the_demo_has_none_of_it(self):
         self.connect_api()
@@ -470,7 +525,7 @@ class Posting(ApiPosting):
         self.assertEqual((posting.recent(), self.google.starts), ([], []))
         # Asked again, the question shows the new answer, and a yes to that one is sent with it.
         info = w.call("youtube_api_info", CAPTION, TAGS)
-        self.assertEqual(info["fields"][3], {"label": "Made for kids", "text": "Yes"})
+        self.assertEqual(info["fields"][3], {"key": "made_for_kids", "label": "Made for kids", "text": "Yes"})
         made = w.call("post_with_api", CAPTION, TAGS, "private", False,
                       {"video": info["video"]["path"], "made_for_kids": info["send"]["made_for_kids"]})
         self.over(w, made["jobs"][0]["id"])
