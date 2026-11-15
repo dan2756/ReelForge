@@ -43,8 +43,10 @@ def _exists(p) -> bool:
 
 
 def _prefer_45(paths: list[str]) -> list[str]:
-    """Blender installs, the 4.5 ones first (the pipeline is built on 4.5 LTS), newest patch first. The version is
-    read from the folder name ("blender-4.5.5-windows-x64", "Blender 4.5"); unversioned paths come last."""
+    """Blender installs, the 4.5 ones first (the pipeline is built on 4.5 LTS), among those the copy in the kit's own
+    tools/ (the one setup downloaded and checked, the version the pipeline is tested with) ahead of one found
+    elsewhere, then the newest patch first. The version is read from the folder name ("blender-4.5.5-windows-x64",
+    "Blender 4.5"); unversioned paths come last."""
     series = tuple(int(x) for x in BLENDER_SERIES.split("."))
 
     def key(p):
@@ -54,7 +56,7 @@ def _prefer_45(paths: list[str]) -> list[str]:
         else:
             m = re.search(r"blender[- _](\d+)\.(\d+)(?:\.(\d+))?", p, re.IGNORECASE)
         ver = tuple(int(x or 0) for x in m.groups()) if m else (0, 0, 0)
-        return (ver[:2] == series, ver)
+        return (ver[:2] == series, TOOLS in Path(p).parents, ver)
     return sorted(paths, key=key, reverse=True)
 
 

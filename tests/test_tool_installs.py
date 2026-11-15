@@ -189,6 +189,19 @@ class Blender(Scratch):
         self.assertEqual(self.rel(self.install(good)), "blender/blender")
 
 
+    def test_the_kits_own_blender_comes_before_one_found_elsewhere(self):
+        # A newer 4.5 unzipped in Downloads used to outrank the copy setup downloaded and checked.
+        own = self.tools / "blender" / "blender"
+        own.parent.mkdir(parents=True)
+        own.write_text("prog", encoding="utf-8")
+        (own.parent / "kit-version.txt").write_text("4.5.5\n", encoding="utf-8")
+        newer = str(self.dir / "Downloads" / "blender-4.5.9-linux-x64" / "blender")
+        other = str(self.dir / "Downloads" / "blender-5.0.1-linux-x64" / "blender")
+        self.assertEqual(tools._prefer_45([other, newer, str(own)]), [str(own), newer, other])
+        (own.parent / "kit-version.txt").write_text("4.4.3\n", encoding="utf-8")   # only a 4.5 comes first
+        self.assertEqual(tools._prefer_45([other, str(own), newer]), [newer, str(own), other])
+
+
 class Bun(Scratch):
     def setUp(self):
         super().setUp()
