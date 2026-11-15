@@ -174,8 +174,9 @@ function LogStats({ data, close }: { data: LogData; close: () => void }) {
         ))}
       </Scroll>
       {problem ? (
-        // (what's wrong with what was typed is red everywhere: here, under an @handle, in first-time setup)
-        <text fg={DASH.bad} marginTop={1} wrapMode="word" flexShrink={0}>
+        // (what's wrong with what was typed is red everywhere: here, under an @handle, in first-time setup. A number
+        // lower than the one saved is not wrong, it is asked about: amber, and Save again is the answer)
+        <text fg={problem.includes("Press Save again") ? DASH.warn : DASH.bad} marginTop={1} wrapMode="word" flexShrink={0}>
           {problem}
         </text>
       ) : null}

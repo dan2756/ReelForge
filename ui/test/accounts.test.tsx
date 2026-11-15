@@ -154,6 +154,33 @@ describe("typing in stats", () => {
   })
 })
 
+describe("typing in a number lower than the one saved", () => {
+  test("is asked about in amber, not said in red as a mistake, and Save again stores it", async () => {
+    const h = await kit({ needs_login: ["x"], spotted: { tiktok: 1200 } })
+    const typeViews = async (views: string, clear = 0) => {
+      await clickText(h, "Type in stats", 2)
+      await until(h, () => frame(h).includes("VIEWS PER VIDEO"))
+      h.t.mockInput.pressKey("TAB") // from the followers box to the video's
+      await h.settle(200)
+      for (let i = 0; i < clear; i++) h.t.mockInput.pressKey("BACKSPACE")
+      await h.t.mockInput.typeText(views)
+      await h.settle(200)
+      h.t.mockInput.pressKey("RETURN")
+    }
+    await typeViews("32000")
+    await until(h, () => !frame(h).includes("TYPE IN STATS"))
+    await typeViews("3400", 5) // the box opens with the 32000 saved a moment ago
+    const asks = "3,400 is lower than the 32,000 saved before."
+    await until(h, () => flat(h).includes(asks))
+    expect(flat(h)).toContain("Press Save again if 3,400 is right")
+    const [, y] = find(h, "3,400 is lower")!
+    expect(hex(h.t.captureSpans().lines[y]!.spans.find((sp) => sp.text.includes("3,400 is lower"))!.fg)).toBe(DASH.warn)
+    h.t.mockInput.pressKey("RETURN") // Save again
+    await until(h, () => !frame(h).includes("TYPE IN STATS"))
+    expect(frame(h)).not.toContain("Something went wrong")
+  })
+})
+
 describe("stats from before a handle changed", () => {
   const ASK = { was: { tiktok: "@oldname" } }
 
