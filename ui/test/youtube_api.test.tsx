@@ -723,6 +723,38 @@ describe("Disconnect", () => {
     expect(row(h)).toBe("YouTube ○ not posted") // nothing on the row any more
   })
 
+  test("a double click on Disconnect asks and disconnects nothing, in a window 80 columns by 24 rows too", async () => {
+    // The dialog is as tall as that window allows, so its row of buttons doesn't move when the question comes. The red
+    // Disconnect came up under the right end of the first one, and the second click pressed it.
+    const h = await kit({ api: { client: "on", kids: false } }, [80, 24])
+    h.t.mockInput.pressKey("\u001b[6~") // Page Down, to POST
+    await h.settle(400)
+    await openApi(h)
+    const at = find(h, "▐ Disconnect ▌")!
+    for (const dx of [0, 4, 8, 10, 11, 12, 13]) {
+      await h.t.mockMouse.click(at[0] + dx, at[1])
+      await h.settle(120)
+      await h.t.mockMouse.click(at[0] + dx, at[1]) // on the same spot
+      await h.settle(300)
+      expect([dx, dialog(h).includes("Disconnect? ReelForge forgets the client")]).toEqual([dx, true]) // asked, and still asking
+      expect(focused(h)).toBe("Keep it")
+      h.t.mockInput.pressKey("RETURN")
+      await h.settle(200)
+      expect(dialog(h)).not.toContain("Disconnect?")
+    }
+    await h.settle(800)
+    expect([api(h).state, Object.keys(onFile()).includes("client_id"), (await google(h)).revoked, popups()]).toEqual(["on", true, 0, []])
+    // Tab goes from Keep it to the red button, which is beside it and under the question.
+    await clickText(h, "▐ Disconnect ▌", 3)
+    expect(frame(h)).toMatch(/│ +▐ Keep it ▌ ▐ Disconnect ▌ +│/)
+    h.t.mockInput.pressKey("TAB")
+    await h.settle(200)
+    expect(focused(h)).toBe("Disconnect")
+    h.t.mockInput.pressKey("RETURN")
+    await until(h, () => api(h).state === "off")
+    expect([onFile(), (await google(h)).revoked]).toEqual([null, 1])
+  })
+
   test("in a window that is not connected, says before and after that Google may still list ReelForge", async () => {
     const h = await kit({ api: { client: true } })
     await openApi(h)

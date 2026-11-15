@@ -195,10 +195,10 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
         </box>
       ) : null}
       <box flexDirection="row" height={1} marginTop={leaving ? 1 : 2} flexShrink={0} gap={1}>
-        <text fg={DASH.faint} wrapMode="none" flexGrow={1} flexShrink={1}>
-          {leaving ? "" : `Guide: ${api.docs}`}
-        </text>
         {leaving ? (
+          // At the left, under their question, where nothing was to press: in a window as short as the dialog this
+          // row doesn't move, and the red button came up under the right end of the first Disconnect. The second
+          // click of a double click there disconnected before the question could be read.
           <>
             <Button id="api-keep" label="Keep it" autoFocus onPress={() => setLeaving(false)} />
             <Button
@@ -213,6 +213,9 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
           </>
         ) : (
           <>
+            <text fg={DASH.faint} wrapMode="none" flexGrow={1} flexShrink={1}>
+              {`Guide: ${api.docs}`}
+            </text>
             {/* (not while Google's page is waiting: one thing at a time, and with it where the guide is no longer
                 fits beside the buttons in a window 80 columns wide) */}
             {api.client && !waiting ? <Button id="api-disconnect" label="Disconnect" onPress={() => setLeaving(true)} /> : null}
