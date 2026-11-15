@@ -431,16 +431,24 @@ class PostingTab:
 
     @rpc
     def post_with_extension(self, platforms: list[str], caption: str, tags: str, stop_before: bool = True,
-                            force: list[str] | None = None) -> dict | None:
+                            force: list[str] | None = None, video: str | None = None) -> dict | None:
         """Your yes to the question: a job for each ticked platform (posting.create_batch), then the local page that
         hands them to the extension. stop_before: the extension stops at the platform's own Post button (off only
         where post_info said press is available). force: the platforms to post to again although the video is up
-        there. Returns {"batch", "jobs": [{"id", "platform"}], "blocked": [...], "opened"}; None when there was
+        there. video: the file the question was about (post_info's video.path), which the window sends back.
+        Returns {"batch", "jobs": [{"id", "platform"}], "blocked": [...], "opened"}; None when there was
         nothing to start from."""
         if self.demo:
             self.notify("Demo mode: nothing is posted.", timeout=4)
             return None
         if not self._picked():
+            return None
+        if video is not None and Path(video) != self.selected_file:
+            # The picked video changed under the question (it was hidden or removed in another window, or its file
+            # went): a yes to that one must never post this one, with that one's caption.
+            self.notify(f"The question was about {Path(video).name}, and {self.selected_file.name} is the picked "
+                        "video now. Press Post… again to post this one.", title="Nothing was started",
+                        severity="warning", timeout=12)
             return None
         needed = self.extension_needed(self.extension_status())
         ticked = [k for k in platforms or [] if k in self.platforms]

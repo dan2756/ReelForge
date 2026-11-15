@@ -18,7 +18,7 @@ import { DASH } from "../theme"
 import { Button } from "../ui/Button"
 import { Switch } from "../ui/Fields"
 import { Fitted } from "../ui/Line"
-import { DialogButtons, Modal, modalRoom, Panel, Scroll, useWidth, Wrapped } from "../ui/Panels"
+import { DialogButtons, Modal, modalRoom, Panel, Scroll, toasts, useWidth, Wrapped } from "../ui/Panels"
 import { useDash, type PostData } from "./state"
 import type { ExtensionInstall, ExtensionView, FilesView, PlatformInfo, PostInfoPlatform, PostingRow, PostingView } from "./types"
 
@@ -162,11 +162,22 @@ export function PostDialog({ data, close }: { data: PostData; close: () => void 
   const go = async () => {
     if (!ok) return
     setBusy(true)
-    // What it started and what it refused come back as the rows on the tab and as pop-ups.
-    await s.bridge.ask("post_with_extension", chosen.map((p) => p.key), data.caption, data.tags, stop || !mayPress, chosen.filter((p) => p.again).map((p) => p.key))
+    // What it started and what it refused come back as the rows on the tab and as pop-ups. The video goes with the
+    // yes: the Python side starts nothing when another one is picked by now.
+    await s.bridge.ask("post_with_extension", chosen.map((p) => p.key), data.caption, data.tags, stop || !mayPress, chosen.filter((p) => p.again).map((p) => p.key), info.video.path)
     if (s.dialog?.kind === "post") close() // (Esc may have closed it while the browser was opening)
   }
-  const review = s.bridge.view<PostingView>("posting")?.review.line ?? [[info.review.line, DASH.muted]]
+  // The question is about one video. The Python side picks another by itself when this one leaves the list (hidden or
+  // removed in another window, or its file is gone): the question then goes, since nothing it shows would be what
+  // Start posts.
+  const now = useView<PostingView>(s.bridge, "posting")
+  const moved = Boolean(now && now.video?.path !== info.video.path)
+  useEffect(() => {
+    if (!moved) return
+    toasts.add({ title: "Nothing was started", body: `${info.video.name} isn't the picked video any more, so the question about it closed.`, severity: "warning", timeout: 10 })
+    close()
+  }, [moved])
+  const review = now?.review.line ?? [[info.review.line, DASH.muted]]
   const count = `${chosen.length} post${chosen.length === 1 ? "" : "s"}`
   // The platforms' rows as they will wrap, so their scrolling area is as tall as they are and no taller.
   const room = modalRoom(100, useTerminalDimensions().width) - TICK

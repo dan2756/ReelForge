@@ -269,6 +269,29 @@ class Posting(PostingTest):
         notes = [plain(r["cells"][4]) for r in w.view("uploads")["rows"]]
         self.assertEqual(notes, ["waiting for the extension to pick it up"] * 2)
 
+    def test_a_yes_to_a_question_about_another_video_than_the_picked_one_starts_nothing(self):
+        """The window sends back the video its question showed. The list picks another by itself when that one
+        leaves it (hidden in another window, here): a yes must not post the new pick with the old one's caption."""
+        other = self.root / "videos" / "ep02.mp4"
+        other.write_bytes(b"second")
+        w = self.window()
+        w.call("pick_file", str(other))
+        asked = w.call("post_info", "The second video", TAGS)["video"]["path"]
+        self.assertEqual(asked, str(other))
+        db.set_meta("hidden_videos", [str(other)])  # what another window's Hide writes
+        w.call("scan_files")                        # ... and what this window does when it sees the change
+        self.assertEqual(w.view("posting")["video"]["name"], "ep01.mp4")
+        made = w.call("post_with_extension", ["tiktok"], "The second video", TAGS, True, None, asked)
+        self.assertIsNone(made)
+        toast = w.sent("toast")[-1]
+        self.assertEqual((toast["title"], toast["severity"]), ("Nothing was started", "warning"))
+        self.assertIn("The question was about ep02.mp4, and ep01.mp4 is the picked video now.", toast["body"])
+        self.assertEqual((posting.recent(), self.pages, db.uploads()), ([], [], []))
+        # The same yes about the video that is picked goes ahead.
+        made = w.call("post_with_extension", ["tiktok"], CAPTION, TAGS, True, None, str(self.video))
+        self.assertEqual([(j["platform"], posting.get(j["id"])["video"]) for j in made["jobs"]],
+                         [("tiktok", "ep01.mp4")])
+
     def test_stop_before_posting_off_is_kept_on_the_job_and_never_for_x(self):
         w = self.window()
         made = self.post(w, "tiktok", "x", stop_before=False)

@@ -5,6 +5,7 @@
 // no video, no platform, a window that isn't listening, a call that failed. No browser opens and nothing is posted:
 // each page that would open is listed in a file.
 
+import { Database } from "bun:sqlite"
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -52,6 +53,19 @@ const flat = (h: Headless) => frame(h).replace(/\s+/g, " ") // what's on screen,
 const listed = (file: string) => (existsSync(join(tmp, file)) ? readFileSync(join(tmp, file), "utf-8").split("\n").filter(Boolean) : [])
 const posting = (h: Headless) => h.bridge.view<PostingView>("posting")!
 const state = (h: Headless, key: string) => posting(h).rows.find((r) => r.key === key)?.state
+const popups = () => toasts.get().map((t) => (t.title ? `${t.title}: ${t.body}` : t.body)) // the pop-ups showing, oldest first
+
+/** The scratch channel's stats database, from outside its window: the way another ReelForge window or the hourly job
+ * gets at it. */
+function inStats<T>(use: (db: Database) => T): T {
+  const db = new Database(join(tmp, "dashboard", "data", "stats.db"))
+  try {
+    return use(db)
+  } finally {
+    db.close()
+  }
+}
+const jobsMade = () => inStats((db) => (db.query("SELECT COUNT(*) AS n FROM post_jobs").get() as { n: number }).n)
 
 /** Wait (up to 6 s) for something the Python side does after a click: each look comes after a settle. */
 async function until(h: Headless, ok: () => boolean) {
@@ -208,6 +222,34 @@ describe("Post…", () => {
     await h.settle(300)
     expect(frame(h)).not.toContain("POST THIS VIDEO")
     expect(state(h, "instagram")).toBe("spotted") // nothing was started
+  })
+
+  test("the question is about one video: when another is the picked one by now it closes, and its yes starts nothing", async () => {
+    const h = await kit({ extension: "on" })
+    await clickText(h, "clip.mp4", 2)
+    await until(h, () => posting(h).video?.name === "clip.mp4")
+    await clickText(h, "▐ Post… ▌", 3)
+    await until(h, () => frame(h).includes("POST THIS VIDEO"))
+    expect(dialog(h)).toContain("clip.mp4")
+    expect(dialog(h)).toContain("Caption Clip #fyp #whatif #weather")
+    const asked = posting(h).video!.path
+    // Another ReelForge window hides clip.mp4 (what its Hide writes): this window's list then picks its newest video
+    // by itself, under the question.
+    inStats((db) => {
+      db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('hidden_videos', ?)", [JSON.stringify([asked])])
+      db.run("INSERT INTO meta (key, value) VALUES ('changes', '1') ON CONFLICT (key) DO UPDATE SET value = CAST(value AS INTEGER) + 1")
+    })
+    await until(h, () => posting(h).video?.name === "ep03_hail.mp4" && !frame(h).includes("POST THIS VIDEO"))
+    expect(posting(h).video?.name).toBe("ep03_hail.mp4")
+    expect(frame(h)).not.toContain("POST THIS VIDEO") // nothing left to say yes to
+    expect(popups()).toContain("Nothing was started: clip.mp4 isn't the picked video any more, so the question about it closed.")
+    // A yes that was on its way as the pick changed: the Python side starts nothing for it either.
+    expect(await h.bridge.call("post_with_extension", ["tiktok", "x"], "Clip", "#fyp #whatif #weather", true, [], asked)).toBeNull()
+    await h.settle(600)
+    expect(popups().at(-1)).toContain("The question was about clip.mp4, and ep03_hail.mp4 is the picked video now.")
+    expect(jobsMade()).toBe(0)
+    expect(posting(h).rows.every((r) => r.state === "none")).toBe(true)
+    expect(listed("opened.txt")).toEqual([]) // no page for the extension either
   })
 
   test("a video that isn't reviewed can't go with the extension and says why, and by hand is not held back", async () => {
