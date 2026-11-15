@@ -244,12 +244,14 @@ Tested here, by automated tests that run with ReelForge's own (`dashboard/tests/
 
 Looked at, not automated:
 
-- the two local pages, in headless Chrome at 1100 and 360 pixels wide: no extension, working, ended, by hand,
+- the two local pages, in headless Chromium at 1100 and 360 pixels wide: no extension, working, ended, by hand,
   ReelForge closed, connected, and a pairing that failed. They made no request to anywhere but ReelForge.
-- the extension itself, loaded in Chromium, connected through the pair page and handed a batch by this server.
-  With no way to reach the platforms from there, every post ended as failed and said why, on the page and in the
-  popup. This was one run by hand. The extension's own tests use a stand-in for this server, and the server's
-  tests a stand-in for the extension.
+- the extension itself with this server, in Chromium, by hand. It connected through the pair page and was handed a
+  batch for all four platforms. With the extension's own copies of the upload pages served under the platforms'
+  addresses, it took each job, fetched the video from ReelForge, attached it, filled in the text and stopped at
+  ready, and the local page followed every step. With no pages to reach at all, every post ended as failed and
+  said why, on the page and in the extension's popup. These were runs by hand: the extension's own tests use a
+  stand-in for this server, and the server's tests a stand-in for the extension.
 
 Not verified:
 
