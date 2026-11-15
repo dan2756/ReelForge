@@ -49,6 +49,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -155,7 +156,11 @@ def onboard(argv: list[str]) -> int:
             answers = {**answers, "_created": ""}
         try:
             written = generate.write_all(answers, target)
-        except ValueError as e:
+        except Exception as e:
+            if target is not None:      # the new profile never got its files: its folder goes again, so the same
+                shutil.rmtree(target.folder, ignore_errors=True)   # command works once the answers are fixed
+            if not isinstance(e, (ValueError, RuntimeError)):
+                raise
             print(e)
             return 1
         _print_written(written)
