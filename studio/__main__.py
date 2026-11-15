@@ -36,10 +36,10 @@
   reelforge extension [folder|pair|serve]       the browser extension that fills in upload pages (optional): where
                                it stands, its folder to load in your browser, connecting a browser, and listening
                                for it without the window. It never starts a post: you do (docs/EXTENSION.md)
-  reelforge youtube-api [connect [FILE]|disconnect]   posting to YouTube through Google's own API, with your own
-                               Google Cloud project (optional): where the connection stands, connecting with the
-                               client file Google gave you, and ending it. It never starts a post: you do, in
-                               the window (docs/YOUTUBE-API.md)
+  reelforge youtube-api [client FILE|disconnect]   posting to YouTube through Google's own API, with your own
+                               Google Cloud project (optional): where it stands, taking the client file Google
+                               gave you, and forgetting it. It never signs in or starts a post: you do, in the
+                               window (docs/YOUTUBE-API.md)
 
   reelforge reset [--yes]      factory reset: every channel's settings, log-ins and stats back to brand-new (into a
                                backup in backups/), then first-time setup again; your first channel's videos stay

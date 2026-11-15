@@ -1,6 +1,7 @@
 """Posting to YouTube through its own API, the Google side (dashboard.platforms.youtube_api): connecting (the
-consent round trip with its PKCE proof and state, a wrong state, a refusal, no answer), the sign-in (renewed when it
-runs out, "connect again" once Google has ended it), the upload in pieces and everything that can go wrong with one
+consent round trip with its PKCE proof and state, a wrong state, a refusal, no answer), the sign-in (held by the
+ReelForge that connected and in no file, renewed when it runs out, "connect again" once Google has ended it), the
+upload in pieces and everything that can go wrong with one
 (a 503, a lost answer, a lost last answer the session can and can't account for, every refusal Google documents),
 disconnecting, the file it keeps and the command. "Google" is the stand-in in dashboard/tests/google.py, on this
 computer; "the browser" follows the consent page's redirect the way yours would. Nothing reaches the internet, and
@@ -17,6 +18,8 @@ import json
 import os
 import socket
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -70,8 +73,9 @@ def google_for(test: unittest.TestCase, root: Path) -> Google:
     env = mock.patch.dict(os.environ, {"NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"})
     env.start()
     test.addCleanup(env.stop)
-    youtube_api._access.clear()
-    test.addCleanup(youtube_api._access.clear)
+    for kept in (youtube_api._access, youtube_api._held, youtube_api._ended):  # what a ReelForge has in mind
+        kept.clear()
+        test.addCleanup(kept.clear)
     test.client_file = root / "client_secret_1234567890-abc.apps.googleusercontent.com.json"
     test.client_file.write_text(json.dumps({"installed": {
         "client_id": CLIENT_ID, "project_id": "night-physics", "client_secret": CLIENT_SECRET,
@@ -122,6 +126,15 @@ class ApiTest(unittest.TestCase):
     def on_file(self) -> dict:
         return json.loads(self.store.read_text("utf-8"))
 
+    def held(self) -> str:
+        """The sign-in this ReelForge has in mind for the channel (its refresh token)."""
+        return youtube_api._held[str(self.store)]["refresh_token"]
+
+    def reopen(self) -> None:
+        """As a ReelForge that has just opened: what the last one had in mind went with it."""
+        for kept in (youtube_api._access, youtube_api._held, youtube_api._ended):
+            kept.clear()
+
 
 class Connecting(ApiTest):
     def test_the_round_trip_asks_for_one_permission_and_proves_itself_with_pkce(self):
@@ -141,11 +154,10 @@ class Connecting(ApiTest):
         self.assertEqual((trade["grant_type"], trade["client_id"], trade["client_secret"], trade["redirect_uri"]),
                          ("authorization_code", CLIENT_ID, CLIENT_SECRET, asked["redirect_uri"]))
         self.assertGreaterEqual(len(trade["code_verifier"]), 43)
-        kept = self.on_file()
         (refresh,) = self.google.grants
-        self.assertEqual((kept["client_id"], kept["client_secret"], kept["refresh_token"]),
-                         (CLIENT_ID, CLIENT_SECRET, refresh))
-        self.assertNotIn("access_token", kept)  # the short-lived one is never written down
+        self.assertEqual(self.held(), refresh)
+        # The file has the client and nothing of the sign-in: that stays in this ReelForge's mind.
+        self.assertEqual(self.on_file(), {"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET})
         self.assertEqual(youtube_api.status()["state"], "on")
         self.assertEqual(self.shown[0][0], 200)
         self.assertIn("ReelForge is connected to YouTube", self.shown[0][1])
@@ -268,7 +280,7 @@ class Connecting(ApiTest):
     def test_connecting_again_needs_no_file_and_keeps_your_choices(self):
         self.connect()
         youtube_api.set_defaults("unlisted", True)
-        first = self.on_file()["refresh_token"]
+        first = self.held()
         self.google.end_grant()
         youtube_api._access.clear()  # (as when the token it has in mind has run out)
         self.refused("not_connected", youtube_api.access_token)
@@ -278,8 +290,7 @@ class Connecting(ApiTest):
         said = youtube_api.status()
         self.assertEqual((said["state"], said["why"], said["privacy"], said["made_for_kids"]),
                          ("on", None, "unlisted", True))
-        self.assertNotEqual(self.on_file()["refresh_token"], first)
-        self.assertNotIn("lapsed", self.on_file())
+        self.assertNotEqual(self.held(), first)
 
     def test_how_long_the_sign_in_lasts_is_kept_when_google_says(self):
         self.connect()
@@ -299,7 +310,7 @@ class SignIn(ApiTest):
         first = youtube_api.access_token()
         self.assertEqual(youtube_api.access_token(), first)
         self.assertEqual(self.google.token_calls, [])
-        refresh = self.on_file()["refresh_token"]
+        refresh = self.held()
         youtube_api._access[refresh] = (first, 0.0)  # as an hour later
         second = youtube_api.access_token()
         self.assertNotEqual(second, first)
@@ -318,9 +329,8 @@ class SignIn(ApiTest):
         self.assertEqual(len(self.google.token_calls), 1)
         said = youtube_api.status()
         self.assertEqual((said["state"], said["why"], said["client"]), ("again", "grant", True))
-        kept = self.on_file()
-        self.assertNotIn("refresh_token", kept)  # the dead one is gone; the client stays, to connect again with
-        self.assertEqual(kept["client_id"], CLIENT_ID)
+        self.assertNotIn(str(self.store), youtube_api._held)  # the dead one is let go of...
+        self.assertEqual(self.on_file()["client_id"], CLIENT_ID)  # ...and the client stays, to connect again with
         for _ in range(3):
             self.assertEqual(self.refused("not_connected", youtube_api.access_token).message, e.message)
         self.assertEqual(len(self.google.token_calls), 1)  # Google isn't asked again and again
@@ -360,6 +370,88 @@ class SignIn(ApiTest):
     def test_not_connected_at_all(self):
         youtube_api.disconnect()
         self.assertEqual(self.refused("not_connected", youtube_api.access_token).message, youtube_api.NOT_CONNECTED)
+
+
+class OnlyInItsReelForge(ApiTest):
+    """The sign-in stays in the mind of the ReelForge that connected. No file has it, so nothing else in this
+    folder can upload: not a ReelForge opened later, and not a script."""
+
+    def test_nothing_of_the_sign_in_is_in_any_file(self):
+        self.connect()
+        self.upload()
+        youtube_api.set_defaults("public")
+        handed_out = [*self.google.codes, *self.google.grants, *self.google.access]
+        self.assertEqual(len(handed_out), 3)  # the code, the sign-in and the token it gave
+        files = [p for p in self.root.rglob("*") if p.is_file()]
+        self.assertIn(self.store, files)
+        for path in files:
+            for value in handed_out:
+                self.assertNotIn(value.encode(), path.read_bytes(), path.name)
+
+    def test_a_reelforge_that_has_just_opened_connects_again_before_it_can_upload(self):
+        self.connect()
+        self.google.token_calls.clear()
+        self.reopen()
+        said = youtube_api.status()
+        self.assertEqual((said["state"], said["why"], said["client"], said["since"]), ("again", "session", True, None))
+        self.assertEqual(self.refused("not_connected", self.upload).message, youtube_api.AGAIN["session"])
+        self.assertEqual((self.google.token_calls, self.google.starts, self.google.puts), ([], [], []))
+        self.assertTrue(self.connect(None).outcome["ok"])  # your yes on Google's page, with no file to pick
+        self.assertEqual(self.upload()["id"], "vid00000001")
+
+    def test_another_program_with_the_same_file_has_nothing_to_upload_with(self):
+        self.connect()
+        self.upload()
+        self.google.token_calls.clear()
+        script = ("import json, sys\nfrom pathlib import Path\nfrom dashboard.platforms import youtube_api\n"
+                  "youtube_api.store_path = lambda: Path(sys.argv[1])\n"
+                  "youtube_api.TOKEN_URL, youtube_api.UPLOAD_URL = sys.argv[2] + '/token', sys.argv[2] + '/upload'\n"
+                  "said = youtube_api.status()\n"
+                  "try:\n    youtube_api.upload(Path(sys.argv[3]), 't', 'd', 'public', False, started=print)\n"
+                  "except youtube_api.ApiError as e:\n    said['error'] = e.code\n"
+                  "print(json.dumps(said))\n")
+        ran = subprocess.run([sys.executable, "-c", script, str(self.store), self.google.base, str(self.video)],
+                             cwd=KIT, capture_output=True, text=True, timeout=120)
+        self.assertEqual(ran.stderr, "")
+        said = json.loads(ran.stdout)
+        self.assertEqual((said["state"], said["why"], said["client"], said["error"]),
+                         ("again", "session", True, "not_connected"))
+        self.assertEqual((self.google.token_calls, len(self.google.starts), len(self.google.videos)), ([], 1, 1))
+
+    def test_a_sign_in_somebody_put_in_the_file_is_never_used_and_goes_at_the_next_connect(self):
+        self.google.grants["refresh-put-in-the-file"] = CLIENT_ID  # one Google would take
+        self.store.parent.mkdir()
+        self.store.write_text(json.dumps({
+            "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET, "refresh_token": "refresh-put-in-the-file",
+            "connected_at": "2026-11-01T00:00:00+00:00", "privacy": "unlisted"}), "utf-8")
+        said = youtube_api.status()
+        self.assertEqual((said["state"], said["why"], said["since"]), ("again", "session", None))
+        self.refused("not_connected", self.upload)
+        self.assertEqual((self.google.token_calls, self.google.starts), ([], []))
+        self.connect(None)
+        self.assertEqual(self.on_file(), {"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
+                                          "privacy": "unlisted"})
+
+    def test_a_disconnect_in_another_reelforge_ends_it_in_this_one_for_good(self):
+        self.connect()
+        self.store.unlink()  # what a disconnect does first, wherever it is run
+        self.assertEqual(youtube_api.status()["state"], "off")
+        self.assertEqual(self.refused("not_connected", self.upload).message, youtube_api.NOT_CONNECTED)
+        with contextlib.redirect_stdout(io.StringIO()):
+            youtube_api.main(["client", str(self.client_file)])  # the same client, given again
+        self.assertEqual(youtube_api.status()["state"], "again")  # doesn't bring the old sign-in back
+        self.refused("not_connected", self.upload)
+        self.assertEqual(self.google.starts, [])
+
+    def test_each_channel_has_its_own(self):
+        self.connect()
+        other = self.root / "profiles" / "cool" / "dashboard" / "data" / "youtube_api.json"
+        other.parent.mkdir(parents=True)
+        other.write_text(self.store.read_text("utf-8"), "utf-8")  # the same client file, as the docs allow
+        with mock.patch.object(youtube_api, "store_path", lambda: other):
+            self.assertEqual(youtube_api.status()["state"], "again")  # this channel connects by itself
+            self.refused("not_connected", youtube_api.access_token)
+        self.assertEqual(youtube_api.status()["state"], "on")
 
 
 class Uploading(ApiTest):
@@ -638,7 +730,7 @@ class Uploading(ApiTest):
 class Disconnecting(ApiTest):
     def test_the_file_goes_and_google_is_told_to_end_the_grant(self):
         self.connect()
-        refresh = self.on_file()["refresh_token"]
+        refresh = self.held()
         self.assertEqual(youtube_api.disconnect(), {"was": True, "revoked": True})
         self.assertEqual(self.google.revoke_calls, [refresh])
         self.assertEqual(self.google.grants, {})
@@ -776,6 +868,30 @@ class Kept(unittest.TestCase):
             self.assertEqual((root / rel).read_text("utf-8"), text, rel)
 
 
+class Guides(unittest.TestCase):
+    """What the AI working in this folder is told about this way of posting, and what the page for the person
+    says about it."""
+
+    def test_the_ais_guides_say_never_to_connect_or_post(self):
+        from dashboard import youtube_api_tab
+
+        for rel in ("AGENTS.md", "CLAUDE.md", "studio/templates/context.md.j2"):
+            text = " ".join((KIT / rel).read_text("utf-8").split())
+            for words in ("Never open Google's consent page", "`python -m studio.bridge`", "`post_with_api`",
+                          "`youtube_api.connect`", "`youtube_api.upload`", "`youtube_api_tab.run`"):
+                self.assertIn(words, text, rel)
+        for owner, name in ((youtube_api, "connect"), (youtube_api, "upload"), (youtube_api_tab, "run"),
+                            (youtube_api_tab.YouTubeApiTab, "post_with_api")):
+            self.assertTrue(callable(getattr(owner, name)), name)  # (the names the guides forbid are the real ones)
+
+    def test_the_page_says_where_the_sign_in_is_and_claims_no_more_than_that(self):
+        page = " ".join((KIT / "docs" / "YOUTUBE-API.md").read_text("utf-8").split())
+        self.assertIn("kept in the memory of the open window that connected, never in a file", page)
+        self.assertIn("it could open Google's page and wait for your yes", page)
+        self.assertNotIn("Your AI cannot start one", page)
+        self.assertNotIn("youtube-api connect", page)  # no command signs in
+
+
 class NothingSecretShows(ApiTest):
     """Everything this file prints, raises or answers through a connect, uploads that go wrong in every way, a
     sign-in that ends, and a disconnect: none of it carries the client's id or secret, a token, a code or a
@@ -839,7 +955,7 @@ class NothingSecretShows(ApiTest):
 
 
 class CommandLine(ApiTest):
-    """reelforge youtube-api [connect [FILE] | disconnect] (youtube_api.main)."""
+    """reelforge youtube-api [client FILE | disconnect] (youtube_api.main)."""
 
     def run_main(self, *argv: str) -> tuple[int, str]:
         out = io.StringIO()
@@ -847,68 +963,59 @@ class CommandLine(ApiTest):
             code = youtube_api.main(list(argv))
         return code, out.getvalue()
 
-    def test_with_no_word_it_says_where_the_connection_stands_and_that_it_is_unproven(self):
+    def test_with_no_word_it_says_where_things_stand_and_that_it_is_unproven(self):
         code, said = self.run_main()
         self.assertEqual(code, 0)
-        self.assertIn("connected  no: reelforge youtube-api connect FILE", said)
+        self.assertIn("client     none yet: reelforge youtube-api client FILE", said)
         self.assertIn(f"kept in    {self.store}  (nothing yet)", said)
         self.assertIn("never against Google itself", said)
         self.assertIn("docs/YOUTUBE-API.md", said)
         self.connect()
         youtube_api.note_channel({"channel_id": CHANNEL["id"], "channel_title": CHANNEL["title"]})
         code, said = self.run_main()
-        self.assertIn("connected  yes, since 20", said)
+        self.assertIn("client     on file", said)
+        self.assertIn("sign-in    never kept in a file: you connect in ReelForge's window", said)
         self.assertIn("channel    Night Physics (where the last upload went)", said)
         self.assertIn("posts      start as private, made for kids: no", said)
         self.assertNotIn(CLIENT_ID, said)
-        self.assertNotIn(self.on_file()["refresh_token"], said)
-        self.google.end_grant()
-        youtube_api._access.clear()
-        with self.assertRaises(ApiError):
-            youtube_api.access_token()
-        code, said = self.run_main()
-        self.assertIn("connected  not any more.", said)
-        self.assertIn("reelforge youtube-api connect\n", said)
+        self.assertNotIn(self.held(), said)
 
-    def test_connect_opens_the_page_waits_and_says_how_it_ended(self):
-        code, said = self.run_main("connect", str(self.client_file))
+    def test_client_takes_the_file_and_signs_in_nowhere(self):
+        code, said = self.run_main("client", str(self.client_file))
         self.assertEqual(code, 0)
-        self.assertIn("Google's consent page is opening in your browser", said)
-        self.assertIn("ReelForge is connected to YouTube's API.", said)
-        self.assertIn("Posts start as private", said)
-        self.assertIn("never against Google itself", said)
+        self.assertIn("ReelForge has the client", said)
+        self.assertIn("Nothing is connected yet: you connect in ReelForge's window", said)
         self.assertNotIn(CLIENT_ID, said)
-        self.assertEqual(youtube_api.status()["state"], "on")
-        self.google.consent = "no"
-        code, said = self.run_main("connect")  # again, with the client on file
-        self.assertEqual(code, 1)
-        self.assertIn("You said no on Google's page", said)
-        code, said = self.run_main("connect", str(self.root / "nowhere.json"))
+        self.assertEqual(self.on_file(), {"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET})
+        if os.name != "nt":
+            self.assertEqual(stat.S_IMODE(self.store.stat().st_mode), 0o600)
+        self.assertEqual((self.opened, self.google.asked, self.google.token_calls), ([], [], []))  # no page, no sign-in
+        self.assertEqual((youtube_api.status()["state"], youtube_api.status()["why"]), ("again", "session"))
+        self.assertTrue(self.connect(None).outcome["ok"])  # what the window does with it, with no file to pick
+        code, said = self.run_main("client", str(self.root / "nowhere.json"))
         self.assertEqual((code, said), (1, f"There is no file at {self.root / 'nowhere.json'}.\n"))
 
     def test_disconnect_says_what_happened(self):
-        self.assertEqual(self.run_main("disconnect"), (0, "YouTube's API wasn't connected.\n"))
-        self.connect()
+        self.assertEqual(self.run_main("disconnect"), (0, "YouTube's API wasn't set up.\n"))
+        self.run_main("client", str(self.client_file))
         code, said = self.run_main("disconnect")
-        self.assertEqual((code, said), (0, "Disconnected. ReelForge has forgotten the connection, and Google has "
-                                           "ended it.\n"))
-        self.assertEqual(self.google.grants, {})
-        self.connect()
-        with mock.patch.object(youtube_api, "REVOKE_URL", "http://127.0.0.1:9/revoke"):
-            code, said = self.run_main("disconnect")
-        self.assertIn("Google couldn't be told", said)
-        self.assertIn("https://myaccount.google.com/connections", said)
-        self.assertFalse(self.store.exists())
+        self.assertEqual(code, 0)
+        self.assertIn("Disconnected. ReelForge has forgotten the client", said)
+        self.assertIn("https://myaccount.google.com/connections", said)  # a command has no sign-in to end at Google
+        self.assertEqual((self.store.exists(), self.google.revoke_calls), (False, []))
+        self.assertEqual(youtube_api.status()["state"], "off")
 
-    def test_no_word_starts_a_post(self):
+    def test_no_word_starts_a_post_or_signs_in(self):
         self.connect()
-        for words in (["post"], ["upload", str(self.video)], ["post", str(self.video), "--public"],
-                      ["connect", "a", "b"]):
+        self.opened.clear()
+        self.google.token_calls.clear()
+        for words in (["post"], ["upload", str(self.video)], ["post", str(self.video), "--public"], ["connect"],
+                      ["connect", str(self.client_file)], ["client"], ["client", "a", "b"]):
             code, said = self.run_main(*words)
             self.assertEqual(code, 2, words)
-            self.assertIn("None of these posts anything.", said)
+            self.assertIn("None of these posts anything, and none of them signs in.", said)
         self.assertEqual(self.run_main("help")[0], 0)
-        self.assertEqual((self.google.starts, self.google.puts), ([], []))
+        self.assertEqual((self.google.starts, self.google.puts, self.opened, self.google.token_calls), ([], [], [], []))
 
     def test_the_reelforge_command_knows_it(self):
         import studio.__main__ as studio_main

@@ -16,9 +16,14 @@ point ReelForge at the client file Google gave you. Then:
               Unknown, never a new try.
   disconnect  The file is forgotten here first, then Google is told to end the grant.
 
+The sign-in Google gives (a refresh token) is never written down. It stays in the memory of the ReelForge that got
+it (_held) and goes when that one closes, so every ReelForge that is opened connects again before it posts. That is
+on purpose: with no sign-in in any file, nothing in this folder can upload by itself. A script, or an AI working
+here, would first have to get your yes on Google's page.
+
 What is kept: one file for each channel, data/youtube_api.json next to its stats (store_path), written whole and
-readable by you alone: the client's id and secret, the refresh token, your choices (who sees a post, the
-made-for-kids answer), the channel the last upload went to, and the session of an upload under way. None of it is
+readable by you alone: the client's id and secret, your choices (who sees a post, the made-for-kids answer), the
+channel the last upload went to, and the session of an upload under way. None of it, and nothing of the sign-in, is
 ever printed, logged, put in a message or sent anywhere but the addresses below. A sign-in Google has ended (it does
 after seven days while your consent screen is in Testing) is "connect again", never something tried over and over.
 
@@ -70,6 +75,8 @@ UNPROVEN = ("This way of posting is tested against a stand-in for Google, never 
             "private first and check the video in YouTube Studio.")
 NOT_CONNECTED = "YouTube's API isn't connected yet. docs/YOUTUBE-API.md says how to set it up."
 AGAIN = {
+    "session": ("ReelForge keeps YouTube's sign-in only while it is open, in its memory and never in a file. Connect "
+                "before you post through the API: it is one press, then Google's page."),
     "grant": ("YouTube's sign-in has run out or was taken back at Google. Connect again. While your Google Cloud "
               "consent screen is in Testing, Google ends it after 7 days."),
     "client": ("Google no longer knows the OAuth client ReelForge was connected with. Connect again with the client "
@@ -119,6 +126,10 @@ sleep = time.sleep      # (and don't wait)
 _store_lock = threading.Lock()
 _token_lock = threading.Lock()
 _access: dict[str, tuple[str, float]] = {}  # refresh token -> (the access token it last gave, when that runs out)
+# A channel's file (store_path, as text) -> the sign-in this ReelForge got for it: {"client_id", "client_secret",
+# "refresh_token", "since", "expires"}. Only ever here, in memory: see the top of this file.
+_held: dict[str, dict] = {}
+_ended: dict[str, str] = {}  # the same -> why Google ended the sign-in this ReelForge had ("grant" or "client")
 
 
 class ApiError(Exception):
@@ -151,8 +162,17 @@ def store_path() -> Path:
 def read_store() -> dict:
     """The file, or {} while there is none (or it can't be read: then nothing is connected)."""
     try:
+        return _read()
+    except OSError:
+        return {}
+
+
+def _read() -> dict:
+    """The file, or {} while there is none or what is there isn't one. OSError when it is there and can't be read,
+    which says nothing about the connection either way."""
+    try:
         data = json.loads(store_path().read_text("utf-8"))
-    except (OSError, ValueError):
+    except (FileNotFoundError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -236,26 +256,55 @@ def _now() -> str:
 
 
 def status() -> dict:
-    """Where this channel's connection stands, with nothing secret in it. state: "on", "again" (it was connected
-    and Google has ended the sign-in: why says "grant" or "client") or "off". client: a client is on file, so
-    connecting again needs no file. since and expires: when you connected, and when Google said the sign-in runs
-    out, if it said. channel: where the last upload went ({"id", "title"}), the only way Google tells with this
-    permission. privacy and made_for_kids: your choices for the next post."""
+    """Where this channel's connection stands in this ReelForge, with nothing secret in it. state: "on", "again"
+    (a client is on file and this ReelForge has no sign-in: why says "session" when it hasn't connected since it
+    opened, "grant" or "client" when Google ended the sign-in it had) or "off". client: a client is on file, so
+    connecting needs no file. since and expires: when you connected, and when Google said the sign-in runs out, if
+    it said. channel: where the last upload went ({"id", "title"}), the only way Google tells with this permission.
+    privacy and made_for_kids: your choices for the next post."""
     store = read_store()
     client = _usable(store.get("client_id")) and _usable(store.get("client_secret"))
-    on = client and _usable(store.get("refresh_token"))
-    lapsed = store.get("lapsed") if isinstance(store.get("lapsed"), dict) else None
+    on = _signed_in(store) if client else None
     channel = store.get("channel") if isinstance(store.get("channel"), dict) else None
     return {
-        "state": "on" if on else "again" if client and lapsed else "off",
+        "state": "on" if on else "again" if client else "off",
         "client": bool(client),
-        "since": store.get("connected_at") if on and isinstance(store.get("connected_at"), str) else None,
-        "expires": store.get("expires_at") if on and isinstance(store.get("expires_at"), str) else None,
-        "why": (lapsed.get("why") if lapsed.get("why") in AGAIN else "grant") if lapsed and not on else None,
+        "since": on["since"] if on else None,
+        "expires": on["expires"] if on else None,
+        "why": None if on or not client else _ended.get(str(store_path()), "session"),
         "channel": {"id": _word(channel.get("id")), "title": _line(channel.get("title"), 100)} if channel else None,
         "privacy": store.get("privacy") if store.get("privacy") in PRIVACY else "private",
         "made_for_kids": store.get("made_for_kids") is True,
     }
+
+
+def _signed_in(store: dict | None = None) -> dict | None:
+    """The sign-in this ReelForge holds for the channel (_held), while the client it was made with is still the one
+    on file: a disconnect in any ReelForge takes the client off the file, and that ends the sign-in in all of them.
+    store: the file as just read (None: it is read here)."""
+    held = _held.get(str(store_path()))
+    if held is None:
+        return None
+    if store is None:
+        try:
+            store = _read()
+        except OSError:
+            return held  # the file can't be read just now, which is not a disconnect
+    if all(store.get(key) == held[key] for key in ("client_id", "client_secret")):
+        return held
+    _held.pop(str(store_path()), None)  # for good: the same client given again doesn't bring it back
+    _access.pop(held["refresh_token"], None)
+    return None
+
+
+def _keep_client(store: dict, client: dict) -> None:
+    """Put a client on the file (inside change_store)."""
+    if store.get("client_id") != client["client_id"]:
+        store.pop("channel", None)  # another project: where its uploads go isn't known yet
+    # No sign-in is ever on file. These are what an earlier build of this file kept there.
+    for gone in ("refresh_token", "connected_at", "expires_at", "lapsed"):
+        store.pop(gone, None)
+    store.update(client)
 
 
 def set_defaults(privacy: str | None = None, made_for_kids: bool | None = None) -> None:
@@ -342,20 +391,20 @@ def _token_call(form: dict) -> tuple[int, dict]:
 
 
 def access_token(fresh: bool = False) -> str:
-    """A token Google takes for the next call, from the sign-in on file: the one it last gave while that is good,
-    else a new one (fresh: a new one whatever). A sign-in Google has ended is taken off the file, so from then on
-    this says "connect again" without asking Google each time."""
-    store = read_store()
-    refresh = store.get("refresh_token")
-    if not (_usable(refresh) and _usable(store.get("client_id")) and _usable(store.get("client_secret"))):
+    """A token Google takes for the next call, from the sign-in this ReelForge holds: the one it last gave while
+    that is good, else a new one (fresh: a new one whatever). A sign-in Google has ended is let go of, so from then
+    on this says "connect again" without asking Google each time."""
+    held = _signed_in()
+    if held is None:
         why = status()["why"]
         raise ApiError("not_connected", AGAIN[why] if why else NOT_CONNECTED)
+    refresh = held["refresh_token"]
     with _token_lock:
         hit = _access.get(refresh)
         if hit and not fresh and hit[1] - 60 > time.time():
             return hit[0]
         code, data = _token_call({"grant_type": "refresh_token", "refresh_token": refresh,
-                                  "client_id": store["client_id"], "client_secret": store["client_secret"]})
+                                  "client_id": held["client_id"], "client_secret": held["client_secret"]})
         token = data.get("access_token")
         if code == 200 and _usable(token):
             _access.clear()
@@ -364,7 +413,7 @@ def access_token(fresh: bool = False) -> str:
         error = data.get("error")
         if error in ("invalid_grant", "invalid_client", "unauthorized_client", "deleted_client"):
             why = "grant" if error == "invalid_grant" else "client"
-            _lapse(refresh, why)
+            _lapse(held, why)
             raise ApiError("not_connected", AGAIN[why])
         raise ApiError("refused", f"Google's sign-in service answered with an error ({_word(error) or code}). Try "
                                   "again in a while.")
@@ -374,19 +423,13 @@ def _seconds(value, default: int) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else default
 
 
-def _lapse(refresh: str, why: str) -> None:
-    """Google has ended this sign-in: take it off the file and note why, so the state is "connect again"."""
-    def change(store: dict) -> None:
-        if store.get("refresh_token") == refresh:  # (not one you connected again with in the meantime)
-            store.pop("refresh_token", None)
-            store.pop("expires_at", None)
-            store["lapsed"] = {"at": _now(), "why": why}
-
-    _access.pop(refresh, None)
-    try:
-        change_store(change)
-    except OSError:
-        pass  # it is asked again next time, and refused again
+def _lapse(held: dict, why: str) -> None:
+    """Google has ended this sign-in: let go of it and note why, so the state is "connect again"."""
+    path = str(store_path())
+    _access.pop(held["refresh_token"], None)
+    if _held.get(path) is held:  # (not one you connected again with in the meantime)
+        del _held[path]
+        _ended[path] = why
 
 
 # ---- connecting
@@ -549,23 +592,19 @@ class Consent:
             if self.outcome is not None:
                 return self.outcome  # called off while Google was answering: nothing is kept
 
-            def keep(store: dict) -> None:
-                if store.get("client_id") != self.client["client_id"]:
-                    store.pop("channel", None)  # another project: where its uploads go isn't known yet
-                for gone in ("lapsed", "expires_at"):
-                    store.pop(gone, None)
-                store.update(self.client, refresh_token=refresh, connected_at=_now())
-                if _seconds(lasts, 0):
-                    store["expires_at"] = (datetime.now(timezone.utc) + timedelta(seconds=lasts)).isoformat(
-                        timespec="seconds")
-
             try:
-                change_store(keep)
+                change_store(lambda store: _keep_client(store, self.client))
             except OSError:
                 self.outcome = {"ok": False, "code": "store", "message": (
                     f"ReelForge couldn't write {store_path().name} in its data folder, so nothing was connected.")}
                 return self.outcome
+            ends = datetime.now(timezone.utc) + timedelta(seconds=_seconds(lasts, 0))
+            path = str(store_path())
             with _token_lock:
+                # The sign-in: held here and nowhere else, until this ReelForge closes.
+                _held[path] = {**self.client, "refresh_token": refresh, "since": _now(),
+                               "expires": ends.isoformat(timespec="seconds") if _seconds(lasts, 0) else None}
+                _ended.pop(path, None)
                 _access.clear()
                 _access[refresh] = (token, time.time() + _seconds(data.get("expires_in"), 3600))
             self.outcome = {"ok": True, "code": "connected", "message": "ReelForge is connected to YouTube's API."}
@@ -599,21 +638,23 @@ def connect(client_file: Path | str | None = None, on_done: Callable[[dict], obj
 
 
 def disconnect() -> dict:
-    """Forget this channel's connection, then tell Google to end the grant. {"was": something was on file,
-    "revoked": True, False (Google couldn't be told) or None (there was no sign-in to end)}. The file goes first:
-    whatever Google answers, nothing here can post any more."""
-    store = read_store()
-    refresh = store.get("refresh_token")
-    if not store and not store_path().exists():
+    """Forget this channel's connection, then tell Google to end the grant. {"was": there was something to
+    forget, "revoked": True, False (Google couldn't be told) or None (this ReelForge held no sign-in to end)}. The
+    file goes first: with the client off it, no ReelForge can post any more, whatever Google answers."""
+    path = str(store_path())
+    held = _held.get(path)
+    if held is None and not read_store() and not store_path().exists():
         return {"was": False, "revoked": None}
     change_store(lambda s: s.clear())
     with _token_lock:
+        _held.pop(path, None)
+        _ended.pop(path, None)
         _access.clear()
-    if not _usable(refresh):
-        return {"was": bool(store), "revoked": None}
+    if held is None:
+        return {"was": True, "revoked": None}
     try:
         with _client() as http:
-            r = http.post(REVOKE_URL, data={"token": refresh})
+            r = http.post(REVOKE_URL, data={"token": held["refresh_token"]})
         # (a token Google doesn't know any more is as ended as one it just ended)
         revoked = r.status_code == 200 or (r.status_code == 400 and _json(r).get("error") == "invalid_token")
     except httpx.HTTPError:
@@ -835,71 +876,56 @@ def _made(data: dict) -> dict:
 # ---- the command
 
 USAGE = """reelforge youtube-api               where the connection to YouTube's API stands (it is optional)
-reelforge youtube-api connect FILE  connect with the client file from your own Google Cloud project: opens Google's
-                                    consent page in your browser and waits for your answer there
-                                    (without FILE: connect again with the client already on file)
-reelforge youtube-api disconnect    forget the connection and tell Google to end it
+reelforge youtube-api client FILE   take the client file from your own Google Cloud project, so that ReelForge's
+                                    window can connect with it
+reelforge youtube-api disconnect    forget the client: no ReelForge can connect or post until it is given again
 
 docs/YOUTUBE-API.md says how to set it up, and what is and isn't known about it.
 
-None of these posts anything. A post starts when you press it in ReelForge's window."""
+None of these posts anything, and none of them signs in. You connect in ReelForge's window, on Google's page, and a
+post starts when you press it there."""
+NO_GRANT = ("If you ever allowed ReelForge on Google's page, Google still lists it: take it off at "
+            "https://myaccount.google.com/connections")
 
 
 def main(argv: list[str]) -> int:
-    """reelforge youtube-api [connect [FILE] | disconnect] (USAGE)."""
+    """reelforge youtube-api [client FILE | disconnect] (USAGE). A command never holds a sign-in (it would end with
+    the command), so nothing here can connect or post."""
     if not argv:
         said = status()
         print("YouTube's API (optional: a second way to post to YouTube, with your own Google Cloud project)")
-        if said["state"] == "on":
-            print("  connected  yes, since " + (said["since"] or "an unknown time")[:10]
-                  + (f" (Google says the sign-in runs out on {said['expires'][:10]})" if said["expires"] else ""))
+        print("  client     " + ("on file" if said["client"] else
+                                 "none yet: reelforge youtube-api client FILE (the client file from Google Cloud)"))
+        if said["client"]:
+            print("  sign-in    never kept in a file: you connect in ReelForge's window, each time you open it")
             channel = said["channel"]
             print("  channel    " + (f"{channel['title'] or channel['id']} (where the last upload went)" if channel
                                      else "Google says which one with the first upload"))
             print(f"  posts      start as {said['privacy']}, made for kids: {'yes' if said['made_for_kids'] else 'no'}")
-        elif said["state"] == "again":
-            print(f"  connected  not any more. {AGAIN[said['why']]}")
-            print("             reelforge youtube-api connect")
-        else:
-            print("  connected  no: reelforge youtube-api connect FILE (the client file from Google Cloud)")
         print(f"  kept in    {store_path()}" + ("" if store_path().exists() else "  (nothing yet)"))
         print(f"\n{UNPROVEN}\ndocs/YOUTUBE-API.md says how to set it up, and what is and isn't known about it.")
         return 0
-    if argv[0] == "connect" and len(argv) <= 2:
+    if argv[0] == "client" and len(argv) == 2:
         try:
-            consent = connect(argv[1] if len(argv) == 2 else None)
+            client = read_client(Path(argv[1]))
+            change_store(lambda store: _keep_client(store, client))
         except ApiError as e:
             print(e.message)
             return 1
-        print("Google's consent page is opening in your browser. Pick the Google account your YouTube channel belongs "
-              "to and allow ReelForge to upload videos. Google will say it hasn't verified the app: the app is your "
-              "own Google Cloud project.")
-        print("Waiting for your answer there, for up to ten minutes (Ctrl-C stops)...", flush=True)
-        try:
-            while not consent.done.wait(0.2):
-                pass
-        except KeyboardInterrupt:
-            consent.cancel()
-            print("\nStopped. Nothing was connected.")
+        except OSError as e:
+            print(f"ReelForge couldn't write {store_path()} ({e}). Nothing was kept.")
             return 1
-        print(consent.outcome["message"])
-        if consent.outcome["ok"]:
-            print(f"Posts start as private until you choose otherwise in ReelForge's window.\n{UNPROVEN}")
-        return 0 if consent.outcome["ok"] else 1
+        print("ReelForge has the client, and you can delete the file you downloaded. Nothing is connected yet: you "
+              "connect in ReelForge's window, on Google's page, each time you open it.")
+        return 0
     if argv == ["disconnect"]:
         try:
             done = disconnect()
         except OSError as e:
             print(f"ReelForge couldn't change {store_path()} ({e}). Nothing was disconnected.")
             return 1
-        if not done["was"]:
-            print("YouTube's API wasn't connected.")
-        elif done["revoked"] is False:
-            print("ReelForge has forgotten the connection, but Google couldn't be told (is this computer online?). "
-                  "Take ReelForge's access away yourself at https://myaccount.google.com/connections")
-        else:
-            print("Disconnected. ReelForge has forgotten the connection" +
-                  (", and Google has ended it." if done["revoked"] else "."))
+        print(f"Disconnected. ReelForge has forgotten the client, so no ReelForge can post through the API. {NO_GRANT}"
+              if done["was"] else "YouTube's API wasn't set up.")
         return 0
     print(USAGE)
     return 0 if argv[0] in ("-h", "--help", "help") else 2

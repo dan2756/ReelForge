@@ -12,7 +12,7 @@ trial: leave it private, and check it in YouTube Studio. The last section of thi
 tested and how.
 
 ReelForge's window does not have buttons for it yet. What is behind them is built and tested, and the command
-below already connects and disconnects. Where this page says "in the window", that part is still to come.
+below already takes your client file. Where this page says "in the window", that part is still to come.
 
 ## What it is, and who it is for
 
@@ -25,8 +25,12 @@ below already connects and disconnects. Where this page says "in the window", th
   your videos, change a video or delete one.
 - It is for one person posting to their own channel. Setting it up takes about fifteen minutes in Google Cloud,
   once.
-- It is not a bot. A post starts only when you press it in ReelForge's window. Your AI cannot start one: there is
-  no command, script or pipeline step that does.
+- It is not a bot. A post starts only when you press it in ReelForge's window. No `reelforge` command posts, and
+  none signs in.
+- Nothing in this folder can post by itself. The sign-in Google gives ReelForge is kept in the memory of the open
+  window that connected, never in a file. A script, or an AI working in this folder, has nothing to upload with:
+  it would first have to open Google's page and get your yes there. If Google's page ever opens when you did not
+  press Connect, close it.
 
 YouTube is the only platform where ReelForge does this. For TikTok, Instagram and X there is no official way for
 one person to post that is practical ([why](EXTENSION.md#why-not-the-platforms-own-posting-apis)).
@@ -57,13 +61,16 @@ Keep the file out of any folder you share or commit. ReelForge's own `.gitignore
 
 ## Connect ReelForge
 
-Run this, with the file you downloaded (ReelForge's window will offer the same):
+First give ReelForge the file you downloaded, once (ReelForge's window will offer the same):
 
 ```
-reelforge youtube-api connect path/to/client_secret_....json
+reelforge youtube-api client path/to/client_secret_....json
 ```
 
-Google's consent page opens in your browser.
+ReelForge keeps the two values it needs from it, the client's id and its secret. This connects nothing yet, and
+you can delete the downloaded file.
+
+Then connect in ReelForge's window. Google's consent page opens in your browser.
 
 1. Pick the Google account your channel belongs to. If the account has more than one channel, Google asks which.
 2. Google says it hasn't verified the app. The app is your own Google Cloud project. Continue.
@@ -74,6 +81,9 @@ ReelForge on your own computer (`127.0.0.1`), for that one answer, and then it s
 
 Things to know:
 
+- **You connect each time you open ReelForge.** The sign-in lives in the open window and goes when it closes.
+  It is one press and Google's page, with no file to pick. A window that has just opened says it is not connected.
+  This is what keeps a script or an AI in this folder from posting: there is no sign-in on disk to post with.
 - **You have ten minutes** to answer on Google's page. After that, connect again.
 - **The browser has to be on this computer.** Google sends the answer to an address only this computer has.
 - **Each channel connects by itself.** With more than one profile, connect each one. They can use the same
@@ -81,7 +91,6 @@ Things to know:
 - **ReelForge can't tell you which channel it is connected to** until the first upload. The permission it asks
   for doesn't cover reading your account. The answer to an upload names the channel, and ReelForge shows it from
   then on. This is one more reason to post privately the first time.
-- **You can delete the downloaded file** once you are connected. Connecting again does not need it.
 
 ## How a post goes
 
@@ -124,8 +133,9 @@ otherwise. YouTube has no switch for Shorts: by its own rule a vertical video of
   Publish tab whether it is there. ReelForge never tries such a post again by itself, because the video may be up.
 - **You cancel.** No more of the file is sent, and YouTube makes no video from a file it only has part of.
 - **You close ReelForge.** The next time it opens, the post is settled. If the last piece had not gone out,
-  nothing was posted and the row says failed. If it had, ReelForge asks YouTube once: finished means posted,
-  anything else means not sure.
+  nothing was posted and the row says failed. If it had, the post is marked not sure it posted: the sign-in went
+  with the window that closed, so ReelForge can't ask YouTube. Look in YouTube Studio. (A second window of the
+  same channel that is still open and connected asks YouTube once: finished means posted.)
 
 ## The limits, and how sure each one is
 
@@ -140,7 +150,7 @@ them has been confirmed by an upload.
 | Cost | No charge was found for the API within its daily allowance. | not read on a page of Google's |
 | Private only | For years, a video uploaded through a project Google had not audited was locked to private. Google's description of the API now says "Videos uploaded from unverified API projects are not restricted to private viewing mode." Google's revision history has an entry for it dated 2 November 2026. Older pages of Google's own still describe the lock. | the sentence: read. The entry: excerpt |
 | A choice left out | If a request does not say who can see the video, YouTube makes it public. ReelForge always says. | read |
-| The sign-in ends after 7 days | While your consent screen is in Testing, Google ends the sign-in after 7 days and ReelForge says "connect again". | excerpt |
+| The sign-in ends after 7 days | While your consent screen is in Testing, Google ends a sign-in after 7 days. You connect again each time ReelForge opens, so this only shows in a window left open for a week: it says "connect again". | excerpt |
 | The warning on Google's page | Google shows "Google hasn't verified this app" for a project it has not reviewed. An app that only you use does not need the review. | excerpt |
 | Size | A file can be up to 256 GB. | read |
 | The permission | Uploading needs only `youtube.upload`. Google's description gives that permission four calls: uploading a video, and setting a thumbnail, a channel banner and a watermark, which ReelForge never does. Reading your account, listing, changing or deleting videos need more, and ReelForge does not ask for it. | read |
@@ -153,14 +163,15 @@ private videos to publish by hand in Studio.
 
 ### About the 7 days
 
-You have two ways to live with it:
+ReelForge never keeps a sign-in longer than its window is open, so you connect again long before the 7 days are
+up. They only matter if you leave ReelForge open for a week. Then you have two ways to live with it:
 
-- **Connect again each time.** It is one press and Google's page, with no file to pick.
+- **Connect again.** It is one press and Google's page, with no file to pick.
 - **Move the app out of Testing.** On the Audience page in Google Cloud, publish the app (its status becomes "In
   production"). Google's help says the sign-in then stops ending after 7 days, that the warning page stays, and
   that an app only you use does not need Google's review (excerpt). Nobody has tried this for ReelForge.
 
-When Google's answer says how long the sign-in lasts, ReelForge shows the day it runs out.
+When Google's answer says how long the sign-in lasts, ReelForge shows how many days are left.
 
 ## When something goes wrong
 
@@ -168,6 +179,7 @@ A failed post says why in a sentence, and nothing was posted. These are the ones
 
 | It says | What to do |
 |---|---|
+| ReelForge keeps YouTube's sign-in only while it is open | Connect in this window, then post or press Retry |
 | YouTube's sign-in has run out or was taken back at Google | Connect again |
 | Google no longer knows the OAuth client | The client was deleted in Google Cloud. Make a new Desktop client and connect with its file |
 | Your Google Cloud project has used up today's YouTube API allowance | Wait until midnight Pacific time, or post this one by hand |
@@ -192,20 +204,26 @@ One file for each channel:
 - your first channel: `dashboard/data/youtube_api.json`
 - a channel you added: `profiles/<its folder>/dashboard/data/youtube_api.json`
 
-It holds the client's id and secret from the file you picked, the sign-in Google gave ReelForge (a refresh
-token), your choices (who can see a post, the made-for-kids answer), the channel the last upload went to, and the
-address of an upload while one is under way.
+It holds the client's id and secret from the file you gave, your choices (who can see a post, the made-for-kids
+answer), the channel the last upload went to, and the address of an upload while one is under way.
 
-- Only you can read it (on macOS and Linux its mode is 0600), and it is written whole, never half.
+**The sign-in is not in it, or in any file.** What Google gives ReelForge when you say yes (a refresh token) stays
+in the memory of the window that connected and is gone when that window closes. The client's id and secret alone
+can't post: they only let ReelForge ask you again on Google's page.
+
+- Only you can read the file (on macOS and Linux its mode is 0600), and it is written whole, never half.
 - It is never part of the kit: git leaves the folder out, and an update never touches it.
 - It moves with the ReelForge folder when you move it.
-- A factory reset moves it into the backup with your stats. The sign-in in it still works, so disconnect first
-  if you want it ended.
-- ReelForge never prints these values, writes them to a log, shows them in its window or puts them in a message.
-  They go to Google's sign-in and upload addresses and nowhere else. The addresses written in the client file
-  are not used.
+- A factory reset moves it into the backup with your stats.
+- ReelForge never prints these values or the sign-in, writes them to a log, shows them in its window or puts
+  them in a message. They go to Google's sign-in and upload addresses and nowhere else. The addresses written in
+  the client file are not used.
 
-What this does not protect against: a program already running as you on this computer. It can read the file.
+What this does and doesn't protect against: a program running as you on this computer, your AI included, finds
+no sign-in to post with in this folder, and no command gives it one. It can still read the client's id and
+secret, and it could open Google's page and wait for your yes, so only say yes to a page you opened yourself. Your
+AI's guide tells it never to connect or post. A program that goes after the open window itself, by reading its
+memory, is beyond what ReelForge can stop.
 
 ## Disconnect
 
@@ -215,21 +233,23 @@ In the window, or:
 reelforge youtube-api disconnect
 ```
 
-ReelForge deletes the file first, then tells Google to end the sign-in. If Google could not be told (you were
-offline), it says so. Then take the access away yourself at
+ReelForge deletes the file first. With the client gone, no ReelForge window can post through the API any more,
+a connected one included. A window that is connected then tells Google to end the sign-in. If Google could not be
+told (you were offline), it says so. The command, and a window that is not connected, have no sign-in to end at
+Google. In both cases take the access away yourself at
 [myaccount.google.com/connections](https://myaccount.google.com/connections). You can also delete the client, or
 the whole project, in Google Cloud. That ends every sign-in made with it.
 
 ## Commands
 
 ```
-reelforge youtube-api                 where the connection stands: connected or not, the channel, your choices
-reelforge youtube-api connect FILE    connect with the client file from your Google Cloud project
-reelforge youtube-api connect         connect again, with the client already on file
-reelforge youtube-api disconnect      forget the connection and tell Google to end it
+reelforge youtube-api                 where it stands: the client, the channel, your choices
+reelforge youtube-api client FILE     take the client file from your Google Cloud project
+reelforge youtube-api disconnect      forget the client, so nothing can connect or post until you give it again
 ```
 
-None of these posts anything. `reelforge -p "Channel name" youtube-api ...` works on one profile.
+None of these posts anything, and none of them signs in. `reelforge -p "Channel name" youtube-api ...` works on
+one profile.
 
 ## For developers
 
@@ -242,18 +262,23 @@ What the window gets and calls:
 
 | | |
 |---|---|
-| view `youtube_api` | `state` (`off`, `connecting`, `on`, `again`), `line`, `lines`, `client`, `channel`, `privacy`, `made_for_kids`, `privacies`, `note`, `docs` |
+| view `youtube_api` | `state` (`off`: no client on file, `connecting`, `on`, `again`: a client is on file and this window has no sign-in), `line`, `lines`, `client`, `channel`, `privacy`, `made_for_kids`, `privacies`, `note`, `docs` |
 | `youtube_api_info(caption, tags)` | the view, and for the picked video `send`, `fields`, `left`, `can_post`, `why`, `force`, `blocked`, `review` |
 | `youtube_api_connect(path)` | reads the client file and opens Google's page. `""` connects again with the client on file |
 | `youtube_api_disconnect()` | forgets the connection and tells Google |
 | `youtube_api_defaults(privacy, made_for_kids)` | your choices for the posts to come |
 | `post_with_api(caption, tags, privacy, force)` | your press: makes the job and starts the upload |
-| view `posting` | while the API is connected and a post could start, the YouTube row has `api: {"force": ...}` (`force`: it would be a post again). Unless it would be one, `post_api` is among its `actions` |
+| view `posting` | while the API is connected and a post could start, the YouTube row has `api: {"force": ...}` (`force`: it would be a post again). Unless it would be one, `post_api` is among its `actions`. While the state is `again`, `connect_api` is there instead |
 | `post_action(job, "post_api")` | the row's own button: posts the picked video with the form's text and your choices, never "again". Posting again takes `post_with_api(..., force)` |
+| `post_action(job, "connect_api")` | the row's button while this window is not connected: the same as `youtube_api_connect("")` |
 
 A job goes `queued`, `uploading` (with `progress`), `posting` (the last piece is on its way), then `posted`, or
 ends as `failed` or `unknown`. Retry on a failed row goes through the API again. A posted job whose `step` is
 `confirm` has a sentence in `detail` about how YouTube stored the video: something for the person to look at.
+
+The sign-in is held in the window's process (`youtube_api._held`) and never written down, so `status()` in any
+other process says `again`, and `upload()` there has nothing to send with. A command never connects: its sign-in
+would end with it.
 
 The addresses ReelForge talks to are constants in `youtube_api.py`. No setting or environment variable changes
 them. The tests patch them to a stand-in on the same computer.
@@ -268,13 +293,16 @@ Tested here, by automated tests that run with ReelForge's own (`dashboard/tests/
   nobody answering, a file that is not a Desktop client, and that the listener answers once and closes
 - the sign-in: renewed when it runs out, "connect again" when Google has ended it, and that Google is not asked
   about an ended one over and over
+- that the sign-in is in no file: a ReelForge opened later, and another program started with the same file, are
+  not connected and send nothing, and a sign-in put into the file by hand is never used
 - the upload: in pieces, a 503 in the middle and carrying on, a piece that arrived although its answer was an
   error, the last answer lost and found, the last answer lost for good (not sure it posted, and one upload only),
   a sign-in that ends in the middle, and every refusal ReelForge has a sentence for
 - the read-back: a video YouTube stored as private when public was asked for
 - that who can see the video and the made-for-kids answer are in every request
 - the ledger: what may not be posted twice, in both directions between the extension and the API; cancelling;
-  two videos taking turns; ReelForge closed before and during the last piece
+  two videos taking turns; ReelForge closed before and during the last piece, with and without a second window
+  that is still connected
 - that an update, a move and a factory reset treat the file as described above
 - that the client's id and secret, the tokens, Google's code and the upload's address appear nowhere in what is
   printed, logged, sent to the window, answered to it, put in an error, or kept in the stats database

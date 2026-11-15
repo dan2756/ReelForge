@@ -1,6 +1,6 @@
 """Posting to YouTube through its own API as the window shows and starts it (dashboard.youtube_api_tab): the
-youtube_api view and the calls behind its buttons, a post from your press to "posted" with what YouTube's answer
-says, every way one ends (failed, unknown, called off), the same rules as the extension's posts about what may not
+youtube_api view and the calls behind its buttons, a window that has just opened and has to connect before it can
+post, a post from your press to "posted" with what YouTube's answer says, every way one ends (failed, unknown, called off), the same rules as the extension's posts about what may not
 be posted twice, an upload a ReelForge closed in the middle of, and that nothing secret is ever sent to the window.
 On a scratch channel; "Google" is the stand-in in dashboard/tests/google.py and "the browser" follows its consent
 page (test_youtube_api.google_for)."""
@@ -62,6 +62,11 @@ class ApiPosting(PostingTest):
             self.google.hold.set()
         for worker in w.loop.live(("youtube-api", "youtube-api-settle", "youtube-api-account")):
             worker.thread.join(15)
+
+    def reopen(self) -> None:
+        """As a ReelForge that has just opened: the sign-in the last one had in mind went with it."""
+        for kept in (youtube_api._access, youtube_api._held, youtube_api._ended):
+            kept.clear()
 
     def api_post(self, w: Window, privacy: str = "", force: bool = False) -> dict | None:
         return w.call("post_with_api", CAPTION, TAGS, privacy, force)
@@ -142,6 +147,35 @@ class View(ApiPosting):
         w.call("form_changed", "Another caption", "#one")
         self.assertEqual(w.call("youtube_api_info")["send"]["title"], "Another caption #shorts")
         self.assertEqual(self.google.starts, [])  # looking sends nothing
+
+    def test_a_window_that_has_just_opened_is_not_connected_and_its_row_offers_to_connect(self):
+        self.connect_api()  # in a ReelForge that has closed since
+        self.reopen()
+        w = self.window()
+        view = w.view("youtube_api")
+        self.assertEqual((view["state"], view["client"]), ("again", True))
+        self.assertEqual(plain(view["line"]), "○ YouTube API: not connected in this window")
+        self.assertEqual(plain(view["lines"][0]), AGAIN["session"])
+        self.assertIn("never in a file", AGAIN["session"])
+        row = self.rows(w)["youtube"]
+        self.assertEqual((row["actions"], "api" in row), (["connect_api"], False))
+        info = w.call("youtube_api_info", CAPTION, TAGS)
+        self.assertEqual((info["can_post"], info["why"]), (False, AGAIN["session"]))
+        # Nothing posts from here, whichever way it is asked: there is no sign-in to post with.
+        self.assertIsNone(self.api_post(w, "public"))
+        self.assertEqual(w.toasts()[-1], AGAIN["session"])
+        w.call("post_action", "youtube", "post_api")
+        self.assertEqual((posting.recent(), self.google.starts, self.google.token_calls[1:]), ([], [], []))
+        # The row's button opens Google's page, and your yes there connects this window.
+        opened = len(self.opened)
+        w.call("post_action", "youtube", "connect_api")
+        self.assertEqual(len(self.opened), opened + 1)
+        self.assertTrue(w.until(lambda: w.view("youtube_api")["state"] == "on"))
+        self.assertEqual(self.rows(w)["youtube"]["actions"], ["post_api"])
+        self.assertEqual(self.posted(w)["state"], "posted")
+        self.assertEqual(json.loads(self.api_store.read_text("utf-8")),
+                         {"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
+                          "channel": {"id": CHANNEL["id"], "title": CHANNEL["title"]}})  # still no sign-in on file
 
     def test_the_demo_has_none_of_it(self):
         self.connect_api()
@@ -266,13 +300,25 @@ class Buttons(ApiPosting):
         self.assertIsNone(self.api_post(w, "everyone", True))
         self.assertEqual(w.toasts()[-1], "Choose who can see the video: private, unlisted or public.")
 
-    def test_another_windows_connection_shows_here_at_the_next_look(self):
+    def test_another_windows_connection_is_not_this_windows(self):
         w = self.window(api=False)
-        self.connect_api()  # as another window of this channel would
+        self.connect_api()  # as another window of this channel would...
+        self.reopen()       # ...with its sign-in in its own mind
         w.svc.demo = False
-        w.svc.mind_the_jobs()
-        self.assertEqual(w.view("youtube_api")["state"], "on")
-        self.assertEqual(self.rows(w)["youtube"]["actions"], ["post_api"])
+        w.svc.mind_the_jobs()  # the next look: the client is on file now, so this window can connect too
+        self.assertEqual(w.view("youtube_api")["state"], "again")
+        self.assertEqual(self.rows(w)["youtube"]["actions"], ["connect_api"])
+
+    def test_disconnect_in_a_window_that_is_not_connected_forgets_the_client(self):
+        self.connect_api()
+        self.reopen()
+        w = self.window()
+        w.call("youtube_api_disconnect")
+        self.assertTrue(w.until(lambda: w.view("youtube_api")["state"] == "off"))
+        self.assertIn("Disconnected. ReelForge has forgotten the client.", w.toasts()[-1])
+        self.assertIn("https://myaccount.google.com/connections", w.toasts()[-1])  # it had no sign-in to end there
+        self.assertEqual((self.google.revoke_calls, self.api_store.exists()), ([], False))
+        self.assertEqual(self.rows(w)["youtube"]["actions"], [])
 
 
 class Posting(ApiPosting):
@@ -468,7 +514,7 @@ class Posting(ApiPosting):
         view = w.view("youtube_api")
         self.assertEqual((view["state"], plain(view["line"])), ("again", "● YouTube API: connect again"))
         self.assertEqual(plain(view["lines"][0]), AGAIN["grant"])
-        self.assertEqual(self.rows(w)["youtube"]["actions"], ["retry"])  # nothing new can start until you connect
+        self.assertEqual(self.rows(w)["youtube"]["actions"], ["retry", "connect_api"])  # nothing new until then
         w.call("post_action", again["id"], "retry")
         self.assertEqual(w.toasts()[-1], AGAIN["grant"])
         self.assertEqual(len(posting.recent()), 2)
@@ -707,18 +753,36 @@ class AfterAQuit(ApiPosting):
 
     def test_a_window_that_opens_does_it(self):
         job = self.quit_before_the_last_piece()
+        self.reopen()
         w = self.window()
         w.svc.mind_the_jobs()  # what a window does when it starts, and every half minute
         self.assertTrue(w.until(lambda: self.rows(w)["youtube"]["state"] == "failed"))
         self.assertIn("ReelForge was closed during the upload", plain(self.rows(w)["youtube"]["line"]))
-        self.assertEqual(self.rows(w)["youtube"]["actions"], ["retry", "post_api"])
+        self.assertEqual(self.rows(w)["youtube"]["actions"], ["retry", "connect_api"])
+        w.call("post_action", job["id"], "retry")  # not before this window is connected
+        self.assertEqual((w.toasts()[-1], len(posting.recent())), (AGAIN["session"], 1))
+        w.call("post_action", job["id"], "connect_api")
+        self.assertTrue(w.until(lambda: self.rows(w)["youtube"]["actions"] == ["retry", "post_api"]))
         w.call("post_action", job["id"], "retry")
         (again,) = [j for j in posting.recent() if j["id"] != job["id"]]
         self.assertEqual(self.over(w, again["id"])["state"], "posted")
         self.assertEqual(len(self.google.videos), 1)
 
-    def test_on_the_last_piece_the_saved_session_is_asked_and_finished_means_posted(self):
+    def test_on_the_last_piece_a_reelforge_opened_since_has_no_sign_in_to_ask_with(self):
         job = self.quit_on_the_last_piece()
+        self.reopen()
+        puts = len(self.google.puts)
+        self.assertEqual(youtube_api_tab.settle_orphans(), 1)
+        done = posting.get(job["id"])
+        self.assertEqual((done["state"], len(self.google.puts)), ("unknown", puts))  # nothing was asked, or sent
+        self.assertEqual(done["detail"], "ReelForge was closed while the last piece was going up, and the sign-in to "
+                                         "YouTube's API went with it, so ReelForge couldn't ask YouTube whether it "
+                                         "arrived. Check YouTube Studio before trying again.")
+        self.assertIsNone(youtube_api.session(job["id"]))
+        self.assertEqual((len(self.google.starts), youtube_api_tab.settle_orphans()), (1, 0))
+
+    def test_on_the_last_piece_a_connected_reelforge_asks_the_saved_session_and_finished_means_posted(self):
+        job = self.quit_on_the_last_piece()  # (another window of this channel is still open and connected)
         self.assertEqual(job["state"], "posting")
         self.assertEqual(youtube_api_tab.settle_orphans(), 1)
         done = posting.get(job["id"])

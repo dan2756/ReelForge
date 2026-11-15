@@ -19,6 +19,9 @@ its mind_the_jobs runs first. One view, youtube_api (the connection: off, connec
 behind the buttons: youtube_api_info, youtube_api_connect, youtube_api_disconnect, youtube_api_defaults and
 post_with_api. PostingTab asks this half about its rows (api_rows) and their buttons (api_action). An upload starts
 only from post_with_api and from a row's post_api and Retry buttons, and only your press in the window calls those.
+
+The sign-in is held by the window that connected and is never in a file (youtube_api._held), so a window that has
+just opened says "again" until you connect in it, and nothing outside a connected window can upload.
 """
 
 from __future__ import annotations
@@ -216,7 +219,9 @@ def settle_orphans() -> int:
     """After a ReelForge closed in the middle of an upload: end the jobs nobody is uploading any more. Returns how
     many. A job still uploading never sent its last piece (the ledger hears of that piece before it goes), so
     nothing was posted and it failed. One whose last piece was on its way asks the saved session, once: finished
-    is posted, anything else is unknown. While any ReelForge holds the upload lock, its jobs are left alone."""
+    is posted, anything else is unknown. That takes a sign-in, which went with the ReelForge that closed: only a
+    ReelForge that is connected can ask, and in any other the job is unknown at once. While any ReelForge holds the
+    upload lock, its jobs are left alone."""
     lock = youtube_api.upload_lock()
     if not lock.acquire():
         return 0
@@ -230,16 +235,18 @@ def settle_orphans() -> int:
                 _end(job, "failed", error_code="interrupted", error_message=(
                     "ReelForge was closed during the upload. Nothing was posted: start it again."))
             else:
-                saved, made = youtube_api.session(job["id"]), None
+                saved, made, why = youtube_api.session(job["id"]), None, "YouTube can't say whether it arrived."
                 try:
                     made = youtube_api.ask(saved["uri"], saved["size"]) if saved else None
-                except ApiError:
-                    pass  # it can't be learned
+                except ApiError as e:  # it can't be learned
+                    if e.code == "not_connected":
+                        why = ("the sign-in to YouTube's API went with it, so ReelForge couldn't ask YouTube whether "
+                               "it arrived.")
                 if made:
                     finish(job, made)
                 elif job["state"] == "posting":
                     _end(job, "unknown", detail=("ReelForge was closed while the last piece was going up, and "
-                                                 f"YouTube can't say whether it arrived. {STUDIO}"))
+                                                 f"{why} {STUDIO}"))
             youtube_api.drop_session(job["id"])
             settled += 1
         return settled
@@ -319,6 +326,8 @@ class YouTubeApiTab:
                     pass
             return Text("● YouTube API connected", f"bold {GOOD}").append("  " + " · ".join(b for b in bits if b),
                                                                          MUTED), lines
+        if said["state"] == "again" and said["why"] == "session":  # every window starts here: nothing is wrong
+            return Text("○ YouTube API: not connected in this window", MUTED), [Text(AGAIN["session"], MUTED)]
         if said["state"] == "again":
             return Text("● YouTube API: connect again", f"bold {AMBER}"), [Text(AGAIN[said["why"]], MUTED)]
         return Text("○ YouTube API not connected", MUTED), [
@@ -329,10 +338,12 @@ class YouTubeApiTab:
         """The posting view's rows, as this way of posting changes them (PostingTab.update_posting calls it). While
         the API is connected and a post could start, the YouTube row has "api": {"force": whether it would be a
         post again}, and post_api among its actions unless it would be one: posting again takes the question
-        (youtube_api_info) and your yes (post_with_api), never one press on a row. A posted row says what the
-        read-back found, or that the video is private, until a stats read has its numbers (only a video everyone
-        can see has any). A row whose last piece is on its way has no buttons: only YouTube's word ends it."""
-        connected = not self.demo and youtube_api.status()["state"] == "on"
+        (youtube_api_info) and your yes (post_with_api), never one press on a row. While a client is on file and
+        this window isn't connected, the row has connect_api there instead. A posted row says what the read-back
+        found, or that the video is private, until a stats read has its numbers (only a video everyone can see has
+        any). A row whose last piece is on its way has no buttons: only YouTube's word ends it."""
+        state = "off" if self.demo else youtube_api.status()["state"]
+        connected = state == "on"
         for row in rows:
             job, post = jobs.get(row["key"]), posts.get(row["key"])
             if job is not None and job["via"] == "api" and row["job"] == job["id"]:
@@ -343,22 +354,29 @@ class YouTubeApiTab:
                     if said:
                         row["line"].append(["  " + said, AMBER if act_on else MUTED])
             again = row["state"] in ("posted", "spotted")
-            if row["key"] == "youtube" and connected and (again or row["state"] in ("none", *posting.FREE)):
+            if row["key"] != "youtube" or not (again or row["state"] in ("none", *posting.FREE)):
+                continue
+            if connected:
                 row["api"] = {"force": again}
                 if not again:
                     row["actions"].append("post_api")
+            elif state == "again":
+                row["actions"].append("connect_api")
 
     def api_action(self, row: dict | None, platform: str, action: str) -> bool:
         """A row's button that goes through the API, not the extension (PostingTab.post_action asks this first).
-        True when it was one: Retry on a job that went through the API, or post_api, which posts the picked video
-        with the form's text as last typed and your choices, and never "again"."""
+        True when it was one: Retry on a job that went through the API, post_api, which posts the picked video
+        with the form's text as last typed and your choices, and never "again", or connect_api, which opens
+        Google's page to connect this window with the client on file."""
         retry = action == "retry" and row is not None and row["via"] == "api"
-        if not retry and not (action == "post_api" and platform == "youtube"):
+        if not retry and not (action in ("post_api", "connect_api") and platform == "youtube"):
             return False
         if self.demo:
             self.notify("Demo mode: nothing is posted.", timeout=4)
         elif retry:
             self.retry_with_api(row)
+        elif action == "connect_api":
+            self.youtube_api_connect("")
         else:
             self.post_with_api(*self.form_text)
         return True
@@ -476,9 +494,12 @@ class YouTubeApiTab:
             self.notify("ReelForge has forgotten the connection, but Google couldn't be told (is this computer "
                         "online?). Take ReelForge's access away yourself at https://myaccount.google.com/connections",
                         title="YouTube's API", severity="warning", timeout=25)
-        else:
-            self.notify("Disconnected. ReelForge has forgotten the connection"
-                        + (", and Google has ended it." if done["revoked"] else "."), title="YouTube's API", timeout=10)
+        elif done["revoked"]:
+            self.notify("Disconnected. ReelForge has forgotten the connection, and Google has ended it.",
+                        title="YouTube's API", timeout=10)
+        else:  # this window wasn't connected, so it had no sign-in to end at Google
+            self.notify(f"Disconnected. ReelForge has forgotten the client. {youtube_api.NO_GRANT}",
+                        title="YouTube's API", timeout=20)
         self.follow_youtube_api(changed=True)
 
     @rpc
