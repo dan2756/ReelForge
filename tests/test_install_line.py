@@ -1,6 +1,7 @@
 """The one-line install for Linux (scripts/install.sh), run for real against a "release" that is two files in a
 scratch folder (curl reads them with file://, so nothing goes over the network): the download is checked, unpacked
-and moved into place, and an unpack that fails part way installs nothing."""
+beside the folder it's for and renamed into place, and an unpack or a move that fails, or the line being stopped,
+installs nothing and leaves nothing behind."""
 
 import hashlib
 import io
@@ -48,12 +49,25 @@ class InstallLine(unittest.TestCase):
         (self.release / NAME).write_bytes(data)
         (self.release / "SHA256SUMS.txt").write_text(f"{hashlib.sha256(data).hexdigest()}  {NAME}\n", encoding="utf-8")
 
-    def install(self) -> subprocess.CompletedProcess:
-        env = {"PATH": os.environ["PATH"], "HOME": str(self.home), "TMPDIR": str(self.dir / "tmp"),
+    def install(self, **instead: str) -> subprocess.CompletedProcess:
+        """Run the install line. instead: a program to stand in for one it runs (mv="..."), as a shell script that
+        finds the real one in $REAL."""
+        path = os.environ["PATH"]
+        for name, script in instead.items():
+            fake = self.dir / "instead" / name
+            fake.parent.mkdir(exist_ok=True)
+            fake.write_text(f"#!/bin/sh\nREAL='{shutil.which(name)}'\n{script}\n", encoding="utf-8")
+            fake.chmod(0o755)
+            path = f"{fake.parent}{os.pathsep}{path}"
+        env = {"PATH": path, "HOME": str(self.home), "TMPDIR": str(self.dir / "tmp"),
                "REELFORGE_RELEASE": self.release.as_uri(), "REELFORGE_DIR": str(self.target),
                "REELFORGE_NO_SETUP": "1"}
         return subprocess.run(["bash", str(KIT / "scripts" / "install.sh")], env=env, capture_output=True, text=True,
                               timeout=120, stdin=subprocess.DEVNULL)
+
+    def left(self) -> list[str]:
+        """What the install line left: in the folder the target goes in, and in the temporary folder."""
+        return sorted(p.name for folder in (self.home, self.dir / "tmp") for p in folder.iterdir())
 
     def test_it_installs_the_checked_download(self):
         self.publish()
@@ -63,7 +77,7 @@ class InstallLine(unittest.TestCase):
         self.assertEqual((self.target / "studio" / "__init__.py").read_text(encoding="utf-8"),
                          'KIT_VERSION = "9.9.9"\n')
         self.assertTrue(os.access(self.target / "setup.sh", os.X_OK))
-        self.assertEqual(list((self.dir / "tmp").iterdir()), [])     # its work folder is gone
+        self.assertEqual(self.left(), [self.target.name])            # its work folders are gone
 
     def test_an_unpack_that_fails_part_way_installs_nothing(self):
         self.publish(cut_at=0.6)       # setup.sh and studio/ unpack, then the archive ends in the middle of a file
@@ -71,9 +85,36 @@ class InstallLine(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn(f"ReelForge wasn't installed: {NAME} couldn't be unpacked", r.stdout)
         self.assertNotIn("ReelForge is in", r.stdout)
-        self.assertFalse(self.target.exists())                       # so running the line again isn't refused
-        self.assertEqual(list((self.dir / "tmp").iterdir()), [])
+        self.assertEqual(self.left(), [])                            # so running the line again isn't refused
         self.publish()
+        self.assertEqual(self.install().returncode, 0)
+
+    def test_its_put_in_place_with_a_rename_even_when_the_temporary_folder_is_another_disk(self):
+        # /tmp is its own filesystem on many Linux systems (and always, for a ReelForge on another drive). mv out of
+        # it is then a copy, and one that stopped (a full disk) left half a ReelForge, which the next run took for an
+        # install: "There's already a ReelForge folder". This mv is that copy stopping, for a move out of $TMPDIR.
+        self.publish()
+        other_disk = ('case "$1" in "$TMPDIR"/*) mkdir -p "$2" && cp "$1/setup.sh" "$2/"\n'
+                      'echo "mv: error writing: No space left on device" >&2; exit 1 ;; esac\nexec "$REAL" "$@"')
+        r = self.install(mv=other_disk)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual((self.target / "assets" / "big.bin").stat().st_size, 400_000)
+        self.assertEqual(self.left(), [self.target.name])            # the folder it unpacked in, beside it, is gone
+
+    def test_a_move_that_fails_installs_nothing(self):
+        self.publish()
+        r = self.install(mv="exit 1")                                # a rename happens or it doesn't
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(f"ReelForge wasn't installed: it couldn't be moved into {self.target}", r.stdout)
+        self.assertEqual(self.left(), [])                            # so running the line again isn't refused
+        self.assertEqual(self.install().returncode, 0)
+
+    def test_stopping_it_while_it_unpacks_leaves_nothing_behind(self):
+        self.publish()
+        r = self.install(tar='"$REAL" "$@"; kill -TERM $PPID')       # unpacked, then the terminal is closed
+        self.assertEqual(r.returncode, 130, r.stdout + r.stderr)
+        self.assertNotIn("ReelForge is in", r.stdout)
+        self.assertEqual(self.left(), [])
         self.assertEqual(self.install().returncode, 0)
 
     def test_a_download_that_doesnt_match_its_checksum_installs_nothing(self):
@@ -83,7 +124,7 @@ class InstallLine(unittest.TestCase):
         r = self.install()
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("doesn't match its checksum", r.stdout)
-        self.assertFalse(self.target.exists())
+        self.assertEqual(self.left(), [])
 
 
 if __name__ == "__main__":
