@@ -1,7 +1,9 @@
 // The Publish tab with its real Python side: the form at start, on a channel of its own in a scratch folder
 // (ui/test/settings_preload.py: one video, nothing connected), and on demo data what posting by hand keeps (every
-// button, doing what it did). Posting with the extension is in posting.test.tsx.
+// button, doing what it did) and that the keyboard never presses a button nobody can see. Posting with the extension
+// is in posting.test.tsx.
 
+import { TextAttributes } from "@opentui/core"
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -112,5 +114,27 @@ describe("posting by hand", () => {
       "https://x.com/compose/post",
     ])
     expect(listed("copied.txt").slice(4)).toEqual([`${CAPTION} ${TAGS}`, "-- copied --"]) // the TikTok text
+  })
+
+  test("Tab brings a button that is out of sight into view before Enter can press it", async () => {
+    const h = await demo([120, 22]) // too short for the By hand rows: they're below the fold
+    expect(frame(h)).not.toContain("Copy Instagram text")
+    /** The label of the button that has the keyboard: it's the underlined one. */
+    const focused = () => {
+      for (const line of h.t.captureSpans().lines) {
+        const text = line.spans.filter((sp) => sp.attributes & TextAttributes.UNDERLINE).map((sp) => sp.text).join("").trim()
+        if (text) return text
+      }
+      return ""
+    }
+    for (let i = 0; i < 30 && focused() !== "Copy Instagram text"; i++) {
+      h.t.mockInput.pressKey("TAB")
+      await h.settle(150)
+    }
+    expect(focused()).toBe("Copy Instagram text") // it has the keyboard, and it's drawn
+    expect(frame(h)).toContain("Copy Instagram text")
+    h.t.mockInput.pressKey("RETURN")
+    await until(h, () => listed("copied.txt").length > 0)
+    expect(listed("copied.txt")).toEqual([`${CAPTION} ${TAGS}`, "-- copied --"])
   })
 })

@@ -2,7 +2,7 @@
 // bottom, left to right, as they're laid out right now); a dialog keeps Tab inside itself. The one with the keyboard
 // gets the keys first (Enter presses a button, the arrows move through a list), then the app's own keys run.
 
-import type { BoxRenderable, KeyEvent, Renderable } from "@opentui/core"
+import { ScrollBoxRenderable, type BoxRenderable, type KeyEvent, type Renderable } from "@opentui/core"
 import { createContext, useContext, useEffect, useRef, useSyncExternalStore, type ReactNode } from "react"
 import { DASH, type Theme } from "../theme"
 
@@ -98,6 +98,8 @@ export class FocusManager {
     const i = items.findIndex((f) => f.id === this.focused)
     const next = i < 0 ? (dir > 0 ? 0 : items.length - 1) : (i + dir + items.length) % items.length
     this.focus(items[next]!.id)
+    const node = items[next]!.node()
+    if (node) reveal(node)
   }
 
   /** Give a key to whatever has the keyboard: Tab moves on, the rest go to it. True if it was used. */
@@ -110,6 +112,19 @@ export class FocusManager {
     const f = this.current
     if (f && f.scope !== this.scope) return false
     return Boolean(f?.onKey?.(key))
+  }
+}
+
+/** Scroll every scrolling area a control sits in, up or down, until it shows: Tab reaches the ones scrolled out of
+ * view too, and Enter would press a button nobody can see. */
+function reveal(n: Renderable) {
+  for (let p = n.parent as Renderable | null; p; p = p.parent as Renderable | null) {
+    if (!(p instanceof ScrollBoxRenderable)) continue
+    const top = p.viewport.y
+    const bottom = top + p.viewport.height
+    // above the area: up to its first row; below it: down until its last row shows, but never past its first
+    const y = n.y < top ? n.y - top : n.y + n.height > bottom ? Math.min(n.y + n.height - bottom, n.y - top) : 0
+    if (y) p.scrollBy({ x: 0, y })
   }
 }
 
