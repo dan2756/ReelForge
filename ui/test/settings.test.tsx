@@ -434,6 +434,23 @@ describe("the danger zone on a channel that's set up", () => {
     expect(existsSync(join(tmp, "my-studio", "answers.json"))).toBe(true) // nothing moved by the window itself
   })
 
+  test("in a window 24 or 25 rows tall, uninstall's one choice has a row of its own", async () => {
+    // The dialog's height was nine tenths of the window's as a fraction (21.6 rows of 24), and its rows were laid
+    // out on it: Keep them and its switch were drawn under the sentence that follows them.
+    const h = await settings()
+    await clickText(h, "Uninstall…")
+    await until(h, "UNINSTALL REELFORGE")
+    for (const [w, rows] of [[80, 24], [80, 25], [120, 24], [150, 24], [80, 26]] as const) {
+      h.t.resize(w, rows)
+      await h.settle(500)
+      const lines = frame(h).split("\n")
+      const at = lines.findIndex((r) => r.includes("Keep them"))
+      expect(lines[at]).toMatch(/│ +Keep them +━+▐█▌ Yes +│/) // the switch and nothing else, inside the dialog
+      expect(lines[at + 1]).toContain("Moved first to")
+      expect(lines.find((r) => r.includes("▐ Uninstall ReelForge ▌"))).toMatch(/▐ Cancel ▌ ▐ Uninstall ReelForge ▌ +│/)
+    }
+  })
+
   test("uninstall says where the videos go, can let them go too, and asks once the name is typed", async () => {
     const h = await settings()
     await clickText(h, "Uninstall…")

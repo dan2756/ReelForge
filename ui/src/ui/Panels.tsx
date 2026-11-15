@@ -119,6 +119,10 @@ export function Modal({
 }) {
   const theme = useTheme()
   const shown = useProgress(name, { ms: 160 })
+  // Nine tenths of the window's rows, as a whole number. As "90%" it is 21.6 rows in a window 24 rows tall, and what
+  // is inside was laid out on the fraction: one row was drawn over another (Uninstall's Keep them switch under the
+  // sentence above it). Rounded up, so no dialog has less room than it had.
+  const tallest = Math.ceil(useTerminalDimensions().height * 0.9)
   return (
     <box
       position="absolute"
@@ -141,7 +145,7 @@ export function Modal({
           flexDirection="column"
           width={width}
           maxWidth="95%"
-          maxHeight="90%"
+          maxHeight={tallest}
           paddingLeft={3}
           paddingRight={3}
           paddingTop={1}
