@@ -469,8 +469,9 @@
   `
 
   // The small note in the corner of the upload page. It lives in a shadow root with its own style sheet, so the
-  // page's styles cannot reach it and its styles cannot leak out. It is built node by node: some of these pages
-  // forbid HTML from strings.
+  // page's styles cannot reach it and its styles cannot leak out. The root is closed: the note can name the
+  // account ReelForge has for the platform, which the page's own scripts were never told. It is built node by
+  // node: some of these pages forbid HTML from strings.
   let note = null
   rf.say = (line, tone = "work", more = "") => {
     if (!note) {
@@ -479,7 +480,7 @@
       for (const [property, value] of [["all", "initial"], ["position", "fixed"], ["right", "16px"], ["bottom", "16px"], ["z-index", "2147483647"]]) {
         host.style.setProperty(property, value, "important")
       }
-      const root = host.attachShadow({ mode: "open" })
+      const root = host.attachShadow({ mode: "closed" })
       const sheet = new CSSStyleSheet()
       sheet.replaceSync(NOTE_CSS)
       root.adoptedStyleSheets = [sheet]
