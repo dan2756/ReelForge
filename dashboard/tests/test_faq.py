@@ -119,6 +119,43 @@ class FaqTest(unittest.TestCase):
         self.assertTrue(answer("Something isn't working.").startswith("Try **Restart** on this tab first"))
         self.assertIn("`reelforge doctor`", answer("Something isn't working."))
 
+    def test_the_posting_answers_say_who_presses_and_how_far_each_way_is_tested(self):
+        # Nothing is posted without your press. The two optional ways are said to be optional and to be tested on
+        # copies and a stand-in only, as their own pages say: no answer claims they work on the live sites.
+        post = answer("Does ReelForge post for me?")
+        self.assertTrue(post.startswith("Not by itself, and never without your press."))
+        self.assertIn("Under **BY HAND**, each platform's button opens its upload page", post)
+        self.assertIn("Your AI never posts.", post)
+        extension = answer("What does the browser extension do?")
+        self.assertTrue(extension.startswith("It is optional."))
+        self.assertIn("then stops for you to check it", extension)
+        self.assertIn("tested against copies of the upload pages, not yet on the live sites", extension)
+        self.assertIn("`docs/EXTENSION.md`", extension)
+        who = answer("Who presses Post?")
+        self.assertTrue(who.startswith("You do."))
+        for said in ("**Press Post for me**", "**Stop before the Post button**", "said yes in your browser",
+                     "Never on X.", "ReelForge has no command for it", "your AI is told never to post"):
+            self.assertIn(said, who)
+        api = answer("Can ReelForge upload to YouTube through its API?")
+        self.assertIn("a Google Cloud project you make yourself", api)
+        self.assertIn("when you press it on **Publish**", api)
+        self.assertIn("tested against a stand-in for Google and has never uploaded to YouTube itself", api)
+        self.assertIn("`docs/YOUTUBE-API.md`", api)
+        text = "\n".join(i["a"] for i in items())
+        for gone in ("never posts, uploads or sends", "posts for you", "posted for you", "\u2014"):
+            self.assertNotIn(gone, text)
+        # The words are the window's own: the Publish tab's heading and button, and the question's switch.
+        from dashboard import posting_tab
+
+        window = Path(faq.__file__).resolve().parent.parent / "ui" / "src" / "dashboard"
+        drawn = "".join((window / name).read_text("utf-8") for name in ("Posting.tsx", "Publish.tsx"))
+        for words in ("BY HAND", 'label="Post…"', "Stop before the Post button"):
+            self.assertIn(words, drawn)
+        self.assertIn("Press Post for me", posting_tab.HOW_PRESS)
+        # What an update and a move leave to do in the browser, as docs/EXTENSION.md has it.
+        self.assertIn("press Reload on its card on your browser's extensions page", answer("How do I update"))
+        self.assertIn("load it again from the new folder afterwards", answer("Can I move the ReelForge folder?"))
+
     def test_the_demo_names_nothing_on_this_computer(self):
         text = "\n".join(i["a"] for i in items(demo=True))
         self.assertNotIn(str(ROOT), text)

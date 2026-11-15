@@ -24,7 +24,7 @@ const FILES = process.platform === "win32" ? "Explorer" : process.platform === "
 setDefaultTimeout(30_000)
 let open: Headless | null = null
 
-async function window(size: [number, number] = [150, 76]): Promise<Headless> {
+async function window(size: [number, number] = [150, 80]): Promise<Headless> {
   open = await headless("dashboard", { demo: true, only_demos: true, tab: "settings" }, size[0], size[1], PRELOAD)
   await open.settle(3000)
   return open
@@ -142,9 +142,10 @@ describe("the Settings tab", () => {
     f = frame(h)
     expect(f).not.toContain("After that, make today's videos")
     expect(f).toContain("▾ Does ReelForge post for me?")
-    expect(f).toContain("ReelForge never posts, uploads or sends anything")
+    expect(f).toContain("Not by itself, and never without your press.")
+    expect(f).toContain("Two optional things can do more of it: the browser extension")
     await clickText(h, "Does ReelForge post for me?", 3)
-    expect(frame(h)).not.toContain("never posts, uploads")
+    expect(frame(h)).not.toContain("never without your press")
     expect(frame(h)).toContain("▸ Does ReelForge post for me?")
   })
 
@@ -373,7 +374,7 @@ describe("the danger zone on a channel that's set up", () => {
 
   async function settings(): Promise<Headless> {
     tmp = mkdtempSync(join(tmpdir(), "reelforge-settings-"))
-    open = await headless("dashboard", { tab: "settings" }, 150, 68, {
+    open = await headless("dashboard", { tab: "settings" }, 150, 72, {
       REELFORGE_BRIDGE_PRELOAD: join(ROOT, "ui", "test", "settings_preload.py"),
       REELFORGE_TEST_ROOT: tmp,
     })

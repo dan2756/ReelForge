@@ -93,7 +93,7 @@ describe("deleting a profile", () => {
   })
 
   test("from the Settings tab: Profiles deletes one, lists it as deleted, and Restore brings it back", async () => {
-    const h = await onAlpha("settings", [160, 72])
+    const h = await onAlpha("settings", [160, 76])
     await until(h, () => frame(h).includes("PROFILES"))
     let f = frame(h)
     if (process.env.SHOW) console.log(f)
