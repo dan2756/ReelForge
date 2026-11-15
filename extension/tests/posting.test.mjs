@@ -124,6 +124,22 @@ export const tests = {
     equal([job.post_id, job.url], [null, null], "post id and url")
   },
 
+  async "an empty text empties the box instead of leaving what the page put there"({ app, browser }) {
+    // TikTok starts its caption box with the file's name. An empty caption has to take that out again.
+    const film = app.addVideo({ text: { tiktok: { caption: "" } } })
+    const { job, tab } = await toReady({ app, browser }, "tiktok", film)
+    equal(job.state, "ready", `state (${job.error_message})`)
+    equal(await tab.evaluate(() => document.querySelector(".public-DraftEditor-content").innerText.trim()), "", "the caption box")
+    ok(job.strategies.join(",").includes("caption=draft-editor+cleared"), `how it was done (${job.strategies})`)
+  },
+
+  async "text that ReelForge did not send is never made up: the post stops before anything is attached"({ app, browser }) {
+    const film = app.addVideo({ text: { youtube: { title: "Only a title" } } })
+    const { job, tab } = await toReady({ app, browser }, "youtube", film)
+    equal([job.state, job.error_code], ["failed", "extension_outdated"], "state and error code")
+    equal(await tab.evaluate(() => fixture.files.length), 0, "files given to the page")
+  },
+
   async "a video of several pieces arrives whole"({ app, browser, video }) {
     const film = video(9 * 1024 * 1024 + 123)
     const { job, tab } = await toReady({ app, browser }, "tiktok", film)

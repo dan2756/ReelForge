@@ -11,6 +11,7 @@
   rf.flows.youtube = {
     final: "done_button",
     button: "Publish or Save",
+    fields: ["title", "description"],
 
     async fill(job) {
       await rf.step("uploading", "upload", "YouTube is taking the video in")

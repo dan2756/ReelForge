@@ -5,6 +5,7 @@
   rf.flows.tiktok = {
     final: "post_button",
     button: "Post",
+    fields: ["caption"],
 
     async fill(job) {
       await rf.fill("fill_caption", "caption", job.text.caption, "Filling in the caption")

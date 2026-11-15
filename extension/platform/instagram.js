@@ -5,6 +5,7 @@
   rf.flows.instagram = {
     final: "share",
     button: "Share",
+    fields: ["caption"],
 
     async open() {
       rf.click(await rf.find("create"))

@@ -326,6 +326,11 @@
       return sameText(el.value, text) ? "value" : null
     }
     doc.getSelection().selectAllChildren(el)
+    // An empty text (a YouTube description with no hashtags, say) means the box is to be left empty.
+    if (text === "") {
+      if (clean(rf.readText(el))) doc.execCommand("delete")
+      return (await settles(() => sameText(rf.readText(el), ""))) ? "cleared" : null
+    }
     doc.execCommand("insertText", false, text)
     if (await settles(() => sameText(rf.readText(el), text))) return "typed"
     el.focus()

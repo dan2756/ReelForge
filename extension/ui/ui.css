@@ -77,7 +77,6 @@ button.plain:hover:not(:disabled) { color: var(--text); border-color: transparen
 
 .notice { border-left: 3px solid var(--soft); padding: 8px 10px; background: var(--panel); border-radius: 0 8px 8px 0; }
 .notice.bad { border-left-color: var(--red); }
-.notice.good { border-left-color: var(--green); }
 
 .quote { margin: 0; padding: 8px 10px; background: var(--page); border: 1px solid var(--line); border-radius: 6px;
   white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; user-select: text; }

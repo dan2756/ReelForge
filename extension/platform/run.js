@@ -102,7 +102,7 @@ void (async () => {
     rf.phase = "watch"
     noticePress()
     // The wait is a little longer than the 45 minutes ReelForge itself waits on a ready post.
-    await rf.waitFor(sent, { timeout: 46 * 60 * 1000, pace: 500 })
+    await rf.waitFor(sent, { timeout: 46 * 60 * 1000, pace: 1000 })
     await posted()
   }
 
@@ -216,6 +216,10 @@ void (async () => {
 
   try {
     if (!flow) throw new rf.Stop("extension_outdated", `This extension does not know ${P} yet. Reload it from your ReelForge folder.`)
+    // Every box this platform has must come with its text, even if that text is empty. Nothing is made up here.
+    if (flow.fields.some(field => typeof job.text?.[field] !== "string")) {
+      throw new rf.Stop("extension_outdated", `ReelForge did not send the text this extension fills in on ${P}. Reload the extension from your ReelForge folder.`)
+    }
     if (job.attached || job.state === "ready" || job.state === "posting") await afterReload()
     else await prepare()
   } catch (error) {

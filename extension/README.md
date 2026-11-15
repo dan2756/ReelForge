@@ -180,7 +180,7 @@ node extension/tests/run.mjs press        # only tests with "press" in their nam
 ```
 
 They need Node 22 and Playwright with its own Chromium (branded Chrome and Edge no longer load an extension from
-the command line). ReelForge must be closed while they run: they use its ports. A full run takes about four
+the command line). ReelForge must be closed while they run: they use its ports. A full run takes four to five
 minutes.
 
 The tests load this folder as an unpacked extension into headless Chromium, with a stand-in for the ReelForge app

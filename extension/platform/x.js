@@ -5,6 +5,7 @@
   rf.flows.x = {
     final: "post_button",
     button: "Post",
+    fields: ["text"],
     neverPress: true,
 
     async fill(job) {
