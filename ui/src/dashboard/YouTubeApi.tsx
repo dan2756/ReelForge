@@ -183,20 +183,25 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
       ) : null}
       {api.wants_file ? (
         <box flexDirection="row" height={3} flexShrink={0} gap={1} alignItems="center">
-          <TextField
-            id="api-file"
-            flexGrow={1}
-            value={path}
-            bad={bad}
-            autoFocus
-            placeholder="/path/to/client_secret_….json"
-            onChange={(v) => {
-              setPath(v)
-              setBad(false)
-              setWhy("")
-            }}
-            onSubmit={(typed) => withFile(typed)}
-          />
+          {/* The box takes the room the button leaves and no more, whatever is in it. A field grows with its text,
+              and a real path is long (Google's own file name alone is about 90 characters): it pushed Connect with
+              this file out of the dialog. */}
+          <box flexGrow={1} flexShrink={1} flexBasis={0} minWidth={0} height={3} overflow="hidden">
+            <TextField
+              id="api-file"
+              flexGrow={1}
+              value={path}
+              bad={bad}
+              autoFocus
+              placeholder="/path/to/client_secret_….json"
+              onChange={(v) => {
+                setPath(v)
+                setBad(false)
+                setWhy("")
+              }}
+              onSubmit={(typed) => withFile(typed)}
+            />
+          </box>
           <Button id="api-file-connect" label="Connect with this file" variant="primary" disabled={busy} onPress={() => withFile()} />
         </box>
       ) : null}

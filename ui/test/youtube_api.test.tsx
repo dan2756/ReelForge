@@ -924,6 +924,22 @@ describe("when something goes wrong, or the window is small", () => {
     expect(frame(h)).toContain("● YouTube API connected")
   })
 
+  test("a client file's path as long as Google's own file names leaves Connect with this file inside the dialog", async () => {
+    // Google names the file client_secret_<a number>-<32 letters>.apps.googleusercontent.com.json: about 90
+    // characters before the folder it is in. The box grew with it and pushed the button out through the border.
+    const long = "C:\\Users\\Sam\\Downloads\\client_secret_123456789012-abcdefghijklmnopqrstuvwxyz123456.apps.googleusercontent.com.json"
+    const h = await kit()
+    await openApi(h)
+    await h.t.mockInput.typeText(long)
+    await h.settle(300)
+    for (const [w, rows] of [[150, 45], [120, 30], [100, 30], [80, 24]] as const) {
+      h.t.resize(w, rows)
+      await h.settle(400)
+      const row = frame(h).split("\n").find((r) => r.includes("googleusercontent.com.json")) ?? ""
+      expect(row).toMatch(/googleusercontent\.com\.json +▐ Connect with this file ▌ +│/) // the whole button, then the border
+    }
+  })
+
   test("in a window 100 columns by 30 rows the line keeps to whole words, and a posted row keeps its three buttons whole", async () => {
     // Not connected: the line's first words are all there is room for beside its button. It was cut at "connected i".
     let h = await kit({ api: { client: true } }, [100, 30])
