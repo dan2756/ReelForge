@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
 from unittest import mock
@@ -766,6 +767,24 @@ class AfterAQuit(ApiPosting):
         job = self.job()
         self.assertEqual((youtube_api_tab.orphans(), youtube_api_tab.settle_orphans()), ([], 0))
         self.assertEqual(posting.get(job["id"])["state"], "queued")
+
+    def test_a_database_too_busy_to_note_the_post_does_not_lose_it(self):
+        job = self.job()
+        real = posting.advance
+
+        def busy(job_id, state, **kw):
+            if state == "posted":
+                raise sqlite3.OperationalError("database is locked")
+            return real(job_id, state, **kw)
+
+        with mock.patch.object(posting, "advance", busy):
+            left = youtube_api_tab.run(job["id"])
+        self.assertEqual(left["state"], "posting")  # it is up at YouTube, and the ledger couldn't be told
+        self.assertEqual(youtube_api.session(job["id"])["size"], SIZE)
+        self.assertEqual(youtube_api_tab.settle_orphans(), 1)  # the next look asks the session and finishes it
+        done = posting.get(job["id"])
+        self.assertEqual((done["state"], done["post_id"]), ("posted", "vid00000001"))
+        self.assertEqual((len(self.google.starts), len(self.google.videos)), (1, 1))
 
     def test_a_post_that_finished_after_its_job_was_called_off_still_counts_as_up(self):
         job = self.quit_on_the_last_piece()

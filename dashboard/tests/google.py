@@ -33,8 +33,8 @@ class Google:
     script, then   the same for each piece and each "where does it stand": None (the usual answer), "503" (the
                    piece is not kept), "503-kept" (it is, and the answer is still 503), "lost" (the piece is
                    kept, and made into the video if it was the last, but no answer comes), "drop" (no answer,
-                   nothing kept), "401", "404", or (status, reason) for a refusal. then: what every one gets
-                   once the script has run out.
+                   nothing kept), "ignored" (answered as usual, but the piece is not kept), "401", "404", or
+                   (status, reason) for a refusal. then: what every one gets once the script has run out.
     stores_as      who YouTube lets see every video, whatever was asked ("private": what it used to do to
                    uploads from an unverified project)
     upload_status  the uploadStatus of the videos it makes ("uploaded" unless a test says otherwise)
@@ -275,7 +275,7 @@ class _Handler(BaseHTTPRequestHandler):
             if self.bearer() not in g.access:
                 self.reply(*refusal(401, "authError"))
                 return
-            status, data, headers = self.take(session, piece)
+            status, data, headers = self.take(session, b"" if said == "ignored" else piece, said == "ignored")
             if said == "503-kept":
                 self.reply(503, {})
             elif said == "lost":
@@ -283,12 +283,14 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self.reply(status, data, headers)
 
-    def take(self, session: dict, piece: bytes) -> tuple[int, dict | None, dict]:
+    def take(self, session: dict, piece: bytes, ignore: bool = False) -> tuple[int, dict | None, dict]:
         """Keep a piece (or answer where the session stands) the way the resumable protocol says."""
         g = self.google
         given = self.headers.get("Content-Range") or ""
-        sent = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", given)
-        if sent:
+        sent = None if ignore else re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", given)
+        if ignore:
+            pass
+        elif sent:
             first, final, size = (int(n) for n in sent.groups())
             if size != session["size"] or final - first + 1 != len(piece) or first > len(session["data"]):
                 return *refusal(400, "invalidRange"), {}

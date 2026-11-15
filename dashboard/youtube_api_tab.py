@@ -120,7 +120,6 @@ def _upload(job: dict, stop: Callable[[], bool]) -> None:
         made = youtube_api.upload(Path(job["video_path"]), text.get("title", ""), text.get("description", ""),
                                   privacy, options.get("made_for_kids") is True, started=started,
                                   progress=progress, last=last, stop=stop)
-        finish(job, made)
     except youtube_api.Stopped:
         pass  # called off (the job says so), or ReelForge is closing (the next start settles it)
     except youtube_api.Unknown:
@@ -131,6 +130,11 @@ def _upload(job: dict, stop: Callable[[], bool]) -> None:
         print(f"youtube api: the upload stopped on a {type(e).__name__}\n"
               + "".join(traceback.format_tb(e.__traceback__)), file=sys.stderr)
         _stopped_short(job, f"ReelForge ran into a problem of its own ({type(e).__name__}).")
+    else:
+        try:
+            finish(job, made)
+        except sqlite3.Error:
+            pass  # the database is busy: the job waits as it is, and settle_orphans asks its session and finishes it
 
 
 def _end(job: dict, state: str, **fields) -> None:
@@ -143,7 +147,10 @@ def _end(job: dict, state: str, **fields) -> None:
 def _stopped_short(job: dict, why: str) -> None:
     """End a job whose upload stopped without YouTube's word: before the last piece nothing can have been posted;
     after it, nobody knows."""
-    now = posting.get(job["id"])
+    try:
+        now = posting.get(job["id"])
+    except sqlite3.Error:
+        return  # busy: settle_orphans ends it
     if now and now["state"] == "posting":
         _end(job, "unknown", detail=f"{why} The last piece of the video may have arrived. {STUDIO}")
     else:

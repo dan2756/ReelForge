@@ -460,6 +460,31 @@ class Uploading(ApiTest):
         self.assertEqual(self.google.videos, [])
         self.assertEqual(self.ranges().count(f"bytes 1000-1999/{SIZE}"), youtube_api.TRIES + 1)
 
+    def test_youtube_never_taking_more_of_the_file_ends_it_instead_of_going_round_for_ever(self):
+        self.google.script, self.google.then = [None], "ignored"  # it answers every piece and keeps none
+        e = self.refused("offline", self.upload)
+        self.assertIn("kept breaking", e.message)
+        self.assertEqual(self.ranges(), [f"bytes 0-999/{SIZE}"] + [f"bytes 1000-1999/{SIZE}"] * (youtube_api.TRIES + 1))
+        self.assertEqual(self.google.videos, [])
+
+    def test_a_no_to_the_question_after_the_last_piece_is_still_unknown(self):
+        self.google.script = [None, None, None, "lost", (403, "quotaExceeded")]  # the video is up; the question isn't answered
+        with self.assertRaises(Unknown):
+            self.upload()
+        self.one_video()
+        self.google.sessions.clear(), self.google.videos.clear(), self.google.starts.clear()
+        self.google.script = [None, "drop", (403, "quotaExceeded")]  # before the last piece, it is a plain failure
+        e = self.refused("quota", self.upload)
+        self.assertFalse(e.definite)
+        self.assertEqual(self.google.videos, [])
+
+    def test_youtube_having_all_of_it_without_saying_what_it_made_is_asked_again(self):
+        whole = httpx.Response(308, headers={"Range": f"bytes=0-{SIZE - 1}"})
+        self.assertEqual(youtube_api._stands(whole, SIZE), ("unclear", None))
+        self.assertEqual(youtube_api._stands(httpx.Response(308, headers={"Range": "bytes=0-99"}), SIZE), ("have", 100))
+        self.assertEqual(youtube_api._stands(httpx.Response(308), SIZE), ("have", 0))
+        self.assertEqual(youtube_api._stands(None, SIZE), ("unclear", None))
+
     def test_a_token_that_runs_out_in_the_middle_is_renewed_once(self):
         self.google.script = [None, "401"]
         self.upload()

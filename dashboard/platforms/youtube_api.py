@@ -646,14 +646,16 @@ def upload(video: Path, title: str, description: str, privacy: str, made_for_kid
             "status": {"privacyStatus": privacy, "selfDeclaredMadeForKids": bool(made_for_kids)}}
     uri = _start(body, size, kind)
     started(uri)
-    sent = stuck = 0
-    out = False  # the piece that ends the upload has left this computer at least once
+    sent = stuck = 0  # stuck: how many pieces in a row left YouTube with no more of the file than before
+    out = False       # the piece that ends the upload has left this computer at least once
     with video.open("rb", buffering=0) as f, _client() as http:  # (unbuffered: each piece is read as the file is now)
         while True:
             if stop():
                 raise Stopped()
             end = min(sent + CHUNK, size)
             try:
+                if stuck > TRIES:
+                    raise ApiError("offline", "The connection to YouTube kept breaking, so the upload stopped.")
                 if end == size and not out:
                     last()
                 f.seek(sent)
@@ -665,20 +667,17 @@ def upload(video: Path, title: str, description: str, privacy: str, made_for_kid
                                                        "Content-Range": f"bytes {sent}-{end - 1}/{size}"}, piece), size)
                 if what not in ("made", "have"):
                     # No answer, or one that says nothing about the piece: the session knows what it has.
-                    stuck += 1
-                    if stuck > TRIES:
-                        raise ApiError("offline", "The connection to YouTube kept breaking, so the upload stopped.")
                     if what != "auth":
-                        sleep(_pause(stuck - 1))
+                        sleep(_pause(stuck))
                     what, value = _where(http, uri, size, fresh=what == "auth")
             except ApiError as e:
+                # Once the last piece has gone out, only YouTube's own "no" to that piece means nothing was posted.
                 if out and not e.definite:
                     raise Unknown() from None
                 raise
             if what == "made":
                 return value
-            if value > sent:
-                stuck = 0
+            stuck = 0 if value > sent else stuck + 1
             sent = value
             progress(sent, size)
 
@@ -764,9 +763,8 @@ def _stands(r: httpx.Response | None, size: int) -> tuple[str, object]:
     if r.status_code == 308:
         got = re.fullmatch(r"bytes=0-(\d+)", r.headers.get("range", "").strip())
         have = int(got[1]) + 1 if got else 0  # (no Range: it has nothing yet)
-        if have > size:
-            raise ApiError("odd", "YouTube's answer about the upload made no sense, so it stopped.")
-        return "have", have
+        # (all of the file, and still "send more": it hasn't said what it made of it, so it is asked again)
+        return ("have", have) if have < size else ("unclear", None)
     if r.status_code == 401:
         return "auth", None
     if r.status_code in (404, 410):
@@ -782,7 +780,11 @@ def _where(http: httpx.Client, uri: str, size: int, fresh: bool = False) -> tupl
     can't be learned."""
     renewed = fresh
     for attempt in range(TRIES):
-        what, value = _stands(_put(http, uri, {"Content-Range": f"bytes */{size}"}, b"", fresh), size)
+        try:
+            what, value = _stands(_put(http, uri, {"Content-Range": f"bytes */{size}"}, b"", fresh), size)
+        except ApiError as e:
+            e.definite = False  # a "no" to the question says nothing about what the session has
+            raise
         fresh = False
         if what in ("made", "have"):
             return what, value
