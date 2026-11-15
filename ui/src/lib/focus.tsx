@@ -1,6 +1,7 @@
 // Which button, list, table or field has the keyboard. Tab and Shift+Tab move through them in reading order (top to
-// bottom, left to right, as they're laid out right now); a dialog keeps Tab inside itself. The one with the keyboard
-// gets the keys first (Enter presses a button, the arrows move through a list), then the app's own keys run.
+// bottom, left to right, as they're laid out right now); a dialog keeps Tab inside itself, and gives the keyboard back
+// to what had it when it closes. The one with the keyboard gets the keys first (Enter presses a button, the arrows
+// move through a list), then the app's own keys run.
 
 import { ScrollBoxRenderable, type BoxRenderable, type KeyEvent, type Renderable } from "@opentui/core"
 import { createContext, useContext, useEffect, useRef, useSyncExternalStore, type ReactNode } from "react"
@@ -22,6 +23,8 @@ export class FocusManager {
   private items = new Map<string, Focusable>()
   private listeners = new Set<() => void>()
   scopes: string[] = ["app"]
+  /** In each scope, what last had the keyboard there: a dialog that closes hands it back. */
+  private last = new Map<string, string>()
 
   subscribe = (fn: () => void) => {
     this.listeners.add(fn)
@@ -49,6 +52,9 @@ export class FocusManager {
   focus(id: string | null) {
     if (id === this.focused) return
     this.focused = id
+    const item = id ? this.items.get(id) : undefined
+    if (item) this.last.set(item.scope, item.id)
+    else if (!id) this.last.delete(this.scope) // the keyboard was taken away (Esc out of a field): nothing to hand back
     this.changed()
   }
 
@@ -70,9 +76,15 @@ export class FocusManager {
     this.changed()
   }
 
+  /** A dialog closed: the keyboard goes back to what had it under the dialog, if that is still there. (Asked for
+   * when the dialog opened, it was too late: its own first button had the keyboard by then.) */
   popScope(name: string) {
     const i = this.scopes.lastIndexOf(name)
     if (i > 0) this.scopes.splice(i, 1)
+    this.last.delete(name)
+    const back = this.last.get(this.scope)
+    if (back && this.items.has(back)) this.focused = back
+    else if (this.current?.scope !== this.scope) this.focused = null
     this.changed()
   }
 
@@ -179,12 +191,8 @@ export function useFocus(
 export function FocusScope({ name, children }: { name: string; children: ReactNode }) {
   const fm = useFocusManager()
   useEffect(() => {
-    const before = fm.focused
     fm.pushScope(name)
-    return () => {
-      fm.popScope(name)
-      if (before && fm.has(before)) fm.focus(before)
-    }
+    return () => fm.popScope(name)
   }, [fm, name])
   return <ScopeContext.Provider value={name}>{children}</ScopeContext.Provider>
 }

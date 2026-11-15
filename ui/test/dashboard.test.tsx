@@ -256,6 +256,37 @@ describe("keys", () => {
     expect(frame(h)).not.toContain("HOW REELFORGE WORKS")
   })
 
+  test("a dialog that closes gives the keyboard back to the button that had it", async () => {
+    const h = await window("updates")
+    /** The label of the button that has the keyboard: it's the underlined one. */
+    const focused = () => {
+      for (const line of h.t.captureSpans().lines) {
+        const text = line.spans.filter((sp) => sp.attributes & TextAttributes.UNDERLINE).map((sp) => sp.text).join("").trim()
+        if (text) return text
+      }
+      return ""
+    }
+    for (let i = 0; i < 6 && focused() !== "Release page"; i++) await press(h, "tab")
+    expect(focused()).toBe("Release page")
+    await h.t.mockInput.typeText("?")
+    await h.settle(300)
+    expect(frame(h)).toContain("HOW REELFORGE WORKS")
+    expect(focused()).toBe("Close") // the dialog's own button, while it's open
+    await press(h, "return")
+    expect(frame(h)).not.toContain("HOW REELFORGE WORKS")
+    expect(focused()).toBe("Release page") // (nothing had it: Tab started again from the top)
+    // Esc out of a text field takes the keyboard away for good: a dialog doesn't hand it back afterwards.
+    await press(h, "u")
+    for (let i = 0; i < 30 && !find(h, "What if everyone"); i++) await h.settle(100)
+    await clickText(h, "What if everyone", 3)
+    await press(h, "escape")
+    await h.t.mockInput.typeText("?")
+    await h.settle(300)
+    await press(h, "return")
+    await press(h, "3") // so 3 is a key again, not a character in the caption
+    expect(activeTab(h)).toBe("Compare")
+  })
+
   test("Tab moves between buttons, and Enter presses one", async () => {
     const h = await window("updates")
     expect(frame(h)).not.toContain("HOW REELFORGE WORKS")
