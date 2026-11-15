@@ -3,7 +3,7 @@
 #   ./setup.sh          one list of what's missing, one yes, then a few questions about your channel
 #   ./setup.sh --yes    the same without questions (for an AI setting up for you, with your OK)
 # Everything goes inside this folder (.venv, tools/, ui/node_modules); nothing is installed system-wide. Without Python
-# 3.11 or newer it offers a private Python 3.13 in tools/python (about 25 MB, from the python-build-standalone project
+# 3.11.4 or newer it offers a private Python 3.13 in tools/python (about 25 MB, from the python-build-standalone project
 # that uv and other tools use, checked against its published checksums). Once Python is found, studio/bootstrap.py
 # draws the first-run box, gets the Python packages and Bun (which runs ReelForge's window), and does the rest.
 set -euo pipefail
@@ -21,9 +21,11 @@ for arg in "$@"; do
 done
 
 # A Python 3.11+ that can make ReelForge's .venv (Debian and Ubuntu leave venv's pip out of their Python until
-# python3-venv is installed: that one is passed over).
+# python3-venv is installed: that one is passed over) and that checks a .tar download as it unpacks it. tarfile's
+# filters came with 3.12 and 3.11.4, so an older 3.11 (Debian 12's is 3.11.2) is passed over as well.
 usable() {
-  "$1" -c 'import sys, venv, ensurepip; sys.exit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1
+  "$1" -c 'import sys, tarfile, venv, ensurepip
+sys.exit(0 if sys.version_info >= (3, 11) and hasattr(tarfile, "data_filter") else 1)' >/dev/null 2>&1
 }
 
 find_python() {
@@ -93,7 +95,7 @@ if ! PY="$(find_python)"; then
   echo
   echo "  reelforge setup"
   echo
-  echo "  ReelForge runs on Python 3.11 or newer, which isn't on this computer yet."
+  echo "  ReelForge runs on Python 3.11.4 or newer, which isn't on this computer yet."
   echo "  It can put a private Python 3.13 in this folder now (about 25 MB, for ReelForge only: nothing else changes)."
   echo
   answer=y
@@ -112,7 +114,7 @@ if ! PY="$(find_python)"; then
     if [ "$(uname)" = Darwin ]; then
       echo "  Or install Python 3.13 from https://www.python.org/downloads/ (or: brew install python@3.13),"
     else
-      echo "  Or install Python 3.11+ with venv from your package manager (e.g. sudo apt install python3 python3-venv),"
+      echo "  Or install Python 3.11.4 or newer with venv from your package manager (e.g. sudo apt install python3 python3-venv),"
     fi
     echo "  then run ./setup.sh again."
     exit 1

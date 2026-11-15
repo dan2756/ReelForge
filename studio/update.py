@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import KIT_VERSION, net
+from . import KIT_VERSION, net, tools
 
 ROOT = Path(__file__).resolve().parent.parent
 REPO = "dan2756/ReelForge"
@@ -270,8 +270,7 @@ def _copy_release(archive: Path, root: Path, work: Path, progress: Progress) -> 
                 z.extractall(out)  # ZipFile drops absolute paths and ".." parts
                 runnable(z, out)
         else:
-            with tarfile.open(archive) as t:
-                t.extractall(out, filter="data")
+            tools.untar(archive, out)   # nothing lands outside the folder, on any Python (see studio/tools.py)
     except (zipfile.BadZipFile, tarfile.TarError, OSError) as e:
         raise UpdateError(f"The download couldn't be unpacked ({e}); try again.") from e
     tops = [p for p in out.iterdir() if p.is_dir()]

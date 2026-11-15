@@ -254,6 +254,29 @@ def _fetch_text(url: str) -> str:
     return net.fetch_text(url)
 
 
+def untar(archive: Path, dest: Path) -> list[str]:
+    """Unpack a tar archive into dest and nowhere else; returns the names in it. Python 3.12 (and 3.11 from 3.11.4)
+    checks that itself, with tarfile's "data" filter. Python 3.11.0 to 3.11.3, which Debian 12 ships, has no filters
+    at all (asking for one is a TypeError), so there every entry is checked here first: no path or link that leaves
+    dest, and nothing but files, folders and links. Raises tarfile.TarError for an archive that tries."""
+    with tarfile.open(archive) as t:
+        names = t.getnames()
+        if hasattr(tarfile, "data_filter"):
+            t.extractall(dest, filter="data")
+            return names
+        root = os.path.realpath(dest)
+
+        def inside(path: str) -> bool:
+            return os.path.commonpath([root, os.path.realpath(os.path.join(root, path))]) == root
+
+        for m in t.getmembers():
+            link = m.linkname if m.islnk() else os.path.join(os.path.dirname(m.name), m.linkname) if m.issym() else ""
+            if not (m.isfile() or m.isdir() or link) or not inside(m.name) or not inside(link):
+                raise tarfile.TarError(f"{m.name} isn't something to unpack here")
+        t.extractall(dest)
+        return names
+
+
 def blender_asset() -> str:
     if WINDOWS:
         return f"blender-{BLENDER_VERSION}-windows-{'arm64' if arm() else 'x64'}.zip"
@@ -288,9 +311,7 @@ def install_blender(progress: Progress | None = None) -> str:
                 top = z.namelist()[0].split("/")[0]
                 z.extractall(TOOLS)
         else:
-            with tarfile.open(archive) as t:
-                top = t.getnames()[0].split("/")[0]
-                t.extractall(TOOLS, filter="data")
+            top = untar(archive, TOOLS)[0].split("/")[0]
         dst = TOOLS / "blender"
         if dst.exists():
             shutil.rmtree(dst)
@@ -366,9 +387,7 @@ def _ffmpeg_unpack(dst: Path, url: str, name: str, want: str, progress: Progress
             top = z.namelist()[0].split("/")[0]
             z.extractall(TOOLS)
     else:
-        with tarfile.open(archive) as t:
-            top = t.getnames()[0].split("/")[0]
-            t.extractall(TOOLS, filter="data")
+        top = untar(archive, TOOLS)[0].split("/")[0]
     if dst.exists():
         shutil.rmtree(dst)
     (TOOLS / top).rename(dst)
