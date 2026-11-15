@@ -742,7 +742,9 @@ def _settled(old: dict, new: dict, by: str) -> dict:
     """After the transaction: every window redraws for a change of state, and a post whose id the extension read
     off the page goes into the stats as this episode's, so it shows before the next read (which fills in its
     numbers and never files it anywhere else)."""
-    if new["state"] == "posted" and new["post_id"] and not old["post_id"] and by != "reconcile":
+    # (Its id may have come before the post did: YouTube shows a video's link while it is still a draft.)
+    if new["state"] == "posted" and new["post_id"] and by != "reconcile" and \
+            (old["state"] != "posted" or not old["post_id"]):
         db.add_post(new["platform"], new["post_id"], new["episode_id"], headline(json.loads(new["text"])),
                     new["url"])
     if (new["state"], new["post_id"], new["url"]) != (old["state"], old["post_id"], old["url"]):

@@ -930,6 +930,24 @@ class Posted(LedgerTest):
         posting.advance(job["id"], "posted", install=CHROME, post_id="dQw4w9WgXcQ")  # said twice
         self.assertEqual(len(db.posts_latest()), 1)
 
+    def test_an_id_the_page_showed_before_the_post_went_up_is_filed_when_it_does(self):
+        # YouTube shows a video's link in its upload dialog, so the extension reports the id with "ready".
+        job = self.walk(self.job("youtube"), "opening", "uploading", "filling")
+        ready = posting.advance(job["id"], "ready", install=CHROME, post_id="dQw4w9WgXcQ",
+                                url="https://youtu.be/dQw4w9WgXcQ")
+        self.assertEqual((ready["post_id"], db.posts_latest()), ("dQw4w9WgXcQ", []))  # a draft is not a post
+        posting.advance(job["id"], "posted", install=CHROME)
+        (post,) = db.posts_latest()
+        self.assertEqual((post["post_id"], post["episode_id"], post["link"], post["url"]),
+                         ("dQw4w9WgXcQ", job["episode_id"], "publish", "https://youtu.be/dQw4w9WgXcQ"))
+        # Your own "It's posted" on a job that has its id files it too.
+        video = self.root / "videos" / "ep02.mp4"
+        video.write_bytes(b"another one")
+        other = self.walk(posting.create_batch(video, ["youtube"], "Another one", TAGS, self.cfg)["jobs"][0], *STEPS)
+        posting.advance(other["id"], "ready", install=CHROME, post_id="abcdefghijk")
+        posting.resolve(other["id"], True)
+        self.assertEqual({p["post_id"] for p in db.posts_latest()}, {"dQw4w9WgXcQ", "abcdefghijk"})
+
     def test_an_id_the_stats_reader_would_not_use_is_left_out(self):
         job = self.walk(self.job("instagram"), *STEPS)
         done = posting.advance(job["id"], "posted", install=CHROME, post_id="DBx3kQwPabc",  # a shortcode, not the pk
