@@ -322,10 +322,11 @@ export interface YouTubeApiView {
 }
 
 /** What the question before a post through YouTube's API shows (youtube_api_info): the view, and for the picked video
- * exactly what would be sent. video is null when there is nothing to post (why says so). force: the video is up there
- * or may be, so this would be a post again. */
+ * exactly what would be sent. video is null when there is nothing to post (why says so); its sha256 is the file as the
+ * question saw it, which goes back with the yes. force: the video is up there or may be, so this would be a post
+ * again. */
 export interface YouTubeApiInfo extends YouTubeApiView {
-  video: { path: string; name: string; size: string } | null
+  video: { path: string; name: string; size: string; sha256: string } | null
   review: { state: string; line: string } | null
   send: { title: string; description: string; privacy: string; made_for_kids: boolean | null; category: string } | null
   fields: { key: string; label: string; text: string }[] // send, a row each, in words

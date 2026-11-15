@@ -9,6 +9,7 @@ page (test_youtube_api.google_for)."""
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import sqlite3
@@ -81,7 +82,8 @@ class ApiPosting(PostingTest):
     @staticmethod
     def yes_to(info: dict) -> dict:
         """What the window sends back with a yes: what its question (youtube_api_info) showed."""
-        return {"video": info["video"]["path"], "made_for_kids": info["send"]["made_for_kids"]}
+        return {"video": info["video"]["path"], "sha256": info["video"]["sha256"],
+                "made_for_kids": info["send"]["made_for_kids"]}
 
     def posted(self, w: Window, privacy: str = "") -> dict:
         """Post the picked video through the API and wait until its job is over. Returns the job."""
@@ -522,8 +524,8 @@ class Posting(ApiPosting):
         w = self.window()
         w.call("pick_file", str(other))
         info = w.call("youtube_api_info", "The second video", TAGS)
-        shown = {"video": info["video"]["path"], "made_for_kids": info["send"]["made_for_kids"]}
-        self.assertEqual(shown, {"video": str(other), "made_for_kids": False})
+        shown = self.yes_to(info)
+        self.assertEqual(shown, {"video": str(other), "sha256": posting.digest(other), "made_for_kids": False})
         db.set_meta("hidden_videos", [str(other)])  # what another window's Hide writes
         w.call("scan_files")                        # ... and what this window does when it sees the change
         self.assertEqual(w.view("posting")["video"]["name"], "ep01.mp4")
@@ -535,9 +537,36 @@ class Posting(ApiPosting):
         self.assertEqual((posting.recent(), self.google.starts, db.uploads()), ([], [], []))
         # The same yes about the video that is picked goes ahead.
         made = w.call("post_with_api", CAPTION, TAGS, "private", False,
-                      {"video": str(self.video), "made_for_kids": False})
+                      {"video": str(self.video), "sha256": posting.digest(self.video), "made_for_kids": False})
         job = self.over(w, made["jobs"][0]["id"])
         self.assertEqual((job["state"], job["video"], len(self.google.videos)), ("posted", "ep01.mp4", 1))
+
+    def test_a_yes_to_a_question_about_a_file_that_was_replaced_since_starts_nothing(self):
+        """A video is its bytes, not its name. The question shows a file, and through the API nobody sees the video
+        again before it is up. When another file has that name by the time of the yes (a new render, a copy over
+        it), the yes was not to this one. A pipeline video's review stops that by itself; a video dropped into the
+        videos folder has no review."""
+        w = self.window()
+        info = w.call("youtube_api_info", CAPTION, TAGS)
+        self.assertEqual((info["review"]["state"], info["can_post"]), ("none", True))
+        self.assertEqual(info["video"]["sha256"], hashlib.sha256(BYTES).hexdigest())
+        self.video.write_bytes(BYTES[::-1] + b"another cut")
+        self.assertIsNone(w.call("post_with_api", CAPTION, TAGS, "private", False, self.yes_to(info)))
+        toast = w.sent("toast")[-1]
+        self.assertEqual((toast["title"], toast["severity"]), ("Nothing was started", "warning"))
+        self.assertEqual(toast["body"], "ep01.mp4 changed after the question was shown: it is another file now, so "
+                                        "nothing was sent. Check the video, then press "
+                                        f"{posting_tab.LABELS['post_api']} again.")
+        self.assertEqual((posting.recent(), self.google.starts, db.uploads()), ([], [], []))
+        # A yes that says nothing of the file it was to is no yes to this one either.
+        self.assertIsNone(w.call("post_with_api", CAPTION, TAGS, "private", False,
+                                 {"video": str(self.video), "made_for_kids": False}))
+        self.assertEqual((posting.recent(), self.google.starts), ([], []))
+        # Asked again, the question is about the file that is there now, and its yes goes ahead.
+        info = w.call("youtube_api_info", CAPTION, TAGS)
+        made = w.call("post_with_api", CAPTION, TAGS, "private", False, self.yes_to(info))
+        job = self.over(w, made["jobs"][0]["id"])
+        self.assertEqual((job["state"], bytes(self.google.videos[0]["data"])), ("posted", BYTES[::-1] + b"another cut"))
 
     def test_a_made_for_kids_answer_changed_since_the_question_starts_nothing(self):
         """The question shows the made-for-kids answer a post will carry, or that none will be sent. When that is
@@ -545,7 +574,7 @@ class Posting(ApiPosting):
         self.connect_api(kids=None)
         w = self.window()
         info = w.call("youtube_api_info", CAPTION, TAGS)
-        shown = {"video": info["video"]["path"], "made_for_kids": info["send"]["made_for_kids"]}
+        shown = self.yes_to(info)
         self.assertIsNone(shown["made_for_kids"])  # the question said: none will be sent
         youtube_api.set_defaults(made_for_kids=True)  # another window's choice, on the same file
         self.assertIsNone(w.call("post_with_api", CAPTION, TAGS, "private", False, shown))
@@ -557,8 +586,7 @@ class Posting(ApiPosting):
         # Asked again, the question shows the new answer, and a yes to that one is sent with it.
         info = w.call("youtube_api_info", CAPTION, TAGS)
         self.assertEqual(info["fields"][3], {"key": "made_for_kids", "label": "Made for kids", "text": "Yes"})
-        made = w.call("post_with_api", CAPTION, TAGS, "private", False,
-                      {"video": info["video"]["path"], "made_for_kids": info["send"]["made_for_kids"]})
+        made = w.call("post_with_api", CAPTION, TAGS, "private", False, self.yes_to(info))
         self.over(w, made["jobs"][0]["id"])
         self.assertEqual(self.google.starts[0]["body"]["status"],
                          {"privacyStatus": "private", "selfDeclaredMadeForKids": True})

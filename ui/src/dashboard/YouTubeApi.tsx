@@ -246,7 +246,8 @@ function Picks({ id, options, value, onChange }: { id: string; options: [string,
  * way of posting has never been run against YouTube itself, then exactly what will be sent, a row for each thing,
  * with who can see it to choose for this one post, and what is left to YouTube Studio. A video that is up there
  * already is only posted again by the button that says so. Nothing is uploaded until Post, and the yes goes with
- * what the question showed: the Python side starts nothing when that is no longer so. */
+ * what the question showed (the video, the file it was, the made-for-kids answer): the Python side starts nothing
+ * when that is no longer so. */
 export function ApiPostDialog({ data, close }: { data: ApiPostData; close: () => void }) {
   const s = useDash()
   const { info } = data
@@ -259,7 +260,8 @@ export function ApiPostDialog({ data, close }: { data: ApiPostData; close: () =>
     sent.current = true
     setBusy(true)
     // What it started, and why not when it didn't, come back as the YouTube row and as pop-ups.
-    await s.bridge.ask("post_with_api", data.caption, data.tags, privacy, info.force, { video: info.video!.path, made_for_kids: info.send!.made_for_kids })
+    const shown = { video: info.video!.path, sha256: info.video!.sha256, made_for_kids: info.send!.made_for_kids }
+    await s.bridge.ask("post_with_api", data.caption, data.tags, privacy, info.force, shown)
     if (s.dialog?.kind === "api_post") close() // (Esc may have closed it meanwhile)
   }
   // The question is about one video. When another is the picked one by now (this one was hidden or removed in another

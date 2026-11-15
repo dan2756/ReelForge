@@ -466,7 +466,8 @@ class YouTubeApiTab:
 
     @rpc
     def youtube_api_info(self, caption: str = "", tags: str = "") -> dict | None:
-        """The connection (youtube_api_view), and for the picked video what a post through the API would send:
+        """The connection (youtube_api_view), and for the picked video ("video": its path, name, size and "sha256",
+        which is the file as it is now) what a post through the API would send:
         "send" ({"title", "description", "privacy", "made_for_kids" (None: none is sent, because you haven't
         answered), "category"}), the same as "fields" to show,
         "left" (what ReelForge doesn't set), whether it can start ("can_post", "why"), and whether it would be a
@@ -508,7 +509,8 @@ class YouTubeApiTab:
         else:
             why = ""
         return {**out, "video": {"path": str(video), "name": video.name,
-                                 "size": f"{video.stat().st_size / 1024 / 1024:.1f} MB"},
+                                 "size": f"{video.stat().st_size / 1024 / 1024:.1f} MB",
+                                 "sha256": posting.digest(video)},
                 "review": look["review"], "send": send, "fields": fields, "can_post": not why, "why": why,
                 "force": again and not why, "blocked": block}
 
@@ -622,7 +624,8 @@ class YouTubeApiTab:
         """Your yes: post the picked video to YouTube through its API, with the form's caption and hashtags.
         privacy: who can see it ("": your choice for posts to come, private unless you changed it). force: post
         it again although it is up there, or may be. shown: what the question showed you, which the window sends
-        back ({"video": youtube_api_info's video.path, "made_for_kids": its send.made_for_kids}). Returns
+        back ({"video": youtube_api_info's video.path, "sha256": its video.sha256, "made_for_kids": its
+        send.made_for_kids}). Returns
         {"batch", "jobs": [{"id", "platform"}], "blocked", "started"}; None when there was nothing to start from.
         The upload runs on a thread of its own."""
         if self.demo:
@@ -634,12 +637,22 @@ class YouTubeApiTab:
         privacy = privacy or said["privacy"]
         if shown is not None:
             # A yes is to what the question showed. The list picks another video by itself when the one in the
-            # question leaves it (hidden or removed in another window, or its file went), and the made-for-kids
-            # answer can be changed in another window. Then nothing starts, and this says which of the two it was.
+            # question leaves it (hidden or removed in another window, or its file went), a file can be written
+            # over under its name (a new render, a copy), and the made-for-kids answer can be changed in another
+            # window. Then nothing starts, and this says which of the three it was.
             asked = Path(str(shown.get("video") or ""))
             if asked != self.selected_file:
                 self.notify(f"The question was about {asked.name}, and {self.selected_file.name} is the picked "
                             "video now. Press Post with API… again to post this one.",
+                            title="Nothing was started", severity="warning", timeout=12)
+                return None
+            try:
+                same = shown.get("sha256") == posting.digest(self.selected_file)
+            except OSError:
+                same = False
+            if not same:  # (nobody sees the video again before it is up: through the extension you do, in the tab)
+                self.notify(f"{asked.name} changed after the question was shown: it is another file now, so "
+                            "nothing was sent. Check the video, then press Post with API… again.",
                             title="Nothing was started", severity="warning", timeout=12)
                 return None
             if shown.get("made_for_kids") is not said["made_for_kids"]:

@@ -7,7 +7,7 @@
 
 import { Database } from "bun:sqlite"
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { TextAttributes } from "@opentui/core"
@@ -368,6 +368,25 @@ describe("the question before a post", () => {
     expect(popups().at(-1)).toBe("Nothing was started: The question was about clip.mp4, and ep03_hail.mp4 is the picked video now. Press Post with API… again to post this one.")
     expect([jobsMade(), (await google(h)).starts]).toEqual([0, []])
     expect(row(h)).toMatch(/^YouTube ○ not posted ▐ Post with API… ▌$/)
+  })
+
+  test("is about one file: when another file has the video's name by the time of the yes, nothing starts", async () => {
+    const h = await kit({ api: { client: "on", kids: false } })
+    await clickText(h, "clip.mp4", 2) // not from the pipeline, so no review of one cut stands in the way
+    await until(h, () => posting(h).video?.name === "clip.mp4")
+    await ask(h)
+    expect(dialog(h)).toContain("clip.mp4 0.0 MB")
+    writeFileSync(posting(h).video!.path, "another cut, saved over the one the question is about")
+    await clickText(h, "Post to YouTube", 2)
+    await until(h, () => popups().length > 0 && !frame(h).includes("POST TO YOUTUBE THROUGH ITS API"))
+    expect(popups()).toEqual(["Nothing was started: clip.mp4 changed after the question was shown: it is another file now, so nothing was sent. Check the video, then press Post with API… again."])
+    expect([jobsMade(), (await google(h)).starts]).toEqual([0, []])
+    // Asked again, the question is about the file that is there now, and its yes posts that one.
+    toasts.clear()
+    await ask(h)
+    await clickText(h, "Post to YouTube", 2)
+    await until(h, () => youtube(h).state === "posted")
+    expect([jobsMade(), (await google(h)).videos.length, popups()]).toEqual([1, 1, []])
   })
 
   test("a video that isn't reviewed can't go this way either, and says why", async () => {
