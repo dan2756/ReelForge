@@ -243,6 +243,26 @@ class RankTest(unittest.TestCase):
                          [("Top 10% of your TikTok videos for views", "1.90K · #2 of 20")])
 
 
+    def test_every_video_at_once_gets_the_badges_it_gets_alone(self):
+        """After each read every video is asked about (badges.notify_new): they're ranked against each platform's
+        numbers sorted once, not gone through again for every video, and that has to say the same."""
+        platforms = {"tiktok": SimpleNamespace(name="TikTok"), "youtube": SimpleNamespace(name="YouTube")}
+        posts, first_day = [], {}
+        for i in range(60):
+            key = "tiktok" if i % 3 else "youtube"
+            posts.append({"platform": key, "post_id": str(i), "views": (i * 37) % 23 * 100,  # with ties, and a zero
+                          "likes": None if i % 7 == 0 else i % 5, "shares": (i * 11) % 13})
+            if i % 4:
+                first_day[key, str(i)] = (i * 53) % 17 * 10
+        values = badges.sorted_values(posts, first_day)
+        earned = 0
+        for post in posts:
+            alone = badges.video_badges(post, posts, first_day, platforms)
+            self.assertEqual(badges.video_badges(post, posts, first_day, platforms, values), alone, post)
+            earned += len(alone)
+        self.assertGreater(earned, 10)  # (the comparison isn't of nothing with nothing)
+
+
 class DayBadgeTest(unittest.TestCase):
     def rows(self, per_day: list[int], today: int) -> list[dict]:
         """Hourly readings: each earlier day gains per_day[i] followers evenly, today `today` so far."""
