@@ -78,9 +78,10 @@ LEAVE = {True: ("Disconnect? ReelForge forgets the client, then tells Google tha
 START_AS = "A new post starts as the one you pick here. You can choose otherwise for one post, in its question."
 KIDS_ASK = ("\"Made for kids\" is a declaration you make to YouTube, so ReelForge never makes it for you. Until you "
             "answer, a post sends none and your channel's own audience setting in YouTube Studio applies.")
-HOW = ("ReelForge uploads the video to YouTube itself, through Google's API, with exactly this. The YouTube row shows "
-       "the percent. Keep ReelForge open until it says posted.")
-AGAIN_ASK = "Posting it makes a second video on your channel."
+# (Both short: in a window 24 rows tall every row they take is one less of what will be sent.)
+HOW = ("ReelForge uploads the video itself, through Google's API, with exactly this. Keep ReelForge open until its "
+       "row says posted.")
+AGAIN_ASK = "It would be a second video."
 
 
 # ---- one job's upload

@@ -272,10 +272,9 @@ class View(ApiPosting):
     def test_the_question_says_what_happens_after_your_yes_and_what_again_means(self):
         w = self.window()
         info = w.call("youtube_api_info", CAPTION, TAGS)
-        self.assertEqual(info["how"], "ReelForge uploads the video to YouTube itself, through Google's API, with "
-                                      "exactly this. The YouTube row shows the percent. Keep ReelForge open until "
-                                      "it says posted.")
-        self.assertEqual(info["again"], "Posting it makes a second video on your channel.")
+        self.assertEqual(info["how"], "ReelForge uploads the video itself, through Google's API, with exactly this. "
+                                      "Keep ReelForge open until its row says posted.")
+        self.assertEqual(info["again"], "It would be a second video.")
         self.assertEqual(info["words"], w.view("youtube_api")["words"])
 
     def test_the_demo_has_none_of_it(self):

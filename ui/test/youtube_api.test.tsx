@@ -312,7 +312,7 @@ describe("the question before a post", () => {
     const said = dialog(h)
     for (const text of [
       "ep03_hail.mp4 0.0 MB ✓ QA passed and the review says APPROVED.",
-      "ReelForge uploads the video to YouTube itself, through Google's API, with exactly this. The YouTube row shows the percent. Keep ReelForge open until it says posted.",
+      "ReelForge uploads the video itself, through Google's API, with exactly this. Keep ReelForge open until its row says posted.",
       UNPROVEN,
       `Title ${CAPTION} #shorts Description ${TAGS} Who can see it ▐ ● Private ▌ ○ Unlisted ○ Public`,
       "Made for kids Not sent: you haven't answered, so your channel's own setting applies",
@@ -429,7 +429,7 @@ describe("a post through the API", () => {
     expect((await google(h)).starts.length).toBe(1)
     toasts.clear()
     await ask(h, "Again with API…")
-    expect(dialog(h)).toContain("Already posted with ReelForge's help. Posting it makes a second video on your channel.")
+    expect(dialog(h)).toContain("Already posted with ReelForge's help. It would be a second video.")
     expect(dialog(h)).toContain("▐ Cancel ▌ ▐ Post it again ▌")
     expect(focused(h)).toBe("Cancel")
     await clickText(h, "Post it again", 2)
