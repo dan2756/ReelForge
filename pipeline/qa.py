@@ -2,7 +2,8 @@
 intermediate files, and writes build/qa/report.md + qa.json + contact sheets for a visual review.
 
   python pipeline/qa.py episodes/<id>          (exit code 1 if any check FAILs)
-  python pipeline/qa.py episodes/<id> --lint   (before the render: what episode.json and series.json can tell)
+  python pipeline/qa.py episodes/<id> --lint   (before the render: what episode.json and series.json can tell;
+                                                with --before-render only what the frames depend on fails it)
   python pipeline/qa.py episodes/<id> --audio  (after the audio step: the sound checks on build/audio.wav)
 
 Checks: file/streams, duration within the channel's length (studio.toml), black and frozen frames outside intended
@@ -419,6 +420,12 @@ def check_audio(x, sr, spec, R):
     return per_sec, a_db
 
 
+# The lint rows that are about what the scene gives: its series, and how far it is rendered. Putting one of them
+# right can mean building or rendering again, so they stop a render before it starts. The other rows are about the
+# text and the sound, which are worked on while the frames render and never cost one.
+RENDER_ROWS = {"HUD numbers", "cover frame"}
+
+
 def lint(ep_dir):
     """Before the render (`qa.py <episode> --lint`, which make_episode runs at the end of the build step and before
     the render): lint_spec, then what would otherwise stop a later step halfway: a HUD number that isn't in
@@ -700,6 +707,12 @@ def main():
         verdict = [f"  QA {v}: report {qa_dir / 'report.md'}" for v in ("PASSED", "FAILED")]
     for c in R.checks:
         print(f"  [{c['status']}] {c['check']}: {c['detail']}")
+    failed = {c["check"] for c in R.checks if c["status"] == "FAIL"}
+    if "--before-render" in sys.argv and failed and not failed & RENDER_ROWS:
+        # the render is often started again, or left running, while the text and the sound are still being written
+        print("  lint: the FAILs above are in the text or the sound, which no frame depends on, so the render goes "
+              "on. Fix them before --steps post.")
+        sys.exit(0)
     print(verdict[0 if R.passed else 1])
     sys.exit(0 if R.passed else 1)
 

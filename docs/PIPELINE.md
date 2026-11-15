@@ -90,7 +90,9 @@ pipeline uses the stamp so that **nothing needs deleting by hand**:
   (`.venv\Scripts\python pipeline\qa.py episodes\<id> --lint`): the placeholder title, story lines that overlap,
   are too short, run past the end or wrap past 2 rows, gaps in the HUD's chapters, a HUD number the scene does not
   give, a sound that is not in the manifest, a cover frame past `render_until`, the caption rules, and a warning
-  for each line that is on screen across a cut. A FAIL stops the step.
+  for each line that is on screen across a cut. A FAIL stops the build. Before the render every row is shown, and
+  only the two that the frames depend on stop it (the HUD's numbers and the cover frame): text and sound can be
+  worked on while it renders.
 - **The lines against their shots.** `--steps stills --stills lines` renders the seconds where a line most often
   ends up over the wrong shot: each line just after it fades in and just before it goes, both sides of each cut,
   and the cover's frame. `build/preview/sheet_N.jpg` shows them with the text on, 12 to a sheet, each labelled with

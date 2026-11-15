@@ -267,6 +267,59 @@ class SoundCheck(Episode):
         self.assertFalse(report.passed)
 
 
+class Verdicts(Episode):
+    """`qa.py <episode> --lint` and `--audio` as the steps run them: the last line, and the exit code they go by."""
+
+    def setUp(self):
+        super().setUp()
+        patch = mock.patch.multiple(qa.config, MAX_HASHTAGS=5, TIKTOK_FIRST_TAG="fyp", PLATFORMS=["tiktok"])
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def qa(self, *flags):
+        self.save()
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", ["qa.py", str(self.ep), *flags]), redirect_stdout(out), \
+                self.assertRaises(SystemExit) as stop:
+            qa.main()
+        return stop.exception.code, out.getvalue()
+
+    def test_the_lint_that_ends_the_build_stops_on_any_fail(self):
+        code, out = self.qa("--lint")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.endswith("  lint passed\n"))
+        self.spec["audio"]["hits"].append({"sound": "not_downloaded_yet", "at": 2.0})
+        code, out = self.qa("--lint")
+        self.assertEqual(code, 1)
+        self.assertTrue(out.endswith("  lint FAILED: fix episode.json before rendering\n"))
+
+    def test_before_the_render_text_and_sound_do_not_stop_it(self):
+        """The render runs in the background for half an hour while the sound and the text are worked on. A sound
+        that is not in the manifest yet, or a title still to write, changes no frame."""
+        self.spec["audio"]["hits"].append({"sound": "not_downloaded_yet", "at": 2.0})
+        self.spec["title"] = "WRITE THE HOOK LINE HERE"
+        self.spec["lines"] = [[1.0, 3.0, "First."], [2.5, 4.5, "Second."]]
+        self.spec["hashtags"] = ["a", "b", "c", "d", "e", "f"]
+        code, out = self.qa("--lint", "--before-render")
+        self.assertEqual(code, 0)
+        for row in ("title", "story lines", "sounds in the cue sheet", "caption rules (from episode.json)"):
+            self.assertIn(f"  [FAIL] {row}: ", out)                         # still shown
+        self.assertIn("so the render goes on. Fix them before --steps post.", out.splitlines()[-1])
+        self.assertNotIn("lint passed", out)
+
+    def test_before_the_render_what_the_scene_has_to_give_still_stops_it(self):
+        self.spec["hud"]["vars"]["mi"] = {"series": "size_mi", "format": "miles"}
+        code, out = self.qa("--lint", "--before-render")
+        self.assertEqual(code, 1)
+        self.assertIn("  [FAIL] HUD numbers: mi: build/series.json has no series 'size_mi'", out)
+        self.assertTrue(out.endswith("  lint FAILED: fix episode.json before rendering\n"))
+        del self.spec["hud"]["vars"]["mi"]
+        self.spec["cover"]["time"] = 9.5                                    # past render_until: more to render
+        self.assertEqual(self.qa("--lint", "--before-render")[0], 1)
+        self.spec["cover"]["time"] = 5.0
+        self.assertEqual(self.qa("--lint", "--before-render")[0], 0)
+
+
 class VideoWithoutSound(Episode):
     """QA on a video that was encoded without an audio track: it used to stop with ffmpeg's error, no report."""
 
@@ -337,7 +390,7 @@ class StepsRunTheEarlyChecks(unittest.TestCase):
                                                "python qa.py --lint"])
 
     def test_the_render_starts_with_the_lint(self):
-        self.assertEqual(self.steps("render"), ["python qa.py --lint", "blender -a"])
+        self.assertEqual(self.steps("render"), ["python qa.py --lint --before-render", "blender -a"])
 
     def test_the_mix_is_checked_before_the_video_is_made(self):
         self.assertEqual(self.steps("audio,video"), ["python audio_mix.py", "python qa.py --audio",

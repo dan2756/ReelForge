@@ -150,7 +150,8 @@ def main():
              ",".join(f"{s:g}" for s in secs)])
 
     if "render" in steps:
-        run([sys.executable, config.PIPELINE / "qa.py", ep, "--lint"])
+        # only a fault in what the scene gives stops the render: text and sound are worked on while it runs
+        run([sys.executable, config.PIPELINE / "qa.py", ep, "--lint", "--before-render"])
         render(build, spec, args.rerender, args.keep_frames, args.as_built)
 
     post = config.PIPELINE / "post"
