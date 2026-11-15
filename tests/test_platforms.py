@@ -272,6 +272,21 @@ class Browser(unittest.TestCase):
             with mock.patch.object(browsers, "WINDOWS", True):
                 self.assertEqual(browsers.major_version(browsers.Browser("Edge", exe, True)), 141)
 
+    def test_the_version_is_looked_up_once_per_browser(self):
+        """On Linux it means running the browser with --version, which every background read used to do again."""
+        asked = []
+
+        def run(cmd, **how):
+            asked.append(cmd)
+            return mock.Mock(stdout="Google Chrome 153.0.7500.12\n")
+
+        chrome = browsers.Browser("Chrome", Path("/opt/somewhere/chrome"))
+        with mock.patch.object(browsers, "WINDOWS", False), mock.patch.object(browsers, "MAC", False), \
+                mock.patch.object(browsers.subprocess, "run", run):
+            self.assertEqual([browsers.major_version(chrome) for _ in range(3)], [153, 153, 153])
+            self.assertIn("Chrome/153.0.0.0", browsers.user_agent(chrome))
+        self.assertEqual(asked, [["/opt/somewhere/chrome", "--version"]])
+
     @unittest.skipUnless(os.environ.get("REELFORGE_BROWSER_TEST") == "1", "set REELFORGE_BROWSER_TEST=1")
     def test_the_browser_starts_headless(self):
         """The browser ReelForge would read stats with starts with its own profile and shows its user agent."""

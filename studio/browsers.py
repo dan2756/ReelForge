@@ -11,6 +11,7 @@ Standard library only: setup and doctor ask about it before the dashboard loads.
 
 from __future__ import annotations
 
+import functools
 import glob
 import json
 import os
@@ -120,8 +121,11 @@ def key(b: Browser) -> str:
     return str(b.exe) if b.exe else "playwright"
 
 
+@functools.lru_cache(maxsize=8)
 def major_version(b: Browser) -> int:
-    """The browser's major version (156), read without starting it where possible; 0 when it can't be told."""
+    """The browser's major version (156), read without starting it where possible; 0 when it can't be told. Looked up
+    once per browser while ReelForge runs: on Linux it means running the browser with --version, and every read in
+    the background asks (user_agent)."""
     text = ""
     try:
         if b.exe is None:
