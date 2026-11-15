@@ -145,8 +145,9 @@ describe("where each post stands", () => {
     await clickText(h, "▐ Cancel ▌", 3) // TikTok's, the first on screen
     await until(h, () => state(h, "tiktok") === "cancelled")
     expect(row(h, "TikTok")).toContain("○ cancelled (you cancelled it)")
-    expect(row(h, "TikTok")).toContain("▐ Try again ▌")
-    await clickText(h, "It's posted", 2) // YouTube's: filled in, and you pressed Post there
+    // (its video was on TikTok's page when you called it off, where you can finish by hand: that is yours to say)
+    expect(row(h, "TikTok")).toMatch(/▐ Try again ▌ ▐ It's posted ▌/)
+    await clickOnRow(h, "YouTube", "It's posted") // filled in, and you pressed Post there
     await until(h, () => state(h, "youtube") === "posted")
     expect(row(h, "YouTube")).toContain("✓ posted")
     expect(frame(h)).not.toContain("Something went wrong")
@@ -563,7 +564,10 @@ describe("without the extension", () => {
     await h.settle(300)
     await clickBelow(h, "▐ Post… ▌", find(h, "Connect another browser")![1], 3) // straight on to the question
     await until(h, () => frame(h).includes("POST THIS VIDEO"))
-    expect(frame(h)).toContain("▐ Start 4 posts ▌")
+    // TikTok's upload page was opened by hand a moment ago, further up. A post made there shows nowhere here until a
+    // stats read finds it, so TikTok starts unticked: it goes only when you say again.
+    expect(dialog(h)).toContain("Its upload page was opened by hand in the last six hours. A post made there may be up before a stats read has seen it. Tick it to post there again.")
+    expect(frame(h)).toContain("▐ Start 3 posts ▌")
   })
 
   test("Show the extension folder says what it did in the dialog, where no pop-up covers Connect a browser", async () => {
