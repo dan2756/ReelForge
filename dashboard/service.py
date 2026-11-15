@@ -2395,7 +2395,8 @@ class Dashboard(StatsTab, SettingsTab, Service):
             "git": "A git copy: an update runs git pull.",
         }.get(kind, "")
         if how:
-            view["how"] = Text(how + "  Your channel, videos, stats and settings are never touched.", MUTED).json()
+            view["how"] = Text(how + "  Your channel, videos, stats and settings are never touched: only your AI's "
+                               "notes (CLAUDE.md, AGENTS.md) are written again, for the new version.", MUTED).json()
         self.emit("update", {**view, "status": out.json()})
 
     @rpc

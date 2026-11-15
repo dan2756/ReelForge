@@ -12,6 +12,9 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
+from dashboard import db, demo
+from dashboard.config import PLATFORM_KEYS
+from dashboard.tests.window import Window, plain
 from studio import update
 
 
@@ -203,6 +206,28 @@ class GitPullTest(unittest.TestCase):
         with self.assertRaises(update.UpdateError):
             update._git_pull(self.copy, lambda *a: None)
         self.assertEqual((self.copy / "README.md").read_text(encoding="utf-8"), "edited\n")
+
+
+class UpdatesTabTest(unittest.TestCase):
+    """What the Updates tab tells you about an update (dashboard.service), in a window on demo data."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(setattr, db, "_path", db._path)
+        root = Path(tmp.name)
+        cfg = {"refresh_minutes": 0, "videos_dir": str(root / "none"), "episodes_dir": str(root / "none"),
+               "completed_dir": str(root / "none"), **{key: {} for key in PLATFORM_KEYS}}
+        db.init(root / "demo.db")
+        self.w = Window(cfg, demo.platforms(), tab="updates")
+        self.addCleanup(self.w.close)
+
+    def test_it_says_what_an_update_leaves_alone_and_what_it_writes_again(self):
+        # true since an update stopped writing studio.toml and the accounts again from the first-time answers
+        # (tests/test_upgrade_preservation.py): the notes for your AI are the one thing of yours it rewrites
+        how = plain(self.w.view("update")["how"])
+        self.assertIn("Your channel, videos, stats and settings are never touched: only your AI's notes (CLAUDE.md, "
+                      "AGENTS.md) are written again, for the new version.", how)
 
 
 class WhatsNewTest(unittest.TestCase):
