@@ -105,9 +105,14 @@ HELP = [
     ("Compare", "The platform scoreboard, or pick an episode to see the same video on every platform, each against "
                 "that platform's typical video. Newest, Oldest and Most views beside Episodes sort the list (Most "
                 "views adds up each episode's views on every platform).", "compare"),
-    ("Publish", "The green button at the top right opens it. Pick a video, check the caption, then open each upload "
-                f"page: ReelForge copies the right text, shows the file in {desktop.FILES}, and checks for the new "
-                "post 10 and 30 minutes later. Remove (or a right-click) hides a video or moves it to the "
+    ("Publish", "The green button at the top right opens it. Pick a video and check the caption. Under POST, a row "
+                "for each platform says where its post stands. Post… shows each platform's exact text and asks, "
+                "then opens each upload page in your browser, where ReelForge's browser extension attaches the "
+                "video and fills in the text: you check it and press Post there. The extension is optional, and "
+                "it is tested against copies of the upload pages, not yet on the live sites. Under BY HAND, each "
+                f"platform's button opens its upload page, copies the right text and shows the file in "
+                f"{desktop.FILES}. Either way ReelForge checks for the new post 10 and 30 minutes later. Remove "
+                "(or a right-click) hides a video or moves it to the "
                 f"{desktop.BIN}; Show hidden brings hidden ones back. Under the videos, Best time to post shows each "
                 "platform's part of the day whose videos got the most views in their first day, and when it next "
                 "comes round; it needs 2 videos a day old in each of 2 parts of the day, with one clearly "
@@ -117,7 +122,10 @@ HELP = [
                  "Sign up opens the platform's own sign-up page (with more than one profile, in a private window of "
                  "your browser, so your other channel stays logged in), and Disconnect hides one again (its stats "
                  "stay saved). Each panel says where that platform's stats come from and when they were last read; "
-                 "Type in stats lets you enter the numbers by hand for one ReelForge can't read yet.", "accounts"),
+                 "Type in stats lets you enter the numbers by hand for one ReelForge can't read yet, and Log out "
+                 "logs ReelForge's own browser out of Instagram or X. The line above the panels is the browser "
+                 "extension for Post…: it works in your everyday browser, whose sign-ins are apart from these "
+                 "accounts.", "accounts"),
     ("Updates", "Your version, what's new in the next one, and Update and restart: one click downloads it, puts it in "
                 "place (your channel, videos and stats stay as they are) and opens ReelForge again.", "updates"),
     ("Settings", "This channel's answers from first-time setup (Change your answers asks the questions again, and Copy "

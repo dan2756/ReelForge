@@ -183,6 +183,11 @@ class WindowTest(Folder):
             self.assertNotRegex(text, r"\(\d\)|tab \d", title)
         self.assertIn("order of the tabs", about["settings"][1])
         self.assertIn("green button", about["publish"][1])
+        # Posting: both ways are there, and the extension is never said to do more than it has been seen to do.
+        for said in ("Post…", "BY HAND", "you check it and press Post there", "optional",
+                     "not yet on the live sites"):
+            self.assertIn(said, about["publish"][1])
+        self.assertIn("Log out", about["accounts"][1])
         self.assertEqual(dict(KEYS)["1-7"], "switch tabs")
         self.assertIn("Publish", dict(KEYS)["u"])
 

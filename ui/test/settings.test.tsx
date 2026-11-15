@@ -240,7 +240,7 @@ describe("the tab order", () => {
     expect(help.indexOf("Accounts (2)")).toBeLessThan(help.indexOf("Videos (3)"))
     expect(help).not.toContain("Publish (")
     const [x, y] = find(h, "Overview (1)")! // down the help to Publish, after the tabs, with its key
-    for (let i = 0; i < 30 && !frame(h).includes("The green button at the top right opens it."); i++) {
+    for (let i = 0; i < 80 && !frame(h).includes("The green button at the top right opens it."); i++) {
       await h.t.mockMouse.scroll(x + 2, y + 2, "down")
       await h.settle(100)
     }
