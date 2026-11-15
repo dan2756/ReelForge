@@ -440,7 +440,8 @@ describe("without the extension", () => {
     await clickText(h, "▐ Connect a browser ▌", 3)
     await until(h, () => listed("opened.txt").some((l) => l.includes("/pair?k=")))
     expect(listed("opened.txt").at(-1)).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/pair\?k=/)
-    expect(dialog(h)).toContain("Waiting for your browser")
+    expect(dialog(h)).toContain("● Waiting for your browser: the page that opened connects it by itself. No extension in that browser yet? The page says how to add it.")
+    expect(popups().filter((p) => p.includes("Connecting your browser"))).toEqual([]) // the dialog says it: no pop-up over its buttons
     // The extension connects (what the pair page does, written the way the local server writes it).
     const store = join(tmp, "dashboard", "data", "extension.json")
     const now = new Date().toISOString().replace(/\.\d+Z$/, "+00:00")
@@ -449,7 +450,7 @@ describe("without the extension", () => {
     expect(dialog(h)).toContain("● Browser extension connected Edge on this PC · v0.1.0")
     expect(dialog(h)).not.toContain("Waiting for your browser")
     expect(frame(h)).not.toContain("Or post by hand now:")
-    toasts.clear() // the pop-ups about the two pages that opened sit over the dialog's corner
+    toasts.clear() // the pop-up about the upload page that opened by hand sits over the dialog's corner
     await h.settle(300)
     await clickBelow(h, "▐ Post… ▌", find(h, "Connect another browser")![1], 3) // straight on to the question
     await until(h, () => frame(h).includes("POST THIS VIDEO"))
@@ -535,6 +536,10 @@ describe("the extension's dialog", () => {
     expect(dialog(h)).not.toContain("Waiting for your browser")
     expect(dialog(h)).toContain("● Browser extension connected Chrome on this PC · v0.1.0")
     expect(h.bridge.view<ExtensionView>("extension")!.installs.map((b) => b.install)).toEqual(["install-chrome"])
+    // No pop-up came with the page that opened, so the dialog's buttons are there to press.
+    expect(popups()).toEqual([])
+    await clickBelow(h, "▐ Close ▌", find(h, "Connect another browser")![1], 3)
+    expect(frame(h)).not.toContain("CONNECTED BROWSERS")
   })
 
   test("a window that isn't listening says why, instead of starting a post it can't hand over", async () => {

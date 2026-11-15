@@ -374,7 +374,8 @@ export function ExtensionDialog({ from, close }: { from?: "post"; close: () => v
       </box>
       {waiting ? (
         <box flexDirection="row" flexShrink={0}>
-          <Wrapped segs={[["● Waiting for your browser: the page that opened connects it by itself.", DASH.warn]]} />
+          {/* (said here and not in a pop-up, which sat on this dialog's buttons) */}
+          <Wrapped segs={[["● Waiting for your browser: the page that opened connects it by itself. No extension in that browser yet? The page says how to add it.", DASH.warn]]} />
         </box>
       ) : null}
       {/* What it is, then its browsers or its steps: the part that scrolls, in a window too short for all of it, so

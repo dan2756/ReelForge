@@ -561,7 +561,7 @@ class PostingTab:
     @rpc
     def pair_extension(self) -> bool:
         """Connect a browser: open the local page the extension pairs on. With no extension in that browser yet,
-        the page says how to add it. True when a browser opened."""
+        the page says how to add it. True when a browser opened (the window then says it is waiting for it)."""
         if self.demo:
             self.notify("The demo doesn't use the browser extension.", timeout=4)
             return False
@@ -572,8 +572,9 @@ class PostingTab:
             return False
         url = server.pair_url()
         if desktop.open_url(url):
-            self.notify("A ReelForge page is opening in your browser: the extension connects there. No extension "
-                        "yet? The page says how to add it.", title="Connecting your browser", timeout=12)
+            # No pop-up: the extension's dialog, which is what asks, says in a line of its own that it is waiting for
+            # the page that opened. A pop-up saying the same sat on the dialog's buttons for twelve seconds, Post…
+            # among them once the browser had connected.
             return True
         self.copy_text(url)
         self.notify("ReelForge couldn't open your browser. The page's address is copied: paste it into the browser "

@@ -1379,12 +1379,12 @@ class WindowServes(PostingTest):
         self.assertTrue(w.call("pair_extension"))
         (url,) = self.opened
         self.assertRegex(url, rf"^http://127\.0\.0\.1:{w.svc.extension_port}/pair\?k=[\w-]+$")
-        self.assertEqual(w.sent("toast")[-1]["title"], "Connecting your browser")
+        self.assertNotIn("Connecting your browser", [t["title"] for t in w.sent("toast")])  # the dialog says it
         self.browser = False
         self.assertFalse(w.call("pair_extension"))
         self.assertEqual(self.copied, [self.opened[-1]])  # the address, to paste into the browser yourself
         toast = w.sent("toast")[-1]
-        self.assertEqual(toast["severity"], "warning")
+        self.assertEqual((toast["title"], toast["severity"]), ("Connecting your browser", "warning"))
         self.assertIn("couldn't open your browser. The page's address is copied", toast["body"])
         w.svc.stop_serving()
         self.assertFalse(w.call("pair_extension"))
