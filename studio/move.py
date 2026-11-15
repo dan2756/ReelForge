@@ -153,6 +153,7 @@ class Plan:
     configs: list[tuple[Path, dict[str, str]]] = field(default_factory=list)  # config.toml -> {key: its full path}
     outside: list[Path] = field(default_factory=list)   # the folders the Publish tab reads outside ReelForge (stay)
     system: dict[str, bool] = field(default_factory=dict)
+    was: list[tuple[Path, str]] = field(default_factory=list)   # each config.toml prepare() rewrote, as it was before
 
 
 def plan(target: Path | None = None) -> Plan:
@@ -227,11 +228,11 @@ def _write_configs(p: Plan) -> list[str]:
     problems = []
     for path, change in p.configs:
         try:
-            text = dashboard_config.set_keys(path.read_text(encoding="utf-8"), {"": change})
+            before = path.read_text(encoding="utf-8")
+            text = dashboard_config.set_keys(before, {"": change})
             tomllib.loads(text)    # never write a config the dashboard can't read
-            tmp = path.with_suffix(".tmp")
-            tmp.write_text(text, encoding="utf-8", newline="\n")
-            tmp.replace(path)
+            P.write_atomic(path, text)
+            p.was.append((path, before))
         except (OSError, tomllib.TOMLDecodeError) as e:
             problems.append(f"{P.rel(path)} couldn't be written ({e})")
     return problems
@@ -253,7 +254,14 @@ def prepare(p: Plan, reopen: bool = False) -> list[str]:
     return []
 
 
-def _undo() -> None:
+def _undo(p: Plan | None = None) -> None:
+    """Take back what prepare() did for a move that then didn't happen: each config.toml as it was (a folder written
+    in full inside ReelForge had been pointed at the new place already, where nothing is), and the note."""
+    for path, before in (p.was if p else []):
+        try:
+            P.write_atomic(path, before)
+        except OSError:
+            pass
     try:
         (ROOT / STATE).unlink()
     except OSError:
@@ -400,13 +408,13 @@ def go(p: Plan, reopen: bool = False, pause: bool = True, say=print) -> tuple[in
     reopen ReelForge opens there in place of this process. Returns (the exit code, whether the folder has moved)."""
     problems = prepare(p, reopen)
     if problems:
-        _undo()
+        _undo(p)
         say(f"{KIT_NAME} didn't move, and nothing else changed: {'; '.join(problems)}.")
         return 1, False
     if P.WINDOWS:
         err = _window(p, reopen, pause)
         if err:
-            _undo()
+            _undo(p)
             say(f"{KIT_NAME} didn't move: {err}.")
             return 1, False
         say(f"A small window moves {KIT_NAME} as soon as it has closed (it waits while anything still has a file in "
@@ -416,7 +424,7 @@ def go(p: Plan, reopen: bool = False, pause: bool = True, say=print) -> tuple[in
     os.chdir(p.target.parent)   # not inside the folder that's moving
     err = rename(p)
     if err:
-        _undo()
+        _undo(p)
         say(f"{KIT_NAME} didn't move ({err}), and nothing else changed.")
         return 1, False
     repair_venv(p.source, p.target)
