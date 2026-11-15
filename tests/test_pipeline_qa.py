@@ -106,6 +106,21 @@ class Lint(Episode):
         self.assertIn("mi: build/series.json has no series 'size_mi'", detail)
         self.assertIn("the chapter from 0 s: KeyError 'earths' in its sub", detail)
 
+    def test_a_hud_template_is_filled_with_text_as_the_video_step_fills_it(self):
+        """compose.py hands each chapter its numbers already formatted, as text. A format for text is right there,
+        and one for a number stops the video step on its first frame."""
+        sys.path.insert(0, str(qa.config.PIPELINE / "post"))
+        import compose
+        self.spec["hud"]["chapters"][0]["value"] = "{ft:>9s} ft"
+        self.assertEqual(compose.hud_text(self.spec, self.series, 1.0, 30)[1], "        1 ft")
+        self.assertEqual(self.lint()[1]["HUD numbers"][0], "PASS")
+        self.spec["hud"]["chapters"][0]["value"] = "{ft:,d} ft"
+        with self.assertRaises(ValueError):
+            compose.hud_text(self.spec, self.series, 1.0, 30)
+        status, detail = self.lint()[1]["HUD numbers"]
+        self.assertEqual(status, "FAIL")
+        self.assertIn("the chapter from 0 s: ValueError", detail)
+
     def test_a_sound_that_is_not_in_the_manifest_fails(self):
         self.spec["audio"]["beds"] = [{"sound": "ocean_of_static", "from": 0, "to": 10}]
         self.spec["audio"]["scatter"] = [{"event": "bursts", "pool": ["glitch_break", "no_such_pop"]}]

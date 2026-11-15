@@ -450,7 +450,7 @@ def lint(ep_dir):
         for c in hud.get("chapters", []):
             try:
                 for part in ("label", "value", "sub"):
-                    c[part].format(**dict.fromkeys(names, 0))
+                    c[part].format(**dict.fromkeys(names, "0"))     # text, as compose fills them (FORMATS)
             except (KeyError, IndexError, ValueError) as exc:
                 bad.append(f"the chapter from {c.get('from')} s: {type(exc).__name__} {exc} in its {part}")
         R.add("HUD numbers", "FAIL" if bad else "PASS",
