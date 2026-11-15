@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+
+import httpx
 
 
 class PlatformError(Exception):
@@ -15,6 +18,45 @@ class PlatformError(Exception):
         self.needs_login = needs_login
 
 
+AGAIN = "ReelForge tries again at the next refresh."
+# What a failed read is put down to when it isn't a PlatformError (which says it itself): the kind, then what you're
+# told, the platform's name first. The error's own words go to data/refresh.log (detail), never on screen.
+KINDS = {
+    "slow": "{name} took too long to answer. " + AGAIN,
+    "offline": "{name} couldn't be reached (is this computer online?). " + AGAIN,
+    "busy": "{name}'s numbers couldn't be saved: the stats database was busy. " + AGAIN,
+    "browser": "{name} wasn't read: ReelForge's browser stopped part-way. " + AGAIN,
+    "odd": "{name} wasn't read: its page wasn't what ReelForge expected. " + AGAIN,
+}
+
+
+def kind_of(error: BaseException) -> str:
+    """Which of KINDS an error is ("said" for a PlatformError, whose message is already fit to show)."""
+    from_browser = type(error).__module__.startswith("playwright")  # Playwright's errors, without needing it here
+    if isinstance(error, PlatformError) and str(error).strip():
+        return "said"
+    if isinstance(error, (httpx.TimeoutException, TimeoutError)) or \
+            from_browser and type(error).__name__ == "TimeoutError":
+        return "slow"
+    if isinstance(error, (httpx.TransportError, OSError)):
+        return "offline"
+    if isinstance(error, sqlite3.Error):
+        return "busy"
+    return "browser" if from_browser else "odd"
+
+
+def explain(error: BaseException, name: str) -> str:
+    """A failed read of the platform called `name`, in a sentence fit to show."""
+    kind = kind_of(error)
+    # A message's first line only: browser errors run long.
+    return str(error).strip().splitlines()[0] if kind == "said" else KINDS[kind].format(name=name)
+
+
+def detail(error: BaseException) -> str:
+    """An error as the log keeps it: its kind and its own words, on one line (browser errors run to many)."""
+    return f"{type(error).__name__}: " + " | ".join(line.strip() for line in str(error).splitlines()[:6] if line.strip())
+
+
 @dataclass
 class Account:
     handle: str
@@ -22,6 +64,10 @@ class Account:
     views: int | None = None  # None: ReelForge sums the views of the posts it can see
     likes: int | None = None
     posts: int | None = None
+    # Part of the read failed and the rest was kept (TikTok's video list, say): what to tell you, and the error's
+    # own words for data/refresh.log.
+    warning: str = ""
+    detail: str = ""
 
 
 @dataclass

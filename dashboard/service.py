@@ -742,15 +742,23 @@ class Dashboard(StatsTab, SettingsTab, Service):
                 # Crunch the numbers here, off the loop's thread, so the window never stalls.
                 data = self.load_data() if result.done else None
             except Exception as e:  # the database was busy, say: report it, keep running
-                result, data = sync.Result(errors=[f"{type(e).__name__}: {e}"]), None
+                result, data = sync.broke(e), None
+            sync.log(["error: " + d for d in result.details])  # what went wrong in its own words: the window sums up
             if result.busy and worker.is_cancelled:
                 return  # it stopped waiting: a newer refresh took over, or ReelForge is closing
             self.loop.call_soon(self.after_refresh, result, manual, data)
 
+    refresh_said = ""  # what the last refresh's pop-up said went wrong ("" when nothing did)
+
     def after_refresh(self, result: sync.Result, manual: bool, data: dict | None) -> None:
         self.set_status("")
-        for e in result.errors:
-            self.notify(e, title="Refresh failed", severity="error", timeout=10)
+        # One pop-up for the whole refresh, in plain words (each platform's own reason is on its Accounts panel, the
+        # errors themselves in data/refresh.log). An automatic refresh doesn't say the same thing every half hour.
+        said = sync.sum_up(result)
+        if said and (manual or said != self.refresh_said):
+            self.notify(said, title="Refresh failed", severity="error", timeout=10)
+        if result.done or result.errors:  # (a refresh with nothing due says nothing either way)
+            self.refresh_said = said
         if result.done:
             self.show_new_data(result.changes, data)
         else:

@@ -20,13 +20,16 @@ from pathlib import Path
 from typing import Callable
 
 from . import analytics, config, db, notify
-from .platforms import Platform, PlatformError
+from .platforms import AGAIN, KINDS, Platform, detail, explain, kind_of
 
 # When each platform was last tried, successful or not, so a failing one waits like any other
 # instead of being retried on every tick. Shared by every ReelForge, like last_errors (see shared).
 _attempted: dict[str, str] = {}
 # The last failed read per platform: (when, message). Cleared by the next good read.
 last_errors: dict[str, tuple[str, str]] = {}
+# The last read that got only part of a platform (TikTok's totals without its videos): (when, what to tell you).
+# Cleared by the next whole read, and shared like last_errors.
+last_warnings: dict[str, tuple[str, str]] = {}
 # One refresh at a time in this ReelForge: a second one (you pressing r during an automatic one) waits for the first.
 # Between ReelForges, ReadLock does the same.
 _running = threading.Lock()
@@ -41,12 +44,70 @@ _stale: str | None = None  # a read under way whose ReelForge closed before it f
 
 @dataclass
 class Result:
-    """How a refresh went: the platforms it read (by name) and the errors."""
+    """How a refresh went: the platforms it read (by name) and what went wrong, each in a sentence fit to show
+    (the platforms that weren't read first, in the order of `failed`)."""
     done: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     busy: bool = False         # another ReelForge was reading: this one left it to that one, or stopped waiting
     waited: str | None = None  # who this one waited for (WHO), when it had to
     changes: int | None = None  # the store's change count (db.bump) once this read was saved
+    failed: dict[str, str] = field(default_factory=dict)  # each platform that wasn't read: name -> kind (base.KINDS)
+    details: list[str] = field(default_factory=list)  # every error's own words, for data/refresh.log (see log)
+
+
+def broke(error: BaseException) -> Result:
+    """A refresh that stopped before it could say how it went."""
+    if kind_of(error) == "busy":
+        said = "The stats database was busy, so this refresh didn't finish. ReelForge tries again at the next one."
+    else:
+        said = ("This refresh didn't finish. ReelForge tries again at the next one, and data/refresh.log says what "
+                "stopped it.")
+    return Result(errors=[said], details=[f"the refresh stopped: {detail(error)}"])
+
+
+def _and(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+def sum_up(result: Result) -> str:
+    """Everything that went wrong in a refresh as one message, for one pop-up: the one sentence there is, or the
+    platforms that weren't read named together (why each wasn't is on its panel on the Accounts tab)."""
+    if len(result.errors) <= 1:
+        return "".join(result.errors)
+    said = result.errors[len(result.failed):]  # what isn't about one platform
+    kinds = set(result.failed.values())
+    if len(result.failed) == 1:
+        said.insert(0, result.errors[0])
+    elif len(kinds) == 1 and kinds <= {"slow", "offline", "busy"}:  # no internet, say: every platform the same way
+        said.insert(0, KINDS[kinds.pop()].format(name=_and(list(result.failed))))
+    elif result.failed:
+        said.insert(0, f"{_and(list(result.failed))} weren't read this time. {AGAIN} Each one's panel on the "
+                       "Accounts tab says why.")
+    return " ".join(said)
+
+
+LOG_LINES = 200  # how many lines data/refresh.log keeps
+
+
+def log_path() -> Path:
+    """data/refresh.log, next to the store: what each run of the hourly job read, and for any read (the job's or a
+    window's) the words of what went wrong, which the window only sums up."""
+    return db._path.with_name("refresh.log")
+
+
+def log(lines: list[str], path: Path | None = None) -> None:
+    """Add lines to the log (or to `path`, before the store is open), each with the time, keeping the newest
+    LOG_LINES. It never raises (a line that can't be written is no reason to fail a read), and the demo keeps no
+    log."""
+    if not lines or db._demo:
+        return
+    try:
+        path = path or log_path()
+        old = path.read_text("utf-8", errors="replace").splitlines()[-LOG_LINES:] if path.exists() else []
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        path.write_text("\n".join([*old, *(f"{stamp}  {line}" for line in lines)]) + "\n", "utf-8")
+    except Exception:
+        pass  # a full disk, a folder that's gone, no store open yet
 
 
 if sys.platform == "win32":
@@ -131,8 +192,8 @@ def lock_path() -> Path:
 
 
 def shared(conn=None) -> dict:
-    """What every ReelForge knows about the reads: attempted ({platform: when}), errors ({platform: [when, message]})
-    and running ({"by", "who", "what", "since"}) while one of them is reading, else None."""
+    """What every ReelForge knows about the reads: attempted ({platform: when}), errors and warnings ({platform:
+    [when, message]}) and running ({"by", "who", "what", "since"}) while one of them is reading, else None."""
     state = db.get_meta(STATE, None, conn)
     return state if isinstance(state, dict) else {}
 
@@ -152,15 +213,17 @@ def adopt(state: dict) -> bool:
 def _take(state: dict) -> None:
     _attempted.clear()
     _attempted.update({k: v for k, v in (state.get("attempted") or {}).items() if isinstance(v, str)})
-    last_errors.clear()
-    last_errors.update({k: (v[0], v[1]) for k, v in (state.get("errors") or {}).items()
-                        if isinstance(v, list) and len(v) == 2})
+    for mine, theirs in ((last_errors, "errors"), (last_warnings, "warnings")):
+        mine.clear()
+        mine.update({k: (v[0], v[1]) for k, v in (state.get(theirs) or {}).items()
+                     if isinstance(v, list) and len(v) == 2})
 
 
 def _share(running: dict | None) -> None:
     """Save this ReelForge's attempts and errors for the others, and the read it has under way (None: it's over)."""
     try:
-        db.set_meta(STATE, {"attempted": _attempted, "errors": last_errors, "running": running})
+        db.set_meta(STATE, {"attempted": _attempted, "errors": last_errors, "warnings": last_warnings,
+                            "running": running})
     except Exception:
         pass  # the store is busy: the others see it after the next read
 
@@ -286,6 +349,7 @@ def _refresh(platforms: dict[str, Platform], cfg: dict, manual: bool, force: boo
             return p, None, e
 
     done, errors, read, changes = [], [], {}, None
+    failed, details = {}, []
     try:
         with ThreadPoolExecutor(len(todo)) as pool:
             for p, result, error in pool.map(fetch, todo):
@@ -296,15 +360,21 @@ def _refresh(platforms: dict[str, Platform], cfg: dict, manual: bool, force: boo
                     except Exception as e:  # e.g. the database is busy: report it, keep the app running
                         error = e
                 if error is not None:
-                    msg = str(error) if isinstance(error, PlatformError) else f"{type(error).__name__}: {error}"
-                    # The first line only: browser errors run long.
-                    msg = msg.strip().splitlines()[0] if msg.strip() else type(error).__name__
+                    # What you're told is a sentence; the error's own words go to the log.
+                    kind, msg = kind_of(error), explain(error, p.name)
                     last_errors[p.key] = (db.now_iso(), msg)
-                    errors.append(f"{p.name}: {msg}")
+                    errors.append(f"{p.name}: {msg}" if kind == "said" else msg)
+                    failed[p.name] = kind
+                    details.append(f"{p.name}: {detail(error)}")
                     if getattr(error, "needs_login", False):
                         _tell(lambda: notify.add("login", f"Log in to {p.name} again", msg, key=f"login:{p.key}"))
                     continue
                 last_errors.pop(p.key, None)
+                if getattr(account, "warning", ""):  # read, but not all of it
+                    last_warnings[p.key] = (db.now_iso(), account.warning)
+                    details.append(f"{p.name}: {getattr(account, 'detail', '') or account.warning}")
+                else:
+                    last_warnings.pop(p.key, None)
                 _tell(lambda: notify.release(f"login:{p.key}"))
                 done.append(p.name)
                 read[p.key] = p.name
@@ -312,8 +382,8 @@ def _refresh(platforms: dict[str, Platform], cfg: dict, manual: bool, force: boo
             try:
                 analytics.auto_link()
             except Exception as e:
-                errors.append(f"Matching posts to videos failed ({type(e).__name__}: {e}); it tries again next "
-                              "refresh.")
+                errors.append(f"New posts couldn't be matched to your videos this time. {AGAIN}")
+                details.append(f"matching posts to videos: {detail(e)}")
             # Round numbers passed since the last read. A platform read for the first time only sets the starting
             # point. Views across every platform add up the connected ones (those this refresh was given).
             _tell(lambda: notify.check_milestones(read, {k for k in read if k not in latest}, on=set(platforms)))
@@ -324,7 +394,7 @@ def _refresh(platforms: dict[str, Platform], cfg: dict, manual: bool, force: boo
             except Exception:
                 pass
         _share(None)
-    return Result(done, errors, changes=changes)
+    return Result(done, errors, changes=changes, failed=failed, details=details)
 
 
 def _tell(fn) -> None:
