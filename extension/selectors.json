@@ -1,0 +1,431 @@
+{
+  "version": 1,
+  "platforms": {
+    "tiktok": {
+      "signed_in": {
+        "hooks": ["file_input", "select_button"]
+      },
+      "signed_out": {
+        "url": ["/login"]
+      },
+      "challenge": {
+        "hooks": ["captcha"]
+      },
+      "success": {
+        "url": ["/tiktokstudio/content"],
+        "hooks": ["posted"]
+      },
+      "hooks": {
+        "select_button": {
+          "label": "the Select video button",
+          "strategies": [
+            { "id": "aria", "role": "button", "name": ["Select file", "Select video", "Select videos"] },
+            { "id": "text", "css": "button, [role='button']", "text": ["Select video", "Select videos"] }
+          ]
+        },
+        "file_input": {
+          "label": "where the video goes",
+          "visible": false,
+          "timeout_ms": 20000,
+          "strategies": [
+            { "id": "accept-video", "css": "input[type='file'][accept*='video']" },
+            { "id": "near-select", "near": "select_button", "css": "input[type='file']" },
+            { "id": "only-file-input", "css": "input[type='file']" }
+          ]
+        },
+        "caption": {
+          "label": "caption box",
+          "timeout_ms": 120000,
+          "strategies": [
+            { "id": "draft-editor", "css": "div.public-DraftEditor-content[contenteditable='true']" },
+            { "id": "role", "role": "textbox", "name": ["Description", "Caption"], "match": "contains" },
+            { "id": "only-editable", "css": "[contenteditable='true']" }
+          ]
+        },
+        "post_button": {
+          "label": "the Post button",
+          "timeout_ms": 15000,
+          "strategies": [
+            { "id": "data-e2e", "css": "button[data-e2e='post_video_button']" },
+            { "id": "role", "role": "button", "name": ["Post"] },
+            { "id": "text", "css": "button, [role='button']", "text": ["Post"] }
+          ]
+        },
+        "post_confirm": {
+          "any": true,
+          "strategies": [
+            { "id": "post-now", "role": "button", "name": ["Post now"] },
+            { "id": "modal-footer", "css": "div.common-modal-footer" }
+          ]
+        },
+        "captcha": {
+          "any": true,
+          "strategies": [
+            { "id": "image", "css": "img#captcha-verify-image" },
+            { "id": "refresh", "css": "span.secsdk_captcha_refresh--text" },
+            { "id": "submit", "css": "div.verify-captcha-submit-button" },
+            { "id": "frame", "css": "iframe[src*='captcha']" }
+          ]
+        },
+        "posted": {
+          "any": true,
+          "strategies": [
+            { "id": "text", "page_text": ["Your video has been uploaded", "Video published"] }
+          ]
+        }
+      }
+    },
+    "youtube": {
+      "signed_in": {
+        "hooks": ["upload_dialog", "file_input"]
+      },
+      "signed_out": {
+        "url": ["accounts.google.com", "/signin", "ServiceLogin"]
+      },
+      "challenge": {
+        "hooks": ["captcha"]
+      },
+      "success": {
+        "hooks": ["posted"]
+      },
+      "hooks": {
+        "upload_dialog": {
+          "label": "the upload dialog",
+          "strategies": [
+            { "id": "element", "css": "ytcp-uploads-dialog" }
+          ]
+        },
+        "file_input": {
+          "label": "where the video goes",
+          "visible": false,
+          "timeout_ms": 20000,
+          "strategies": [
+            { "id": "file-picker", "css": "ytcp-uploads-file-picker input[type='file']" },
+            { "id": "in-dialog", "within": "upload_dialog", "css": "input[type='file']" },
+            { "id": "only-file-input", "css": "input[type='file']" }
+          ]
+        },
+        "title": {
+          "label": "title box",
+          "timeout_ms": 120000,
+          "strategies": [
+            { "id": "title-id", "css": "#title-textarea #textbox" },
+            { "id": "role", "within": "upload_dialog", "role": "textbox", "name": ["Add a title that describes your video"], "match": "contains" },
+            { "id": "first-textbox", "within": "upload_dialog", "css": "#textbox", "pick": 0 }
+          ]
+        },
+        "description": {
+          "label": "description box",
+          "timeout_ms": 15000,
+          "strategies": [
+            { "id": "description-id", "css": "#description-textarea #textbox" },
+            { "id": "role", "within": "upload_dialog", "role": "textbox", "name": ["Tell viewers about your video"], "match": "contains" },
+            { "id": "second-textbox", "within": "upload_dialog", "css": "#textbox", "pick": 1 }
+          ]
+        },
+        "kids_no": {
+          "strategies": [
+            { "id": "name", "css": "tp-yt-paper-radio-button[name='VIDEO_MADE_FOR_KIDS_NOT_MFK']" },
+            { "id": "role", "role": "radio", "name": ["No, it's not made for kids"] }
+          ]
+        },
+        "kids_yes": {
+          "strategies": [
+            { "id": "name", "css": "tp-yt-paper-radio-button[name='VIDEO_MADE_FOR_KIDS_MFK']" },
+            { "id": "role", "role": "radio", "name": ["Yes, it's made for kids"] }
+          ]
+        },
+        "next_button": {
+          "label": "the Next button",
+          "timeout_ms": 10000,
+          "strategies": [
+            { "id": "id", "css": "#next-button" },
+            { "id": "role", "within": "upload_dialog", "role": "button", "name": ["Next"] }
+          ]
+        },
+        "visibility": {
+          "any": true,
+          "strategies": [
+            { "id": "names", "css": "tp-yt-paper-radio-button[name='PUBLIC'], tp-yt-paper-radio-button[name='UNLISTED'], tp-yt-paper-radio-button[name='PRIVATE']" },
+            { "id": "group", "css": "#privacy-radios [name='PUBLIC']" }
+          ]
+        },
+        "visibility_public": {
+          "strategies": [
+            { "id": "name", "css": "tp-yt-paper-radio-button[name='PUBLIC']" }
+          ]
+        },
+        "visibility_unlisted": {
+          "strategies": [
+            { "id": "name", "css": "tp-yt-paper-radio-button[name='UNLISTED']" }
+          ]
+        },
+        "visibility_private": {
+          "strategies": [
+            { "id": "name", "css": "tp-yt-paper-radio-button[name='PRIVATE']" }
+          ]
+        },
+        "progress": {
+          "any": true,
+          "read": { "pattern": "(\\d{1,3})\\s?%" },
+          "strategies": [
+            { "id": "in-progress-element", "css": "ytcp-video-upload-progress .progress-label" },
+            { "id": "label", "css": "span.progress-label" }
+          ]
+        },
+        "upload_done": {
+          "any": true,
+          "strategies": [
+            { "id": "label-text", "css": "span.progress-label", "text": ["Upload complete", "Checks complete", "Processing"], "match": "contains" }
+          ]
+        },
+        "error": {
+          "any": true,
+          "strategies": [
+            { "id": "error-area", "css": ".error-area.style-scope.ytcp-uploads-dialog" }
+          ]
+        },
+        "captcha": {
+          "any": true,
+          "strategies": [
+            { "id": "frame", "css": "iframe[src*='recaptcha'], iframe[src*='captcha']" }
+          ]
+        },
+        "post_link": {
+          "any": true,
+          "read": { "attr": "href", "pattern": "(?:youtu\\.be/|/shorts/|[?&]v=)([A-Za-z0-9_-]{6,})" },
+          "strategies": [
+            { "id": "href", "css": "a[href^='https://youtu.be/'], a[href^='https://youtube.com/shorts/'], a[href^='https://www.youtube.com/shorts/']" }
+          ]
+        },
+        "done_button": {
+          "label": "the Publish button",
+          "timeout_ms": 10000,
+          "strategies": [
+            { "id": "id", "css": "#done-button" },
+            { "id": "role", "within": "upload_dialog", "role": "button", "name": ["Publish", "Save", "Schedule"] }
+          ]
+        },
+        "posted": {
+          "any": true,
+          "strategies": [
+            { "id": "share-dialog", "css": "ytcp-video-share-dialog" },
+            { "id": "text", "page_text": ["Video published", "Video saved as private", "Video saved as unlisted"] }
+          ]
+        }
+      }
+    },
+    "instagram": {
+      "signed_in": {
+        "hooks": ["inbox_link"]
+      },
+      "signed_out": {
+        "url": ["/accounts/login"],
+        "hooks": ["login_form"]
+      },
+      "challenge": {
+        "url": ["/challenge/", "/accounts/suspended/"],
+        "hooks": ["captcha"]
+      },
+      "success": {
+        "hooks": ["posted"]
+      },
+      "hooks": {
+        "inbox_link": {
+          "any": true,
+          "strategies": [
+            { "id": "href", "css": "a[href^='/direct/inbox/']" }
+          ]
+        },
+        "login_form": {
+          "any": true,
+          "strategies": [
+            { "id": "username", "css": "input[name='username']" },
+            { "id": "login-link", "css": "a[href^='/accounts/login/']" }
+          ]
+        },
+        "account": {
+          "any": true,
+          "read": { "attr": "href", "pattern": "^/([A-Za-z0-9._]{1,30})/?$" },
+          "strategies": [
+            { "id": "profile-picture-link", "css": "a[href]:has(img[alt$='profile picture'])" }
+          ]
+        },
+        "create": {
+          "label": "the Create button",
+          "timeout_ms": 20000,
+          "strategies": [
+            { "id": "aria", "css": "svg[aria-label='New post'], svg[aria-label='新帖子'], svg[aria-label='新貼文']", "closest": "a, button, [role='link'], [role='button']" },
+            { "id": "role", "role": "link", "name": ["New post", "Create"] },
+            { "id": "text", "css": "a, [role='link'], [role='button']", "text": ["Create"] }
+          ]
+        },
+        "create_post": {
+          "any": true,
+          "strategies": [
+            { "id": "aria", "css": "svg[aria-label='Post']", "closest": "a, button, [role='link'], [role='button'], [role='menuitem']" },
+            { "id": "text", "css": "[role='menuitem'], [role='menu'] a, [role='menu'] [role='button']", "text": ["Post"] }
+          ]
+        },
+        "dialog": {
+          "label": "the Create dialog",
+          "timeout_ms": 10000,
+          "strategies": [
+            { "id": "aria", "css": "div[role='dialog'][aria-label='Create new post']" },
+            { "id": "has-file-input", "css": "[role='dialog']:has(input[type='file'])" }
+          ]
+        },
+        "file_input": {
+          "label": "where the video goes",
+          "visible": false,
+          "timeout_ms": 10000,
+          "strategies": [
+            { "id": "accept-mp4", "within": "dialog", "css": "input[type='file'][accept*='video/mp4']" },
+            { "id": "only-in-dialog", "within": "dialog", "css": "input[type='file']" },
+            { "id": "accept-video", "css": "input[type='file'][accept*='video']" }
+          ]
+        },
+        "reels_notice": {
+          "any": true,
+          "strategies": [
+            { "id": "icon", "css": "[role='dialog']:has(img[src*='reels_nux_icon'])" }
+          ]
+        },
+        "reels_ok": {
+          "strategies": [
+            { "id": "in-notice", "within": "reels_notice", "role": "button", "name": ["OK"] },
+            { "id": "only-button", "within": "reels_notice", "css": "button" }
+          ]
+        },
+        "heading": {
+          "any": true,
+          "strategies": [
+            { "id": "role", "within": "dialog", "role": "heading" }
+          ]
+        },
+        "next": {
+          "label": "the Next button",
+          "strategies": [
+            { "id": "role", "within": "dialog", "role": "button", "name": ["Next"] },
+            { "id": "text", "within": "dialog", "css": "div[role='button'][tabindex='0'], button", "text": ["Next"] }
+          ]
+        },
+        "caption": {
+          "label": "caption box",
+          "timeout_ms": 60000,
+          "strategies": [
+            { "id": "lexical", "css": "[contenteditable='true'][role='textbox'][data-lexical-editor='true']" },
+            { "id": "role", "within": "dialog", "role": "textbox", "name": ["Write a caption"], "match": "contains" },
+            { "id": "only-editable", "within": "dialog", "css": "[contenteditable='true']" }
+          ]
+        },
+        "share": {
+          "label": "the Share button",
+          "timeout_ms": 10000,
+          "strategies": [
+            { "id": "role", "within": "dialog", "role": "button", "name": ["Share"] },
+            { "id": "text", "within": "dialog", "css": "div[role='button'][tabindex='0'], button", "text": ["Share"] }
+          ]
+        },
+        "captcha": {
+          "any": true,
+          "strategies": [
+            { "id": "frame", "css": "iframe[src*='recaptcha'], iframe[src*='captcha']" }
+          ]
+        },
+        "posted": {
+          "any": true,
+          "strategies": [
+            { "id": "text", "page_text": ["Your reel has been shared", "Your post has been shared", "Reel shared", "Post shared"] }
+          ]
+        }
+      }
+    },
+    "x": {
+      "signed_in": {
+        "hooks": ["composer"]
+      },
+      "signed_out": {
+        "url": ["/i/flow/login", "/i/flow/signup", "/login"],
+        "hooks": ["login_button"]
+      },
+      "challenge": {
+        "url": ["/account/access"],
+        "hooks": ["captcha"]
+      },
+      "success": {
+        "hooks": ["post_link"]
+      },
+      "hooks": {
+        "compose_dialog": {
+          "any": true,
+          "strategies": [
+            { "id": "modal", "css": "[role='dialog'][aria-modal='true']" }
+          ]
+        },
+        "composer": {
+          "label": "the post box",
+          "timeout_ms": 20000,
+          "strategies": [
+            { "id": "testid-in-dialog", "within": "compose_dialog", "css": "[data-testid='tweetTextarea_0']" },
+            { "id": "testid", "css": "[data-testid='tweetTextarea_0']" },
+            { "id": "role", "within": "compose_dialog", "role": "textbox" }
+          ]
+        },
+        "login_button": {
+          "any": true,
+          "strategies": [
+            { "id": "testid", "css": "[data-testid='loginButton']" }
+          ]
+        },
+        "account": {
+          "any": true,
+          "read": { "attr": "href", "pattern": "^/([A-Za-z0-9_]{1,15})$" },
+          "strategies": [
+            { "id": "profile-link", "css": "a[data-testid='AppTabBar_Profile_Link']" }
+          ]
+        },
+        "file_input": {
+          "label": "where the video goes",
+          "visible": false,
+          "timeout_ms": 10000,
+          "strategies": [
+            { "id": "testid-in-dialog", "within": "compose_dialog", "css": "input[data-testid='fileInput']" },
+            { "id": "accept-video-in-dialog", "within": "compose_dialog", "css": "input[type='file'][accept*='video']" },
+            { "id": "near-composer", "near": "composer", "css": "input[type='file']" }
+          ]
+        },
+        "attached": {
+          "any": true,
+          "strategies": [
+            { "id": "attachments-video", "css": "[data-testid='attachments'] video" },
+            { "id": "video-player", "css": "[data-testid='videoPlayer']" },
+            { "id": "attachments", "css": "[data-testid='attachments']" }
+          ]
+        },
+        "post_button": {
+          "label": "the Post button",
+          "timeout_ms": 10000,
+          "strategies": [
+            { "id": "testid", "css": "[data-testid='tweetButton']" },
+            { "id": "role", "within": "compose_dialog", "role": "button", "name": ["Post"] },
+            { "id": "text", "within": "compose_dialog", "css": "button, [role='button']", "text": ["Post"] }
+          ]
+        },
+        "captcha": {
+          "any": true,
+          "strategies": [
+            { "id": "frame", "css": "iframe[src*='arkoselabs'], iframe[src*='captcha']" }
+          ]
+        },
+        "post_link": {
+          "any": true,
+          "read": { "attr": "href", "pattern": "/status/(\\d+)" },
+          "strategies": [
+            { "id": "toast", "css": "[data-testid='toast'] a[href*='/status/']" }
+          ]
+        }
+      }
+    }
+  }
+}

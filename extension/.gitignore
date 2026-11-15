@@ -1,0 +1,2 @@
+# The kit ignores every folder called tools (it downloads Blender and ffmpeg into one). This one is source.
+!tools/

@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "ReelForge",
+  "version": "0.1.0",
+  "description": "Needs the ReelForge app on this computer. Attaches your video and fills in the text on TikTok, YouTube, Instagram and X. It can press Post too, where you switch that on.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAu3aM0botKJ6u+h+aFFxRSpLYS+ii4U+wVpj+XuC/XIIhV1fAGk2dBO5gdYSrEG0vdKaV+4juGSP2oy9dfBgi2zM7ts/soellah6seKSUAMGSA5vxXfHswTmxv8y3UoSj3GqS469tcaM+dsnWkU6zugTe3yrmpic6okTtjp5ldf0frXUpHkoy9fohXoIoewu806gO/e4j5tZSwI1+vPLaRV+VZFw1WOeCKNiZ8jElqDVLoKU2yANRg8GsbuLLuesq73peZTWxNsmC+ewiqu3YDH3B/tOWvZjaKwgLotsTqSxCZ54Yg4ehlhsLO2sVMuXhKqz4T4NKMw7wWl2nnpUI8wIDAQAB",
+  "minimum_chrome_version": "121",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "ReelForge",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["storage", "alarms", "scripting"],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "https://studio.youtube.com/*",
+    "https://www.youtube.com/*",
+    "https://www.tiktok.com/*",
+    "https://www.instagram.com/*",
+    "https://x.com/*",
+    "https://reelforge.tools/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["http://127.0.0.1/pair*", "http://127.0.0.1/post/*"],
+      "js": ["content/local.js"],
+      "run_at": "document_end"
+    },
+    {
+      "matches": ["https://reelforge.tools/*"],
+      "js": ["content/site.js"],
+      "run_at": "document_start"
+    }
+  ]
+}
