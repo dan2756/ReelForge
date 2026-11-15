@@ -1747,6 +1747,15 @@ class CommandLine(ApiTest):
             for word in ("create_batch", "retry(", "advance(", "claim(", "grant_press"):
                 self.assertNotIn(word, source, fn.__name__)
         self.assertIn("None of these starts a post", extension_api.USAGE)
+        # Nor does anything else a command line reaches: the reelforge command, the pipeline, the scripts. What
+        # makes a job is called from the window's own buttons and from the popup's Post (which needs the token).
+        for folder in ("studio", "pipeline", "scripts"):
+            for path in sorted((KIT / folder).rglob("*.py")):
+                if "tests" in path.parts or "tools" in path.parts:
+                    continue
+                source = path.read_text("utf-8", errors="replace")
+                for word in ("create_batch", "post_with_extension", "grant_press", "posting.retry"):
+                    self.assertNotIn(word, source, f"{path.relative_to(KIT)} can start a post")
 
     def test_the_reelforge_command_knows_it(self):
         from studio.__main__ import __doc__ as usage
@@ -1866,6 +1875,13 @@ class Ships(unittest.TestCase):
 
         for rel in ["manifest.json", "selectors.json", *named(manifest)]:
             self.assertIn(f"extension/{rel}", shipped)
+        # The manifest names only some of it. The platform scripts, the worker's modules and the popup's own
+        # script and style are loaded by other files, and one of them missing breaks the extension as surely.
+        for path in sorted((KIT / "extension").rglob("*")):
+            rel = path.relative_to(KIT).as_posix()
+            if path.is_file() and path.suffix in (".js", ".json", ".html", ".css", ".png") \
+                    and not rel.startswith("extension/tests/"):
+                self.assertIn(rel, shipped)
         self.assertEqual(extension_api.manifest_id(KIT / "extension"), extension_api.EXTENSION_ID)
 
     def test_an_update_replaces_the_folder_and_keeps_your_connections(self):

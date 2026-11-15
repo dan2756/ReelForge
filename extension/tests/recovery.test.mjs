@@ -184,6 +184,19 @@ export const tests = {
     await popup.close()
   },
 
+  async "a post this browser took just before its worker was stopped is taken up when the batch is handed over again"(t) {
+    equal(await t.browser.pair(t.app), "ok", "pairing")
+    const made = t.app.createBatch(t.video(), ["tiktok", "x"])
+    // The claim was granted and the worker stopped before it wrote the job down: ReelForge has the job as this
+    // browser's, and the browser knows nothing of it. The other job is another browser's.
+    Object.assign(made.jobs[0], { state: "claimed", claimed_by: t.app.paired[0].install })
+    Object.assign(made.jobs[1], { state: "claimed", claimed_by: "another-browser" })
+    const page = await t.browser.post(t.app, made.batch)
+    equal(await page.evaluate(() => document.documentElement.dataset.rfBatchState), "started", "what the page is told")
+    await until(() => `TikTok to be ready (it is ${made.jobs[0].state})`, () => made.jobs[0].state === "ready", 30000)
+    equal([made.jobs[1].state, made.jobs[1].claimed_by, t.browser.tabs("x.com").length], ["claimed", "another-browser", 0], "the other browser's job, and tabs opened for it")
+  },
+
   async "with no post under way, the person's own tabs do not wake the worker"({ browser }) {
     const page = await browser.popup()
     await sleep(800)
