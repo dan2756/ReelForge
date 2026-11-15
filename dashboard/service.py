@@ -2361,11 +2361,11 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
             n, was = lower[0]
             return (f"{n:,} is lower than the {was:,} saved before. Press Save again if {n:,} is right: it "
                     f"replaces the {was:,}.")
-        self.lower_asked = None
         try:
             self._save_logged(key, followers, views, put_right=bool(lower))
-        except sqlite3.OperationalError as e:
+        except sqlite3.OperationalError as e:  # (what you said about a lower number still stands for the next try)
             return f"The stats database is busy ({e}). Try again in a moment."
+        self.lower_asked = None
         return None
 
     def _save_logged(self, key: str, followers: int | None, views: dict[int, int], put_right: bool = False) -> None:

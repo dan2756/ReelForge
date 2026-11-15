@@ -6,6 +6,7 @@ The window's own Accounts tab (the Connect box, Sign up, Disconnect) is tested i
 from __future__ import annotations
 
 import shutil
+import sqlite3
 import tempfile
 import threading
 import unittest
@@ -547,6 +548,13 @@ class WindowTest(unittest.TestCase):
             self.assertEqual(readings(), [3_500, 3_500])  # the 32,000 it replaces, and the new reading
             self.assertIsNone(w.call("save_logged_stats", "instagram", "125", {eid: "3,600"}))  # up: nothing to ask
             self.assertEqual(typed(), [3_600])
+            # Save pressed again while the database is busy: that's said, and the next press doesn't ask again.
+            self.assertIn("3,000 is lower than the 3,600", w.call("save_logged_stats", "instagram", "", {eid: "3000"}))
+            with mock.patch.object(db, "record_snapshot", side_effect=sqlite3.OperationalError("database is locked")):
+                self.assertEqual(w.call("save_logged_stats", "instagram", "", {eid: "3000"}),
+                                 "The stats database is busy (database is locked). Try again in a moment.")
+            self.assertIsNone(w.call("save_logged_stats", "instagram", "", {eid: "3000"}))
+            self.assertEqual(typed(), [3_000])
             other = str(w.call("log_stats", "instagram")["episodes"][1]["id"])
             self.assertIsNone(w.call("save_logged_stats", "instagram", "", {eid: "3,600", other: "900"}))
             self.assertEqual(w.call("save_logged_stats", "instagram", "", {eid: "360", other: "90"}),
