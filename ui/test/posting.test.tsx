@@ -498,6 +498,30 @@ describe("Post…", () => {
   })
 })
 
+describe("RECENT UPLOADS", () => {
+  test("says where each post stands at every width: the file's name gives way, not the Post column", async () => {
+    // The room went to the Video column, and Post, the one that says where a post stands, was cut at every width:
+    // in a window 100 columns wide it was one letter.
+    const h = await kit({ extension: "on", jobs: { tiktok: ["ready", "posted"], x: ["ready"] } }, [150, 45])
+    for (const [w, rows, said] of [
+      [150, 45, /ep03_hail\.mp4 +● +ready: check it in the browser, then press Post/],
+      [120, 30, /ep03_hail\.mp4 +● +ready: check it in the bro/],
+      [100, 30, /ep03_hail\.mp4 +● +ready: ch/],
+      [80, 24, /ep03_hail\.mp4 +● +ready: check it in the browser,/],
+    ] as const) {
+      h.t.resize(w, rows)
+      await h.settle(500)
+      for (let i = 0; i < 12 && !/ep03_hail\.mp4 +●/.test(frame(h)); i++) {
+        h.t.mockInput.pressKey("\u001b[6~") // Page Down, to the table
+        await h.settle(250)
+      }
+      const lines = frame(h).split("\n")
+      expect(lines.find((r) => /ep03_hail\.mp4 +●/.test(r)) ?? "").toMatch(said)
+      expect(lines.find((r) => /ep03_hail\.mp4 +✓/.test(r)) ?? "").toMatch(/ep03_hail\.mp4 +✓ +(posted wi|live · )/)
+    }
+  })
+})
+
 describe("without the extension", () => {
   test("Post… explains the one-time set-up and offers by hand right there; connecting a browser shows at once", async () => {
     const h = await kit()

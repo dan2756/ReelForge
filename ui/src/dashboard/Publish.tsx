@@ -174,7 +174,7 @@ function Form({ page }: { page?: boolean }) {
         <Line segs={uploads?.heading} />
       </box>
       {/* (with nothing uploaded yet, two rows for the words that say so) */}
-      <Table id="uploads-table" data={uploads} cursor={false} rowsShown={Math.min(uploads?.rows.length || 2, 11)} />
+      <Table id="uploads-table" data={uploads} cursor={false} stretch="note" rowsShown={Math.min(uploads?.rows.length || 2, 11)} />
     </>
   )
   return (

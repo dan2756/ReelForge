@@ -1864,7 +1864,9 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
             rows.append((None, [Text(fmt_clock(when) if when.date() == datetime.now().date()
                                      else when.strftime("%m/%d")), tag(p) if p else Text(u["platform"]),
                                 Text(u["video"] or ""), mark, note]))
-        columns = [("when", "When", 8), ("platform", "", 4), ("title", "Video", 26), ("mark", "", 2),
+        # The Post column says where each post stands: it takes the room there is, and the file's name gives way
+        # first. (With the name at 26 and the room going to it, Post was one letter wide in a window 100 columns wide.)
+        columns = [("when", "When", 8), ("platform", "", 4), ("title", "Video", 16), ("mark", "", 2),
                    ("note", "Post", 64)]
         empty = ("Nothing yet. A post you start, with Post… or a platform's button under BY HAND, is listed here "
                  "with where it stands.")
