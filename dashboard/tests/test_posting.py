@@ -916,6 +916,37 @@ class Posted(LedgerTest):
                          ("posted", None, "https://www.instagram.com/reel/DBx3kQwPabc/"))
         self.assertEqual(db.posts_latest(), [])  # the reader files it, under its own id
 
+    def test_an_id_reelforge_has_as_another_videos_post_is_not_taken(self):
+        # The page showed last week's video (the newest on the profile), and the extension read its id.
+        old = db.create_episode("What if rain doubled every 2 seconds?", "ep00.mp4")
+        week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat(timespec="seconds")
+        db.record_snapshot("tiktok", Account("@me", 100), [Post(
+            "7300000000000000001", "What if rain doubled every 2 seconds?",
+            "https://www.tiktok.com/@me/video/7300000000000000001", week_ago, views=46000)])
+        db.link_post("tiktok", "7300000000000000001", old, "caption")
+        # ... and a newer post you filed under another video yourself.
+        db.record_snapshot("tiktok", Account("@me", 100), [Post("7300000000000000002", "Something of mine", None,
+                                                                 db.now_iso())])
+        db.set_post_episode("tiktok", "7300000000000000002", old)
+        for taken in ("7300000000000000001", "7300000000000000002"):
+            self.video.write_bytes(f"the video said to be {taken}".encode())
+            job = self.walk(self.job(), *STEPS)
+            done = posting.advance(job["id"], "posted", install=CHROME, post_id=taken,
+                                   url=f"https://www.tiktok.com/@me/video/{taken}")
+            self.assertEqual((done["state"], done["post_id"], done["url"]), ("posted", None, None))
+        with db.connect() as c:
+            self.assertEqual({tuple(r) for r in c.execute("SELECT post_id, episode_id, link FROM posts")},
+                             {("7300000000000000001", old, "caption"), ("7300000000000000002", old, "hand")})
+        self.assertEqual(posting.spotted("ep00.mp4")["tiktok"]["post_id"], "7300000000000000001")
+        self.assertEqual(posting.spotted("ep01.mp4"), {})
+        # A post the read has seen but nobody has filed, that went up after the job was made, is this job's.
+        self.video.write_bytes(b"one more")
+        job = self.walk(self.job(), *STEPS)
+        db.record_snapshot("tiktok", Account("@me", 100), [Post("7300000000000000003", "New", None, db.now_iso())])
+        done = posting.advance(job["id"], "posted", install=CHROME, post_id="7300000000000000003")
+        self.assertEqual(done["post_id"], "7300000000000000003")
+        self.assertEqual(posting.spotted("ep01.mp4")["tiktok"]["post_id"], "7300000000000000003")
+
     def test_the_id_can_follow_the_news_that_it_posted(self):
         job = self.walk(self.job(), *STEPS, "posted")
         self.assertEqual(db.posts_latest(), [])

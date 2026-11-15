@@ -493,11 +493,26 @@ def advance(job_id: str, state: str, *, by: str = "extension", install: str | No
             state = "unknown"
         if not allowed(old["state"], state, by):
             raise Refused("bad_transition", f"A post that is {old['state']} can't become {state}.", old)
+        if post_id and by != "reconcile" and _anothers(c, old, str(post_id)):
+            post_id = url = None  # the page showed some other post: a stats read finds this job's own (reconcile)
         new = _write(c, old, state, by, step=step, progress=progress, detail=detail, error_code=error_code,
                      error_message=error_message, post_id=post_id, url=url)
         if strategy:  # when a platform changes its page, this is where it shows first
             _event(c, old["id"], new["updated_at"], new["state"], new["step"], f"found by {strategy}")
     return _settled(old, new, by)
+
+
+def _anothers(c: sqlite3.Connection, job: dict, post_id: str) -> bool:
+    """Whether a post id the extension read off the page is a post ReelForge already has as another's: one that
+    went up before this job was made (the page showed an older video), or one that you, or ReelForge, filed under
+    another video. Such a post stays where it is."""
+    known = c.execute("SELECT episode_id, link, published_at FROM posts WHERE platform = ? AND post_id = ?",
+                      (job["platform"], post_id)).fetchone()
+    if known is None:
+        return False
+    since = (db.parse(job["created_at"]) - CLOCK_SLACK).isoformat(timespec="seconds")
+    return (known["published_at"] or "") < since or \
+        (known["link"] in ("hand", "publish") and known["episode_id"] != job["episode_id"])
 
 
 def claim(job_id: str, install: str) -> dict:
