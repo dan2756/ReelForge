@@ -325,11 +325,12 @@ class YouTubeApiTab:
                  f"yourself. {DOCS} has the steps.", MUTED)]
 
     def api_rows(self, rows: list[dict], jobs: dict[str, dict], posts: dict[str, dict]) -> None:
-        """The posting view's rows, as this way of posting changes them (PostingTab.update_posting calls it): the
-        YouTube row offers post_api while the API is connected and a post could start there (row["api"]["force"]:
-        it would be a post again); a posted row says what the read-back found, or that the video is private, until
-        a stats read has its numbers (only a video everyone can see has any); and a row whose last piece is on its
-        way has no buttons, since only YouTube's word ends it."""
+        """The posting view's rows, as this way of posting changes them (PostingTab.update_posting calls it). While
+        the API is connected and a post could start, the YouTube row has "api": {"force": whether it would be a
+        post again}, and post_api among its actions unless it would be one: posting again takes the question
+        (youtube_api_info) and your yes (post_with_api), never one press on a row. A posted row says what the
+        read-back found, or that the video is private, until a stats read has its numbers (only a video everyone
+        can see has any). A row whose last piece is on its way has no buttons: only YouTube's word ends it."""
         connected = not self.demo and youtube_api.status()["state"] == "on"
         for row in rows:
             job, post = jobs.get(row["key"]), posts.get(row["key"])
@@ -342,8 +343,24 @@ class YouTubeApiTab:
                         row["line"].append(["  " + said, AMBER if act_on else MUTED])
             again = row["state"] in ("posted", "spotted")
             if row["key"] == "youtube" and connected and (again or row["state"] in ("none", *posting.FREE)):
-                row["actions"].append("post_api")
                 row["api"] = {"force": again}
+                if not again:
+                    row["actions"].append("post_api")
+
+    def api_action(self, row: dict | None, platform: str, action: str) -> bool:
+        """A row's button that goes through the API, not the extension (PostingTab.post_action asks this first).
+        True when it was one: Retry on a job that went through the API, or post_api, which posts the picked video
+        with the form's text as last typed and your choices, and never "again"."""
+        retry = action == "retry" and row is not None and row["via"] == "api"
+        if not retry and not (action == "post_api" and platform == "youtube"):
+            return False
+        if self.demo:
+            self.notify("Demo mode: nothing is posted.", timeout=4)
+        elif retry:
+            self.retry_with_api(row)
+        else:
+            self.post_with_api(*self.form_text)
+        return True
 
     # --- what the buttons call ---------------------------------------------------------------------
 
@@ -517,8 +534,8 @@ class YouTubeApiTab:
         return self._api_started(made)
 
     def retry_with_api(self, job: dict) -> None:
-        """Retry on a row whose post went through the API (PostingTab.post_action calls it): the same text and
-        choices once more, in a new job and a new upload. Only a job that ended without a post has the button."""
+        """Retry on a row whose post went through the API: the same text and choices once more, in a new job and a
+        new upload. Only a job that ended without a post has the button."""
         said = youtube_api.status()
         if said["state"] != "on":
             self.notify(AGAIN[said["why"]] if said["state"] == "again" else NOT_CONNECTED, title="YouTube's API",

@@ -245,7 +245,8 @@ What the window gets and calls:
 | `youtube_api_disconnect()` | forgets the connection and tells Google |
 | `youtube_api_defaults(privacy, made_for_kids)` | your choices for the posts to come |
 | `post_with_api(caption, tags, privacy, force)` | your press: makes the job and starts the upload |
-| view `posting` | the YouTube row has `post_api` among its `actions` while a post could start, with `api: {"force": ...}` |
+| view `posting` | while the API is connected and a post could start, the YouTube row has `api: {"force": ...}` (`force`: it would be a post again). Unless it would be one, `post_api` is among its `actions` |
+| `post_action(job, "post_api")` | the row's own button: posts the picked video with the form's text and your choices, never "again". Posting again takes `post_with_api(..., force)` |
 
 A job goes `queued`, `uploading` (with `progress`), `posting` (the last piece is on its way), then `posted`, or
 ends as `failed` or `unknown`. Retry on a failed row goes through the API again. A posted job whose `step` is

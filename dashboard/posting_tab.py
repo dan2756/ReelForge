@@ -548,6 +548,8 @@ class PostingTab:
         a new post of the picked video there, with the form's text as it is, stopping before Post."""
         row = self._safe(lambda: posting.get(job), None) if job not in self.every else None
         platform = row["platform"] if row else job
+        if self.api_action(row, platform, action):  # a button that goes through YouTube's API (youtube_api_tab.py)
+            return
         if platform not in self.every or action not in {a for acts in ACTIONS.values() for a in acts}:
             return
         name = self.every[platform].name
@@ -560,9 +562,6 @@ class PostingTab:
             return
         if self.demo:
             self.notify("Demo mode: nothing is posted.", timeout=4)
-            return
-        if row and row["via"] == "api" and action == "retry":
-            self.retry_with_api(row)  # through the API again, which needs no extension (youtube_api_tab.py)
             return
         needed = self.extension_needed(self.extension_status()) if action in ("post_again", "retry") else ""
         if needed:

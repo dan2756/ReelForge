@@ -305,7 +305,7 @@ class Posting(ApiPosting):
         # The row says it is up and what to do next, and offers to post it again; the pop-up says the same.
         row = self.rows(w)["youtube"]
         self.assertEqual((row["state"], row["url"], row["actions"], row["api"]),
-                         ("posted", LINK, ["open_post", "post_again", "post_api"], {"force": True}))
+                         ("posted", LINK, ["open_post", "post_again"], {"force": True}))
         said = plain(row["line"])
         self.assertTrue(said.startswith("✓ posted"), said)
         self.assertIn("It is private, as you chose. Change who can see it in YouTube Studio when you're ready.", said)
@@ -318,6 +318,23 @@ class Posting(ApiPosting):
         self.assertEqual(w.view("youtube_api")["channel"], CHANNEL)
         self.assertIn("last upload went to Night Physics", plain(w.view("youtube_api")["line"]))
         self.assertNotIn("sessions", json.loads(self.api_store.read_text("utf-8")))
+
+    def test_the_rows_own_button_posts_with_the_form_as_it_is_and_never_again(self):
+        w = self.window()
+        w.call("form_changed", "Typed since", "#one #two")
+        w.call("post_action", "youtube", "post_api")
+        (job,) = posting.recent()
+        job = self.over(w, job["id"])
+        self.assertEqual((job["state"], job["via"], json.loads(job["text"]), json.loads(job["options"])["privacy"]),
+                         ("posted", "api", {"title": "Typed since #shorts", "description": "#one #two"}, "private"))
+        w.call("post_action", job["id"], "post_api")  # (a row that is up has no such button, and it would not post)
+        self.assertIn("Already posted", w.toasts()[-1])
+        self.assertEqual((len(posting.recent()), len(self.google.starts)), (1, 1))
+        w.call("post_action", "tiktok", "post_api")  # nor is it a button of any other platform's
+        self.assertEqual(len(posting.recent()), 1)
+        w.svc.demo = True
+        w.call("post_action", "youtube", "post_api")
+        self.assertEqual((w.toasts()[-1], len(posting.recent())), ("Demo mode: nothing is posted.", 1))
 
     def test_the_window_never_waits_for_the_upload(self):
         w = self.window()
@@ -597,7 +614,7 @@ class OnlyOnce(ApiPosting):
         w.call("form_changed", CAPTION, TAGS)
         row = self.rows(w)["youtube"]
         self.assertEqual((row["state"], row["actions"], row["api"]),
-                         ("spotted", ["open_post", "post_again", "post_api"], {"force": True}))
+                         ("spotted", ["open_post", "post_again"], {"force": True}))  # again: only by the question
         made = self.api_post(w)
         self.assertEqual((made["started"], made["blocked"][0]["reason"], made["blocked"][0]["url"]),
                          (False, "spotted", "https://youtu.be/abcdefghijk"))
