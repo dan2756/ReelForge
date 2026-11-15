@@ -50,7 +50,9 @@ WORDS = {
     "posted": "posted", "unknown": "did it post? ReelForge lost track: check your profile there",
     "failed": "failed", "cancelled": "cancelled", "expired": "the extension didn't pick it up",
 }
-API_WORDS = {"queued": "about to start", "expired": "it never started"}
+API_WORDS = {"queued": "about to start", "expired": "it never started",
+             "posting": "the last piece is on its way: waiting for YouTube to say it's up",
+             "unknown": "did it post? ReelForge lost track: check YouTube Studio before trying again"}
 # The same in a word or two, for the POSTED line under the form.
 BRIEF = {"queued": "queued", "claimed": "starting", "opening": "opening", "uploading": "uploading",
          "filling": "filling in", "ready": "ready for you to press Post", "posting": "posting",
@@ -260,6 +262,7 @@ class PostingTab:
                          "line": state_line(job, post, p.name).json(), "busy": state in BUSY, "url": url,
                          "job": job["id"] if job and state == job["state"] else None,
                          "actions": [a for a in ACTIONS[state] if a != "open_post" or url]})
+        self.api_rows(rows, jobs)  # what posting through YouTube's own API adds (dashboard/youtube_api_tab.py)
         style = {"approved": GOOD, "none": MUTED, "demo": MUTED}.get(review["state"], f"bold {AMBER}")
         mark = {"approved": "✓ ", "none": "", "demo": ""}.get(review["state"], "! ")
         why = self.cant_post(video, review, extension, rows)
@@ -557,6 +560,9 @@ class PostingTab:
             return
         if self.demo:
             self.notify("Demo mode: nothing is posted.", timeout=4)
+            return
+        if row and row["via"] == "api" and action == "retry":
+            self.retry_with_api(row)  # through the API again, which needs no extension (youtube_api_tab.py)
             return
         needed = self.extension_needed(self.extension_status()) if action in ("post_again", "retry") else ""
         if needed:

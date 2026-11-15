@@ -26,6 +26,7 @@ from .platforms import Platform, PlatformError, PublishItem, browser, connected,
 from .posting_tab import AMBER, BRIEF, PostingTab, flag_style, numbers, standing, upload_note
 from .settings_tab import SettingsTab
 from .stats_tab import StatsTab
+from .youtube_api_tab import YouTubeApiTab
 from .platforms.base import Account, Post
 from .view import (BAD, GOOD, MARK, MUTED, SHORT, TYPICAL, Text, act, cell_len, change_text, chip, chips, js, legend,
                    num, parts, score_text, tag)
@@ -226,7 +227,7 @@ def table(columns: list[tuple[str, str, int]], rows: list[tuple[str | None, list
                                                              for c in cells]} for k, cells in rows]}
 
 
-class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
+class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
     def __init__(self, loop: Loop):
         super().__init__(loop)
         self.cfg: dict = {}
