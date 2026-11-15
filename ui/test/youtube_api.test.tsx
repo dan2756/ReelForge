@@ -402,7 +402,7 @@ describe("a post through the API", () => {
     await google(h, "release")
     await until(h, () => youtube(h).state === "posted")
     expect(row(h)).toContain("✓ posted")
-    expect(row(h)).toContain("It is private, as you chose. Change who can see it in YouTube Studio when you're ready.")
+    expect(row(h)).toContain("It is private, as you chose. Change it in YouTube Studio.")
     expect(row(h)).toMatch(/▐ Open ▌ ▐ Post again… ▌ ▐ Again with API… ▌$/)
     expect(popups()).toEqual([]) // the row says it, with its buttons: no pop-up sits on them
     // What Google got: that title and description, private, and the answer on file about kids. One video.
@@ -679,6 +679,22 @@ describe("when something goes wrong, or the window is small", () => {
     await h.settle(400)
     expect(frame(h)).not.toContain("POST TO YOUTUBE THROUGH ITS API")
     expect(jobsMade()).toBe(0)
+  })
+
+  test("in a window 100 columns by 30 rows the line keeps to whole words, and a posted row keeps its three buttons whole", async () => {
+    // Not connected: the line's first words are all there is room for beside its button. It was cut at "connected i".
+    let h = await kit({ api: { client: true } }, [100, 30])
+    expect(frame(h)).toMatch(/┃ ○ YouTube API: not connected +YouTube API… +$/m)
+    await h.close()
+    rmSync(tmp, { recursive: true, force: true })
+    // Posted: Open, Post again… and Again with API… don't fit in one row there. The third was cut off at "Again with".
+    h = await kit({ api: { client: "on", kids: false } }, [100, 30])
+    expect(frame(h)).toMatch(/┃ ● YouTube API connected +YouTube API… +$/m)
+    await ask(h)
+    await clickText(h, "Post to YouTube", 2)
+    await until(h, () => youtube(h).state === "posted")
+    for (const button of ["▐ Open ▌", "▐ Post again… ▌", "▐ Again with API… ▌"]) expect(frame(h)).toContain(button)
+    expect(row(h)).toMatch(/It is private, as you chose\. Change it in YouTube Studio\. ▐ Open ▌ ▐ Post again… ▌ ▐ Again with API… ▌$/)
   })
 
   test("with the API connected, everything that starts a post still shows in a window 120 columns by 30 rows", async () => {

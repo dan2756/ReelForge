@@ -53,7 +53,8 @@ KIDS = {True: "Yes", False: "No", None: "Not sent: you haven't answered, so your
 NOT_SET = ("ReelForge doesn't set the altered-content answer, tags, a thumbnail or a schedule. Set those in YouTube "
            "Studio.")
 STUDIO = "Check YouTube Studio before trying again."
-PRIVATE = "It is private, as you chose. Change who can see it in YouTube Studio when you're ready."
+# (Short: with it a posted row is three rows tall in a window 120 columns wide, and the by-hand buttons stay in view.)
+PRIVATE = "It is private, as you chose. Change it in YouTube Studio."
 # What the window's dialog for the connection says beside its controls (the view's "words"), and the question before
 # a post. Written here, beside what the controls do, so the window only draws them.
 # On the Publish tab's one line, while a post is on offer there. Short: it has to fit beside "● YouTube API connected"
@@ -358,7 +359,9 @@ class YouTubeApiTab:
             lines.append(Text(UNPROVEN, MUTED))
         waiting = self.api_consent is not None and not self.api_consent.done.is_set()
         if waiting:
-            line = Text("● Waiting for your answer on Google's page", f"bold {AMBER}")
+            # (In pieces, as the line below: where the Publish tab has no room for all of it, it drops the last
+            # ones and never cuts a word.)
+            line = Text("● Waiting for your answer", f"bold {AMBER}").append(" on Google's page", f"bold {AMBER}")
             line.append("  it opened in your browser", MUTED)
         return {"state": "connecting" if waiting else said["state"], "line": line.json(),
                 "lines": [t.json() for t in lines], "client": said["client"], "channel": said["channel"],
@@ -392,7 +395,8 @@ class YouTubeApiTab:
             return Text("● YouTube API connected", f"bold {GOOD}").append("  " + " · ".join(b for b in bits if b),
                                                                          MUTED), lines
         if said["state"] == "again" and said["why"] == "session":  # every window starts here: nothing is wrong
-            return Text("○ YouTube API: not connected in this window", MUTED), [Text(AGAIN["session"], MUTED)]
+            return Text("○ YouTube API: not connected", MUTED).append(" in this window", MUTED), [
+                Text(AGAIN["session"], MUTED)]
         if said["state"] == "again":
             return Text("● YouTube API: connect again", f"bold {AMBER}"), [Text(AGAIN[said["why"]], MUTED)]
         return Text("○ YouTube API not connected", MUTED), [

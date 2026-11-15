@@ -163,6 +163,8 @@ class View(ApiPosting):
         view = w.view("youtube_api")
         self.assertEqual((view["state"], view["client"]), ("again", True))
         self.assertEqual(plain(view["line"]), "○ YouTube API: not connected in this window")
+        # (Its first piece says it alone, for the Publish tab's line in a window with no room for the rest.)
+        self.assertEqual(view["line"][0][0], "○ YouTube API: not connected")
         self.assertEqual(plain(view["lines"][0]), AGAIN["session"])
         self.assertIn("never in a file", AGAIN["session"])
         row = self.rows(w)["youtube"]
@@ -201,8 +203,7 @@ class View(ApiPosting):
                          ("posted", "note", "ReelForge sent no made-for-kids answer, so your channel's own audience "
                                             "setting applies. YouTube has it as not made for kids."))
         said = self.rows(w)["youtube"]["line"][-1]  # said quietly, with the rest: nothing is wrong
-        self.assertEqual(said[0], "  It is private, as you chose. Change who can see it in YouTube Studio when you're "
-                                  "ready. " + job["detail"])
+        self.assertEqual(said[0], "  It is private, as you chose. Change it in YouTube Studio. " + job["detail"])
         self.assertNotIn(youtube_api_tab.AMBER, said[1])
         self.assertEqual(w.sent("toast")[-1]["severity"], "information")
         # Once you have answered, your answer goes with every post, and there is nothing to add.
@@ -498,7 +499,7 @@ class Posting(ApiPosting):
                          ("posted", LINK, ["open_post", "post_again"], {"force": True}))
         said = plain(row["line"])
         self.assertTrue(said.startswith("✓ posted"), said)
-        self.assertIn("It is private, as you chose. Change who can see it in YouTube Studio when you're ready.", said)
+        self.assertIn("It is private, as you chose. Change it in YouTube Studio.", said)
         toast = w.sent("toast")[-1]
         self.assertEqual((toast["title"], toast["severity"]), ("Posted to YouTube", "information"))
         self.assertIn("It is private, as you chose.", toast["body"])

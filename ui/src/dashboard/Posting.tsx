@@ -136,7 +136,9 @@ function PostRow({ row, labels, nameWidth, room }: { row: PostingRow; labels: Re
           <Wrapped segs={row.line} width={beside ? undefined : Math.max(room, 0)} />
         </box>
         {actions.length ? (
-          <box flexDirection="row" height={1} flexShrink={0} gap={1}>
+          // (under the words they go on under themselves where the row is too narrow for all of them: a posted
+          // YouTube row has three, and the third was cut off in a window 100 columns wide)
+          <box flexDirection="row" flexWrap={beside ? "no-wrap" : "wrap"} flexShrink={0} columnGap={1}>
             {actions.map((action) => (
               <Button key={action} id={`post-${row.key}-${action}`} label={label(action)} onPress={() => s.postAction(row, action)} />
             ))}

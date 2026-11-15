@@ -38,14 +38,15 @@ export function ApiLine({ rows }: { rows: PostingRow[] }) {
         {button}
       </box>
     )
-  // Its first words always, then how far it is tested, then the rest while there's room. A click on any of it opens
-  // the dialog, as the button does.
+  // Its first words always, then how far it is tested, then the rest piece by piece while there's room (the Python
+  // side sends the line in pieces that each end on a whole word). A click on any of it opens the dialog, as the
+  // button does.
   const open: Action = ["youtube_api"]
   const clickable = (seg: Seg): Seg => [seg[0], seg[1], open]
   const parts: Parts = [
     [api.line.slice(0, 1).map(clickable), 0],
     [api.words.caveat ? [[`  ${api.words.caveat}`, DASH.faint, open]] : [], 1],
-    [api.line.slice(1).map(clickable), 2],
+    ...api.line.slice(1).map((seg, i): Parts[number] => [[clickable(seg)], 2 + i]),
   ]
   return (
     <box flexDirection="row" height={1} flexShrink={0} gap={1}>
