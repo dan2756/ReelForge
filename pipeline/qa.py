@@ -476,8 +476,9 @@ def lint(ep_dir):
 
 
 def audio_check(ep_dir):
-    """Straight after the audio step: the sound checks on build/audio.wav, so a key hit nobody can hear or a hissing
-    bed stops `post` in seconds instead of after the video is composed. -> Report"""
+    """Straight after the audio step: the sound checks on build/audio.wav, so a mix that would fail QA (clipping,
+    the loudness, silence, a hissing bed) stops `post` in seconds instead of after the video is composed. A key hit
+    nobody can hear is a WARN, here as in QA: it does not stop `post`, and the last line names it. -> Report"""
     spec = json.loads((ep_dir / "episode.json").read_text(encoding="utf-8"))
     with wave.open(str(ep_dir / "build" / "audio.wav")) as w:
         sr = w.getframerate()
@@ -702,6 +703,10 @@ def main():
         R, verdict = lint(ep), ("  lint passed", "  lint FAILED: fix episode.json before rendering")
     elif "--audio" in sys.argv:
         R, verdict = audio_check(ep), ("  sound check passed", "  sound check FAILED: fix the mix before the video")
+        warned = [c["check"] for c in R.checks if c["status"] == "WARN"]
+        if warned:      # the video step starts next, and this line is what is left on screen above it
+            verdict = (f"  sound check passed, with a WARN ({', '.join(warned)}): it does not stop the video "
+                       "step, and the mix is quicker to fix now than after it", verdict[1])
     else:
         spec, R, qa_dir, video = check_episode(ep)
         verdict = [f"  QA {v}: report {qa_dir / 'report.md'}" for v in ("PASSED", "FAILED")]

@@ -158,7 +158,8 @@ def main():
     if "audio" in steps:
         mixer = "audio_mix.py" if spec.get("audio", {}).get("mixer") == "samples" else "audio.py"
         run([sys.executable, "-I", post / mixer, ep])
-        run([sys.executable, config.PIPELINE / "qa.py", ep, "--audio"])     # sound faults stop before the compose
+        # a mix that would fail QA stops here, before the compose; a WARN (a quiet key hit) is shown and goes on
+        run([sys.executable, config.PIPELINE / "qa.py", ep, "--audio"])
     if "video" in steps:
         run([sys.executable, post / "compose.py", ep, "--video"])
     if "cover" in steps:

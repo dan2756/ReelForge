@@ -102,6 +102,7 @@ pipeline uses the stamp so that **nothing needs deleting by hand**:
   `build/preview/`.
 - **The sound.** The audio step ends with the sound checks on `build/audio.wav`
   (`pipeline\qa.py episodes\<id> --audio`), so a mix that would fail QA stops `post` before the video is made.
+  A WARN, such as a key hit that cannot be heard on its cue, does not stop it: the last line of the check names it.
 
 ### What QA checks
 

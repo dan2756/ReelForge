@@ -57,6 +57,15 @@ class Episode(unittest.TestCase):
         report = qa.lint(self.ep)
         return report, rows(report)
 
+    def qa(self, *flags):
+        """`qa.py <episode> --lint` or `--audio` as the steps run it: (the exit code they go by, what it printed)."""
+        self.save()
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", ["qa.py", str(self.ep), *flags]), redirect_stdout(out), \
+                self.assertRaises(SystemExit) as stop:
+            qa.main()
+        return stop.exception.code, out.getvalue()
+
 
 class Lint(Episode):
     def test_a_finished_spec_passes(self):
@@ -268,13 +277,35 @@ class SoundCheck(Episode):
         self.assertFalse(report.passed)
         self.assertEqual(got["no clipping"][0], "FAIL")
 
-    def test_the_mix_on_disk_is_checked_straight_after_the_audio_step(self):
-        self.save()
+    def mixed(self, seconds=10):
+        """The audio step: the mix as build/audio.wav."""
         with wave.open(str(self.ep / "build" / "audio.wav"), "wb") as w:
             w.setnchannels(2)
             w.setsampwidth(2)
             w.setframerate(SR)
-            w.writeframes((self.mix[: 8 * SR] * 32767).astype("<i2").tobytes())
+            w.writeframes((self.mix[: seconds * SR] * 32767).astype("<i2").tobytes())
+
+    def test_a_key_hit_nobody_can_hear_is_named_in_the_last_line_and_the_video_is_still_made(self):
+        """It is a WARN here as it is in QA, so `post` goes on to the video. The last line is what is left on screen
+        when it does, and it used to read "sound check passed"."""
+        self.spec["audio"]["hits"] = [{"sound": "glitch_break", "at": 8.0, "align": "peak"}]
+        self.mixed()
+        code, out = self.qa("--audio")
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"\[WARN\] key sound hits audible on cue: glitch_break @ 8\.00s: .*\(NOT AUDIBLE\)")
+        self.assertEqual(out.splitlines()[-1], "  sound check passed, with a WARN (key sound hits audible on cue): it "
+                         "does not stop the video step, and the mix is quicker to fix now than after it")
+        self.hit(8.0, 0.5)
+        self.mixed()
+        code, out = self.qa("--audio")
+        self.assertEqual((code, out.splitlines()[-1]), (0, "  sound check passed"))
+        self.mixed(seconds=8)
+        code, out = self.qa("--audio")
+        self.assertEqual((code, out.splitlines()[-1]), (1, "  sound check FAILED: fix the mix before the video"))
+
+    def test_the_mix_on_disk_is_checked_straight_after_the_audio_step(self):
+        self.save()
+        self.mixed(seconds=8)
         report = qa.audio_check(self.ep)
         got = rows(report)
         self.assertEqual(got["audio length"], ("FAIL", "8.00 s (the video is 10.0 s)"))
@@ -283,21 +314,13 @@ class SoundCheck(Episode):
 
 
 class Verdicts(Episode):
-    """`qa.py <episode> --lint` and `--audio` as the steps run them: the last line, and the exit code they go by."""
+    """`qa.py <episode> --lint` as the build and render steps run it: the last line, and the exit code they go by."""
 
     def setUp(self):
         super().setUp()
         patch = mock.patch.multiple(qa.config, MAX_HASHTAGS=5, TIKTOK_FIRST_TAG="fyp", PLATFORMS=["tiktok"])
         patch.start()
         self.addCleanup(patch.stop)
-
-    def qa(self, *flags):
-        self.save()
-        out = io.StringIO()
-        with mock.patch.object(sys, "argv", ["qa.py", str(self.ep), *flags]), redirect_stdout(out), \
-                self.assertRaises(SystemExit) as stop:
-            qa.main()
-        return stop.exception.code, out.getvalue()
 
     def test_the_lint_that_ends_the_build_stops_on_any_fail(self):
         code, out = self.qa("--lint")
