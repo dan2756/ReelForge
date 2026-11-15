@@ -225,6 +225,8 @@ def coerce(q: Q, value):
         return out
     if q.kind == "handle":
         return signup.handle_from("" if value is None else str(value))  # "@name", from a link too
+    if isinstance(value, (list, tuple)):   # a JSON array, the natural way to write "one per line" in an answers file
+        return ("\n" if q.kind == "long" else " ").join(s for s in (str(v).strip() for v in value) if s)
     return str(value).strip() if value is not None else ""
 
 
