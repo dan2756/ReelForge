@@ -1664,7 +1664,13 @@ class Dashboard(StatsTab, SettingsTab, Service):
         else:
             self.notify(f"The caption is empty, so nothing was copied for {p.name}.", severity="warning")
         desktop.reveal(item.video)
-        desktop.open_upload_page(p.key)
+        if not desktop.open_upload_page(p.key):
+            # Nothing is noted: an upload page that never opened would later claim some other post for this video.
+            self.notify(f"ReelForge couldn't open your browser. Open {desktop.UPLOAD_PAGES[p.key]} yourself"
+                        + (f": the {what} is copied" if text else "") + f", and {item.video.name} is showing in "
+                        f"{desktop.FILES_WINDOW}.", title=f"{p.name}'s upload page didn't open", severity="warning",
+                        timeout=20)
+            return
         tip = {
             "youtube": " For the description, use Copy YouTube hashtags.",
             "instagram": " Click + Create, then Post/Reel.",
@@ -1682,11 +1688,19 @@ class Dashboard(StatsTab, SettingsTab, Service):
         first = "tiktok" if "tiktok" in self.platforms else None
         self.copy_text(item.text_for(first) if first else item.title)
         desktop.reveal(item.video)
-        for p in self.platforms.values():
-            desktop.open_upload_page(p.key)
-        self.record_manual(list(self.platforms.values()), item)
+        opened = [p for p in self.platforms.values() if desktop.open_upload_page(p.key)]
+        if len(opened) < len(self.platforms):
+            missing = [p for p in self.platforms.values() if p not in opened]
+            self.notify("ReelForge couldn't open your browser for " + ", ".join(p.name for p in missing) + ". Open "
+                        + ", ".join(desktop.UPLOAD_PAGES[p.key] for p in missing) + " yourself.",
+                        title="Upload pages didn't open" if len(missing) > 1 else
+                        f"{missing[0].name}'s upload page didn't open", severity="warning", timeout=20)
+        if not opened:
+            return
+        self.record_manual(opened, item)
         self.notify(f"{'TikTok text' if first else 'Caption'} copied. For the others use the Copy buttons. "
-                    "On Instagram click + Create.", title=f"{len(self.platforms)} upload pages opened", timeout=15)
+                    "On Instagram click + Create.", title=f"{len(opened)} upload pages opened"
+                    if len(opened) > 1 else "Upload page opened", timeout=15)
 
     @db_safe
     def record_manual(self, platforms: list[Platform], item: PublishItem) -> None:

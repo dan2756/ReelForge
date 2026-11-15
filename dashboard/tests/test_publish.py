@@ -78,6 +78,53 @@ class Form(PublishTest):
         self.assertIn(f"{len(CAPTION)}/100", plain(w.view("preview")["caption"]))
 
 
+class UploadPage(PublishTest):
+    """A platform's button: its text copied, the file shown, its upload page opened, and a note of it kept."""
+
+    def test_a_page_that_opened_is_noted(self):
+        w = self.window()
+        w.call("open_upload", "tiktok", CAPTION, TAGS)
+        self.assertEqual(self.opened, [desktop.UPLOAD_PAGES["tiktok"]])
+        self.assertEqual(self.copied, [f"{CAPTION} #fyp {TAGS}"])
+        self.assertEqual([t["title"] for t in w.sent("toast")], ["Upload page opened"])
+        self.assertEqual([(u["platform"], u["video"], u["status"]) for u in db.uploads()],
+                         [("tiktok", "ep01.mp4", "manual")])
+        self.assertEqual(len(w.svc.post_check_timers), 2)
+
+    def test_no_browser_means_no_note_and_a_message_that_says_so(self):
+        self.browser = False
+        w = self.window()
+        w.call("open_upload", "tiktok", CAPTION, TAGS)
+        toast = w.sent("toast")[-1]
+        self.assertEqual((toast["title"], toast["severity"]), ("TikTok's upload page didn't open", "warning"))
+        self.assertIn(desktop.UPLOAD_PAGES["tiktok"], toast["body"])
+        self.assertEqual(self.copied, [f"{CAPTION} #fyp {TAGS}"])  # the text is still copied for you
+        self.assertEqual(db.uploads(), [])
+        self.assertEqual(db.episodes(), [])
+        self.assertEqual(w.svc.post_check_timers, [])
+
+    def test_open_all_notes_only_the_pages_that_opened(self):
+        w = self.window()
+        opens = {desktop.UPLOAD_PAGES["youtube"]}  # the only one a browser opens for
+        with mock.patch.object(desktop, "open_url", lambda url: url in opens):
+            w.call("open_all", CAPTION, TAGS)
+            self.assertEqual([u["platform"] for u in db.uploads()], ["youtube"])
+            titles = [t["title"] for t in w.sent("toast")]
+            self.assertEqual(titles, ["Upload pages didn't open", "Upload page opened"])
+            w.forget()
+            opens.clear()
+            w.call("open_all", CAPTION, TAGS)
+            self.assertEqual([t["title"] for t in w.sent("toast")], ["Upload pages didn't open"])
+            self.assertEqual(len(db.uploads()), 1)
+
+    def test_open_all_is_as_it_was_when_every_page_opens(self):
+        w = self.window()
+        w.call("open_all", CAPTION, TAGS)
+        self.assertEqual(self.opened, [desktop.UPLOAD_PAGES[k] for k in w.svc.platforms])
+        self.assertEqual([t["title"] for t in w.sent("toast")], ["4 upload pages opened"])
+        self.assertEqual(len(db.uploads()), 4)
+
+
 class Remove(PublishTest):
     def test_the_demo_never_moves_a_real_video_to_the_bin(self):
         w = self.window()  # the tests' window is the demo
