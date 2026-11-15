@@ -44,7 +44,7 @@ export function DashboardApp({ bridge, init, quit, nav }: { bridge: Bridge; init
       bridge.on("focus", (d) => setTimeout(() => focus.show(d.id), 50)),
       bridge.on("exit", (d) => quit(d.code ?? 0, d.result ?? undefined)), // result: {restart: true} from Restart
       // A picked video's caption and hashtags, for the Publish form (whichever tab is open when it's picked).
-      bridge.on("form", (d) => state.set({ caption: d.caption ?? "", tags: d.tags ?? "" })),
+      bridge.on("form", (d) => state.formArrived(d.file ?? "", d.caption ?? "", d.tags ?? "")),
       // Another ReelForge window moved a tab (the Settings tab's Tab order): this one follows.
       bridge.on("order", (d) => state.set({ order: tabOrder(d.order) })),
     ]

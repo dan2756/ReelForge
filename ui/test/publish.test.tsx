@@ -64,6 +64,29 @@ describe("the Publish form at start", () => {
   })
 })
 
+describe("what you type in the form", () => {
+  test("is still there when you pick another video and come back, and the preview with it", async () => {
+    const h = await demo([200, 56])
+    for (let i = 0; i < 30 && !find(h, "What if everyone"); i++) await h.settle(100)
+    await clickText(h, "What if everyone", 3) // the caption's field
+    h.t.mockInput.pressKey("END")
+    await h.t.mockInput.typeText(" My own words.")
+    await h.settle(400)
+    const mine = "What if everyone on Earth jumped at the same time? My own words."
+    const shown = () => h.bridge.view<{ rows: { name: string; text: string }[] }>("preview")!.rows.find((r) => r.name === "X")!.text
+    await until(h, () => shown() === mine)
+    h.t.mockInput.pressKey("ESCAPE") // out of the field
+    await h.settle(200)
+    await clickText(h, "demo_doubling_duck.mp4", 2)
+    await until(h, () => !frame(h).includes("My own words."))
+    expect(frame(h)).not.toContain("My own words.") // the other video's own caption
+    await clickText(h, "demo_everyone_jumps.mp4", 2)
+    await until(h, () => frame(h).includes("My own words.") && shown() === mine)
+    expect(frame(h)).toContain("jumped at the same time? My own words.") // (it came back as the video's own caption)
+    expect(shown()).toBe(mine) // and what each platform would get follows
+  })
+})
+
 describe("posting by hand", () => {
   const CAPTION = "What if everyone on Earth jumped at the same time?"
   const TAGS = "#fyp #whatif #science #physics #earth"

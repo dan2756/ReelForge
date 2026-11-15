@@ -114,6 +114,10 @@ export class DashState {
   note: string | null = null // the highlighted notification
   caption = ""
   tags = ""
+  /** The picked video (its path) with its caption and hashtags as the Python side last sent them, and what you
+   * changed them to for each video, with what they were changed from: see formArrived. */
+  private formSent = { file: "", caption: "", tags: "" }
+  private edits: Record<string, { from: { caption: string; tags: string }; caption: string; tags: string }> = {}
   handles: Record<string, string> = {} // what's typed into each unconnected platform's @handle box
   handleErrors: Record<string, string> = {} // ... and what's wrong with it
   private listeners = new Set<() => void>()
@@ -131,11 +135,32 @@ export class DashState {
     this.drawer = init.drawer
     this.tags = init.default_tags
     // The picked video's caption, when the Python side has sent it already (the window drawn again on the same one).
-    const form = bridge.view<{ caption?: string; tags?: string }>("form")
+    const form = bridge.view<{ file?: string; caption?: string; tags?: string }>("form")
     if (form) {
       this.caption = form.caption ?? ""
       this.tags = form.tags ?? ""
+      this.formSent = { file: form.file ?? "", caption: this.caption, tags: this.tags }
     }
+  }
+
+  /** A video was picked: its caption and hashtags, as written with the video. What you typed for it earlier comes
+   * back instead, as long as its own words are still the ones you changed (a new render brings a new caption, and
+   * that one wins): picking another video and coming back used to throw your words away. */
+  formArrived(file: string, caption: string, tags: string) {
+    this.formSent = { file, caption, tags }
+    const mine = this.edits[file]
+    if (mine && mine.from.caption === caption && mine.from.tags === tags) {
+      this.set({ caption: mine.caption, tags: mine.tags })
+      this.bridge.send("form_changed", mine.caption, mine.tags) // the preview follows
+    } else this.set({ caption, tags })
+  }
+
+  /** You typed in the Publish form: the preview follows, and the words are kept for this video while the window is
+   * open. */
+  formTyped(caption: string, tags: string) {
+    this.set({ caption, tags })
+    if (this.formSent.file) this.edits[this.formSent.file] = { from: this.formSent, caption, tags }
+    this.bridge.send("form_changed", caption, tags)
   }
 
   subscribe = (fn: () => void) => {

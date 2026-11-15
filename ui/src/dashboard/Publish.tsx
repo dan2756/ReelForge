@@ -133,10 +133,7 @@ function Form({ page }: { page?: boolean }) {
     // the preview of the form as it is (another tab and back, or nothing picked yet)
     s.bridge.send("form_changed", s.caption, s.tags)
   }, [])
-  const changed = (caption: string, tags: string) => {
-    s.set({ caption, tags })
-    s.bridge.send("form_changed", caption, tags)
-  }
+  const changed = (caption: string, tags: string) => s.formTyped(caption, tags)
   const body = (
     <>
       <Label first segs={preview?.caption} fallback="Caption" />
