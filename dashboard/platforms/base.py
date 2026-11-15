@@ -54,9 +54,11 @@ def explain(error: BaseException, name: str) -> str:
 
 
 def detail(error: BaseException) -> str:
-    """An error as the log keeps it: its kind and its own words, on one line (browser errors run to many)."""
+    """An error as the log keeps it: its kind and its own words, on one line (browser errors run to many). One
+    raised from another (a sentence fit to show, in place of what went wrong) is followed by that one."""
     lines = [line.strip() for line in str(error).splitlines()[:6] if line.strip()]
-    return f"{type(error).__name__}: " + " | ".join(lines)
+    said = f"{type(error).__name__}: " + " | ".join(lines)
+    return said if error.__cause__ is None else f"{said} (from {detail(error.__cause__)})"
 
 
 @dataclass

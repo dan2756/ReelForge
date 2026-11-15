@@ -14,8 +14,10 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from dashboard import analytics, db, notify
+from dashboard.platforms import PlatformError, detail
 
 T0 =datetime(2026, 10, 23, 4, 0, tzinfo=timezone.utc)
 EPISODES = r"C:\Users\me\Desktop\my channel\episodes"
@@ -734,6 +736,36 @@ class HandleTest(DbTest):
         self.assertEqual({r["views"] for r in db.account_series("tiktok", "")}, {1000})
         self.assertEqual(db.old_handles("tiktok"), [])
 
+    def test_no_copy_no_read(self):
+        """The copy that comes first can't be written (a full disk): the read isn't stored, the reason is said in
+        a sentence and kept in the log, and the next read tries again. It used to be put down to a busy database
+        at every read from then on."""
+        self.typo_then_mine()
+        full = sqlite3.OperationalError("database or disk is full")
+
+        class Closing:  # a connection whose copy fails part-way
+            def __init__(self, conn):
+                self.conn = conn
+
+            def backup(self, target):
+                target.conn.execute("CREATE TABLE half (written INTEGER)")
+                raise full
+
+            def close(self):
+                self.conn.close()
+
+        with mock.patch.object(db, "closing", lambda conn: closing(Closing(conn))):
+            with self.assertRaises(PlatformError) as caught:
+                self.read("@me", self.mine, 120, 120)
+        self.assertEqual(str(caught.exception), "ReelForge couldn't save a copy of your stats before storing @me's "
+                         "with them, so this read wasn't stored. Check that the disk has room. ReelForge tries again "
+                         "at the next refresh.")
+        self.assertIn("(from OperationalError: database or disk is full)", detail(caught.exception))
+        self.assertEqual(self.copies(), [])  # half a copy isn't left behind
+        self.assertEqual((self.stored(), db.old_handles("tiktok")), (["big0", "big1", "big2"], []))
+        self.assertEqual(self.read("@me", self.mine, 120, 150), "@mrbest")  # room again: copied, then stored
+        self.assertEqual(len(self.copies()), 1)
+
     def test_a_refresh_says_so_once_and_the_note_leads_to_accounts(self):
         from dashboard import sync
         from dashboard.platforms import Account, Platform, Post
@@ -748,8 +780,20 @@ class HandleTest(DbTest):
         for state in (sync._attempted, sync.last_errors, sync.last_warnings):
             state.clear()
             self.addCleanup(state.clear)
+        refresh = lambda: sync.refresh({"tiktok": Mine({"handle": "@me"})}, {"refresh_minutes": 30},  # noqa: E731
+                                       manual=True, force=True)
+        # While the copy can't be written, the refresh says so, each time, and nothing of @me's is stored.
+        with mock.patch.object(db, "backup", side_effect=sqlite3.OperationalError("database or disk is full")):
+            for _ in range(2):
+                result = refresh()
+                self.assertEqual((result.done, result.failed), ([], {"TikTok": "said"}))
+                self.assertEqual(result.errors, [
+                    "TikTok: ReelForge couldn't save a copy of your stats before storing @me's with them, so this "
+                    "read wasn't stored. Check that the disk has room. ReelForge tries again at the next refresh."])
+                self.assertIn("(from OperationalError: database or disk is full)", result.details[0])
+        self.assertEqual((self.stored(), notify.recent()), (["big0", "big1", "big2"], []))
         for _ in range(2):
-            sync.refresh({"tiktok": Mine({"handle": "@me"})}, {"refresh_minutes": 30}, manual=True, force=True)
+            self.assertEqual(refresh().errors, [])
         notes = [n for n in notify.recent() if (n["key"] or "").startswith("handle:")]
         self.assertEqual([(n["key"], n["title"]) for n in notes], [("handle:tiktok:me", "TikTok is now read as @me")])
         self.assertIn("read as @mrbest", notes[0]["body"])

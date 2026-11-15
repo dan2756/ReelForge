@@ -132,13 +132,18 @@ def _migrate() -> None:
 
 def backup(why: str) -> Path:
     """Copy the database next to itself as stats.db.bak-<YYYYmmdd-HHMMSS>-<why>, consistent even while it's in use.
-    A copy is never written over another: a second one in the same second gets a number before its why."""
+    A copy is never written over another: a second one in the same second gets a number before its why. One that
+    can't be finished (a full disk) isn't left behind: half a copy would pass for a whole one."""
     stamp = f"{_path.name}.bak-{datetime.now():%Y%m%d-%H%M%S}"
     target, n = _path.with_name(f"{stamp}-{why}"), 1
     while target.exists():
         target, n = _path.with_name(f"{stamp}-{n + 1}-{why}"), n + 1
-    with closing(sqlite3.connect(_path, timeout=10)) as src, closing(sqlite3.connect(target)) as dst:
-        src.backup(dst)
+    try:
+        with closing(sqlite3.connect(_path, timeout=10)) as src, closing(sqlite3.connect(target)) as dst:
+            src.backup(dst)
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
     return target
 
 
@@ -197,7 +202,7 @@ def record_snapshot(platform: str, account, posts: list, ts: str | None = None,
     with connect() as db:
         change = _handle_change(db, platform, account.handle, posts, ts)
     if change and change["before"]:
-        backup("handle")
+        _copy_first(account.handle)
     with connect() as db:  # what the read showed about the handle is stored with the read, or not at all
         if change:
             _note_change(db, platform, account.handle, change)
@@ -259,7 +264,7 @@ def _handle_change(db: sqlite3.Connection, platform: str, handle: str, posts: li
     mistyped that exists, or a switch to another one). The posts say which. One of the old handle's posts, read
     under the new one too: the same account, and its readings under the old name go under the new one. A read with
     posts, none of them the old handle's: another account, whose numbers are about to be stored with the ones so
-    far, so the store is copied first (backup "handle") and you're asked which it is. A read with nothing to compare
+    far, so the store is copied first (_copy_first) and you're asked which it is. A read with nothing to compare
     (TikTok's totals alone, numbers you typed in) can't say, so the old handle's posts are only written down. Every
     later read under the new handle is compared with what's written down, until one settles it either way.
 
@@ -303,6 +308,19 @@ def _handle_change(db: sqlite3.Connection, platform: str, handle: str, posts: li
         return None
     return {"record": record, "relabel": relabel, "before": before,
             "untold": untold and not any(e["sure"] for e in kept)}
+
+
+def _copy_first(handle: str) -> None:
+    """Save the copy that comes before another account's stats are stored with the ones so far (backup "handle").
+    Without it the read isn't stored: two accounts are never mixed with no way back. Said in a sentence, because
+    the next read runs into the same thing until there's room for the copy."""
+    from .platforms.base import AGAIN, PlatformError  # imported here because the platforms import this module
+
+    try:
+        backup("handle")
+    except (sqlite3.Error, OSError) as e:
+        raise PlatformError(f"ReelForge couldn't save a copy of your stats before storing {handle}'s with them, so "
+                            f"this read wasn't stored. Check that the disk has room. {AGAIN}") from e
 
 
 def _note_change(db: sqlite3.Connection, platform: str, handle: str, change: dict) -> None:
