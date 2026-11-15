@@ -131,6 +131,14 @@ class Stills(Steps):
             self.main("--steps", "stills", "--stills", "1")
         self.assertEqual(self.passes, 0)
 
+    def test_as_built_gives_stills_of_the_scene_as_it_was_built(self):
+        stamp = self.built()
+        self.spec["effect"]["subject"] = "donut"
+        out = self.main("--steps", "stills", "--stills", "1", "--as-built")
+        self.assertIn('episode.json "effect" changed after the scene was built: using the scene as it was built', out)
+        self.assertEqual(self.passes, 1)
+        self.assertEqual(framecache.read_stamp(self.stills / framecache.STAMP), stamp)
+
     def test_the_stills_are_previewed_with_the_text_on(self):
         self.built()
         self.main("--steps", "stills", "--stills", "0.5,2")
@@ -285,6 +293,37 @@ class RenderGuard(Steps):
             self.render()
         self.assertEqual(self.passes, 0)
 
+    def test_as_built_carries_on_with_the_scene_as_it_was_built(self):
+        """A module this scene shares with another episode was edited while its render was stopped. scene.blend
+        and the frames still belong together, so the render can go on without building again."""
+        stamp = self.built()
+        self.rendered(range(1, 13), stamp)
+        (self.code / "rf_common.py").write_text("HAZE = 1\n# for the other episode\n", encoding="utf-8")
+        with self.assertRaisesRegex(SystemExit, "or add --as-built to use the scene as it was built"):
+            self.render()
+        with self.assertRaisesRegex(SystemExit, "or add --as-built"):
+            self.render(keep=True)                              # keeping the frames was never the question
+        out = self.render(as_built=True)
+        self.assertIn("pipeline/blender/rf_common.py changed after the scene was built: using the scene as it was "
+                      "built, as asked", out)
+        self.assertEqual((self.shows(12), self.shows(13)), ("earlier", "pass"))
+        self.assertEqual(framecache.read_stamp(self.frames / framecache.STAMP), stamp)
+
+    def test_as_built_still_asks_about_frames_of_an_older_scene(self):
+        self.rendered(range(1, 13), self.built())
+        self.spec["world"]["type"] = "plaza"
+        self.built()
+        self.spec["effect"]["subject"] = "donut"                # edited again, not built
+        with self.assertRaisesRegex(SystemExit, "say what to do with them"):
+            self.render(as_built=True)
+        self.assertEqual(self.passes, 0)
+
+    def test_as_built_does_not_stand_in_for_a_build_that_did_not_finish(self):
+        self.rendered(range(1, 13), self.built())
+        (self.build / framecache.SCENE).unlink()
+        with self.assertRaisesRegex(SystemExit, "the last build did not finish"):
+            self.render(as_built=True)
+
     def test_a_build_that_did_not_finish_stops_the_render(self):
         self.rendered(range(1, 13), self.built())
         (self.build / framecache.SCENE).unlink()                # build_scene.py removes it when it starts
@@ -317,6 +356,12 @@ class RenderGuard(Steps):
         self.main("--steps", "render", "--keep-frames")
         self.assertEqual(framecache.read_stamp(self.frames / framecache.STAMP), street)
         self.assertEqual(self.passes, 1)                        # every frame was there, so Blender had nothing to do
+        self.spec["effect"]["subject"] = "donut"
+        (self.frames / "f_0030.jpg").unlink()
+        with self.assertRaisesRegex(SystemExit, 'render: episode.json "effect" changed after the scene was built'):
+            self.main("--steps", "render")
+        self.assertIn("using the scene as it was built, as asked", self.main("--steps", "render", "--as-built"))
+        self.assertEqual(self.passes, 2)
 
 
 class RenderPasses(Steps):

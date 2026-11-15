@@ -117,7 +117,7 @@ class DoctorJson(unittest.TestCase):
             (saved, lint, "step failed with exit code 1\n",
              "Blender built the example, then a later step stopped:\n  [FAIL] HUD numbers: ft: no format called 'feet'",
              "[PASS]"),
-            (saved, "> python compose.py --preview 21\n", "OSError: cannot open resource\nstep failed with exit code 1\n",
+            (saved, "> python compose.py --preview 21\n", "OSError: cannot open resource\nstep failed\n",
              "then a later step stopped:\n> python compose.py --preview 21\nOSError: cannot open resource\nstep failed",
              "couldn't build"),
             ("Error: cannot read the scene\n", "> blender -b\n", "step failed with exit code 1 (see build.log)\n",

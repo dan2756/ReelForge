@@ -75,7 +75,9 @@ pipeline uses the stamp so that **nothing needs deleting by hand**:
   fails by naming them if they still are. `build/render.log` keeps every run, and a step that fails prints the end
   of its log.
 - `stills` and `render` stop when `episode.json` or the scene code changed after the last build, because Blender
-  would show the scene as it was. Build first.
+  would show the scene as it was. Build first. To carry on a render with the scene as it was built, because a
+  module it shares with another episode is being edited or the kit was updated, add `--as-built`: it says what
+  changed, and the frames on disk are still checked against that scene.
 - The video and cover steps refuse frames of an older scene, and name the frames that are missing before ffmpeg
   starts. The video is written beside the last one and replaces it only when it is whole, so a failed step leaves
   the earlier video as it was.

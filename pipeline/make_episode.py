@@ -97,6 +97,9 @@ def main():
                     "if it is stopped, the same command carries on")
     ap.add_argument("--keep-frames", action="store_true",
                     help="render: keep the frames on disk although the scene was built again since")
+    ap.add_argument("--as-built", action="store_true",
+                    help="stills, render: use build/scene.blend as it was built, although episode.json or the scene "
+                    "code changed since (to carry on a render while a shared scene module is being worked on)")
     ap.add_argument("--status", action="store_true",
                     help="say where the episode stands (built, frames, audio, video, QA, review, delivered) and stop")
     args = ap.parse_args()
@@ -139,7 +142,7 @@ def main():
             [1, 15, 20, 26, 31, 38, 47, 55, 63, 67]
         frames = ",".join(str(int(round(s * fps)) + 1) for s in secs)
         (build / "stills").mkdir(exist_ok=True)
-        fresh_stills(build, built_scene(build, spec, "stills"), {int(n) for n in frames.split(",")})
+        fresh_stills(build, built_scene(build, spec, "stills", args.as_built), {int(n) for n in frames.split(",")})
         run([config.BLENDER, "-b", build / "scene.blend", "-o", build / "stills" / "s_####", "-F", "JPEG",
              "-f", frames], log=build / "stills.log")
         # the same seconds with the text and HUD drawn on, and a labelled contact sheet of them, in build/preview
@@ -148,7 +151,7 @@ def main():
 
     if "render" in steps:
         run([sys.executable, config.PIPELINE / "qa.py", ep, "--lint"])
-        render(build, spec, args.rerender, args.keep_frames)
+        render(build, spec, args.rerender, args.keep_frames, args.as_built)
 
     post = config.PIPELINE / "post"
     if "audio" in steps:
@@ -223,10 +226,12 @@ def clean(spec, build):
     print(f"  cleaned render files ({freed / 1e9:.2f} GB freed); scene.blend, series.json, audio and QA kept")
 
 
-def built_scene(build, spec, step):
+def built_scene(build, spec, step, as_built=False):
     """The stamp of the scene in build/scene.blend, once it's sure that this is still the scene episode.json and the
     scene code describe (None for a scene built before ReelForge kept stamps). Blender renders whatever scene.blend
-    holds, so an edit made after the last build would not be in the pictures."""
+    holds, so an edit made after the last build would not be in the pictures. With as_built that is what was asked
+    for: a render that was stopped is carried on from scene.blend while a module it shares with another episode is
+    being edited, or after an update of the kit."""
     if not (build / "scene.blend").exists():
         raise SystemExit(f"{step}: build/scene.blend not found, run --steps build first")
     stamp = framecache.read_stamp(build / framecache.SCENE)
@@ -234,9 +239,12 @@ def built_scene(build, spec, step):
         raise SystemExit(f"{step}: the last build did not finish, so build/scene.blend is an older scene. "
                          "Run --steps build first.")
     old = framecache.outdated(stamp, spec, config.PIPELINE / "blender") if stamp else []
-    if old:
+    if old and not as_built:
         raise SystemExit(f"{step}: {', '.join(old)} changed after the scene was built, so build/scene.blend "
-                         "still shows it as it was. Run --steps build first.")
+                         "still shows it as it was. Run --steps build first, or add --as-built to use the scene "
+                         "as it was built.")
+    if old:
+        print(f"  {', '.join(old)} changed after the scene was built: using the scene as it was built, as asked")
     return stamp
 
 
@@ -271,7 +279,7 @@ def fresh_stills(build, stamp, numbers):
         framecache.write_stamp(stills / framecache.STAMP, stamp)
 
 
-def render(build, spec, rerender="", keep=False):
+def render(build, spec, rerender="", keep=False, as_built=False):
     """Render every frame up to render_until into build/frames. Frames already there are kept (Blender skips them),
     which is what lets a stopped render carry on, but only while they show this scene: after the scene is built
     again the step stops and asks what to do with them. It never mixes old and new pictures on its own."""
@@ -281,7 +289,7 @@ def render(build, spec, rerender="", keep=False):
     if rerender and keep:
         raise SystemExit("render: --rerender and --keep-frames don't go together (--rerender SECONDS already keeps "
                          "the other frames)")
-    stamp = built_scene(build, spec, "render")
+    stamp = built_scene(build, spec, "render", as_built)
     frames.mkdir(exist_ok=True)
     swept = len(framecache.sweep_empty(frames))
     if swept:
