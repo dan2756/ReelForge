@@ -43,6 +43,7 @@ REPO = "dan2756/ReelForge"
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES = f"https://github.com/{REPO}/releases"
 RESTART = 75  # the exit code that asks the reelforge launcher to start ReelForge again
+PART_WAY_EXIT = 4  # --into's exit code when it stopped with some of the new version in place (scripts/install.ps1)
 # Never overwritten by an update: the person's own channel, videos, tools, data and generated instructions.
 KEEP = ("my-studio/", "episodes/", "completed videos/", "research/", "tools/", ".venv/", "ui/node_modules/", ".git/",
         ".claude/", "assets/sfx/mixkit/", "assets/sfx/_cache/", "dashboard/data/", "dashboard/videos/",
@@ -535,7 +536,11 @@ def _move_in_main(where: list[str]) -> int:
         summary = move_in(Path(where[0]), _show)
     except UpdateError as e:
         print(f"\nThe update didn't finish: {e}")
-        return 1
+        # The install line goes by this: only after a 1 does it say that ReelForge still works as it was.
+        return PART_WAY_EXIT if e.partial else 1
+    except Exception as e:   # anywhere in the update, so some of the new files may be in place already
+        print(f"\nThe update didn't finish: {type(e).__name__}: {e}")
+        return PART_WAY_EXIT
     print(f"\n{summary}")
     return 0
 

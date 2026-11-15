@@ -77,6 +77,7 @@
     $tag = [guid]::NewGuid().ToString("N").Substring(0, 8)
     $work = Join-Path ([IO.Path]::GetTempPath()) "reelforge-install-$tag"
     $unpack = $null
+    $partway = $false
     $pattern = '^([0-9a-fA-F]{64}) +\*?(ReelForge-[0-9A-Za-z.-]+-Windows\.zip)$'
     try {
         New-Item -ItemType Directory -Force -Path $work, $parent | Out-Null
@@ -106,7 +107,10 @@
             # The new version's own updater puts it in place, with the rules ReelForge's Updates tab follows
             Push-Location -LiteralPath $top[0].FullName
             try { & $python -B -m studio.update --into $dir } finally { Pop-Location }
-            if ($LASTEXITCODE -ne 0) { throw "the update stopped. ReelForge still works as it was; paste the install command to try again." }
+            # 4: it stopped with some of the new version in place, and its own line above says what and why. Only
+            # another way of stopping has left ReelForge as it was.
+            if ($LASTEXITCODE -eq 4) { $partway = $true }
+            elseif ($LASTEXITCODE -ne 0) { throw "the update stopped. ReelForge still works as it was; paste the install command to try again." }
         } else {
             Say "Unpacking it into $dir..."
             [IO.Compression.ZipFile]::ExtractToDirectory($zip, $unpack)
@@ -125,6 +129,10 @@
         }
     }
 
+    if ($partway) {
+        Say "Paste the install command again to finish the update." "Yellow"
+        return
+    }
     if ($old) {
         Say "ReelForge in $dir is up to date. Open it as usual." "Green"
         return

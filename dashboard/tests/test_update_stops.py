@@ -212,6 +212,28 @@ class PartWayTest(unittest.TestCase):
         self.assertIn("-m pip install -r requirements.txt", str(stopped.exception))
         self.assertNotIn("setup starts", str(stopped.exception))
 
+    def test_the_install_line_only_hears_nothing_changed_when_thats_so(self):
+        # install.ps1 runs `studio.update --into` on a copy the old Windows installer made. After any failure it
+        # said "ReelForge still works as it was", right under the updater's own "The new version's files are in
+        # place, but ...". The updater's exit code now tells the two apart.
+        self.kit("1.0.0", self.root, **{"README.md": "old", "dashboard/service.py": "old"})
+        new = self.kit("1.1.0", self.dir / "new", **{"README.md": "new", "dashboard/service.py": "new"})
+        with mock.patch.object(update, "ROOT", new), contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(update.main(["--into", str(self.dir / "no ReelForge here")]), 1)
+            with self.busy("README.md", "service.py"):               # nothing could be replaced
+                self.assertEqual(update.main(["--into", str(self.root)]), 1)
+            with self.busy("service.py"):                            # README.md is the new one now
+                self.assertEqual(update.main(["--into", str(self.root)]), update.PART_WAY_EXIT)
+            with mock.patch.object(update, "move_in", side_effect=RuntimeError("anywhere, maybe mid-copy")):
+                self.assertEqual(update.main(["--into", str(self.root)]), update.PART_WAY_EXIT)
+        self.assertEqual(out.getvalue().count("The update didn't finish: "), 4)
+        # PowerShell isn't run here: this only reads that the script keeps its claim for the other exit codes
+        script = (Path(update.__file__).resolve().parent.parent / "scripts" / "install.ps1").read_text(encoding="utf-8")
+        lines = [ln.strip() for ln in script.splitlines()]
+        claim = next(i for i, ln in enumerate(lines) if "ReelForge still works as it was" in ln)
+        self.assertEqual(lines[claim - 1], f"if ($LASTEXITCODE -eq {update.PART_WAY_EXIT}) {{ $partway = $true }}")
+        self.assertTrue(lines[claim].startswith("elseif ($LASTEXITCODE -ne 0) { throw "), lines[claim])
+
     def test_a_release_without_checksums_isnt_installed(self):
         archive = self.dir / "ReelForge-9.0.0-Linux.tar.gz"
         archive.write_bytes(b"not checked")
