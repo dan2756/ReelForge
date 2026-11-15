@@ -317,6 +317,25 @@ class Posting(PostingTest):
         self.assertEqual([(j["platform"], posting.get(j["id"])["video"]) for j in made["jobs"]],
                          [("tiktok", "ep01.mp4")])
 
+    def test_a_yes_to_a_question_about_a_file_that_was_written_over_since_starts_nothing(self):
+        """The window sends back the file's content as its question saw it too. A new render under the same name is
+        another video: with Press Post for me on nobody would look at it again before it is up."""
+        w = self.window()
+        asked = w.call("post_info", CAPTION, TAGS)["video"]
+        self.assertEqual((asked["path"], asked["sha256"]), (str(self.video), posting.digest(self.video)))
+        self.video.write_bytes(b"another render, under the same name")
+        made = w.call("post_with_extension", ["tiktok"], CAPTION, TAGS, False, None, asked["path"], asked["sha256"])
+        self.assertIsNone(made)
+        toast = w.sent("toast")[-1]
+        self.assertEqual((toast["title"], toast["severity"]), ("Nothing was started", "warning"))
+        self.assertEqual(toast["body"], "ep01.mp4 changed after the question was shown: it is another file now, so "
+                                        "nothing was started. Check the video, then press Post… again.")
+        self.assertEqual((posting.recent(), self.pages, db.uploads()), ([], [], []))
+        # Asked again, the yes is to the file as it is now.
+        asked = w.call("post_info", CAPTION, TAGS)["video"]
+        made = w.call("post_with_extension", ["tiktok"], CAPTION, TAGS, True, None, asked["path"], asked["sha256"])
+        self.assertEqual([posting.get(j["id"])["video_sha256"] for j in made["jobs"]], [asked["sha256"]])
+
     def test_stop_before_posting_off_is_kept_on_the_job_and_never_for_x(self):
         w = self.window()
         made = self.post(w, "tiktok", "x", stop_before=False)

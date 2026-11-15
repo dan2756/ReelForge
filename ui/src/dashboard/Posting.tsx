@@ -185,7 +185,7 @@ export function PostDialog({ data, close }: { data: PostData; close: () => void 
     setBusy(true)
     // What it started and what it refused come back as the rows on the tab and as pop-ups. The video goes with the
     // yes: the Python side starts nothing when another one is picked by now.
-    await s.bridge.ask("post_with_extension", chosen.map((p) => p.key), data.caption, data.tags, stop || !mayPress, chosen.filter((p) => p.again).map((p) => p.key), info.video.path)
+    await s.bridge.ask("post_with_extension", chosen.map((p) => p.key), data.caption, data.tags, stop || !mayPress, chosen.filter((p) => p.again).map((p) => p.key), info.video.path, info.video.sha256)
     if (s.dialog?.kind === "post") close() // (Esc may have closed it while the browser was opening)
   }
   // The question is about one video. The Python side picks another by itself when this one leaves the list (hidden or

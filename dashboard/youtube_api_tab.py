@@ -674,7 +674,7 @@ class YouTubeApiTab:
                 same = shown.get("sha256") == posting.digest(self.selected_file)
             except OSError:
                 same = False
-            if not same:  # (nobody sees the video again before it is up: through the extension you do, in the tab)
+            if not same:  # (nobody sees the video again before it is up)
                 self.notify(f"{asked.name} changed after the question was shown: it is another file now, so "
                             "nothing was sent. Check the video, then press Post with API… again.",
                             title="Nothing was started", severity="warning", timeout=12)

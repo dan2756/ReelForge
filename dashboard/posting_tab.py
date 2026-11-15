@@ -493,18 +493,23 @@ class PostingTab:
             why = self.extension_needed(extension)
         self.update_posting()
         return {"video": {"path": str(video), "name": video.name,
-                          "size": f"{video.stat().st_size / 1024 / 1024:.1f} MB"},
+                          "size": f"{video.stat().st_size / 1024 / 1024:.1f} MB",
+                          # The file as the question saw it. It goes back with the yes (post_with_extension).
+                          "sha256": posting.digest(video)},
                 "review": look["review"], "extension": {"state": extension["state"], "line": extension["line"].json()},
                 "platforms": platforms, "can_post": not why, "why": why, "stop_before": True, "note": TESTED,
                 "how": HOW, "how_press": HOW_PRESS}
 
     @rpc
     def post_with_extension(self, platforms: list[str], caption: str, tags: str, stop_before: bool = True,
-                            force: list[str] | None = None, video: str | None = None) -> dict | None:
+                            force: list[str] | None = None, video: str | None = None,
+                            sha256: str | None = None) -> dict | None:
         """Your yes to the question: a job for each ticked platform (posting.create_batch), then the local page that
         hands them to the extension. stop_before: the extension stops at the platform's own Post button (off only
         where post_info said press is available, and the extension then still asks you in the browser before it
-        presses). force: the platforms to post to again although the video is up there. video: the file the question was about (post_info's video.path), which the window sends back.
+        presses). force: the platforms to post to again although the video is up there. video and sha256: the file
+        the question was about and its content then (post_info's video.path and video.sha256), which the window
+        sends back.
         Returns {"batch", "jobs": [{"id", "platform"}], "blocked": [...], "opened"}; None when there was
         nothing to start from."""
         if self.demo:
@@ -519,6 +524,19 @@ class PostingTab:
                         "video now. Press Post… again to post this one.", title="Nothing was started",
                         severity="warning", timeout=12)
             return None
+        if sha256 is not None:
+            # ... nor another file under the same name (a new render, a copy written over it). You do see the video
+            # in the tab before you press Post there, but not when Press Post for me is on: a yes is to the file
+            # the question was about, as it is for a post through YouTube's API.
+            try:
+                same = sha256 == posting.digest(self.selected_file)
+            except OSError:
+                same = False
+            if not same:
+                self.notify(f"{self.selected_file.name} changed after the question was shown: it is another file "
+                            "now, so nothing was started. Check the video, then press Post… again.",
+                            title="Nothing was started", severity="warning", timeout=12)
+                return None
         needed = self.cant_hand_over()
         ticked = [k for k in platforms or [] if k in self.platforms]
         if needed or not ticked:

@@ -291,7 +291,7 @@ export interface PostInfoPlatform {
 }
 
 export interface PostInfo {
-  video: { path: string; name: string; size: string }
+  video: { path: string; name: string; size: string; sha256: string } // sha256: the file as the question saw it
   review: { state: string; line: string }
   extension: { state: ExtensionState; line: Segs }
   platforms: PostInfoPlatform[]

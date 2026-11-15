@@ -363,6 +363,24 @@ describe("Post…", () => {
     expect(popups()).toEqual([]) // and no "not started: a post is already under way" about the posts it just started
   })
 
+  test("a yes is to the file the question was about: one written over under its name since starts nothing", async () => {
+    const h = await kit({ extension: "on" })
+    await clickText(h, "clip.mp4", 2)
+    await until(h, () => posting(h).video?.name === "clip.mp4")
+    await clickText(h, "▐ Post… ▌", 3)
+    await until(h, () => frame(h).includes("POST THIS VIDEO"))
+    // A new render lands on the file while the question is open (the same name, other bytes).
+    writeFileSync(posting(h).video!.path, "another render of the clip")
+    h.t.mockInput.pressKey("TAB")
+    await h.settle(200)
+    expect(focused(h)).toBe("Start 4 posts")
+    h.t.mockInput.pressKey("RETURN")
+    await until(h, () => popups().length > 0)
+    expect(popups()).toEqual(["Nothing was started: clip.mp4 changed after the question was shown: it is another file now, so nothing was started. Check the video, then press Post… again."])
+    expect(jobsMade()).toBe(0)
+    expect(listed("opened.txt")).toEqual([]) // no page for the extension
+  })
+
   test("the question is about one video: when another is the picked one by now it closes, and its yes starts nothing", async () => {
     const h = await kit({ extension: "on" })
     await clickText(h, "clip.mp4", 2)
