@@ -535,6 +535,26 @@ class Spotted(PostingTest):
         self.assertEqual(posting.get(first["id"])["superseded"], 1)
         self.assertEqual(self.rows(w)["tiktok"]["job"], second["id"])
 
+    def test_a_post_again_that_ends_without_a_post_leaves_the_post_standing(self):
+        """Post again sets the posted job aside for the new try. When that try is called off, or the page for the
+        extension never opens, ReelForge must not forget the post that is up: the row says posted again, and a
+        plain Post is refused there as before."""
+        w = self.window()
+        (first,) = self.post(w)["jobs"]
+        self.work(first["id"], "ready", "posted", url=TIKTOK_URL)
+        (second,) = self.post(w, force=["tiktok"])["jobs"]
+        w.call("post_action", second["id"], "cancel")
+        row = self.rows(w)["tiktok"]
+        self.assertEqual((row["state"], row["job"], row["actions"]),
+                         ("posted", first["id"], ["open_post", "post_again"]))
+        by = {p["key"]: p for p in w.call("post_info", CAPTION, TAGS)["platforms"]}
+        self.assertEqual((by["tiktok"]["blocked"]["reason"], by["tiktok"]["again"]), ("posted", True))
+        self.assertEqual(self.post(w)["jobs"], [])  # not without saying again
+        self.page_opens = False
+        self.assertEqual(self.post(w, force=["tiktok"])["jobs"], [])  # made, then called off: no page opened
+        self.assertEqual(self.rows(w)["tiktok"]["state"], "posted")
+        self.assertEqual(self.post(w)["jobs"], [])
+
 
 class ExtensionView(PostingTest):
     def view(self, w: Window) -> dict:

@@ -224,6 +224,28 @@ describe("Post…", () => {
     expect(state(h, "instagram")).toBe("spotted") // nothing was started
   })
 
+  test("a Post again that is called off leaves the post standing: its row says posted, and Post… still asks before posting there", async () => {
+    const h = await kit({ extension: "on", jobs: { x: ["ready"] } })
+    await clickText(h, "It's posted", 2)
+    await until(h, () => state(h, "x") === "posted")
+    expect(row(h, "X")).toContain("✓ posted")
+    await clickText(h, "Post again…", 2)
+    await until(h, () => frame(h).includes("POST THIS VIDEO"))
+    await clickText(h, "Start 1 post", 2)
+    await until(h, () => state(h, "x") === "queued")
+    await clickText(h, "▐ Cancel ▌", 3) // the new try, on X's row
+    await until(h, () => state(h, "x") !== "queued")
+    // The post that was up is still up, as far as ReelForge knows: the row says so again, not "cancelled".
+    expect(state(h, "x")).toBe("posted")
+    expect(row(h, "X")).toContain("✓ posted")
+    expect(row(h, "X")).toContain("▐ Post again… ▌")
+    expect(row(h, "X")).not.toContain("Try again")
+    await clickText(h, "▐ Post… ▌", 3)
+    await until(h, () => frame(h).includes("POST THIS VIDEO"))
+    expect(dialog(h)).toContain("○ X @me Already posted with ReelForge's help. Tick it to post there again.")
+    expect(frame(h)).toContain("▐ Start 3 posts ▌") // the other three: X only when you tick it
+  })
+
   test("the question is about one video: when another is the picked one by now it closes, and its yes starts nothing", async () => {
     const h = await kit({ extension: "on" })
     await clickText(h, "clip.mp4", 2)

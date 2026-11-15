@@ -647,7 +647,26 @@ def _write(c: sqlite3.Connection, old: dict, state: str, by: str, **fields) -> d
         _event(c, old["id"], new["updated_at"], new["state"], new["step"], new["detail"])
     else:
         c.execute(f"UPDATE meta SET value = CAST(value AS INTEGER) + 1 WHERE key = '{CHANGES}'")
+    if state in FREE and old["state"] not in FREE:
+        _stands_again(c, new)
     return new
+
+
+def _stands_again(c: sqlite3.Connection, job: dict) -> None:
+    """A job just ended without a post. If it was a post again, the posted or unknown job it set aside stands
+    again: as far as ReelForge knows the video is still up there (or still to be asked about), and a plain Post
+    must go on being refused. Without this, a Post again that never got anywhere would quietly forget the post
+    before it."""
+    aside = c.execute(
+        """SELECT id, state FROM post_jobs WHERE video_sha256 = ? AND platform = ? AND superseded = 1
+           AND state IN ('posted', 'unknown') AND rowid < (SELECT rowid FROM post_jobs WHERE id = ?)
+           ORDER BY rowid DESC LIMIT 1""", (job["video_sha256"], job["platform"], job["id"])).fetchone()
+    live = c.execute(f"SELECT 1 FROM post_jobs WHERE video_sha256 = ? AND platform = ? AND superseded = 0 "
+                     f"AND state IN ({','.join('?' * len(LIVE))})", (job["video_sha256"], job["platform"], *LIVE))
+    if aside and not live.fetchone():  # (a newer try that is under way has the say until it ends)
+        c.execute("UPDATE post_jobs SET superseded = 0 WHERE id = ?", (aside["id"],))
+        _event(c, aside["id"], job["updated_at"], aside["state"], None,
+               "stands again: the new try ended without a post")
 
 
 def _settled(old: dict, new: dict, by: str) -> dict:
