@@ -606,6 +606,32 @@ class Posting(ApiPosting):
         self.assertEqual((row["state"], row["actions"]), ("posting", []))
         self.assertEqual(plain(row["line"]), "● the last piece is on its way: waiting for YouTube to say it's up")
 
+    def test_if_the_ledger_cannot_be_told_the_last_piece_does_not_go(self):
+        # Everything after a quit rests on this: a job that isn't "posting" never sent its last piece, so it can be
+        # called failed and tried again without a second video.
+        self.connect_api()
+        real = posting.advance
+        for error in (sqlite3.OperationalError("database is locked"), posting.Refused("bad_transition", "no")):
+            job = self.job()
+
+            def advance(job_id, state, **kw):
+                if state == "posting":
+                    raise error
+                return real(job_id, state, **kw)
+
+            sent, err = len(self.google.puts), io.StringIO()
+            with mock.patch.object(posting, "advance", advance), contextlib.redirect_stderr(err):
+                left = youtube_api_tab.run(job["id"])
+            self.assertEqual([p["range"] for p in self.google.puts[sent:]],
+                             [f"bytes 0-999/{SIZE}", f"bytes 1000-1999/{SIZE}", f"bytes 2000-2999/{SIZE}"], error)
+            self.assertEqual(self.google.videos, [])
+            self.assertIn(left["state"], ("failed", "uploading"), error)  # never posting, posted or unknown
+            youtube_api_tab.settle_orphans()  # what the next look does with one left uploading
+            done = posting.get(job["id"])
+            self.assertEqual((done["state"], done["error_code"]), ("failed", "interrupted"), error)
+            self.assertTrue(done["error_message"].endswith("Nothing was posted: start it again."))
+            self.assertEqual((len(self.google.puts) - sent, self.google.videos), (3, []))  # and that is true
+
     def test_a_file_replaced_after_the_press_is_not_sent(self):
         w = self.window()
         job = self.job()
