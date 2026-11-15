@@ -313,8 +313,9 @@ Tested here, by automated tests: ReelForge's own (`dashboard/tests/test_extensio
 - that the extension's folder goes into the downloads and is replaced by an update, and that the file of connected
   browsers survives an update, a move and goes to the backup on a factory reset
 - the same automated tests on GitHub's machines, on 15 November 2026: ReelForge's own passed there on Windows,
-  macOS and Linux (the Test workflow), and both of the extension's suites passed on Linux, with Playwright's
-  Chromium (`.github/workflows/extension.yml`, which runs them on every push)
+  macOS and Linux (the "Dashboard tests" step of the Test workflow. That run as a whole failed: three or four of
+  the window's tests failed on each system, none of them about posting), and both of the extension's suites
+  passed on Linux, with Playwright's Chromium (`.github/workflows/extension.yml`, which runs them on every push)
 
 Looked at, not automated:
 
