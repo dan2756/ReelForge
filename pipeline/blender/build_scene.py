@@ -26,9 +26,10 @@ on_disk = (ep_dir / "episode.json").read_text(encoding="utf-8")
 spec = framecache.Recorder(json.loads(on_disk))
 build = ep_dir / "build"
 (build / "frames").mkdir(parents=True, exist_ok=True)
-# Until this build has finished there is no stamp: a build that stops halfway leaves an old scene.blend behind, and
-# nothing should take it for the scene episode.json describes now.
-(build / framecache.SCENE).unlink(missing_ok=True)
+# Until this build has finished there is no stamp, only a note that a build began: a build that stops halfway leaves
+# an old scene.blend behind, and nothing should take it for the scene episode.json describes now, or for a scene
+# from before ReelForge kept stamps (which has no build/scene.json at all and is rendered unchecked).
+framecache.write_stamp(build / framecache.SCENE, {"unfinished": True})
 
 rf.clear_scene()
 scene = bpy.context.scene

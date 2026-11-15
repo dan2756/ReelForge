@@ -133,6 +133,18 @@ class Status(Episode):
         self.spec["effect"]["subject"] = "donut"                        # edited again, not built yet
         self.assertEqual(self.status()["built"], 'yes, but episode.json "effect" changed since: build again')
 
+    def test_a_build_that_did_not_finish(self):
+        (self.build / "scene.blend").write_bytes(b"BLENDER")
+        self.frames(range(1, 13))
+        self.assertEqual(self.status()["built"], "yes, without a stamp (an older ReelForge built it, or the last "
+                                                 "build did not finish)")
+        self.assertEqual(self.status()["frames"], "12 of 30, not checked against the scene (it has no stamp)")
+        framecache.write_stamp(self.build / framecache.SCENE, {"unfinished": True})    # what build_scene.py starts with
+        got = self.status()
+        self.assertEqual(got["built"], "no: the last build did not finish, so build/scene.blend is an older scene "
+                                       "(run --steps build)")
+        self.assertEqual(got["frames"], "12 of 30, but the last build did not finish")
+
     def test_a_finished_and_delivered_episode(self):
         with wave.open(str(self.build / "audio.wav"), "wb") as w:
             w.setnchannels(2)

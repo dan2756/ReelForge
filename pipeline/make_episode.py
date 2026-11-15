@@ -235,7 +235,8 @@ def built_scene(build, spec, step, as_built=False):
     if not (build / "scene.blend").exists():
         raise SystemExit(f"{step}: build/scene.blend not found, run --steps build first")
     stamp = framecache.read_stamp(build / framecache.SCENE)
-    if stamp is None and any((build / d / framecache.STAMP).exists() for d in ("frames", "stills")):
+    if stamp is None and (framecache.unfinished(build) or
+                          any((build / d / framecache.STAMP).exists() for d in ("frames", "stills"))):
         raise SystemExit(f"{step}: the last build did not finish, so build/scene.blend is an older scene. "
                          "Run --steps build first.")
     old = framecache.outdated(stamp, spec, config.PIPELINE / "blender") if stamp else []
@@ -375,6 +376,8 @@ def status(ep, spec):
     stamp = framecache.read_stamp(build / framecache.SCENE)
     if not (build / "scene.blend").exists():
         built = "no (run --steps build)"
+    elif framecache.unfinished(build):
+        built = "no: the last build did not finish, so build/scene.blend is an older scene (run --steps build)"
     elif stamp is None:
         built = "yes, without a stamp (an older ReelForge built it, or the last build did not finish)"
     else:

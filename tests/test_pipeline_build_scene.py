@@ -105,8 +105,14 @@ class BuildScene(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "stopped halfway"):
             self.blender()
         self.assertTrue((self.build / "scene.blend").exists())          # the earlier scene is still on disk
-        self.assertFalse((self.build / framecache.SCENE).exists())      # and nothing calls it the current one
+        self.assertIsNone(framecache.read_stamp(self.build / framecache.SCENE))     # nothing calls it the current one
+        self.assertTrue(framecache.unfinished(self.build))              # or one from before there were stamps
         self.assertEqual(framecache.frames_state(self.build)[0], "unbuilt")
+        (self.build / "frames" / framecache.STAMP).unlink()             # as after `ship` has cleaned the frames
+        self.assertEqual(framecache.frames_state(self.build)[0], "unbuilt")
+        del self.spec["effect"]["broken"]
+        self.assertEqual(self.blender()["fingerprint"], stamp["fingerprint"])       # the next good build stamps it
+        self.assertFalse(framecache.unfinished(self.build))
 
 
 if __name__ == "__main__":

@@ -77,7 +77,8 @@ pipeline uses the stamp so that **nothing needs deleting by hand**:
 - `stills` and `render` stop when `episode.json` or the scene code changed after the last build, because Blender
   would show the scene as it was. Build first. To carry on a render with the scene as it was built, because a
   module it shares with another episode is being edited or the kit was updated, add `--as-built`: it says what
-  changed, and the frames on disk are still checked against that scene.
+  changed, and the frames on disk are still checked against that scene. They also stop after a build that did not
+  finish: `build/scene.blend` is then an older scene, whatever is in the folders beside it.
 - The video and cover steps refuse frames of an older scene, and name the frames that are missing before ffmpeg
   starts. The video is written beside the last one and replaces it only when it is whole, so a failed step leaves
   the earlier video as it was.

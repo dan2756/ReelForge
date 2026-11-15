@@ -326,9 +326,21 @@ class RenderGuard(Steps):
 
     def test_a_build_that_did_not_finish_stops_the_render(self):
         self.rendered(range(1, 13), self.built())
-        (self.build / framecache.SCENE).unlink()                # build_scene.py removes it when it starts
+        (self.build / framecache.SCENE).unlink()                # frames of a stamped scene, and the scene has none
         with self.assertRaisesRegex(SystemExit, "the last build did not finish"):
             self.render()
+
+    def test_a_build_that_did_not_finish_stops_the_render_and_the_stills_with_no_pictures_on_disk(self):
+        """A remake: `ship` cleaned the frames and stills long ago, and the build of the new scene stopped halfway.
+        The scene.blend on disk is the old video's, not one from before ReelForge kept stamps."""
+        self.built()
+        framecache.write_stamp(self.build / framecache.SCENE, {"unfinished": True})    # what build_scene.py starts with
+        with self.assertRaisesRegex(SystemExit, "render: the last build did not finish"):
+            self.render()
+        with self.assertRaisesRegex(SystemExit, "stills: the last build did not finish"):
+            self.main("--steps", "stills", "--stills", "1")
+        self.assertEqual(self.passes, 0)
+        self.assertEqual(list(self.frames.glob("f_*.jpg")), [])
 
     def test_no_scene_no_render(self):
         with self.assertRaisesRegex(SystemExit, "render: build/scene.blend not found, run --steps build first"):

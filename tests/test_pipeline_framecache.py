@@ -117,6 +117,17 @@ class Stamps(unittest.TestCase):
         (self.build / framecache.SCENE).unlink()
         self.assertEqual(framecache.frames_state(self.build), ("unbuilt", []))
 
+    def test_a_build_that_began_and_did_not_finish_is_told_from_a_scene_from_before_stamps(self):
+        frame(self.build / "frames", 1)
+        self.assertFalse(framecache.unfinished(self.build))             # no scene.json: built before stamps
+        self.assertEqual(framecache.frames_state(self.build), ("untracked", []))
+        framecache.write_stamp(self.build / framecache.SCENE, {"unfinished": True})    # what a build starts with
+        self.assertTrue(framecache.unfinished(self.build))
+        self.assertIsNone(framecache.read_stamp(self.build / framecache.SCENE))
+        self.assertEqual(framecache.frames_state(self.build), ("unbuilt", []))          # frames with no stamp too
+        framecache.write_stamp(self.build / framecache.SCENE, self.stamp())
+        self.assertFalse(framecache.unfinished(self.build))
+
     def test_the_stills_have_their_own_stamp(self):
         frame(self.build / "stills", 31, prefix="s")
         framecache.write_stamp(self.build / framecache.SCENE, self.stamp())

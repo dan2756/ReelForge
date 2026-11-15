@@ -124,6 +124,14 @@ def write_stamp(path, stamp):
     os.replace(tmp, path)
 
 
+def unfinished(build):
+    """True when the last build began and did not get to its end. build_scene.py puts a note in build/scene.json
+    when it starts, and the scene's stamp takes its place once scene.blend is saved. Until then the scene.blend on
+    disk, if there is one, is an older scene: not the one episode.json describes, and not one from before stamps."""
+    path = Path(build) / SCENE
+    return path.exists() and read_stamp(path) is None
+
+
 def changed(old, new):
     """What differs between two stamps, in words: ['episode.json "effect"', 'effects/grow.py', ...]."""
     out = []
@@ -155,7 +163,7 @@ def frames_state(build, folder="frames", pattern="f_*.jpg"):
     match      rendered from this scene
     changed    rendered from an older scene (the second value says what changed since)
     unstamped  no record of the scene they show, and the scene has been built since stamps existed: can't tell
-    unbuilt    they have a stamp but the scene has none: the last build did not finish
+    unbuilt    the last build did not finish (it left its note, or they have a stamp and the scene has none)
     untracked  neither has a stamp (built by a ReelForge from before stamps): nothing to compare
     """
     build = Path(build)
@@ -163,7 +171,7 @@ def frames_state(build, folder="frames", pattern="f_*.jpg"):
         return "none", []
     scene, theirs = read_stamp(build / SCENE), read_stamp(build / folder / STAMP)
     if scene is None:
-        return ("unbuilt" if theirs else "untracked"), []
+        return ("unbuilt" if theirs or unfinished(build) else "untracked"), []
     if theirs is None:
         return "unstamped", []
     if theirs["fingerprint"] == scene["fingerprint"]:
