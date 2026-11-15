@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from bisect import bisect_right
 from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PureWindowsPath
@@ -131,8 +132,12 @@ def _migrate() -> None:
 
 
 def backup(why: str) -> Path:
-    """Copy the database next to itself as stats.db.bak-<YYYYmmdd-HHMMSS>-<why>, consistent even while it's in use."""
-    target = _path.with_name(f"{_path.name}.bak-{datetime.now():%Y%m%d-%H%M%S}-{why}")
+    """Copy the database next to itself as stats.db.bak-<YYYYmmdd-HHMMSS>-<why>, consistent even while it's in use.
+    A copy is never written over another: a second one in the same second gets a number before its why."""
+    stamp = f"{_path.name}.bak-{datetime.now():%Y%m%d-%H%M%S}"
+    target, n = _path.with_name(f"{stamp}-{why}"), 1
+    while target.exists():
+        target, n = _path.with_name(f"{stamp}-{n + 1}-{why}"), n + 1
     with closing(sqlite3.connect(_path, timeout=10)) as src, closing(sqlite3.connect(target)) as dst:
         src.backup(dst)
     return target
@@ -174,20 +179,187 @@ def parse(ts: str) -> datetime:
 
 
 def record_snapshot(platform: str, account, posts: list, ts: str | None = None,
-                    conn: sqlite3.Connection | None = None) -> None:
+                    conn: sqlite3.Connection | None = None) -> str | None:
     """Store one refresh: the account totals plus every post's current numbers.
 
     A read that misses numbers never wipes known ones: a post keeps its last known counts and its views never go down
     (RSS counts lag and dip), while post_stats keeps what was read. Without the platform's own totals, the account gets
     the sum over every post ReelForge knows there (one page load only shows the newest), or its last totals if no posts
     came. Numbers you typed in are taken as typed, so a slip can be put right (see _correct_typed).
+
+    Returns the @handle the platform's stats were read under until now when this read is under another one and looks
+    like another account (see _handle_before): the two are stored together from here on, so a copy of the store is
+    saved first, and handle_change, forget_old_handle and keep_old_handle are how you say which it is.
     """
     ts = ts or now_iso()
-    if conn is None:
-        with connect() as db:
-            _record(db, platform, account, posts, ts)
-    else:
+    if conn is not None:
         _record(conn, platform, account, posts, ts)  # the demo writes its history in one go
+        return None
+    before = _handle_before(platform, account.handle, posts)
+    with connect() as db:
+        _record(db, platform, account, posts, ts)
+    return before
+
+
+def _handle(text) -> str:
+    """A handle as kept with a reading, for comparing two: no @, lower case ("" for none)."""
+    return str(text or "").strip().lstrip("@").lower()
+
+
+def _read_under(db: sqlite3.Connection, platform: str) -> dict[str, set[str]]:
+    """Post id -> the handles (see _handle) the platform was being read under at each of the post's readings. A
+    reading belongs to the account reading at or just before it: they're saved together, with the same time."""
+    rows = db.execute("SELECT ts, handle FROM account_stats WHERE platform = ? ORDER BY ts, rowid",
+                      (platform,)).fetchall()
+    times, out = [r[0] for r in rows], {}
+    if not rows:
+        return out
+    for post_id, ts in db.execute(
+            """SELECT post_id, ts FROM post_stats WHERE platform = ?
+               UNION SELECT post_id, last_ts FROM posts WHERE platform = ? AND last_ts IS NOT NULL""",
+            (platform, platform)):
+        out.setdefault(post_id, set()).add(_handle(rows[max(bisect_right(times, ts) - 1, 0)][1]))
+    return out
+
+
+def _handle_before(platform: str, handle: str, posts: list) -> str | None:
+    """Before a read under `handle` is stored: the handle the platform's newest reading was under, when it's a
+    different one and none of the posts just read was ever read under it. That's another account as far as ReelForge
+    can tell (a handle you mistyped that exists, or a switch to another account), and its numbers are about to be
+    stored with this one's, so the store is copied first (backup "handle"). None otherwise.
+
+    A handle that changed while its posts stayed the same is the same account under a new name: the readings under
+    the old name are put under the new one, and nothing more is made of it."""
+    new = _handle(handle)
+    if not new:
+        return None
+    with connect() as db:
+        last = db.execute("""SELECT handle FROM account_stats WHERE platform = ? AND handle IS NOT NULL AND handle != ''
+                             ORDER BY ts DESC, rowid DESC LIMIT 1""", (platform,)).fetchone()
+        old = last[0] if last else None
+        if not old or _handle(old) == new:
+            return None
+        under = _read_under(db, platform)
+        if any(_handle(old) in under.get(p.post_id, ()) for p in posts if not p.post_id.startswith(TYPED)):
+            db.execute("UPDATE account_stats SET handle = ? WHERE platform = ? AND handle = ?",
+                       (handle, platform, old))
+            return None
+    backup("handle")
+    return old
+
+
+def old_handles(platform: str) -> list[str]:
+    """The other @handles this platform's stats were read under, besides the one it's read under now: none, unless
+    the handle changed to what looks like another account (_handle_before) and you haven't said which it is yet."""
+    with connect() as db:
+        rows = db.execute("""SELECT handle, MAX(ts) FROM account_stats WHERE platform = ? AND handle IS NOT NULL
+                             AND handle != '' GROUP BY handle ORDER BY MAX(ts) DESC, MAX(rowid) DESC""",
+                          (platform,)).fetchall()
+    if len(rows) < 2:
+        return []
+    now, out = _handle(rows[0][0]), []
+    for handle, _ in rows[1:]:
+        if _handle(handle) != now and _handle(handle) not in map(_handle, out):
+            out.append(handle)
+    return out
+
+
+def _from_before(db: sqlite3.Connection, platform: str) -> dict | None:
+    """What a platform's stats hold from before its handle changed (None: nothing): the handle now and the old
+    ones, the readings saved under the old ones (account_stats rowids), and the posts read only under them."""
+    rows = db.execute("SELECT rowid, ts, handle FROM account_stats WHERE platform = ? ORDER BY ts, rowid", (platform,))
+    named = [r for r in rows if _handle(r["handle"])]
+    if not named:
+        return None
+    now = named[-1]["handle"]
+    old = [r for r in named if _handle(r["handle"]) != _handle(now)]
+    if not old:
+        return None
+    # A reading that doesn't say whose it is counts as this account's, and numbers you typed in are yours whatever
+    # the handle was: neither is ever forgotten.
+    mine = {_handle(now), ""}
+    posts = sorted(pid for pid, handles in _read_under(db, platform).items()
+                   if not handles & mine and not pid.startswith(TYPED))
+    return {"now": now, "old": list(dict.fromkeys(r["handle"] for r in old)), "rows": [r["rowid"] for r in old],
+            "first": old[0]["ts"], "last": old[-1]["ts"], "posts": posts}
+
+
+def handle_change(platform: str) -> dict | None:
+    """What forget_old_handle would forget, to ask about first (see _from_before); None when there's nothing."""
+    with connect() as db:
+        return _from_before(db, platform)
+
+
+def keep_old_handle(platform: str) -> int:
+    """The readings under the platform's old handle are this account's too (you renamed it): they're put under the
+    handle it has now. Returns how many readings."""
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        found = _from_before(db, platform)
+        if not found:
+            return 0
+        db.executemany("UPDATE account_stats SET handle = ? WHERE rowid = ?",
+                       [(found["now"], r) for r in found["rows"]])
+        return len(found["rows"])
+
+
+def forget_old_handle(platform: str) -> dict | None:
+    """Forget what a platform's stats hold from before its handle changed, because that was another account: the
+    readings under the old handle, the posts read only under it with their readings, the notifications about them
+    and the episodes ReelForge made up from them (twins without a video). The whole store is copied first (backup
+    "handle"), and nothing else is touched: this account's own readings and posts stay, and so does every other
+    platform. This account's totals since then lose what they counted of the other's posts, and the round numbers
+    and badges the platform has passed start again from where this account is.
+    Returns what went, with the copy's path ("backup"), or None when there was nothing to forget."""
+    from . import notify  # imported here because notify imports this module
+
+    if not handle_change(platform):
+        return None
+    copy = backup("handle")
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        found = _from_before(db, platform)  # looked up again, now that nothing else can write
+        if not found:
+            return None
+        posts = found["posts"]
+        mine = [(platform, pid) for pid in posts]
+        episodes = {r[0] for ref in mine for r in db.execute(
+            "SELECT episode_id FROM posts WHERE platform = ? AND post_id = ? AND episode_id IS NOT NULL", ref)}
+        # Where the platform's total is ReelForge's own sum over its posts (_record), this account's readings since
+        # then counted the other account's posts too: they come down by exactly those posts' numbers.
+        newest = db.execute("""SELECT views, likes FROM account_stats WHERE platform = ?
+                               ORDER BY ts DESC, rowid DESC LIMIT 1""", (platform,)).fetchone()
+        for field in ("views", "likes"):
+            every = db.execute(f"SELECT SUM({field}) FROM posts WHERE platform = ? AND post_id NOT LIKE 'manual-%'",
+                               (platform,)).fetchone()[0]
+            theirs = sum(r[0] or 0 for ref in mine for r in db.execute(
+                f"SELECT {field} FROM posts WHERE platform = ? AND post_id = ?", ref))
+            if theirs and newest[field] == every:
+                db.execute(f"UPDATE account_stats SET {field} = MAX({field} - ?, 0) WHERE platform = ? AND ts > ?",
+                           (theirs, platform, found["last"]))
+        db.executemany("DELETE FROM account_stats WHERE rowid = ?", [(r,) for r in found["rows"]])
+        for table in ("post_stats", "posts"):
+            db.executemany(f"DELETE FROM {table} WHERE platform = ? AND post_id = ?", mine)
+        emptied = [e for e in episodes if db.execute(
+            """DELETE FROM episodes WHERE id = ? AND video IS NULL
+               AND NOT EXISTS (SELECT 1 FROM posts WHERE episode_id = episodes.id)""", (e,)).rowcount]
+        refs = {f"{platform}|{pid}" for pid in posts}
+        about = (f"milestone:followers:{platform}:", f"badge:day:{platform}:", f"handle:{platform}:")
+        gone = [n["id"] for n in map(dict, db.execute("SELECT id, kind, key, title FROM notifications"))
+                if notify.target(n).post in refs or (n["key"] or "").startswith(about)]
+        db.executemany("DELETE FROM notifications WHERE id = ?", [(i,) for i in gone])
+        # What the platform had passed was the other account's doing: these marks are set afresh, quietly, by the
+        # next read (notify.check_milestones, badges.notify_new).
+        for key, stale in (("milestones", lambda k: k in (f"followers:{platform}", "views:total")
+                            or k.removeprefix("video:") in refs),
+                           ("badge_tiers", lambda k: k == f"seen:{platform}" or k.startswith(f"day:{platform}:")
+                            or k.removeprefix("video:").rsplit(":", 1)[0] in refs)):
+            marks = get_meta(key, None, db)
+            if isinstance(marks, dict):
+                db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                           (key, json.dumps({k: v for k, v in marks.items() if not stale(k)})))
+    return {"backup": copy, "now": found["now"], "old": found["old"], "readings": len(found["rows"]),
+            "posts": len(posts), "episodes": len(emptied)}
 
 
 def _record(db: sqlite3.Connection, platform: str, account, posts: list, ts: str) -> None:

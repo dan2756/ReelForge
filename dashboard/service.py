@@ -1843,13 +1843,18 @@ class Dashboard(StatsTab, SettingsTab, Service):
                             f"\nlast read failed: {error[1]}", BAD)
             elif warning:  # read, but not all of it (TikTok's totals without its videos)
                 body.append(f"\n{warning[1]}", TYPICAL)
+            # Stats from before the handle changed to what looks like another account: the window asks which to
+            # keep (handle_change_info), and this line is there until you've said.
+            was = [] if self.demo else self._safe(lambda: db.old_handles(p.key), [])
+            if was:
+                body.append(f"\nAlso holds stats read as {sync.listed(was)}, from before the handle changed.", TYPICAL)
             note = "Demo data, made up on this PC." if self.demo and not pretend else p.setup_note
             panel.update(
                 status=status.json(), status_short=short.json() if short else None, body=body.json(),
                 note=Text(note, MUTED).json(), logs_in=logs_in,
                 login_label="Log in again" if source == "browser" else "Log in",
                 # Log out (logout_info, logout): only while ReelForge's browser is logged in to it.
-                logs_out=p.browser_stats and p.logged_in and not self.demo,
+                logs_out=p.browser_stats and p.logged_in and not self.demo, old_handles=was,
                 profile_disabled=not p.public_handle and not pretend, refresh_disabled=self.demo and not pretend,
                 show_log=not p.has_stats, chart=self.followers_chart(p, rows) if state == "on" else None)
             panels.append(panel)
@@ -2072,6 +2077,77 @@ class Dashboard(StatsTab, SettingsTab, Service):
             if logout and p.browser_stats and p.logged_in:
                 self.loop.run_worker(self._browser_logout, p, group="login")
             self.loop.run_worker(self._save_account, p, "", group="accounts")
+
+    # --- a handle that changed to another account -----------------------------------------------
+
+    @rpc
+    def handle_change_info(self, key: str) -> dict | None:
+        """The dialog for a platform whose stats were read under another @handle before (a panel with old_handles):
+        what's there from before, and the two ways out of it, forget_handle_stats and keep_handle_stats."""
+        p = self.every.get(key)
+        found = None if p is None or self.demo else self._safe(lambda: db.handle_change(key), None)
+        if not found:
+            return None
+        old, now = sync.listed(found["old"]), found["now"]
+        first, last = (db.parse(found[k]).astimezone() for k in ("first", "last"))
+        days = f"on {first:%b} {first.day}" if first.date() == last.date() else \
+            f"from {first:%b} {first.day} to {last:%b} {last.day}"
+        videos = len(found["posts"])
+        note = Text()
+        note.append(f"{p.name}  ", f"bold {p.color}")
+        note.append(now, "bold")
+        note.append(f"\n\nBefore, ReelForge read {p.name} as {old} ({days}). What it read then is still here: "
+                    f"{len(found['rows'])} readings of the account and {videos} video{'' if videos == 1 else 's'} "
+                    f"that {now} doesn't have. They're on the Videos tab and count in {p.name}'s totals and "
+                    "charts.", MUTED)
+        note.append(f"\n\nIf {old} was a typo or someone else's account, forget its stats: ", MUTED)
+        note.append("those readings and videos are removed", "bold")
+        note.append(f", after ReelForge saves a copy of the whole stats database beside it. {now}'s own stats, and "
+                    "every other platform's, stay as they are.", MUTED)
+        note.append(f"\n\nIf you renamed the account, keep them: they're {now}'s too.", MUTED)
+        return {"key": key, "title": f"{p.name.upper()} WAS {old.upper()} BEFORE", "note": note.json(),
+                "forget": f"Forget {old}'s stats", "keep": "Keep them"}
+
+    @rpc
+    def forget_handle_stats(self, key: str) -> None:
+        """The dialog's Forget: db.forget_old_handle, which saves a copy of the store first. Only ever from this
+        button: nothing is forgotten by itself."""
+        p = self.every.get(key)
+        if p is not None and not self.demo:
+            self.loop.run_worker(self._forget_handle, p, group="accounts")
+
+    def _forget_handle(self, p: Platform) -> None:
+        try:
+            gone = db.forget_old_handle(p.key)
+        except Exception as e:
+            sync.log([f"error: forgetting {p.name}'s old stats: {detail(e)}"])
+            self.loop.call_soon(self.notify, "Nothing was forgotten: the stats database was busy or couldn't be "
+                                             "copied first. Try again in a moment.", "", "error", 12)
+            return
+        self.loop.call_soon(self.handle_forgotten, p, gone)
+
+    def handle_forgotten(self, p: Platform, gone: dict | None) -> None:
+        if gone:
+            videos = f"{gone['posts']} video{'' if gone['posts'] == 1 else 's'}"
+            self.notify(f"{videos} and {gone['readings']} readings are gone. The copy from before is "
+                        f"{gone['backup'].name}, in {gone['backup'].parent}.",
+                        title=f"Forgot {sync.listed(gone['old'])}'s {p.name} stats", timeout=15)
+            self.tell_others()
+        self.reload()
+        self.update_notes()
+
+    @rpc
+    @db_safe
+    def keep_handle_stats(self, key: str) -> None:
+        """The dialog's Keep: the stats from before the handle changed are this account's too."""
+        p = self.every.get(key)
+        if p is None or self.demo:
+            return
+        if db.keep_old_handle(key):
+            notify.release(f"handle:{key}:{p.public_handle.lower()}")  # settled: a later change is news again
+            self.notify(f"Kept: they count as {p.handle}'s from now on.", title=f"{p.name}'s earlier stats", timeout=8)
+            self.tell_others()
+        self.update_accounts()
 
     def _save_account(self, p: Platform, handle: str) -> None:
         """Connect a platform with its handle, or disconnect it (""): your settings change (config.save_handle), then

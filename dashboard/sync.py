@@ -65,7 +65,8 @@ def broke(error: BaseException) -> Result:
     return Result(errors=[said], details=[f"the refresh stopped: {detail(error)}"])
 
 
-def _and(names: list[str]) -> str:
+def listed(names: list[str]) -> str:
+    """TikTok, YouTube and X"""
     return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
@@ -79,9 +80,9 @@ def sum_up(result: Result) -> str:
     if len(result.failed) == 1:
         said.insert(0, result.errors[0])
     elif len(kinds) == 1 and kinds <= {"slow", "offline", "busy"}:  # no internet, say: every platform the same way
-        said.insert(0, KINDS[kinds.pop()].format(name=_and(list(result.failed))))
+        said.insert(0, KINDS[kinds.pop()].format(name=listed(list(result.failed))))
     elif result.failed:
-        said.insert(0, f"{_and(list(result.failed))} weren't read this time. {AGAIN} Each one's panel on the "
+        said.insert(0, f"{listed(list(result.failed))} weren't read this time. {AGAIN} Each one's panel on the "
                        "Accounts tab says why.")
     return " ".join(said)
 
@@ -356,7 +357,9 @@ def _refresh(platforms: dict[str, Platform], cfg: dict, manual: bool, force: boo
                 if error is None:
                     try:
                         account, posts = result
-                        db.record_snapshot(p.key, account, posts)
+                        was = db.record_snapshot(p.key, account, posts)
+                        if was:  # another account's stats, as far as ReelForge can tell: say so, once
+                            _tell(lambda: notify.handle_changed(p.key, p.name, was, account.handle))
                     except Exception as e:  # e.g. the database is busy: report it, keep the app running
                         error = e
                 if error is not None:

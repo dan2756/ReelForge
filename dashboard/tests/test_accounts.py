@@ -16,7 +16,7 @@ from unittest import mock
 from dashboard import analytics, config, db, demo, notify, sync
 from dashboard import service as service_module
 from dashboard.config import PLATFORM_KEYS
-from dashboard.platforms import Instagram, TikTok, X, YouTube, browser, build, connected
+from dashboard.platforms import Account, Instagram, Post, TikTok, X, YouTube, browser, build, connected
 from dashboard.service import NOTHING_CONNECTED, Dashboard
 from dashboard.tests.window import Window, plain
 
@@ -292,6 +292,59 @@ class WindowTest(unittest.TestCase):
         body = plain(self.panel(w, "tiktok")["body"])
         self.assertIn("last read failed: TikTok couldn't be reached", body)
         self.assertNotIn(said, body)
+
+    def test_stats_from_before_a_handle_changed_stay_until_you_say(self):
+        """TikTok was read as one account and is now read as another: the panel says so, the dialog says what's
+        there from before, and only its Forget removes it, after a copy of the stats database."""
+        self.forget("youtube", "instagram", "x")
+        every = self.real_platforms({"tiktok": "@mine"})
+        old = db.latest_accounts()["tiktok"]["handle"]  # the handle the stats so far were read under
+        before = len([p for p in db.all_posts() if p["platform"] == "tiktok"])
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()):
+            w = self.open(every, demo_mode=False)
+            self.assertEqual(self.panel(w, "tiktok")["old_handles"], [])
+            self.assertIsNone(w.call("handle_change_info", "tiktok"))
+            mine = Post("mine1", "My own video", None, db.now_iso(), views=500, likes=5, comments=0, shares=0)
+            soon = (analytics.now() + timedelta(minutes=1)).isoformat(timespec="seconds")  # the next read
+            self.assertEqual(db.record_snapshot("tiktok", Account("@mine", 120), [mine], soon), old)
+            w.call("reload")
+            panel = self.panel(w, "tiktok")
+            self.assertEqual(panel["old_handles"], [old])
+            self.assertIn(f"Also holds stats read as {old}, from before the handle changed.", plain(panel["body"]))
+            info = w.call("handle_change_info", "tiktok")
+            self.assertEqual((info["key"], info["title"], info["forget"], info["keep"]),
+                             ("tiktok", f"TIKTOK WAS {old.upper()} BEFORE", f"Forget {old}'s stats", "Keep them"))
+            note = plain(info["note"])
+            self.assertIn(f"{before} videos that @mine doesn't have", note)
+            self.assertIn("after ReelForge saves a copy of the whole stats database beside it", note)
+            self.assertEqual(len(db.all_posts()), before + 1)  # asking forgets nothing
+            w.forget()
+            w.call("forget_handle_stats", "tiktok")
+            self.assertTrue(w.until(lambda: any(t["title"] == f"Forgot {old}'s TikTok stats" for t in w.sent("toast"))))
+            self.assertEqual([p["post_id"] for p in db.all_posts()], ["mine1"])
+            copies = [f.name for f in self.root.iterdir() if f.name.endswith("-handle")]
+            self.assertEqual(len(copies), 2)  # one from before the read went in, one from before this
+            self.assertTrue(any(name in " ".join(w.toasts()) for name in copies))  # ... which the pop-up names
+            panel = self.panel(w, "tiktok")
+            self.assertEqual(panel["old_handles"], [])
+            self.assertNotIn("Also holds stats", plain(panel["body"]))
+            self.assertEqual([p["post_id"] for p in w.svc.posts], ["mine1"])
+
+    def test_keeping_the_stats_from_before_a_handle_changed(self):
+        self.forget("youtube", "instagram", "x")
+        every = self.real_platforms({"tiktok": "@mine"})
+        before = len(db.all_posts())
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()):
+            w = self.open(every, demo_mode=False)
+            soon = (analytics.now() + timedelta(minutes=1)).isoformat(timespec="seconds")
+            db.record_snapshot("tiktok", Account("@mine", 120), [Post("mine1", "My own video", None, db.now_iso())],
+                               soon)
+            w.call("reload")
+            self.assertTrue(self.panel(w, "tiktok")["old_handles"])
+            w.call("keep_handle_stats", "tiktok")
+            self.assertEqual(self.panel(w, "tiktok")["old_handles"], [])
+            self.assertIn("Kept: they count as @mine's from now on.", w.toasts())
+            self.assertEqual(len(db.all_posts()), before + 1)
 
     def test_log_out_forgets_the_log_in_and_keeps_the_platform(self):
         """Instagram and X: ReelForge's own browser can be logged out (it never could be). The platform stays, with

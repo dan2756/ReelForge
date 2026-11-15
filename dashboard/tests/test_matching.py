@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from dashboard import analytics, db
+from dashboard import analytics, db, notify
 
 T0 =datetime(2026, 10, 23, 4, 0, tzinfo=timezone.utc)
 EPISODES = r"C:\Users\me\Desktop\my channel\episodes"
@@ -460,6 +460,150 @@ class TypedInTest(DbTest):
         self.typed("x", {kite: 50}, 120)
         self.assertEqual([r["views"] for r in db.account_series("x", "")], [9000, 500, 50])
         self.assertEqual(next(p["views"] for p in db.posts_latest() if p["post_id"] == "1234"), 9000)
+
+
+class HandleTest(DbTest):
+    """A platform read under another @handle than its stats so far (db.record_snapshot): a renamed account carries
+    on; what looks like another account is stored too, after a copy of the store, until you say which it is
+    (db.forget_old_handle, db.keep_old_handle). Nothing is forgotten before that."""
+
+    def read(self, handle: str, posts: list, followers: int, minutes: float, platform: str = "tiktok") -> str | None:
+        account = SimpleNamespace(handle=handle, followers=followers, views=None, likes=None, posts=None)
+        return db.record_snapshot(platform, account, posts, at(minutes))
+
+    def copies(self) -> list[Path]:
+        return sorted(self.dir.glob("stats.db.bak-*-handle"))
+
+    def stored(self, platform: str = "tiktok") -> list[str]:
+        return [p["post_id"] for p in db.all_posts() if p["platform"] == platform]
+
+    def typo_then_mine(self) -> None:
+        """Connected as @mrbest by mistake (an account that exists), then as @me."""
+        theirs = [post(f"big{i}", f"Their video {i}", i, views=2_000_000, likes=1000) for i in range(3)]
+        self.assertIsNone(self.read("@mrbest", theirs, 900_000, 60))
+        self.assertIsNone(self.read("@mrbest", theirs, 900_010, 90))
+        self.mine = [post("mine1", "My video", 5, views=500, likes=5), post("mine2", "My other video", 6, views=300)]
+
+    def test_the_same_handle_is_nothing_new(self):
+        mine = [post("a", "A", 0, views=10)]
+        self.assertIsNone(self.read("@me", mine, 100, 60))
+        self.assertIsNone(self.read("@Me", mine, 101, 120))  # however it's capitalised
+        self.assertEqual((db.old_handles("tiktok"), db.handle_change("tiktok"), self.copies()), ([], None, []))
+
+    def test_a_renamed_account_carries_on(self):
+        mine = [post("a", "A", 0, views=10), post("b", "B", 1, views=20)]
+        self.read("@oldname", mine, 100, 60)
+        self.assertIsNone(self.read("@newname", [*mine, post("c", "C", 100, views=1)], 105, 120))  # the same posts
+        self.assertEqual((db.old_handles("tiktok"), self.copies()), ([], []))
+        self.assertEqual(self.stored(), ["a", "b", "c"])
+        with db.connect() as c:  # its earlier readings are under the new name
+            self.assertEqual({r[0] for r in c.execute("SELECT handle FROM account_stats")}, {"@newname"})
+
+    def test_another_account_is_copied_first_and_nothing_is_forgotten_unasked(self):
+        self.typo_then_mine()
+        self.assertEqual(self.read("@me", self.mine, 120, 120), "@mrbest")
+        (copy,) = self.copies()
+        with closing(sqlite3.connect(copy)) as c:  # taken before @me's numbers went in
+            self.assertEqual({r[0] for r in c.execute("SELECT handle FROM account_stats")}, {"@mrbest"})
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM posts").fetchone()[0], 3)
+        self.assertEqual(self.stored(), ["big0", "big1", "big2", "mine1", "mine2"])  # both, as before the fix
+        self.assertEqual(db.latest_accounts()["tiktok"]["views"], 6_000_800)
+        self.assertEqual(db.old_handles("tiktok"), ["@mrbest"])
+        found = db.handle_change("tiktok")
+        self.assertEqual((found["now"], found["old"], found["posts"], len(found["rows"])),
+                         ("@me", ["@mrbest"], ["big0", "big1", "big2"], 2))
+        self.assertIsNone(self.read("@me", self.mine, 121, 150))  # said once: the next read is just a read
+        self.assertEqual(len(self.copies()), 1)
+
+    def test_forgetting_the_other_account_leaves_this_one_whole(self):
+        self.typo_then_mine()
+        eid = db.create_episode("Their video 0", None, at(0))  # as a twin of theirs would have made
+        own = db.create_episode("My video", video("ep01_mine"), at(0))
+        self.read("@me", self.mine, 120, 120)
+        self.read("@me", self.mine, 121, 150)
+        db.link_post("tiktok", "big0", eid, "twin")
+        db.link_post("tiktok", "mine1", own)
+        read("youtube", [post("yt", "Their video 0", 1, views=7)], minutes=120)
+        db.set_meta("milestones", {"_seeded": 1, "followers:tiktok": 500_000, "views:total": 1_000_000,
+                                   "video:tiktok|big0": 1_000_000, "video:tiktok|mine1": 0, "followers:youtube": 100})
+        db.set_meta("badge_tiers", {"_seeded": 1, "seen:tiktok": 1, "seen:youtube": 1, "video:tiktok|big0:views": 5,
+                                    "video:tiktok|mine1:views": 1})
+        for key in ("milestone:video:tiktok|big0:1000000", "milestone:followers:tiktok:500000",
+                    "milestone:video:tiktok|mine1:100", "milestone:followers:youtube:100"):
+            notify.add("milestone", key, key=key)
+
+        gone = db.forget_old_handle("tiktok")
+        self.assertEqual((gone["old"], gone["now"], gone["posts"], gone["readings"], gone["episodes"]),
+                         (["@mrbest"], "@me", 3, 2, 1))
+        self.assertIn(gone["backup"], self.copies())
+        with closing(sqlite3.connect(gone["backup"])) as c:  # everything is still in the copy
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM posts WHERE platform = 'tiktok'").fetchone()[0], 5)
+        self.assertEqual(self.stored(), ["mine1", "mine2"])
+        self.assertEqual([(r["followers"], r["views"], r["likes"]) for r in db.account_series("tiktok", "")],
+                         [(120, 800, 5), (121, 800, 5)])  # without the 6,000,000 views and 3,000 likes of theirs
+        with db.connect() as c:
+            self.assertEqual({r[0] for r in c.execute("SELECT handle FROM account_stats WHERE platform = 'tiktok'")},
+                             {"@me"})
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM post_stats WHERE post_id LIKE 'big%'").fetchone()[0], 0)
+            self.assertEqual({r[0] for r in c.execute("SELECT key FROM notifications")},
+                             {"milestone:video:tiktok|mine1:100", "milestone:followers:youtube:100"})
+        self.assertEqual([e["id"] for e in db.episodes()], [own])  # the episode made from their video went too
+        self.assertEqual(self.stored("youtube"), ["yt"])  # another platform's post is left alone (and unlinked)
+        self.assertEqual(db.get_meta("milestones"), {"_seeded": 1, "video:tiktok|mine1": 0, "followers:youtube": 100})
+        self.assertEqual(db.get_meta("badge_tiers"), {"_seeded": 1, "seen:youtube": 1, "video:tiktok|mine1:views": 1})
+        self.assertEqual((db.old_handles("tiktok"), db.forget_old_handle("tiktok")), ([], None))  # nothing left to
+
+    def test_keeping_them_makes_them_this_accounts(self):
+        self.typo_then_mine()
+        self.read("@me", self.mine, 120, 120)
+        self.assertEqual(db.keep_old_handle("tiktok"), 2)
+        self.assertEqual((db.old_handles("tiktok"), db.handle_change("tiktok")), ([], None))
+        self.assertEqual(len(self.stored()), 5)
+        self.assertEqual(db.keep_old_handle("tiktok"), 0)
+
+    def test_back_to_the_right_handle_after_a_wrong_one(self):
+        """@me for a while, @mrbest by mistake, @me again: only what was read as @mrbest can be forgotten."""
+        mine = [post("mine1", "My video", 5, views=500)]
+        self.read("@me", mine, 100, 30)
+        theirs = [post("big0", "Their video", 0, views=2_000_000)]
+        self.assertEqual(self.read("@mrbest", theirs, 900_000, 60), "@me")
+        self.assertEqual(self.read("@me", mine, 101, 90), "@mrbest")  # not taken for a rename back
+        self.assertEqual(len(self.copies()), 2)
+        self.assertEqual(db.handle_change("tiktok")["posts"], ["big0"])
+        db.forget_old_handle("tiktok")
+        self.assertEqual(self.stored(), ["mine1"])
+        self.assertEqual([r["followers"] for r in db.account_series("tiktok", "")], [100, 101])
+
+    def test_numbers_you_typed_in_are_never_forgotten(self):
+        eid = db.create_episode("My video", video("ep01_mine"), at(0))
+        db.add_post("x", f"manual-{eid}", eid, "My video", None, at(0))
+        self.read("@oldme", [post(f"manual-{eid}", "My video", 0, views=40)], 10, 60, platform="x")
+        self.assertEqual(self.read("@me", [post("x1", "Another video", 5, views=7)], 12, 120, platform="x"), "@oldme")
+        self.assertEqual(db.handle_change("x")["posts"], [])
+        db.forget_old_handle("x")
+        self.assertEqual(self.stored("x"), [f"manual-{eid}", "x1"])
+
+    def test_a_refresh_says_so_once_and_the_note_leads_to_accounts(self):
+        from dashboard import sync
+        from dashboard.platforms import Account, Platform, Post
+
+        class Mine(Platform):
+            key, name, public_stats = "tiktok", "TikTok", True
+
+            def fetch(self):
+                return Account("@me", 120), [Post("mine1", "My video", None, at(5), views=500)]
+
+        self.typo_then_mine()
+        for state in (sync._attempted, sync.last_errors, sync.last_warnings):
+            state.clear()
+            self.addCleanup(state.clear)
+        for _ in range(2):
+            sync.refresh({"tiktok": Mine({"handle": "@me"})}, {"refresh_minutes": 30}, manual=True, force=True)
+        notes = [n for n in notify.recent() if (n["key"] or "").startswith("handle:")]
+        self.assertEqual([(n["key"], n["title"]) for n in notes], [("handle:tiktok:me", "TikTok is now read as @me")])
+        self.assertIn("read as @mrbest", notes[0]["body"])
+        self.assertEqual(notify.target(notes[0]), notify.Target("accounts", account="tiktok"))
+        self.assertEqual(len(self.copies()), 1)
 
 
 class CompactTest(DbTest):

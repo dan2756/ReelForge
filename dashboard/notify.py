@@ -4,6 +4,7 @@
   a milestone      followers on a platform, views across every platform, or one video's views passing a round number
   a video          a finished video turned up, ready to post from the Publish tab
   a log-in         Instagram or X logged ReelForge's browser out
+  a handle         a platform is being read under another @handle than its stats so far
   taking off       a new video doing 3x your typical one
   a badge          a video or today moving up to a better "top X% of yours" badge (see badges.py)
 
@@ -56,6 +57,7 @@ def target(note: dict, names: dict[str, str] | None = None) -> Target:
       milestone:views:<views>                            the All platforms card on the Overview
       milestone:followers:<platform>:<followers>         the platform's panel on Accounts
       login:<platform>                                   the platform's panel on Accounts
+      handle:<platform>:<handle>                         the platform's panel on Accounts
       video:<file name>                                  the video on the Publish tab
       update:<version>, updated:<version>                the Updates tab
 
@@ -80,6 +82,8 @@ def target(note: dict, names: dict[str, str] | None = None) -> Target:
             return Target("accounts", account=rest.rpartition(":")[0])
     if head == "login" and rest:
         return Target("accounts", account=rest)
+    if head == "handle" and rest:
+        return Target("accounts", account=rest.partition(":")[0])
     if head == "video" and rest:
         return Target("publish", file=rest)
     if head in ("update", "updated"):
@@ -278,6 +282,15 @@ def check_videos(cfg: dict) -> int:
         names = list(dict.fromkeys([*known, *names]))
     db.set_meta("known_videos", names[-500:])
     return told
+
+
+def handle_changed(platform: str, name: str, old: str, new: str) -> bool:
+    """A platform was read under another @handle than its stats so far, and it looks like another account
+    (db.record_snapshot): told once per handle, since from here on the store holds both until you say which to keep
+    on the Accounts tab."""
+    return add("info", f"{name} is now read as {new}",
+               f"Its stats so far were read as {old}, so they hold both accounts now. ReelForge saved a copy from "
+               "before, next to the stats database.", key=f"handle:{platform}:{new.lstrip('@').lower()}")
 
 
 def update_available(version: str) -> bool:
