@@ -479,7 +479,16 @@ describe("a post through the API", () => {
     await ask(h)
     await clickText(h, "○ Public", 2) // for this one post
     expect(dialog(h)).toContain("○ Private ○ Unlisted ▐ ● Public ▌")
+    // While the yes is on its way (held back here) the question says what was picked. It read "Private" then, which
+    // is what posts start as, while Public went out.
+    const answer = h.bridge.ask.bind(h.bridge)
+    let send = () => {}
+    h.bridge.ask = ((method: string, ...args: unknown[]) => new Promise((done) => (send = () => void answer(method, ...args).then(done)))) as typeof h.bridge.ask
     await clickText(h, "Post to YouTube", 2)
+    expect(dialog(h)).toContain("Who can see it Public Made for kids No")
+    expect(dialog(h)).toContain("▐ Starting… ▌")
+    h.bridge.ask = answer
+    send()
     await until(h, () => youtube(h).state === "posted")
     expect((await google(h)).starts[0]!.status.privacyStatus).toBe("public") // what you chose is what was sent
     expect(row(h)).toContain("✓ posted")

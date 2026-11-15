@@ -264,6 +264,8 @@ export function ApiPostDialog({ data, close }: { data: ApiPostData; close: () =>
     await s.bridge.ask("post_with_api", data.caption, data.tags, privacy, info.force, shown)
     if (s.dialog?.kind === "api_post") close() // (Esc may have closed it meanwhile)
   }
+  // Who can see it, in words: while the yes is on its way the choice can't be changed any more, and reads as it went.
+  const who = info.privacies.find((p) => p.key === privacy)?.label
   // The question is about one video. When another is the picked one by now (this one was hidden or removed in another
   // window, or its file is gone), it closes: nothing it shows would be what Post uploads.
   const now = useView<PostingView>(s.bridge, "posting")
@@ -316,7 +318,7 @@ export function ApiPostDialog({ data, close }: { data: ApiPostData; close: () =>
                 // who can see it: yours to choose for this one post, whatever posts start as
                 <Picks id="api-post-privacy" options={info.privacies.map((p) => [p.key, p.label])} value={privacy} onChange={setPrivacy} />
               ) : (
-                <Wrapped segs={[[f.text, DASH.text]]} width={room - labels} />
+                <Wrapped segs={[[f.key === "privacy" ? (who ?? f.text) : f.text, DASH.text]]} width={room - labels} />
               )}
             </box>
           ))}
