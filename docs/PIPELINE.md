@@ -72,8 +72,9 @@ pipeline uses the stamp so that **nothing needs deleting by hand**:
 - The frames a killed render leaves empty or cut off are deleted before a render and before the video step.
 - While it renders, a line every 20 seconds gives the frames done, the seconds a frame takes and the time left.
   When Blender exits, the step checks that every frame is there, goes back once for any that are missing, and
-  fails by naming them if they still are. `build/render.log` keeps every run, and a step that fails prints the end
-  of its log.
+  fails by naming them if they still are. It does not go back when the scene was built again while it rendered,
+  or for frames that were deleted while it rendered: it names them and leaves them to the next run.
+  `build/render.log` keeps every run, and a step that fails prints the end of its log.
 - `stills` and `render` stop when `episode.json` or the scene code changed after the last build, because Blender
   would show the scene as it was. Build first. To carry on a render with the scene as it was built, because a
   module it shares with another episode is being edited or the kit was updated, add `--as-built`: it says what

@@ -393,14 +393,69 @@ class RenderPasses(Steps):
     def test_a_frame_cut_off_during_the_render_is_made_again(self):
         self.built()
 
-        def cut_one_off(cmd, log=None, **kw):
-            self.blender(cmd, log, **kw)
-            if self.passes == 1:
-                (self.frames / "f_0005.jpg").write_bytes(self.picture("pass 1")[:30])   # the disk was full
-        with mock.patch.object(make_episode, "run", cut_one_off):
+        def cut_one_off(progress):
+            (self.frames / "f_0005.jpg").write_bytes(self.picture("pass 1")[:30])   # the disk was full
+            progress()                                          # seen on disk, then swept: it did not come out
+        with self.during_the_first_pass(cut_one_off):
             self.render()
         self.assertEqual((self.passes, self.shows(5)), (2, "pass"))
         self.assertIn(b"pass 2", (self.frames / "f_0005.jpg").read_bytes())
+
+    def during_the_first_pass(self, happens):
+        """Run the render step with `happens(progress)` called just before Blender's first pass ends."""
+        def blender(cmd, log=None, progress=None, **kw):
+            self.blender(cmd, log, **kw)
+            if self.passes == 1:
+                happens(progress)
+        return mock.patch.object(make_episode, "run", blender)
+
+    def test_it_does_not_go_back_once_the_scene_is_being_built_again(self):
+        """The scene is fixed and built again while its render runs, and the bad shot's frames are deleted behind
+        the render for the next run to make. Going back would fill them from the scene.blend that is on disk at
+        that moment, which is the old one until the build has saved."""
+        self.built()
+
+        def a_build_begins(progress):
+            for n in (7, 8, 9):
+                (self.frames / f"f_{n:04d}.jpg").unlink()
+            framecache.write_stamp(self.build / framecache.SCENE, {"unfinished": True})
+        with self.during_the_first_pass(a_build_begins), self.assertRaisesRegex(
+                SystemExit, r"render: the scene was built again while this render ran, so it did not go back for "
+                            r"frames 7-9 \(0\.6-0\.8 s\)\. Run --steps render again"):
+            self.render()
+        self.assertEqual(self.passes, 1)
+        self.assertEqual(framecache.missing(self.frames, TOTAL), [(7, 9)])
+
+    def test_it_does_not_go_back_once_another_scene_has_been_built(self):
+        stamp = self.built()
+
+        def a_build_finishes(progress):
+            (self.frames / "f_0007.jpg").unlink()
+            self.spec["effect"]["subject"] = "donut"
+            self.built()
+        with self.during_the_first_pass(a_build_finishes), self.assertRaisesRegex(
+                SystemExit, "the scene was built again while this render ran"):
+            self.render()
+        self.assertEqual(self.passes, 1)
+        self.assertEqual(framecache.read_stamp(self.frames / framecache.STAMP), stamp)     # still the old scene's
+        with self.assertRaisesRegex(SystemExit, "were rendered from an older scene"):
+            self.render()                                       # and the next run asks what to do with them
+
+    def test_it_does_not_go_back_for_frames_deleted_behind_the_render(self):
+        """Frames deleted on purpose while the render runs are for a later run, of the scene as it will be then."""
+        self.rendered(range(1, 6), self.built())
+
+        def frames_are_deleted(progress):
+            progress()                                          # the step looks at the folder as Blender renders
+            for n in (3, 12, 13):                               # one from before this run, two it had just made
+                (self.frames / f"f_{n:04d}.jpg").unlink()
+        with self.during_the_first_pass(frames_are_deleted), self.assertRaisesRegex(
+                SystemExit, r"render: frames 3 \(0\.2 s\), 12-13 \(1\.1-1\.2 s\) were deleted while this render ran"):
+            self.render()
+        self.assertEqual(self.passes, 1)
+        self.assertEqual(framecache.missing(self.frames, TOTAL), [(3, 3), (12, 13)])
+        self.assertIn(f"all {TOTAL} frames are in build/frames", self.render())    # the next run makes them
+        self.assertEqual(self.passes, 2)
 
     def test_frames_still_missing_after_the_second_pass_fail_the_step_by_name(self):
         self.built()
@@ -422,11 +477,13 @@ class RenderPasses(Steps):
     def test_progress_is_counted_from_the_files(self):
         stamp = self.built()
         self.rendered(range(1, 11), stamp)
+        seen = set()
         with mock.patch.object(make_episode.time, "time", side_effect=[100.0, 109.0, 118.0]):
-            line = make_episode.render_progress(self.frames, TOTAL)
+            line = make_episode.render_progress(self.frames, TOTAL, seen)
             self.assertEqual(line(), f"frames 10/{TOTAL}, the first one is still rendering")
             self.rendered(range(11, 21), stamp)
             self.assertEqual(line(), f"frames 20/{TOTAL}, 1.80 s a frame, about 18 s left")
+        self.assertEqual(seen, set(range(1, 21)))               # and it remembers every frame it has seen
 
 
 class RunningAStep(unittest.TestCase):

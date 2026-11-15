@@ -336,14 +336,27 @@ def render(build, spec, rerender="", keep=False, as_built=False):
     # Blender renders in one go and never looks back at a frame it has passed, so check what came out and go back
     # once for anything that is missing before calling it a failure.
     log = build / "render.log"
+    seen, cut_off = set(), set()    # the frames that have been on disk since the step began; those it swept itself
     for attempt in ("first", "second"):
         todo = framecache.missing(frames, total)
         if not todo:
             break
         if attempt == "second":
+            # Going back starts Blender on whatever build/scene.blend holds by now, and Blender fills every frame
+            # that is missing. That is right for a frame that did not come out. It is wrong once the scene is being
+            # built again, and for frames that were deleted behind the render so that a later run makes them.
+            if framecache.read_stamp(build / framecache.SCENE) != stamp or framecache.unfinished(build):
+                raise SystemExit("render: the scene was built again while this render ran, so it did not go back "
+                                 f"for {framecache.describe(todo, fps)}. Run --steps render again.")
+            gone = framecache.ranges({n for n in seen - framecache.present(frames) - cut_off if n <= total})
+            if gone:
+                verb = "was" if framecache.count(gone) == 1 else "were"
+                raise SystemExit(f"render: {framecache.describe(gone, fps)} {verb} deleted while this render ran, "
+                                 "so it did not go back. Run --steps render again to render what is missing.")
             print(f"  {framecache.describe(todo, fps)} did not come out: going back once", flush=True)
-        run([config.BLENDER, "-b", build / "scene.blend", "-a"], log=log, progress=render_progress(frames, total))
-        framecache.sweep_empty(frames)
+        run([config.BLENDER, "-b", build / "scene.blend", "-a"], log=log,
+            progress=render_progress(frames, total, seen))
+        cut_off |= {framecache.number(f) for f in framecache.sweep_empty(frames)}
     todo = framecache.missing(frames, total)
     if todo:
         if log.exists():
@@ -355,14 +368,19 @@ def render(build, spec, rerender="", keep=False, as_built=False):
     print(f"  all {total} frames are in build/frames")
 
 
-def render_progress(frames, total):
+def render_progress(frames, total, seen):
     """A line for run() to print while Blender renders, counted from the files that have appeared in build/frames:
-    how far it is, how long a frame takes and how long the rest will take at that pace."""
-    t0, before = time.time(), len(framecache.present(frames))
+    how far it is, how long a frame takes and how long the rest will take at that pace. The numbers of the frames
+    it finds are added to `seen`, which is how the step tells a frame that was deleted behind the render from one
+    that never came out."""
+    start = framecache.present(frames)
+    seen |= start
+    t0, before = time.time(), len(start)
 
     def line():
-        done = len(framecache.present(frames))
-        return framecache.progress(done, total, done - before, time.time() - t0)
+        now = framecache.present(frames)
+        seen.update(now)
+        return framecache.progress(len(now), total, len(now) - before, time.time() - t0)
     return line
 
 
