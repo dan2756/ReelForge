@@ -26,7 +26,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-from dashboard import config, db, desktop, extension_api, posting
+from dashboard import config, db, desktop, extension_api, posting, posting_tab
 from dashboard.config import PLATFORM_KEYS
 from dashboard.service import Dashboard
 from dashboard.tests.test_posting import CAPTION, CHROME, EDGE, TAGS, LedgerTest, approve
@@ -1291,6 +1291,52 @@ class WindowServes(PostingTest):
             w.svc.stop()
             stop.assert_called_once_with()
 
+    def started(self) -> Window:
+        """Your own window (not the demo), started the way the real one starts: by started() itself."""
+        w = PublishTest.window(self, {key: Reader(key, name) for key, name in NAMES.items()}, ready=True,
+                               extension_ports=(0,))
+        w.svc.demo = False
+        self.addCleanup(w.svc.stop_serving)
+        with mock.patch.object(Dashboard, "start_updates"):  # (it would look for a new ReelForge)
+            w.call("ready")
+        return w
+
+    def ticking(self, w: Window) -> set[str]:
+        """What the window does by the clock from now on."""
+        return {getattr(t.fn, "__name__", "") for _, _, t in w.loop.timers}
+
+    def test_your_own_window_starts_listening_and_shows_the_extension(self):
+        self.extension()
+        w = self.started()
+        self.assertIsInstance(w.svc.extension_port, int)
+        self.assertEqual((w.view("extension")["state"], w.view("extension")["port"]), ("on", w.svc.extension_port))
+        self.assertEqual(w.view("posting")["video"]["name"], "ep01.mp4")
+        self.assertEqual(ask(w.svc.extension_port, "GET", "/v1/hello").json["demo"], False)
+
+    def test_the_window_starts_whatever_the_connections_file_holds(self):
+        # The file can be edited by hand (extension_ids). A time without its zone, a name that isn't text: the
+        # window starts all the same, with its first refresh, its timers and its once-a-second look.
+        for entry in ({"last_seen": "2026-11-15T10:00:00"}, {"last_seen": 7, "name": 5, "version": ["1"]},
+                      {"accounts": "x", "protocol": "1", "last_seen": "soon"}):
+            self.extension(**entry)
+            w = self.started()
+            self.assertLessEqual({"tick", "keep_in_step", "welcome_back"}, self.ticking(w), entry)
+            (install,) = w.view("extension")["installs"]
+            self.assertEqual((install["seen"], install["on"]), ("never", False), entry)
+            self.assertEqual(w.view("extension")["state"], "old" if "protocol" in entry else "waiting")
+            self.store.write_text(self.store.read_text("utf-8") + " ", "utf-8")
+            w.svc.keep_in_step()  # every second afterwards
+            w.close()
+
+    def test_a_fault_in_the_extensions_views_never_stops_the_window_starting_or_its_clock(self):
+        self.extension()
+        with mock.patch.object(posting_tab.PostingTab, "update_extension", side_effect=TypeError("boom")), \
+                contextlib.redirect_stderr(io.StringIO()) as log:
+            w = self.started()
+            self.assertLessEqual({"tick", "keep_in_step", "welcome_back"}, self.ticking(w))
+            w.svc.tick()  # the half-minute clock goes on too
+        self.assertIn("TypeError: boom", log.getvalue())  # and the window's log has it
+
     def test_the_demo_never_listens(self):
         w = PublishTest.window(self)  # the tests' plain window is the demo
         w.svc.extension_ports = (0,)
@@ -1536,6 +1582,11 @@ class CommandLine(ApiTest):
         code, said = self.run_main()
         self.assertIn("connected  Chrome on macOS · v0.1.0 · last seen 5m ago", said)
         self.assertIn("Edge on Windows · last seen never", said)
+        # A time someone wrote in by hand, without its zone or not a time at all, is "never" and not an error.
+        for odd in ("2026-11-15T10:00:00", "yesterday", 7):
+            extension_api.change_store(lambda s: s["paired"][0].update(last_seen=odd))
+            self.assertIn("connected  Chrome on macOS · v0.1.0 · last seen never", self.run_main()[1], odd)
+        extension_api.change_store(lambda s: s["paired"][0].update(last_seen=seen))
         self.assertNotIn("ab", said.replace("able", "").replace("about", ""))  # nothing of a token's
         (self.folder / "manifest.json").unlink()
         code, said = self.run_main()

@@ -1107,7 +1107,10 @@ def status() -> int:
     print(f"  id         {EXTENSION_ID}")
     browsers = paired(read_store())
     for i, p in enumerate(browsers):
-        seen = fmt_ago(p.get("last_seen")) if isinstance(p.get("last_seen"), str) else "never"
+        try:
+            seen = fmt_ago(p["last_seen"])
+        except (KeyError, TypeError, ValueError):  # none, or not a time ReelForge wrote: the file can be edited
+            seen = "never"
         version = f" · v{p['version']}" if p.get("version") else ""
         label = "connected " if i == 0 else " " * 10
         print(f"  {label} {p.get('name') or 'A browser'}{version} · last seen {seen}")

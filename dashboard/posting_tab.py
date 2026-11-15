@@ -174,6 +174,7 @@ class PostingTab:
         for p in extension_api.paired(extension_api.read_store()):
             try:
                 seen = db.parse(p["last_seen"])
+                seen = seen if seen.tzinfo else None  # written in by hand without its zone: as good as never
             except (KeyError, TypeError, ValueError):
                 seen = None
             theirs = p.get("protocol", posting.PROTOCOL)
@@ -314,12 +315,17 @@ class PostingTab:
     def mind_the_jobs(self) -> None:
         """At start and every half minute: what the clock decides (a job nobody picked up expires, one that went
         silent after it was ready becomes unknown: posting.expire_stale), a post a stats read found while this
-        window wasn't looking, the extension's "seen 2m ago", and the picked video's review as it stands now."""
-        if not self.demo:
-            self._safe(posting.expire_stale, 0)
-            self._safe(posting.reconcile, 0)
-        self.update_extension()
-        self.update_posting(fresh=self.tab == "publish")
+        window wasn't looking, the extension's "seen 2m ago", and the picked video's review as it stands now.
+        Whatever goes wrong in here is for the log and the next half minute: the extension is an extra, and neither
+        the window's start nor its clock stops for it."""
+        try:
+            if not self.demo:
+                self._safe(posting.expire_stale, 0)
+                self._safe(posting.reconcile, 0)
+            self.update_extension()
+            self.update_posting(fresh=self.tab == "publish")
+        except Exception:
+            traceback.print_exc()
 
     def settle_jobs(self) -> None:
         """After a stats read, here or anywhere: a post it found settles the job that was waiting to hear."""

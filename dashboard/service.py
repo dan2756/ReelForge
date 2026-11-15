@@ -630,8 +630,6 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
         self.show_platforms()
         self.reload()
         self.scan_files()
-        self.serve_extension()
-        self.mind_the_jobs()
         self.update_notes()
         if self.tab == "settings":
             self.update_settings()
@@ -647,6 +645,10 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
         self.loop.set_interval(WATCH_EVERY, self.keep_in_step)
         # Say what changed while ReelForge was closed once the first refresh is in (or after a while without one).
         self.loop.set_timer(45, self.welcome_back)
+        # Last, so that nothing about the browser extension, which nobody needs, can keep the window from starting:
+        # the first refresh is under way and every timer is set by now.
+        self.serve_extension()
+        self.mind_the_jobs()
 
     def stop(self) -> None:
         for w in self.loop.live():
