@@ -1118,6 +1118,20 @@ class Pages(ApiTest):
         self.assertEqual(self.manual("youtube").status, 200)  # pressed again: the same again, still set aside
         self.assertGreaterEqual(self.app.changes, 2)
 
+    def test_by_hand_shows_a_video_that_was_moved_and_says_so_when_it_is_gone(self):
+        moved = self.root / "completed" / "ep01 - Gravity" / "ep01.mp4"
+        moved.parent.mkdir(parents=True)
+        self.video.rename(moved)
+        answer = self.manual("tiktok")
+        self.assertEqual(self.revealed, [moved.resolve()])
+        self.assertIn(f"drag ep01.mp4 in from {desktop.FILES_WINDOW}", answer.json["message"])
+        moved.unlink()
+        answer = self.manual("youtube")
+        self.assertEqual((answer.status, answer.json["opened"], self.revealed), (200, True, [moved.resolve()]))
+        self.assertIn("The title is copied: paste it there. ReelForge can't find ep01.mp4 any more, so you have to "
+                      "find the video yourself.", answer.json["message"])
+        self.assertNotIn("drag", answer.json["message"])
+
     def test_by_hand_with_no_browser_says_so_and_notes_no_page(self):
         self.browser = False
         answer = self.manual("tiktok")

@@ -141,6 +141,22 @@ def unchanged(job: dict) -> bool:
         return False
 
 
+def whereabouts(job: dict, cfg: dict) -> Path:
+    """The file a job's video is in now: where it was when the job was made, else a video on the Publish list with
+    the same bytes (the pipeline moves a delivered video to completed videos/, and a ReelForge folder can be moved
+    whole). When neither is there, the path it had."""
+    path = Path(job["video_path"])
+    if path.is_file():
+        return path
+    for f in videos.find(cfg):
+        try:
+            if f.stat().st_size == job["video_size"] and digest(f) == job["video_sha256"]:
+                return f
+        except OSError:
+            continue
+    return path
+
+
 # ---- the text
 
 def snapshot(item: PublishItem, platform: str) -> dict[str, str]:
@@ -328,7 +344,7 @@ def retry(job_id: str, cfg: dict, demo: bool = False) -> dict:
     if job is None or job["state"] not in FREE:
         raise Refused("bad_transition", "Only a post that failed, expired or was cancelled can be tried again.", job)
     text, platform = json.loads(job["text"]), job["platform"]
-    return _create(Path(job["video_path"]), {platform: text}, headline(text), cfg, bool(job["press"]), (),
+    return _create(whereabouts(job, cfg), {platform: text}, headline(text), cfg, bool(job["press"]), (),
                    {platform: job["via"]}, {platform: json.loads(job["options"])}, demo)
 
 

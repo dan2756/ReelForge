@@ -408,6 +408,28 @@ class Making(LedgerTest):
         self.assertEqual(len(db.episodes()), 1)
 
 
+    def test_trying_again_finds_a_video_that_was_moved(self):
+        # The pipeline moves a delivered video to completed videos/: same name, same bytes, still on the list.
+        job = self.walk(self.job(), "opening")
+        posting.advance(job["id"], "failed", install=CHROME, error_code="timeout")
+        moved = self.root / "completed" / "ep01 - Gravity" / "ep01.mp4"
+        moved.parent.mkdir(parents=True)
+        self.video.rename(moved)
+        other = moved.with_name("other.mp4")
+        other.write_bytes(b"another one..")  # as long, and not it
+        self.assertEqual(posting.whereabouts(job, self.cfg), moved.resolve())
+        (again,) = posting.retry(job["id"], self.cfg)["jobs"]
+        self.assertEqual((again["video_path"], again["video_sha256"], again["text"]),
+                         (str(moved.resolve()), job["video_sha256"], job["text"]))
+        # Gone for good: it says so, and makes nothing.
+        posting.cancel(again["id"])
+        moved.unlink()
+        self.assertEqual(posting.whereabouts(job, self.cfg), self.video)
+        made = posting.retry(job["id"], self.cfg)
+        self.assertEqual((made["jobs"], made["blocked"][0]["reason"]), ([], "missing"))
+        self.assertEqual(made["blocked"][0]["message"], "ep01.mp4 isn't there any more.")
+
+
 class Moving(LedgerTest):
     def test_the_whole_way_from_queued_to_posted(self):
         job = self.job()

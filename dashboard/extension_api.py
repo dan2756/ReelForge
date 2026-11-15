@@ -387,16 +387,19 @@ def by_hand(job: dict, name: str, copy: Callable[[str], object], record: Callabl
     what = {"youtube": "title", "x": "post"}.get(job["platform"], "caption and hashtags")
     if text:
         copy(text)
-    if video.exists():
+    shown = video.exists()
+    if shown:
         desktop.reveal(video)
     opened = desktop.open_upload_page(job["platform"])
     if opened:
         record(PublishItem(video=video, caption=text, tags=""))
-        message = (f"{name}'s upload page is opening. The {what} is copied: drag {video.name} in from "
-                   f"{desktop.FILES_WINDOW}, then paste.")
+        message = f"{name}'s upload page is opening. The {what} is copied: " + (
+            f"drag {video.name} in from {desktop.FILES_WINDOW}, then paste." if shown else
+            f"paste it there. ReelForge can't find {video.name} any more, so you have to find the video yourself.")
     else:
-        message = (f"ReelForge couldn't open your browser for {name}. Open its upload page yourself: the {what} is "
-                   f"copied, and {video.name} is showing in {desktop.FILES_WINDOW}.")
+        message = f"ReelForge couldn't open your browser for {name}. Open its upload page yourself: the {what} is " + (
+            f"copied, and {video.name} is showing in {desktop.FILES_WINDOW}." if shown else
+            f"copied. ReelForge can't find {video.name} any more, so you have to find the video yourself.")
     if job["platform"] == "youtube":
         message += " For the description, use Copy YouTube hashtags on ReelForge's Publish tab."
     if job["platform"] == "instagram":
@@ -893,7 +896,8 @@ class Handler(BaseHTTPRequestHandler):
                                              "cancel it on ReelForge's Publish tab first.")
         names, handles = self.names()
         name = names.get(platform, platform)
-        done = api.app.by_hand(job, name)
+        # (the video where it is now: it may have been moved to completed videos/ since the job was made)
+        done = api.app.by_hand({**job, "video_path": str(posting.whereabouts(job, api.app.cfg))}, name)
         if done is None:
             raise Refusal(503, "busy", "ReelForge didn't answer in time. Try again.")
         job = posting.cancel(job["id"], "posted by hand")
