@@ -289,6 +289,13 @@ def posts_latest() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def last_read(platform: str) -> dict[str, str]:
+    """When each of a platform's posts was last read: post id -> time."""
+    with connect() as db:
+        return {r[0]: r[1] for r in db.execute(
+            "SELECT post_id, last_ts FROM posts WHERE platform = ? AND last_ts IS NOT NULL", (platform,))}
+
+
 def platforms_with_posts_since(since: str) -> set[str]:
     with connect() as db:
         return {r[0] for r in db.execute("SELECT DISTINCT platform FROM posts WHERE published_at >= ?", (since,))}
