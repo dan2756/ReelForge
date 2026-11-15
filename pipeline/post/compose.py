@@ -11,6 +11,7 @@ sheet_N.jpg, 12 to a sheet). So the lines can be checked against their shots bef
 import argparse
 import json
 import math
+import os
 import random
 import subprocess
 import sys
@@ -321,25 +322,51 @@ class Episode:
 
 
 def make_video(ep):
+    """Encode final/<id>.mp4. It is written beside the last video as <id>.mp4.part and takes its place only once
+    ffmpeg has finished it, so a step that fails halfway leaves the earlier video (and the Publish list) as it was
+    instead of a short, playable file under the same name."""
     final = ep.dir / "final"
     final.mkdir(exist_ok=True)
     out = final / f"{ep.spec['id']}.mp4"
+    part = out.with_name(out.name + ".part")
     audio = ep.dir / "build" / "audio.wav"
     ep.need_frames("video", range(1, ep.rendered + 1))
     cmd = [config.FFMPEG, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
            "-r", str(ep.fps), "-i", "-"]
     if audio.exists():
         cmd += ["-i", str(audio), "-map", "0:v", "-map", "1:a", "-c:a", "aac", "-b:a", "192k"]
+    else:
+        print("  note: build/audio.wav not found, so this video has no sound (run --steps audio first)", flush=True)
     cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-profile:v", "high",
-            "-movflags", "+faststart", "-shortest", str(out)]
+            "-movflags", "+faststart", "-shortest", "-f", "mp4", str(part)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-    for idx in range(ep.total):
-        proc.stdin.write(ep.frame(idx).tobytes())
-        if idx % 300 == 0:
-            print(f"  frame {idx}/{ep.total}", flush=True)
-    proc.stdin.close()
-    if proc.wait() != 0:
-        raise RuntimeError("ffmpeg failed")
+
+    def give_up():
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+        part.unlink(missing_ok=True)
+
+    try:
+        for idx in range(ep.total):
+            proc.stdin.write(ep.frame(idx).tobytes())
+            if idx % 300 == 0:
+                print(f"  frame {idx}/{ep.total}", flush=True)
+        proc.stdin.close()
+        encoded = proc.wait() == 0
+    except BrokenPipeError:         # ffmpeg stopped reading: its own message is just above this one
+        encoded = False
+    except BaseException:           # a fault while drawing a frame, or Ctrl-C
+        give_up()
+        raise
+    if not encoded:
+        give_up()
+        raise SystemExit(f"video: ffmpeg failed, so no new video was made; {out.name} was left as it was")
+    try:
+        os.replace(part, out)
+    except OSError as exc:      # Windows won't replace a file that is open, in a player for one
+        raise SystemExit(f"video: the new video is finished but could not take the place of {out.name} ({exc}). "
+                         f"Close whatever has it open, then rename {part.name} to {out.name}.") from None
     print(f"  wrote {out}")
 
 

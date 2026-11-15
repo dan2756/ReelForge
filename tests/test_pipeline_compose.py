@@ -35,12 +35,15 @@ class Ffmpeg:
 
     def feed(self, data):
         self.fed += 1
+        if self.fed == Ffmpeg.dies_at:
+            self.code = 1
+            raise BrokenPipeError("ffmpeg went away")
         return len(data)
 
     def wait(self):
         if self.code is None:
-            self.code = 0
-            Path(self.cmd[-1]).write_bytes(b"a new video")
+            self.code = Ffmpeg.exit
+            Path(self.cmd[-1]).write_bytes(b"a new video" if self.code == 0 else b"half a vid")
         return self.code
 
     def poll(self):
@@ -66,7 +69,7 @@ class Composing(unittest.TestCase):
                      "render_until": SECONDS, "world": {"type": "street"}, "effect": {"type": "grow"},
                      "cover": {"time": 1.0, "kicker": "DAY 12", "keyword": "DUCK"}}
         (self.build / "series.json").write_text(json.dumps({"fps": FPS, "frames": TOTAL}), encoding="utf-8")
-        Ffmpeg.last = None
+        Ffmpeg.last, Ffmpeg.dies_at, Ffmpeg.exit = None, None, 0
         for patch in (mock.patch.object(compose.subprocess, "Popen", Ffmpeg),
                       mock.patch.object(compose.config, "FFMPEG", "ffmpeg")):
             patch.start()
@@ -157,6 +160,68 @@ class FrameGuard(Composing):
         self.rendered(range(1, 6))
         with self.assertRaisesRegex(SystemExit, r"cover: frame 11 \(1\.0 s\) is not rendered"):
             compose.make_cover(self.episode())
+
+
+class LastGoodVideo(Composing):
+    """The video step writes beside the last video and replaces it only when the new one is whole."""
+
+    def setUp(self):
+        super().setUp()
+        self.built()
+        self.rendered(range(1, TOTAL + 1))
+        (self.build / "audio.wav").write_bytes(b"RIFF")
+
+    def left_over(self):
+        return sorted(p.name for p in self.video.parent.iterdir())
+
+    def test_a_finished_encode_takes_the_place_of_the_last_video(self):
+        out = self.make_video()
+        self.assertEqual(Ffmpeg.last.cmd[-3:], ["-f", "mp4", str(self.video) + ".part"])
+        self.assertEqual(self.video.read_bytes(), b"a new video")
+        self.assertEqual(self.left_over(), [self.video.name])
+        self.assertNotIn("no sound", out)
+
+    def test_ffmpeg_failing_leaves_the_last_video_alone(self):
+        Ffmpeg.exit = 1
+        with self.assertRaisesRegex(SystemExit, "ffmpeg failed, so no new video was made"):
+            self.make_video()
+        self.assertEqual(self.video.read_bytes(), b"the last good video")
+        self.assertEqual(self.left_over(), [self.video.name])
+
+    def test_ffmpeg_stopping_midway_leaves_the_last_video_alone(self):
+        Ffmpeg.dies_at = 5
+        with self.assertRaisesRegex(SystemExit, "ffmpeg failed.*ep01_test.mp4 was left as it was"):
+            self.make_video()
+        self.assertEqual(self.video.read_bytes(), b"the last good video")
+        self.assertEqual(self.left_over(), [self.video.name])
+
+    def test_a_fault_while_drawing_a_frame_stops_ffmpeg_and_leaves_the_last_video_alone(self):
+        ep = self.episode()
+        real = ep.frame
+
+        def frame(idx):
+            if idx == 7:
+                raise KeyError("size_ft")           # a HUD number the scene never gave
+            return real(idx)
+        ep.frame = frame
+        Path(str(self.video) + ".part").write_bytes(b"what ffmpeg had written so far")
+        with self.assertRaises(KeyError), redirect_stdout(io.StringIO()):
+            compose.make_video(ep)
+        self.assertTrue(Ffmpeg.last.killed)
+        self.assertEqual(self.video.read_bytes(), b"the last good video")
+        self.assertEqual(self.left_over(), [self.video.name])
+
+    def test_a_video_that_cannot_be_replaced_keeps_the_new_one_beside_it(self):
+        with mock.patch.object(compose.os, "replace", side_effect=PermissionError("in use")), \
+                self.assertRaisesRegex(SystemExit, "rename ep01_test.mp4.part to ep01_test.mp4"):
+            self.make_video()
+        self.assertEqual(self.left_over(), [self.video.name, self.video.name + ".part"])
+        self.assertEqual(self.video.read_bytes(), b"the last good video")
+
+    def test_encoding_without_sound_says_so(self):
+        (self.build / "audio.wav").unlink()
+        self.assertIn("note: build/audio.wav not found, so this video has no sound", self.make_video())
+        self.assertNotIn("-c:a", Ffmpeg.last.cmd)
 
 
 class Preview(Composing):

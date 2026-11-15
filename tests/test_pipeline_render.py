@@ -141,7 +141,8 @@ class Stills(Steps):
         self.spec["cover"] = {"time": 1.0}
         self.built()
         (self.build / "series.json").write_text(json.dumps({"events": {"cuts": [1.5]}}), encoding="utf-8")
-        times = [0.65, 1.0, 1.2, 1.4, 1.6, 2.05, 2.6]       # 0.2+0.45, cover, 1.4-0.2, cut-0.1, cut+0.1, 1.6+0.45, 2.8-0.2
+        # line 1 in and out, the cover between them, both sides of the cut, line 2 in and out; line 3 is post-only
+        times = [0.65, 1.0, 1.2, 1.4, 1.6, 2.05, 2.6]
         self.assertEqual(make_episode.line_times(self.spec, self.build), times)
         self.main("--steps", "stills", "--stills", "lines")
         self.assertEqual(self.blender_cmd[self.blender_cmd.index("-f") + 1], "7,11,13,15,17,21,27")
