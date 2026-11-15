@@ -11,12 +11,12 @@
 
 import { TextAttributes } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/react"
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useView } from "../bridge"
 import { cellLen, plain, wrappedRows, type Action, type Parts, type Seg } from "../lib/styled"
 import { DASH } from "../theme"
 import { Button } from "../ui/Button"
-import { RadioSet, TextField } from "../ui/Fields"
+import { TextField } from "../ui/Fields"
 import { Fitted } from "../ui/Line"
 import { DialogButtons, Modal, modalRoom, Scroll, toasts, Wrapped } from "../ui/Panels"
 import { useDash, type ApiPostData } from "./state"
@@ -59,7 +59,7 @@ export function ApiLine({ rows }: { rows: PostingRow[] }) {
 // ---------------------------------------------------------------- the connection
 
 const WIDTH = 96 // the connection's dialog
-const CHOICE = 30 // columns for each of the two choices, side by side
+const CHOICE = 24 // columns for what each of the two choices is called, before its options
 
 /** YouTube's API: where the connection stands, and everything that changes it. With no client on file (or one Google
  * no longer knows), the box for the client file's path. With one, Connect (Google's consent page opens in your
@@ -112,11 +112,9 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
   // (room: two columns short of the dialog's, for the scrollbar and a column of air beside it)
   const room = modalRoom(WIDTH, width) - 2
   const choices = api.client && !api.wants_file // (a client Google no longer knows: the file first)
-  const stacked = room < CHOICE * 2 + 2 // the two choices one under the other
-  const choiceRows = (options: number) => 1 + options
   const bodyRows =
     api.lines.reduce((n, l) => n + wrappedRows(plain(l), room), api.lines.length ? 1 : 0) +
-    (choices ? 2 + (stacked ? choiceRows(3) + 1 + choiceRows(kidsOptions.length) : choiceRows(3)) + 1 + wrappedRows(api.words.start_as, room) + wrappedRows(api.words.kids, room) : 0)
+    (choices ? 2 + 2 + 1 + wrappedRows(api.words.start_as, room) + wrappedRows(api.words.kids, room) : 0)
   return (
     <Modal name="youtube-api" title="YOUTUBE API" width={WIDTH}>
       <box flexDirection="row" flexShrink={0}>
@@ -141,13 +139,17 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
               <text fg={DASH.text} attributes={TextAttributes.BOLD} marginTop={1} flexShrink={0}>
                 FOR POSTS TO COME
               </text>
-              <box flexDirection={stacked ? "column" : "row"} flexShrink={0} gap={stacked ? 1 : 2}>
-                <Choice label="Who can see a new post">
-                  <RadioSet id="api-privacy" options={api.privacies.map((p) => [p.key, p.label])} value={api.privacy} onChange={(key) => s.bridge.send("youtube_api_defaults", key, null)} />
-                </Choice>
-                <Choice label="Made for kids">
-                  <RadioSet id="api-kids" options={kidsOptions} value={kids} onChange={(key) => (key ? s.bridge.send("youtube_api_defaults", null, key === "yes") : undefined)} />
-                </Choice>
+              <box flexDirection="row" height={1} flexShrink={0}>
+                <text fg={DASH.text} width={CHOICE} flexShrink={0} wrapMode="none">
+                  Who can see a new post
+                </text>
+                <Picks id="api-privacy" options={api.privacies.map((p) => [p.key, p.label])} value={api.privacy} onChange={(key) => s.bridge.send("youtube_api_defaults", key, null)} />
+              </box>
+              <box flexDirection="row" height={1} flexShrink={0}>
+                <text fg={DASH.text} width={CHOICE} flexShrink={0} wrapMode="none">
+                  Made for kids
+                </text>
+                <Picks id="api-kids" options={kidsOptions} value={kids} onChange={(key) => (key ? s.bridge.send("youtube_api_defaults", null, key === "yes") : undefined)} />
               </box>
               <box flexDirection="column" marginTop={1} flexShrink={0}>
                 <Wrapped segs={[[api.words.start_as, DASH.muted]]} width={room} />
@@ -221,14 +223,15 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
   )
 }
 
-/** One of the two choices: what it is, over its options. */
-function Choice({ label, children }: { label: string; children: ReactNode }) {
+/** One of a few, all in one row: ● marks the one picked, and a press (or Tab to one, then Enter) picks another. In a
+ * row because these sit in a part of a dialog that scrolls in a short window: a list of them one under the other was
+ * cut off there, and its arrows moved on to an option out of sight. */
+function Picks({ id, options, value, onChange }: { id: string; options: [string, string][]; value: string; onChange: (key: string) => void }) {
   return (
-    <box flexDirection="column" width={CHOICE} flexShrink={0}>
-      <text fg={DASH.text} wrapMode="none" flexShrink={0}>
-        {label}
-      </text>
-      {children}
+    <box flexDirection="row" height={1} flexShrink={0} gap={1}>
+      {options.map(([key, label]) => (
+        <Button key={key} id={`${id}-${key || "none"}`} label={`${key === value ? "●" : "○"} ${label}`} variant={key === value ? "default" : "ghost"} onPress={() => onChange(key)} />
+      ))}
     </box>
   )
 }
@@ -273,7 +276,7 @@ export function ApiPostDialog({ data, close }: { data: ApiPostData; close: () =>
   // The rows of what will be sent, as they will wrap, so their scrolling area is as tall as they are and no taller.
   const room = modalRoom(100, useTerminalDimensions().width) - 2
   const rows =
-    info.fields.reduce((n, f) => n + (f.key === "privacy" && ok ? info.privacies.length : wrappedRows(f.text, room - labels)), 0) + (info.fields.length ? 1 + wrappedRows(info.left, room) : 0)
+    info.fields.reduce((n, f) => n + (f.key === "privacy" && ok ? 1 : wrappedRows(f.text, room - labels)), 0) + (info.fields.length ? 1 + wrappedRows(info.left, room) : 0)
   return (
     <Modal name="api-post" title="POST TO YOUTUBE THROUGH ITS API">
       {info.video ? (
@@ -305,7 +308,7 @@ export function ApiPostDialog({ data, close }: { data: ApiPostData; close: () =>
               </text>
               {f.key === "privacy" && ok ? (
                 // who can see it: yours to choose for this one post, whatever posts start as
-                <RadioSet id="api-post-privacy" options={info.privacies.map((p) => [p.key, p.label])} value={privacy} onChange={setPrivacy} />
+                <Picks id="api-post-privacy" options={info.privacies.map((p) => [p.key, p.label])} value={privacy} onChange={setPrivacy} />
               ) : (
                 <Wrapped segs={[[f.text, DASH.text]]} width={room - labels} />
               )}

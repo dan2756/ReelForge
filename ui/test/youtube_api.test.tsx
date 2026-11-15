@@ -284,25 +284,24 @@ describe("the choices for posts to come", () => {
     const h = await kit({ api: { client: "on" } })
     await openApi(h)
     const said = dialog(h)
-    expect(said).toContain("FOR POSTS TO COME Who can see a new post Made for kids")
-    expect(said).toContain("● Private")
-    expect(said).toContain("● Not answered") // nobody has answered for you
+    expect(said).toContain("FOR POSTS TO COME Who can see a new post ▐ ● Private ▌ ○ Unlisted ○ Public")
+    expect(said).toContain("Made for kids ▐ ● Not answered ▌ ○ No ○ Yes") // nobody has answered for you
     expect(said).toContain("A new post starts as the one you pick here. You can choose otherwise for one post, in its question.")
     expect(said).toContain('"Made for kids" is a declaration you make to YouTube, so ReelForge never makes it for you. Until you answer, a post sends none and your channel\'s own audience setting in YouTube Studio applies.')
     expect([api(h).privacy, api(h).made_for_kids]).toEqual(["private", null])
-    await clickText(h, "○  Unlisted", 4)
+    await clickText(h, "○ Unlisted", 2)
     await until(h, () => api(h).privacy === "unlisted")
-    expect(dialog(h)).toContain("● Unlisted")
+    expect(dialog(h)).toContain("○ Private ▐ ● Unlisted ▌ ○ Public")
     expect(dialog(h)).toContain("posts start as unlisted")
-    await clickText(h, "○  No", 4)
+    await clickText(h, "○ No", 2)
     await until(h, () => api(h).made_for_kids === false)
-    expect(dialog(h)).toContain("● No")
+    expect(dialog(h)).toContain("Made for kids ▐ ● No ▌ ○ Yes")
     expect(dialog(h)).not.toContain("Not answered") // an answer can be changed, and not taken back
     expect([onFile().privacy, onFile().made_for_kids]).toEqual(["unlisted", false])
     // The question before a post shows both, as they will be sent.
     await clickText(h, "▐ Close ▌", 3)
     await ask(h)
-    expect(dialog(h)).toContain("Who can see it ┃ ○ Private ┃ ● Unlisted ┃ ○ Public Made for kids No Category People & Blogs")
+    expect(dialog(h)).toContain("Who can see it ○ Private ▐ ● Unlisted ▌ ○ Public Made for kids No Category People & Blogs")
   })
 })
 
@@ -315,7 +314,7 @@ describe("the question before a post", () => {
       "ep03_hail.mp4 0.0 MB ✓ QA passed and the review says APPROVED.",
       "ReelForge uploads the video to YouTube itself, through Google's API, with exactly this. The YouTube row shows the percent. Keep ReelForge open until it says posted.",
       UNPROVEN,
-      `Title ${CAPTION} #shorts Description ${TAGS} Who can see it ┃ ● Private ┃ ○ Unlisted ┃ ○ Public`,
+      `Title ${CAPTION} #shorts Description ${TAGS} Who can see it ▐ ● Private ▌ ○ Unlisted ○ Public`,
       "Made for kids Not sent: you haven't answered, so your channel's own setting applies",
       "Category People & Blogs",
       "ReelForge doesn't set the altered-content answer, tags, a thumbnail or a schedule. Set those in YouTube Studio.",
@@ -330,16 +329,16 @@ describe("the question before a post", () => {
     expect([jobsMade(), (await google(h)).starts]).toEqual([0, []])
     // Tab goes on to Post and round to the choice of who can see it; Esc closes, and still nothing was sent.
     await ask(h)
-    h.t.mockInput.pressKey("TAB")
-    await h.settle(200)
-    expect(focused(h)).toBe("Post to YouTube")
-    h.t.mockInput.pressKey("TAB")
-    await h.settle(200)
-    h.t.mockInput.pressArrow("down")
-    await h.settle(200)
+    const seen: string[] = []
+    for (let i = 0; i < 3; i++) {
+      h.t.mockInput.pressKey("TAB")
+      await h.settle(200)
+      seen.push(focused(h))
+    }
+    expect(seen).toEqual(["Post to YouTube", "● Private", "○ Unlisted"])
     h.t.mockInput.pressKey("RETURN") // unlisted, for this one post
     await h.settle(300)
-    expect(dialog(h)).toContain("┃ ○ Private ┃ ● Unlisted ┃ ○ Public")
+    expect(dialog(h)).toContain("Who can see it ○ Private ▐ ● Unlisted ▌ ○ Public")
     h.t.mockInput.pressKey("ESCAPE")
     await h.settle(400)
     expect(frame(h)).not.toContain("POST TO YOUTUBE THROUGH ITS API")
@@ -441,8 +440,8 @@ describe("a post through the API", () => {
   test("that YouTube stored another way than you chose is posted, with an amber note on its row", async () => {
     const h = await kit({ api: { client: "on", kids: false, google: { stores_as: "private" } } })
     await ask(h)
-    await clickText(h, "○  Public", 4) // for this one post
-    expect(dialog(h)).toContain("┃ ○ Private ┃ ○ Unlisted ┃ ● Public")
+    await clickText(h, "○ Public", 2) // for this one post
+    expect(dialog(h)).toContain("○ Private ○ Unlisted ▐ ● Public ▌")
     await clickText(h, "Post to YouTube", 2)
     await until(h, () => youtube(h).state === "posted")
     expect((await google(h)).starts[0]!.status.privacyStatus).toBe("public") // what you chose is what was sent
@@ -626,10 +625,10 @@ describe("when something goes wrong, or the window is small", () => {
     expect(popups()).toEqual(["Something went wrong: RuntimeError: boom"])
     expect(dialog(h)).toContain("▐ Connect ▌") // still there, to press again
     toasts.clear()
-    await clickText(h, "○  Public", 4)
+    await clickText(h, "○ Public", 2)
     await until(h, () => popups().length > 0)
     expect(popups()).toEqual(["Something went wrong: RuntimeError: boom"])
-    expect(dialog(h)).toContain("● Private") // nothing was changed, and nothing says it was
+    expect(dialog(h)).toContain("▐ ● Private ▌ ○ Unlisted ○ Public") // nothing was changed, and nothing says it was
     toasts.clear()
     await clickText(h, "▐ Close ▌", 3)
     h.bridge.emit("posting", { ...posting(h), rows: posting(h).rows.map((r) => (r.key === "youtube" ? { ...r, actions: ["post_api"] } : r)) })
@@ -657,14 +656,14 @@ describe("when something goes wrong, or the window is small", () => {
     await openApi(h)
     for (const text of ["YOUTUBE API", "○ YouTube API: not connected in this window", "▐ Disconnect ▌", "▐ Close ▌", "▐ Connect ▌"]) expect(frame(h)).toContain(text)
     expect(focused(h)).toBe("Connect")
-    // Tab goes round: the two choices (scrolled into view), then the buttons.
+    // Tab goes round: the two choices, each of their options (scrolled into view), then the buttons.
     const seen: string[] = []
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 9; i++) {
       h.t.mockInput.pressKey("TAB")
       await h.settle(200)
       seen.push(focused(h))
     }
-    expect(seen.slice(2)).toEqual(["Disconnect", "Close", "Connect"])
+    expect(seen).toEqual(["● Private", "○ Unlisted", "○ Public", "● Not answered", "○ No", "○ Yes", "Disconnect", "Close", "Connect"])
     expect(frame(h)).toContain("▐ Connect ▌")
     h.t.mockInput.pressKey("RETURN")
     await until(h, () => api(h).state === "on")
