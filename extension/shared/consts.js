@@ -18,6 +18,20 @@ export const PLATFORMS = {
 // X's rules name scripting its website and suspend accounts for it, so the press is never offered there.
 export const PRESS_PLATFORMS = ["tiktok", "youtube", "instagram"]
 
+// The hooks of selectors.json that a newer list from the app never replaces: every element a platform's script
+// clicks, and its final button. They change only with the extension itself (worker/selectors.js says why).
+export const PACKED_HOOKS = {
+  tiktok: ["post_button"],
+  youtube: ["next_button", "done_button"],
+  instagram: ["create", "create_post", "reels_ok", "next", "share"],
+  x: ["post_button"],
+}
+
+// Where the upload page shows which account it is on, so the extension can compare it with the one ReelForge
+// has (the platforms with an "account" hook in selectors.json). On the others nothing is compared, and the
+// person is told to look at the tab.
+export const ACCOUNT_SHOWN = ["instagram", "x"]
+
 const ORDER = ["queued", "claimed", "opening", "uploading", "filling", "ready", "posting", "posted"]
 const FINAL = ["posted", "failed", "cancelled", "expired", "unknown"]
 

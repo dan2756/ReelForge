@@ -292,9 +292,29 @@
 
   // ---- doing -----------------------------------------------------------------------------------------------
 
-  rf.click = el => el.click()
+  // True for the platform's own final button (Post, Publish, Share), and for anything around or inside it.
+  // The rules are written in each platform's script, not in selectors.json: the hook for the final button, a
+  // fixed selector where the sources give one, and the words the button carries.
+  rf.isFinal = el => {
+    const flow = rf.flows[rf.job.platform]
+    const button = rf.probe(flow.final)
+    if (button && (button === el || button.contains(el) || el.contains(button))) return true
+    if (flow.last.css && (el.closest(flow.last.css) || el.querySelector(flow.last.css))) return true
+    return names(el).some(name => flow.last.names.includes(name))
+  }
 
-  // The one press of the platform's final button (run.js, with the person's yes and ReelForge's grant).
+  // A click on the way to the final screen (Next, Create, OK). It is never a click on the final button,
+  // whatever a hook found: a list of hooks that pointed "Next" at Publish would otherwise publish with nobody
+  // having asked for it. The one place the final button is pressed is rf.pressFinal, which run.js calls only
+  // with the person's switch, their yes and ReelForge's grant.
+  rf.click = el => {
+    if (rf.isFinal(el)) {
+      throw new Stop("hook_not_found", `${rf.job.name} has changed its page: a step on the way led to its ${rf.flows[rf.job.platform].button} button, which ReelForge did not press. You can finish by hand in this tab.`,
+        { detail: "a step's hook found the final button" })
+    }
+    el.click()
+  }
+
   rf.pressFinal = el => el.click()
 
   rf.readText = el => (/^(textarea|input)$/.test(el.localName) ? el.value : el.innerText)
