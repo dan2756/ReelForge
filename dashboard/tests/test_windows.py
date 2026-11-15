@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import contextlib
 import io
+import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -19,6 +21,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import httpx
+
+from dashboard import __main__ as launcher
 from dashboard import config, db, demo, notify, sync
 from dashboard.__main__ import refresh as job_refresh
 from dashboard.config import PLATFORM_KEYS
@@ -94,7 +99,7 @@ class StoreTest(unittest.TestCase):
         self.addCleanup(setattr, db, "_path", db._path)
         self.dir = Path(tmp.name)
         db.init(self.dir / "stats.db")
-        for state in (sync._attempted, sync.last_errors):
+        for state in (sync._attempted, sync.last_errors, sync.last_warnings):
             state.clear()
             self.addCleanup(state.clear)
         self.addCleanup(setattr, sync, "_stale", None)
@@ -208,6 +213,68 @@ class RefreshTest(StoreTest):
         sync.adopt(sync.shared())
         self.assertNotIn("tiktok", sync.last_errors)  # the good read cleared it for everyone
 
+    def test_errors_are_sentences_and_their_own_words_are_kept_for_the_log(self):
+        class Odd(Fake):
+            def fetch(self):
+                raise KeyError("createTime")  # a page that changed under ReelForge
+
+        ps = {"tiktok": Fake("tiktok", "TikTok", error="TikTok didn't load @me's profile"),
+              "youtube": Unreachable("youtube", "YouTube"), "x": Odd("x", "X")}
+        result = sync.refresh(ps, self.cfg)
+        again = "ReelForge tries again at the next refresh."
+        self.assertEqual(result.errors, [
+            "TikTok: TikTok didn't load @me's profile",
+            f"YouTube couldn't be reached (is this computer online?). {again}",
+            f"X wasn't read: its page wasn't what ReelForge expected. {again}"])
+        self.assertEqual(result.failed, {"TikTok": "said", "YouTube": "offline", "X": "odd"})
+        self.assertEqual(result.details, ["TikTok: PlatformError: TikTok didn't load @me's profile",
+                                          "YouTube: ConnectError: [Errno -2] Name or service not known",
+                                          "X: KeyError: 'createTime'"])
+        self.assertEqual(sync.last_errors["x"][1], result.errors[2])
+        # Summed up for one pop-up: who wasn't read, and where each one's reason is.
+        self.assertEqual(sync.sum_up(result), f"TikTok, YouTube and X weren't read this time. {again} Each one's "
+                                              "panel on the Accounts tab says why.")
+        self.assertEqual(sync.sum_up(sync.Result()), "")
+        self.assertEqual(sync.sum_up(sync.Result(errors=result.errors[:1], failed={"TikTok": "said"})),
+                         result.errors[0])
+        matching = f"New posts couldn't be matched to your videos this time. {again}"
+        with mock.patch.object(sync.analytics, "auto_link", side_effect=sqlite3.OperationalError("locked")):
+            ps = {"tiktok": Fake("tiktok", "TikTok"), "youtube": Unreachable("youtube", "YouTube")}
+            result = sync.refresh(ps, self.cfg, True, True)
+        self.assertEqual(result.errors[1], matching)
+        self.assertEqual(sync.sum_up(result), f"{result.errors[0]} {matching}")
+        self.assertEqual(result.details[1], "matching posts to videos: OperationalError: locked")
+        # A refresh that broke off whole (the store was busy) is a sentence too.
+        broke = sync.broke(sqlite3.OperationalError("database is locked"))
+        self.assertEqual(broke.errors, ["The stats database was busy, so this refresh didn't finish. ReelForge tries "
+                                        "again at the next one."])
+        self.assertEqual(broke.details, ["the refresh stopped: OperationalError: database is locked"])
+
+    def test_a_platform_that_needs_a_log_in_keeps_its_own_sentence_in_the_pop_up(self):
+        """X logged ReelForge's browser out and YouTube couldn't be reached: the one pop-up used to say "X and
+        YouTube weren't read this time. ReelForge tries again at the next refresh." X isn't read again until you
+        log in."""
+        class LoggedOut(Fake):
+            def fetch(self):
+                raise PlatformError(f"{self.name} logged ReelForge's browser out. Log in again on the Accounts tab.",
+                                    needs_login=True)
+
+        again = "ReelForge tries again at the next refresh."
+        log_in = "X: X logged ReelForge's browser out. Log in again on the Accounts tab."
+        ps = {"x": LoggedOut("x", "X"), "youtube": Unreachable("youtube", "YouTube")}
+        result = sync.refresh(ps, self.cfg)
+        self.assertEqual(result.failed, {"X": "login", "YouTube": "offline"})
+        self.assertEqual(sync.sum_up(result),
+                         f"{log_in} YouTube couldn't be reached (is this computer online?). {again}")
+        ps = {"tiktok": Fake("tiktok", "TikTok", error="TikTok didn't load @me's profile"), **ps}
+        result = sync.refresh(ps, self.cfg, True, True)
+        self.assertEqual(sync.sum_up(result), f"{log_in} TikTok and YouTube weren't read this time. {again} Each "
+                                              "one's panel on the Accounts tab says why.")
+        ps = {"instagram": LoggedOut("instagram", "Instagram"), "x": ps["x"]}  # both: each says so, nothing else
+        self.assertEqual(sync.sum_up(sync.refresh(ps, self.cfg, True, True)),
+                         "Instagram: Instagram logged ReelForge's browser out. Log in again on the Accounts tab. "
+                         + log_in)
+
     def test_the_change_count_goes_up_once_per_read_that_saved_something(self):
         ps = self.fakes()
         self.assertEqual(db.changes(), 0)
@@ -255,6 +322,81 @@ class RefreshTest(StoreTest):
         self.assertIn("refreshed: nothing due (another ReelForge window had just read them)", log)
 
 
+class Unreachable(Fake):
+    """A platform whose site can't be reached: the read fails the way httpx says it with no internet."""
+
+    def fetch(self):
+        self.reads += 1
+        raise httpx.ConnectError("[Errno -2] Name or service not known")
+
+
+class HourlyJobTest(StoreTest):
+    """reelforge refresh, the hourly job (dashboard/__main__.py, started by dashboard/refresh.pyw): it has no window
+    and, under the scheduler, no terminal, so data/refresh.log says how each run went, one that couldn't start
+    included."""
+
+    def job(self, platforms: dict) -> tuple[int, str, str]:
+        """One run: its exit code, what it printed, and the log afterwards."""
+        out = io.StringIO()
+        with mock.patch.object(config, "DATA_DIR", self.dir), contextlib.redirect_stdout(out):
+            code = job_refresh(platforms, self.cfg, demo=True)
+        return code, out.getvalue(), (self.dir / "refresh.log").read_text("utf-8")
+
+    def test_the_terminal_gets_a_sentence_and_the_log_the_errors_own_words(self):
+        code, said, log = self.job({"tiktok": Fake("tiktok", "TikTok"), "youtube": Unreachable("youtube", "YouTube")})
+        self.assertEqual(code, 1)
+        self.assertIn("refreshed: TikTok\n", said)
+        self.assertIn("error: YouTube couldn't be reached (is this computer online?). ReelForge tries again at the "
+                      "next refresh.", said)
+        self.assertNotIn("ConnectError", said)
+        self.assertIn("  refreshed: TikTok\n", log)
+        self.assertIn("  error: YouTube: ConnectError: [Errno -2] Name or service not known\n", log)
+        self.assertEqual(db.get_meta("job")["problems"], 1)
+
+    def test_a_run_that_goes_wrong_after_its_read_has_still_logged_it(self):
+        with mock.patch.object(db, "compact", side_effect=sqlite3.OperationalError("database is locked")):
+            code, _, log = self.job(self.fakes())
+        self.assertEqual(code, 0)  # the read itself went fine
+        self.assertIn("  refreshed: TikTok, YouTube\n", log)
+        self.assertIn("  error: tidying the stats database: OperationalError: database is locked\n", log)
+        job = db.get_meta("job")
+        self.assertEqual((job["read"], job["problems"]), ("TikTok, YouTube", 1))
+
+    def test_a_run_that_cant_start_says_why_in_the_log(self):
+        settings = self.dir / "config.toml"
+        settings.write_text('videos_dir = "C:\\Users\\me\\Videos"\n', "utf-8")  # a Windows path, as people type it
+        out = io.StringIO()
+        with mock.patch.object(config, "DATA_DIR", self.dir), mock.patch.object(config, "CONFIG_PATH", settings), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(launcher.main(["refresh"]), 2)
+            settings.write_text('videos_dir = "videos"\n', "utf-8")
+            with mock.patch.object(launcher, "refresh_profiles",
+                                   side_effect=sqlite3.DatabaseError("file is not a database")):
+                self.assertEqual(launcher.main(["refresh"]), 1)
+        log = (self.dir / "refresh.log").read_text("utf-8").splitlines()
+        self.assertIn("  error: the stats read didn't run: config.toml has a typo", log[0])
+        self.assertTrue(log[1].endswith("  error: the stats read didn't run: DatabaseError: file is not a database"))
+
+    def test_refresh_pyw_logs_what_stops_it_outside_the_read(self):
+        """The script the scheduler starts, in a stand-in ReelForge folder whose dashboard fails in turn the ways a
+        real one can: an error nothing caught, the kit's packages missing (exit code 3), and not at all."""
+        kit = self.dir / "kit" / "dashboard"
+        kit.mkdir(parents=True)
+        shutil.copy(ROOT / "dashboard" / "refresh.pyw", kit / "refresh.pyw")
+        (kit / "__init__.py").write_text("", "utf-8")
+        log = kit / "data" / "refresh.log"
+        for stand_in, logged in (("def main(argv):\n    raise RuntimeError('the disk went away')\n",
+                                  "error: the stats read didn't run: RuntimeError: the disk went away"),
+                                 ("import sys\nsys.exit(3)\n", "error: the stats read didn't run: ReelForge's Python "
+                                                               "packages are missing: run setup again"),
+                                 ("def main(argv):\n    return 1\n", None)):
+            (kit / "__main__.py").write_text(stand_in, "utf-8")
+            before = log.read_text("utf-8").splitlines() if log.exists() else []
+            subprocess.run([sys.executable, str(kit / "refresh.pyw")], cwd=self.dir, check=True, timeout=60)
+            added = (log.read_text("utf-8").splitlines() if log.exists() else [])[len(before):]
+            self.assertEqual([line.split("  ", 1)[1] for line in added], [logged] if logged else [])
+
+
 class WindowsTest(unittest.TestCase):
     """A window on demo data (its Python side), with another ReelForge reading and saving next to it."""
 
@@ -267,7 +409,7 @@ class WindowsTest(unittest.TestCase):
                     "completed_dir": str(root / "none"), **{key: {} for key in PLATFORM_KEYS}}
         db.init(root / "demo.db")
         demo.seed()
-        for state in (sync._attempted, sync.last_errors):
+        for state in (sync._attempted, sync.last_errors, sync.last_warnings):
             state.clear()
             self.addCleanup(state.clear)
         self.addCleanup(setattr, sync, "_stale", None)
@@ -326,6 +468,51 @@ class WindowsTest(unittest.TestCase):
         self.assertIn("● IG: last refresh failed", plain(foot["short"]))
         self.assertNotIn("TikTok", plain(foot["line"]))
         self.assertIn(["tab", "accounts"], [seg[2] for seg in foot["line"] if len(seg) > 2])
+
+    def test_a_failed_refresh_is_one_pop_up_in_plain_words(self):
+        """No internet: every platform fails the same way. That's one pop-up saying so, not one per platform with the
+        error's own words, which go to data/refresh.log; each panel on Accounts says why in a sentence."""
+        every = {"tiktok": Unreachable("tiktok", "TikTok"), "youtube": Unreachable("youtube", "YouTube"),
+                 "x": Unreachable("x", "X")}
+        w = Window(self.cfg, every)
+        self.addCleanup(w.close)
+        w.pump(0.5)
+        w.forget()
+        w.call("refresh", True)
+        self.assertTrue(w.until(lambda: w.toasts()))
+        w.pump(0.3)
+        offline = ("TikTok, YouTube and X couldn't be reached (is this computer online?). ReelForge tries again at the "
+                   "next refresh.")
+        self.assertEqual([(t["title"], t["body"]) for t in w.sent("toast")], [("Refresh failed", offline)])
+        panel = next(p for p in w.view("accounts")["panels"] if p["key"] == "youtube")
+        self.assertIn("last read failed: YouTube couldn't be reached (is this computer online?). ReelForge tries "
+                      "again at the next refresh.", plain(panel["body"]))
+        self.assertNotIn("ConnectError", str(w.loop.events))
+        log = sync.log_path().read_text("utf-8")
+        for name in ("TikTok", "YouTube", "X"):
+            self.assertIn(f"  error: {name}: ConnectError: [Errno -2] Name or service not known\n", log)
+
+    def test_an_automatic_refresh_doesnt_repeat_what_it_said(self):
+        w = self.window()
+        w.forget()
+
+        def after(result: sync.Result, manual: bool) -> list[str]:
+            w.forget()
+            w.svc.after_refresh(result, manual, None)
+            w.pump(0.05)
+            return [t["body"] for t in w.sent("toast") if t["title"] == "Refresh failed"]
+
+        slow = "YouTube took too long to answer. ReelForge tries again at the next refresh."
+        failed = sync.Result(errors=[slow], failed={"YouTube": "slow"})
+        self.assertEqual(after(failed, False), [slow])
+        self.assertEqual(after(sync.Result(), False), [])  # nothing was due
+        self.assertEqual(after(failed, False), [])  # the same again, half an hour later: said already
+        self.assertEqual(after(failed, True), [slow])  # you pressed Refresh: it always answers
+        offline = sync.Result(errors=[slow.replace("took too long to answer", "couldn't be reached")],
+                              failed={"YouTube": "offline"})
+        self.assertEqual(len(after(offline, False)), 1)  # something else went wrong: said
+        w.svc.after_refresh(sync.Result(done=["YouTube"]), False, None)  # read again
+        self.assertEqual(after(failed, False), [slow])  # and when it next fails, that's news
 
     def test_the_bell_follows_the_other_windows(self):
         w = self.window()

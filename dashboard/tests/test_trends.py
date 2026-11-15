@@ -190,6 +190,30 @@ class RegressionTest(unittest.TestCase):
         self.assertTrue(all(g is None for g in b.gains[-5:]))
 
 
+    def test_thinned_history_isnt_a_gap_on_daily_bars(self):
+        """Readings over 26 days old are thinned to the last of each day (db.compact): a day apart, give or take the
+        seconds a read takes, so about half of them are a little over one daily bucket apart."""
+        now = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)
+        fr = trends.frame_span(timedelta(days=60), timedelta(days=1), now)
+        day = timedelta(days=1, seconds=40)  # each read came 40 seconds later in the day than the one before
+        pts = [(now - timedelta(days=58) + day * i, 100.0 * i) for i in range(30)]
+        last = pts[-1][0]
+        b = trends.bucket(pts, fr)
+        inside = [i for i in range(fr.n) if pts[0][0] <= fr.starts[i] and fr.ends[i] <= last]
+        self.assertGreater(len(inside), 25)
+        self.assertEqual([b.gaps[i] for i in inside], [False] * len(inside))
+        self.assertTrue(all(abs(b.gains[i] - 100) < 1 for i in inside))
+        # Days ReelForge wasn't reading are still a gap there: four days between two readings.
+        missing = pts[:10] + [(t + timedelta(days=3), v) for t, v in pts[10:]]
+        b = trends.bucket(missing, fr)
+        hole = fr.index(missing[9][0] + timedelta(days=2))
+        self.assertTrue(b.gaps[hole])
+        self.assertIsNone(b.gains[hole])
+        # Recent readings a day apart are a gap on hourly bars, as before.
+        recent = [(now - timedelta(hours=30), 0.0), (now - timedelta(hours=5), 100.0)]
+        self.assertTrue(any(trends.bucket(recent, trends.frame("24h", now)).gaps))
+
+
 class FitTest(unittest.TestCase):
     """Charts too narrow for a bar per bucket combine buckets, so every bar keeps a column and a gap."""
 

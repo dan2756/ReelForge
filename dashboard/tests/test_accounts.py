@@ -7,14 +7,16 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+import threading
 import unittest
+from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
-from dashboard import config, db, demo, notify, sync
+from dashboard import analytics, config, db, demo, notify, sync
 from dashboard import service as service_module
 from dashboard.config import PLATFORM_KEYS
-from dashboard.platforms import Instagram, TikTok, X, YouTube, browser, build, connected
+from dashboard.platforms import Account, Instagram, Post, TikTok, X, YouTube, browser, build, connected
 from dashboard.service import NOTHING_CONNECTED, Dashboard
 from dashboard.tests.window import Window, plain
 
@@ -68,7 +70,7 @@ class WindowTest(unittest.TestCase):
                     "completed_dir": str(root / "none"), **{key: {} for key in PLATFORM_KEYS}}
         db.init(root / "demo.db")
         demo.seed()
-        for state in (sync._attempted, sync.last_errors):
+        for state in (sync._attempted, sync.last_errors, sync.last_warnings):
             state.clear()
             self.addCleanup(state.clear)
 
@@ -178,6 +180,25 @@ class WindowTest(unittest.TestCase):
         w.call("toggle_line", "tiktok")
         self.assertTrue(w.view("trends")["metrics"]["views"]["variants"])
 
+    def test_the_followers_chart_doesnt_hatch_thinned_history(self):
+        """Old readings are kept one a day (db.compact), a day and a few seconds apart: those days were measured, so
+        the chart doesn't draw them as estimates. Days nothing was read on still are."""
+        now = analytics.now()
+        with db.connect() as c:
+            c.execute("DELETE FROM account_stats WHERE platform = 'tiktok'")
+            t, followers = now - timedelta(days=45), 1000
+            while t < now - timedelta(days=27):
+                c.execute("INSERT INTO account_stats (platform, ts, handle, followers) VALUES ('tiktok', ?, '@me', ?)",
+                          (t.isoformat(timespec="seconds"), followers))
+                t, followers = t + timedelta(days=1, seconds=40), followers + 5
+            c.execute("INSERT INTO account_stats (platform, ts, handle, followers) VALUES ('tiktok', ?, '@me', 2000)",
+                      (now.isoformat(timespec="seconds"),))
+        w = self.open(demo.platforms())
+        guessed = self.panel(w, "tiktok")["chart"]["guessed"]
+        self.assertEqual(len(guessed), 30)
+        self.assertFalse(guessed[0])  # 29 days ago: read the day before and the day after
+        self.assertTrue(guessed[15])  # nothing was read for four weeks after that
+
     def test_sign_up_guides(self):
         w = self.open(demo.platforms(unconnected=("x",)))
         guide = w.call("signup_guide", "x")
@@ -257,6 +278,197 @@ class WindowTest(unittest.TestCase):
             self.assertNotIn("tiktok", self.buttons(w))
             self.assertEqual(self.panel(w, "tiktok")["state"], "off")
             self.assertIn("tiktok", db.stored_platforms())
+
+    def test_a_read_that_got_only_part_shows_on_its_panel(self):
+        w = self.open(demo.platforms())
+        said = "Only TikTok's totals were read this time, not its videos. TikTok's video list took too long to answer."
+        sync.last_warnings["tiktok"] = (db.now_iso(), said)
+        w.call("update_accounts")
+        self.assertIn(said, plain(self.panel(w, "tiktok")["body"]))
+        self.assertNotIn("Only TikTok's", plain(self.panel(w, "youtube")["body"]))
+        self.assertNotIn("TikTok", plain(w.view("header")["line"]))  # it was read: not a failed refresh at the foot
+        sync.last_errors["tiktok"] = (db.now_iso(), "TikTok couldn't be reached (is this computer online?).")
+        w.call("update_accounts")  # a read that failed outright says only that
+        body = plain(self.panel(w, "tiktok")["body"])
+        self.assertIn("last read failed: TikTok couldn't be reached", body)
+        self.assertNotIn(said, body)
+
+    def test_stats_from_before_a_handle_changed_stay_until_you_say(self):
+        """TikTok was read as one account and is now read as another: the panel says so, the dialog says what's
+        there from before, and only its Forget removes it, after a copy of the stats database."""
+        self.forget("youtube", "instagram", "x")
+        every = self.real_platforms({"tiktok": "@mine"})
+        old = db.latest_accounts()["tiktok"]["handle"]  # the handle the stats so far were read under
+        before = len([p for p in db.all_posts() if p["platform"] == "tiktok"])
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()):
+            w = self.open(every, demo_mode=False)
+            self.assertEqual(self.panel(w, "tiktok")["old_handles"], [])
+            self.assertIsNone(w.call("handle_change_info", "tiktok"))
+            mine = Post("mine1", "My own video", None, db.now_iso(), views=500, likes=5, comments=0, shares=0)
+            soon = (analytics.now() + timedelta(minutes=1)).isoformat(timespec="seconds")  # the next read
+            self.assertEqual(db.record_snapshot("tiktok", Account("@mine", 120), [mine], soon), old)
+            w.call("reload")
+            panel = self.panel(w, "tiktok")
+            self.assertEqual(panel["old_handles"], [old])
+            self.assertIn(f"Also holds stats read as {old}, from before the handle changed.", plain(panel["body"]))
+            info = w.call("handle_change_info", "tiktok")
+            self.assertEqual((info["key"], info["title"], info["forget"], info["keep"]),
+                             ("tiktok", f"TIKTOK WAS {old.upper()} BEFORE", f"Forget {old}'s stats", "Keep them"))
+            note = plain(info["note"])
+            self.assertIn(f"{before} videos that @mine doesn't have", note)
+            self.assertIn("after ReelForge saves a copy of the whole stats database beside it", note)
+            self.assertEqual(len(db.all_posts()), before + 1)  # asking forgets nothing
+            w.forget()
+            w.call("forget_handle_stats", "tiktok")
+            self.assertTrue(w.until(lambda: any(t["title"] == f"Forgot {old}'s TikTok stats" for t in w.sent("toast"))))
+            self.assertEqual([p["post_id"] for p in db.all_posts()], ["mine1"])
+            copies = [f.name for f in self.root.iterdir() if f.name.endswith("-handle")]
+            self.assertEqual(len(copies), 2)  # one from before the read went in, one from before this
+            self.assertTrue(any(name in " ".join(w.toasts()) for name in copies))  # ... which the pop-up names
+            panel = self.panel(w, "tiktok")
+            self.assertEqual(panel["old_handles"], [])
+            self.assertNotIn("Also holds stats", plain(panel["body"]))
+            self.assertEqual([p["post_id"] for p in w.svc.posts], ["mine1"])
+
+    def test_the_dialog_still_asks_once_the_old_readings_are_thinned_away(self):
+        """The old handle's readings of the account go with time (db.compact keeps one a day, then one a week). Its
+        videos don't, so the panel and the dialog are still there, and say what is."""
+        self.forget("youtube", "instagram", "x")
+        every = self.real_platforms({"tiktok": "@mine"})
+        old = db.latest_accounts()["tiktok"]["handle"]
+        before = len(db.all_posts())
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()):
+            w = self.open(every, demo_mode=False)
+            soon = (analytics.now() + timedelta(minutes=1)).isoformat(timespec="seconds")
+            db.record_snapshot("tiktok", Account("@mine", 120), [Post("mine1", "My own video", None, db.now_iso())],
+                               soon)
+            with db.connect() as c:
+                c.execute("DELETE FROM account_stats WHERE platform = 'tiktok' AND handle = ?", (old,))
+            w.call("reload")
+            self.assertEqual(self.panel(w, "tiktok")["old_handles"], [old])
+            note = plain(w.call("handle_change_info", "tiktok")["note"])
+            self.assertIn(f"What it read then is still here: {before} videos that @mine doesn't have.", note)
+            w.forget()
+            w.call("forget_handle_stats", "tiktok")
+            self.assertTrue(w.until(lambda: any(t.startswith(f"Removed: {before} videos. The copy from before is")
+                                                for t in w.toasts())), w.toasts())
+            self.assertEqual([p["post_id"] for p in db.all_posts()], ["mine1"])
+            self.assertEqual(self.panel(w, "tiktok")["old_handles"], [])
+
+    def test_keeping_the_stats_from_before_a_handle_changed(self):
+        self.forget("youtube", "instagram", "x")
+        every = self.real_platforms({"tiktok": "@mine"})
+        before = len(db.all_posts())
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()):
+            w = self.open(every, demo_mode=False)
+            soon = (analytics.now() + timedelta(minutes=1)).isoformat(timespec="seconds")
+            db.record_snapshot("tiktok", Account("@mine", 120), [Post("mine1", "My own video", None, db.now_iso())],
+                               soon)
+            w.call("reload")
+            self.assertTrue(self.panel(w, "tiktok")["old_handles"])
+            w.call("keep_handle_stats", "tiktok")
+            self.assertEqual(self.panel(w, "tiktok")["old_handles"], [])
+            self.assertIn("Kept: they count as @mine's from now on.", w.toasts())
+            self.assertEqual(len(db.all_posts()), before + 1)
+
+    def test_log_out_forgets_the_log_in_and_keeps_the_platform(self):
+        """Instagram and X: ReelForge's own browser can be logged out (it never could be). The platform stays, with
+        its stats; Disconnect says the log-in stays unless it's asked to take it along."""
+        every = self.real_platforms({"tiktok": "@mine", "instagram": "@mine"})
+        self.logged_in["instagram"] = True
+        done = []
+
+        def logout(key: str) -> None:
+            done.append(key)
+            self.logged_in[key] = False
+
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()), \
+                mock.patch.object(browser, "logout", logout):
+            w = self.open(every, demo_mode=False)
+            self.assertTrue(self.panel(w, "instagram")["logs_out"])
+            self.assertFalse(self.panel(w, "tiktok")["logs_out"])  # nothing to log out of
+            self.assertIsNone(w.call("logout_info", "tiktok"))
+            info = w.call("logout_info", "instagram")
+            self.assertEqual((info["key"], info["title"], info["button"]),
+                             ("instagram", "LOG OUT OF INSTAGRAM?", "Log out"))
+            note = plain(info["note"])
+            self.assertIn("ReelForge's own browser is logged out of Instagram", note)
+            self.assertIn("Your normal browser and your phone stay logged in.", note)
+            self.assertIn("Instagram stays connected, with everything read so far.", note)
+            w.call("logout", "instagram")
+            self.assertTrue(w.until(lambda: any(t["title"] == "Instagram logged out" for t in w.sent("toast"))))
+            self.assertEqual(done, ["instagram"])
+            self.assertIn("instagram", w.svc.platforms)  # the stats it has keep it on
+            panel = self.panel(w, "instagram")
+            self.assertFalse(panel["logs_out"])
+            self.assertIn("log in again to keep tracking", plain(panel["status"]))
+            # Disconnect: the log-in stays, and the dialog says so; asked to, it logs out as well.
+            self.logged_in["instagram"] = True
+            w.call("follow_connections")
+            info = w.call("disconnect_info", "instagram")
+            self.assertTrue(info["logged_in"])
+            self.assertIn("ReelForge's own browser stays logged in to Instagram", plain(info["note"]))
+            self.assertFalse(w.call("disconnect_info", "tiktok")["logged_in"])
+            w.call("disconnect", "instagram", True)
+            self.assertTrue(w.until(lambda: done == ["instagram", "instagram"] and "instagram" not in w.svc.platforms))
+            self.assertEqual(config.load_config()["instagram"]["handle"], "")
+        # A log-out the browser couldn't do says so in a sentence, and the log-in stays.
+        every = self.real_platforms({"x": "@mine"})
+        self.logged_in["x"] = True
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()), \
+                mock.patch.object(browser, "logout", side_effect=OSError("profile is locked")):
+            w = self.open(every, demo_mode=False)
+            w.call("logout", "x")
+            self.assertTrue(w.until(lambda: any(t["title"] == "X still logged in" for t in w.sent("toast"))))
+            self.assertIn("ReelForge's browser window didn't work for the log-out. Try again in a moment; "
+                          "data/refresh.log says what stopped it.", w.toasts())
+            self.assertNotIn("profile is locked", str(w.loop.events))
+        self.assertIn("error: the log-out in ReelForge's browser: OSError: profile is locked",
+                      sync.log_path().read_text("utf-8"))
+
+    def test_a_log_in_the_browser_couldnt_do_is_said_plainly(self):
+        """It says so in a sentence, and the error's own words go to the log. And a second press of Log in while the
+        window is open doesn't queue another window behind it."""
+        every = self.real_platforms({"instagram": "@mine"})
+        started, finish = threading.Event(), threading.Event()
+
+        def login(key: str) -> None:
+            started.set()
+            finish.wait(10)
+            raise RuntimeError("Target crashed\nCall log:\n  - navigating to login")
+
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()), \
+                mock.patch.object(browser, "login", login):
+            w = self.open(every, demo_mode=False)
+            w.call("login", "instagram")
+            self.assertTrue(started.wait(10))
+            w.forget()
+            w.call("login", "instagram")  # pressed again, the window still open
+            self.assertEqual(w.toasts(), ["ReelForge's browser window is already open for Instagram. Finish there, or "
+                                          "close that window first."])
+            finish.set()
+            self.assertTrue(w.until(lambda: any(t["title"] == "Instagram not logged in" for t in w.sent("toast"))))
+            self.assertIn("ReelForge's browser window didn't work for the log-in. Try again in a moment; "
+                          "data/refresh.log says what stopped it.", w.toasts())
+            self.assertEqual(w.svc.logging_in, "")
+            self.assertNotIn("Target crashed", str(w.loop.events))
+        self.assertIn("error: the log-in in ReelForge's browser: RuntimeError: Target crashed | Call log: | "
+                      "- navigating to login", sync.log_path().read_text("utf-8"))
+
+    def test_a_handle_that_cant_be_saved_says_so_plainly(self):
+        every = self.real_platforms({"tiktok": "@mine"})
+        denied = PermissionError(13, "Permission denied", "config.toml")
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()):
+            w = self.open(every, demo_mode=False)
+            w.forget()
+            with mock.patch.object(config, "save_handle", side_effect=denied):
+                self.assertIsNone(w.call("connect", "youtube", "@new"))
+                self.assertTrue(w.until(lambda: w.toasts()))
+            self.assertEqual(w.toasts(), ["YouTube's handle wasn't saved, and nothing changed. config.toml couldn't "
+                                          "be written."])
+            self.assertNotIn("youtube", w.svc.platforms)
+        self.assertIn("error: saving YouTube's handle: PermissionError: [Errno 13] Permission denied: 'config.toml'",
+                      sync.log_path().read_text("utf-8"))
 
     def test_another_window_connecting_shows_here(self):
         """Every ReelForge window follows a platform connected (or disconnected) in another one."""

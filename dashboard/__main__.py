@@ -50,10 +50,19 @@ def main(argv: list[str] | None = None) -> int:
         cfg = config.load_config()
     except config.ConfigError as e:
         print(f"ReelForge can't start: {e}")
+        if word == "refresh":
+            job_stopped(str(e))
         return 2
 
     if word == "refresh":  # only the connected platforms are read (Platform.connected)
-        return refresh_profiles(args.demo)
+        try:
+            return refresh_profiles(args.demo)
+        except Exception as e:
+            from .platforms import detail
+
+            print(f"reelforge refresh stopped: {detail(e)}")
+            job_stopped(detail(e))
+            return 1
 
     # The window is the OpenTUI app in ui/; it runs dashboard/service.py through studio/bridge.py, on the profile asked
     # for (reelforge -p NAME), else the one you had open last.
@@ -84,7 +93,7 @@ def load_platforms(demo: bool = False, only_demos: bool = False, unconnected=())
         path = config.DATA_DIR / "demo.db"
         for suffix in ("", "-wal", "-shm"):
             path.with_name(path.name + suffix).unlink(missing_ok=True)
-        db.init(path)
+        db.init(path, demo=True)
         if only_demos:
             from . import videos
 
@@ -147,33 +156,47 @@ def refresh_profiles(demo: bool = False) -> int:
     return code
 
 
+def job_stopped(why: str) -> None:
+    """The hourly job couldn't do its read at all (a config.toml it can't read, a stats database that won't open): a
+    line in data/refresh.log says why. It has no window to say so in and, started by the scheduler, no terminal."""
+    try:
+        sync.log([f"error: the stats read didn't run: {why}"], config.DATA_DIR / "refresh.log")
+    except Exception:
+        pass  # not even the data folder: nothing more to do here
+
+
 def refresh(platforms: dict, cfg: dict, demo: bool = False) -> int:
     """One stats read, then new videos and (every few hours) the update check, all saved for the next look. Open
     ReelForge windows show what it read."""
     result = sync.refresh(platforms, cfg, manual=True, who="job")
-    db.compact()
-    if not demo:
-        for extra in (lambda: notify.check_videos(cfg), _check_updates):
-            try:
-                extra()
-            except Exception:
-                pass  # extras: a hiccup here never fails the read
     if result.busy:  # another ReelForge has been reading all along: it saves what it reads
         done = f"nothing ({result.waited or sync.WHO['window']} was still reading after {sync.WAIT // 60} minutes)"
     elif result.done:
         done = ", ".join(result.done)
     else:
         done = "nothing due" + (f" ({result.waited} had just read them)" if result.waited else "")
-    lines = [f"refreshed: {done}", *("error: " + e for e in result.errors)]
-    print("\n".join(lines))
-    # A scheduled refresh has no window to read, so it also keeps a short log.
-    log = config.DATA_DIR / "refresh.log"
+    print("\n".join([f"refreshed: {done}", *("error: " + e for e in result.errors)]))
+    # A scheduled refresh has no window to read, so it also keeps a short log, with each error's own words. It's
+    # written before the tidying, so a run that goes wrong after its read still says what it read.
+    sync.log([f"refreshed: {done}", *("error: " + d for d in result.details)])
+    problems = len(result.details)
     try:
-        old = log.read_text("utf-8").splitlines()[-200:] if log.exists() else []
-        stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        log.write_text("\n".join([*old, *(f"{stamp}  {line}" for line in lines)]) + "\n", "utf-8")
-    except OSError:
-        pass
+        db.compact()
+    except Exception as e:
+        from .platforms import detail
+
+        sync.log([f"error: tidying the stats database: {detail(e)}"])
+        problems += 1
+    try:
+        db.set_meta("job", {"at": db.now_iso(), "read": done, "problems": problems})
+    except Exception:
+        pass  # the store is busy: the log has it
+    if not demo:
+        for extra in (lambda: notify.check_videos(cfg), _check_updates):
+            try:
+                extra()
+            except Exception:
+                pass  # extras: a hiccup here never fails the read
     return 1 if result.errors or result.busy else 0
 
 

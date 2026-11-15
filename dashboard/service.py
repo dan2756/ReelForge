@@ -22,7 +22,7 @@ from studio.bridge import Loop, Service, rpc
 
 from . import analytics, badges, besttime, config, db, desktop, notify, sync, tabs, trends, videos
 from .analytics import fmt_age, fmt_ago, fmt_clock, fmt_delta, fmt_hours, fmt_num, fmt_pct
-from .platforms import Platform, PlatformError, PublishItem, browser, connected
+from .platforms import Platform, PlatformError, PublishItem, browser, connected, detail
 from .settings_tab import SettingsTab
 from .stats_tab import StatsTab
 from .platforms.base import Account, Post
@@ -742,15 +742,23 @@ class Dashboard(StatsTab, SettingsTab, Service):
                 # Crunch the numbers here, off the loop's thread, so the window never stalls.
                 data = self.load_data() if result.done else None
             except Exception as e:  # the database was busy, say: report it, keep running
-                result, data = sync.Result(errors=[f"{type(e).__name__}: {e}"]), None
+                result, data = sync.broke(e), None
+            sync.log(["error: " + d for d in result.details])  # what went wrong in its own words: the window sums up
             if result.busy and worker.is_cancelled:
                 return  # it stopped waiting: a newer refresh took over, or ReelForge is closing
             self.loop.call_soon(self.after_refresh, result, manual, data)
 
+    refresh_said = ""  # what the last refresh's pop-up said went wrong ("" when nothing did)
+
     def after_refresh(self, result: sync.Result, manual: bool, data: dict | None) -> None:
         self.set_status("")
-        for e in result.errors:
-            self.notify(e, title="Refresh failed", severity="error", timeout=10)
+        # One pop-up for the whole refresh, in plain words (each platform's own reason is on its Accounts panel, the
+        # errors themselves in data/refresh.log). An automatic refresh doesn't say the same thing every half hour.
+        said = sync.sum_up(result)
+        if said and (manual or said != self.refresh_said):
+            self.notify(said, title="Refresh failed", severity="error", timeout=10)
+        if result.done or result.errors:  # (a refresh with nothing due says nothing either way)
+            self.refresh_said = said
         if result.done:
             self.show_new_data(result.changes, data)
         else:
@@ -1829,14 +1837,24 @@ class Dashboard(StatsTab, SettingsTab, Service):
                     if rows:
                         since = db.parse(rows[0]["ts"]).astimezone().strftime("%b %d").replace(" 0", " ")
                         body.append(f" · history since {since}", MUTED)
+            warning = sync.last_warnings.get(p.key)
             if error:
                 body.append(f"\n\nlast read failed: {error[1]}" if state == "login" else
                             f"\nlast read failed: {error[1]}", BAD)
+            elif warning:  # read, but not all of it (TikTok's totals without its videos)
+                body.append(f"\n{warning[1]}", TYPICAL)
+            # Stats from before the handle changed to what looks like another account: the window asks which to
+            # keep (handle_change_info), and this line is there until you've said.
+            was = [] if self.demo else self._safe(lambda: db.old_handles(p.key), [])
+            if was:
+                body.append(f"\nAlso holds stats read as {sync.listed(was)}, from before the handle changed.", TYPICAL)
             note = "Demo data, made up on this PC." if self.demo and not pretend else p.setup_note
             panel.update(
                 status=status.json(), status_short=short.json() if short else None, body=body.json(),
                 note=Text(note, MUTED).json(), logs_in=logs_in,
                 login_label="Log in again" if source == "browser" else "Log in",
+                # Log out (logout_info, logout): only while ReelForge's browser is logged in to it.
+                logs_out=p.browser_stats and p.logged_in and not self.demo, old_handles=was,
                 profile_disabled=not p.public_handle and not pretend, refresh_disabled=self.demo and not pretend,
                 show_log=not p.has_stats, chart=self.followers_chart(p, rows) if state == "on" else None)
             panels.append(panel)
@@ -1868,8 +1886,7 @@ class Dashboard(StatsTab, SettingsTab, Service):
         ys = [v for v in b.totals if v is not None]
         if not ys:
             return None
-        longest = max(trends.GAP, fr.step)
-        holes = [(t0, t1) for (t0, _), (t1, _) in zip(pts, pts[1:]) if t1 - t0 > longest]
+        holes = [(t0, t1) for (t0, _), (t1, _) in zip(pts, pts[1:]) if t1 - t0 > trends.spaced(t0, fr.step, fr.now)]
         guessed = [any(t0 < a + (z - a) / 2 < t1 for t0, t1 in holes) for a, z in zip(fr.starts, fr.ends)]
         est: list[list[int]] = []
         for i, guess in enumerate(guessed):
@@ -1888,11 +1905,17 @@ class Dashboard(StatsTab, SettingsTab, Service):
                 "series": [{"key": p.key, "name": p.name, "color": p.color, "xs": xs, "ys": ys, "style": "area",
                             "est": est}]}
 
+    logging_in = ""  # the platform whose log-in window is open ("" for none): ReelForge's browser has one window
+
     @rpc
     def login(self, key: str) -> None:
         p = self.every[key]
         if not p.public_handle:
             self.notify(f"Connect {p.name} with your @handle first.", severity="warning")
+            return
+        if self.logging_in:  # a second press would only queue another window behind the open one
+            self.notify(f"ReelForge's browser window is already open for {self.every[self.logging_in].name}. Finish "
+                        "there, or close that window first.", severity="warning", timeout=8)
             return
         self.loop.run_worker(self._browser_login, p, group="login")
 
@@ -1915,17 +1938,67 @@ class Dashboard(StatsTab, SettingsTab, Service):
     def _browser_login(self, p: Platform) -> None:
         window = f"{'An' if browser.NAME == 'Edge' else 'A'} {browser.NAME} window"
         self.loop.call_soon(self.notify, f"{window} is opening (if ReelForge is reading stats right now, as soon as "
-                                         f"that's done). Log in to {p.name} there; ReelForge carries on by itself "
-                                         "once you're in.", f"Log in to {p.name}", "information", 15)
+                                         f"that's done). Log in to {p.name} there, or do what it asks; ReelForge "
+                                         "carries on by itself once you're in, or when you close the window.",
+                            f"Log in to {p.name}", "information", 15)
+        self.logging_in = p.key
         try:
             browser.login(p.key)
         except Exception as e:
-            msg = str(e) if isinstance(e, PlatformError) else f"{type(e).__name__}: {e}"
-            self.loop.call_soon(self.notify, msg, f"{p.name} not logged in", "error", 15)
+            self.loop.call_soon(self.notify, self._browser_trouble(e, "log-in"), f"{p.name} not logged in", "error", 15)
             return
+        finally:
+            self.logging_in = ""
         self.loop.call_soon(self.notify, f"Logged in to {p.name}. Reading your stats now…")
         self.loop.call_soon(self.follow_connections)  # connected now, if it was waiting for this
         self.loop.call_soon(self.run_refresh, True, True, p.key)
+
+    @staticmethod
+    def _browser_trouble(error: Exception, what: str) -> str:
+        """Why a log-in or log-out in ReelForge's browser didn't happen, in a sentence: the browser module's own
+        when it gave one, else that it didn't work, with the error's own words kept in data/refresh.log."""
+        if isinstance(error, PlatformError):
+            return str(error)
+        sync.log([f"error: the {what} in ReelForge's browser: {detail(error)}"])
+        return (f"ReelForge's browser window didn't work for the {what}. Try again in a moment; data/refresh.log "
+                "says what stopped it.")
+
+    @rpc
+    def logout_info(self, key: str) -> dict | None:
+        """Are you sure? What the Log out dialog says: what goes (the log-in ReelForge's own browser keeps on this
+        computer) and what stays (the platform, connected, with its stats)."""
+        p = self.every.get(key)
+        if p is None or not p.browser_stats or not p.logged_in:
+            return None
+        if self.demo:
+            self.notify("Demo mode: nothing is changed.", timeout=4)
+            return None
+        note = Text()
+        note.append(f"{p.name}  ", f"bold {p.color}")
+        note.append(p.handle, "bold")
+        note.append(f"\n\nReelForge's own browser is logged out of {p.name}: the log-in it keeps on this computer, in "
+                    "ReelForge's data folder, is removed. Your normal browser and your phone stay logged in.", MUTED)
+        note.append(f"\n\n{p.name} stays connected, with everything read so far. ReelForge can't read it again until "
+                    "you press Log in on this tab.", MUTED)
+        return {"key": key, "title": f"LOG OUT OF {p.name.upper()}?", "note": note.json(), "button": "Log out"}
+
+    @rpc
+    def logout(self, key: str) -> None:
+        """Log ReelForge's browser out of a platform (Instagram, X): see logout_info."""
+        p = self.every.get(key)
+        if p is not None and p.browser_stats and not self.demo:
+            self.loop.run_worker(self._browser_logout, p, group="login")
+
+    def _browser_logout(self, p: Platform) -> None:
+        try:
+            browser.logout(p.key)
+        except Exception as e:
+            self.loop.call_soon(self.notify, self._browser_trouble(e, "log-out"), f"{p.name} still logged in",
+                                "error", 15)
+            return
+        self.loop.call_soon(self.notify, f"ReelForge's browser is logged out of {p.name}. Its stats so far stay; "
+                                         "press Log in to read it again.", f"{p.name} logged out", "information", 10)
+        self.loop.call_soon(self.follow_connections)
 
     # --- connecting and disconnecting -------------------------------------------------------
 
@@ -1989,15 +2062,95 @@ class Dashboard(StatsTab, SettingsTab, Service):
         note.append(f"\n\nReelForge stops reading {p.name}, and its cards, charts, columns, filters, upload buttons and "
                     "notifications leave every tab. Everything it has read so far stays saved, so connecting it again "
                     "(on this tab, with the same @handle) brings it all back.", MUTED)
-        if p.browser_stats:
-            note.append(f"\nYou stay logged in to {p.name} in ReelForge's browser.", MUTED)
-        return {"key": key, "title": f"DISCONNECT {p.name.upper()}?", "note": note.json()}
+        logged_in = p.browser_stats and p.logged_in
+        if logged_in:
+            note.append(f"\nReelForge's own browser stays logged in to {p.name}: that log-in is kept on this computer, "
+                        "in ReelForge's data folder, until you log out of it.", MUTED)
+        # logged_in: the window can offer to log out too (disconnect with logout=True).
+        return {"key": key, "title": f"DISCONNECT {p.name.upper()}?", "note": note.json(), "logged_in": logged_in}
 
     @rpc
-    def disconnect(self, key: str) -> None:
+    def disconnect(self, key: str, logout: bool = False) -> None:
+        """Disconnect a platform. logout: also log ReelForge's browser out of it (see logout_info)."""
         p = self.every.get(key)
         if p is not None and p.public_handle and not self.demo:
+            if logout and p.browser_stats and p.logged_in:
+                self.loop.run_worker(self._browser_logout, p, group="login")
             self.loop.run_worker(self._save_account, p, "", group="accounts")
+
+    # --- a handle that changed to another account -----------------------------------------------
+
+    @rpc
+    def handle_change_info(self, key: str) -> dict | None:
+        """The dialog for a platform whose stats were read under another @handle before (a panel with old_handles):
+        what's there from before, and the two ways out of it, forget_handle_stats and keep_handle_stats."""
+        p = self.every.get(key)
+        found = None if p is None or self.demo else self._safe(lambda: db.handle_change(key), None)
+        if not found:
+            return None
+        old, now = sync.listed(found["old"]), found["now"]
+        first, last = (db.parse(found[k]).astimezone() for k in ("first", "last"))
+        days = f"on {first:%b} {first.day}" if first.date() == last.date() else \
+            f"from {first:%b} {first.day} to {last:%b} {last.day}"
+        readings, videos = len(found["rows"]), len(found["posts"])
+        # (Old readings of the account are thinned out with time, down to none: the videos stay until you say.)
+        here = f"{readings} reading{'' if readings == 1 else 's'} of the account and " if readings else ""
+        note = Text()
+        note.append(f"{p.name}  ", f"bold {p.color}")
+        note.append(now, "bold")
+        note.append(f"\n\nBefore, ReelForge read {p.name} as {old} ({days}). What it read then is still here: "
+                    f"{here}{videos} video{'' if videos == 1 else 's'} "
+                    f"that {now} doesn't have. They're on the Videos tab and count in {p.name}'s totals and "
+                    "charts.", MUTED)
+        note.append(f"\n\nIf {old} was a typo or someone else's account, forget its stats: ", MUTED)
+        note.append("those readings and videos are removed", "bold")
+        note.append(f", after ReelForge saves a copy of the whole stats database beside it. {now}'s own stats, and "
+                    "every other platform's, stay as they are.", MUTED)
+        note.append(f"\n\nIf you renamed the account, keep them: they're {now}'s too.", MUTED)
+        return {"key": key, "title": f"{p.name.upper()} WAS {old.upper()} BEFORE", "note": note.json(),
+                "forget": f"Forget {old}'s stats", "keep": "Keep them"}
+
+    @rpc
+    def forget_handle_stats(self, key: str) -> None:
+        """The dialog's Forget: db.forget_old_handle, which saves a copy of the store first. Only ever from this
+        button: nothing is forgotten by itself."""
+        p = self.every.get(key)
+        if p is not None and not self.demo:
+            self.loop.run_worker(self._forget_handle, p, group="accounts")
+
+    def _forget_handle(self, p: Platform) -> None:
+        try:
+            gone = db.forget_old_handle(p.key)
+        except Exception as e:
+            sync.log([f"error: forgetting {p.name}'s old stats: {detail(e)}"])
+            self.loop.call_soon(self.notify, "Nothing was forgotten: the stats database was busy or couldn't be "
+                                             "copied first. Try again in a moment.", "", "error", 12)
+            return
+        self.loop.call_soon(self.handle_forgotten, p, gone)
+
+    def handle_forgotten(self, p: Platform, gone: dict | None) -> None:
+        if gone:
+            went = [f"{n} {what}{'' if n == 1 else 's'}" for n, what in ((gone["posts"], "video"),
+                                                                         (gone["readings"], "reading")) if n]
+            self.notify(f"Removed: {sync.listed(went or ['nothing'])}. The copy from before is "
+                        f"{gone['backup'].name}, in {gone['backup'].parent}.",
+                        title=f"Forgot {sync.listed(gone['old'])}'s {p.name} stats", timeout=15)
+            self.tell_others()
+        self.reload()
+        self.update_notes()
+
+    @rpc
+    @db_safe
+    def keep_handle_stats(self, key: str) -> None:
+        """The dialog's Keep: the stats from before the handle changed are this account's too."""
+        p = self.every.get(key)
+        if p is None or self.demo:
+            return
+        if db.keep_old_handle(key):
+            notify.release(f"handle:{key}:{p.public_handle.lower()}")  # settled: a later change is news again
+            self.notify(f"Kept: they count as {p.handle}'s from now on.", title=f"{p.name}'s earlier stats", timeout=8)
+            self.tell_others()
+        self.update_accounts()
 
     def _save_account(self, p: Platform, handle: str) -> None:
         """Connect a platform with its handle, or disconnect it (""): your settings change (config.save_handle), then
@@ -2005,7 +2158,10 @@ class Dashboard(StatsTab, SettingsTab, Service):
         try:
             config.save_handle(p.key, handle)
         except Exception as e:
-            self.loop.call_soon(self.notify, f"Couldn't save {p.name}'s handle: {e}", "", "error", 12)
+            why = str(e) if isinstance(e, config.ConfigError) else "config.toml couldn't be written."
+            sync.log([f"error: saving {p.name}'s handle: {detail(e)}"])
+            self.loop.call_soon(self.notify, f"{p.name}'s handle wasn't saved, and nothing changed. {why}", "",
+                                "error", 12)
             return
         self.loop.call_soon(self.account_saved, p, handle)
 
