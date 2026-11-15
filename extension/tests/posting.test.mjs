@@ -1,5 +1,5 @@
 // A batch from ReelForge's post page, through to "ready" on each platform, and the person pressing Post.
-import { equal, ok, until, note, quickSelectors } from "./harness.mjs"
+import { equal, ok, until, sleep, note, noteOpenToPage, quickSelectors } from "./harness.mjs"
 
 const HOST = { tiktok: "www.tiktok.com", youtube: "studio.youtube.com", instagram: "www.instagram.com", x: "x.com" }
 const FINAL = {
@@ -7,11 +7,12 @@ const FINAL = {
   instagram: "[role=dialog] [role=button]:text-is('Share')",
 }
 
-// Starts one platform's job from the post page and waits until the app has it as ready.
-export async function toReady({ app, browser }, platform, video, options = {}) {
+// Starts one platform's job from the post page and waits until the app has it as ready. `yes`: the person
+// presses the post page's "Yes, press Post for me" button.
+export async function toReady({ app, browser }, platform, video, { yes = false, ...options } = {}) {
   if (!app.paired.length) equal(await browser.pair(app), "ok", "pairing")
   const made = app.createBatch(video, [platform], options)
-  const post = await browser.post(app, made.batch)
+  const post = await browser.post(app, made.batch, { yes })
   equal(await post.evaluate(() => document.documentElement.dataset.rfBatchState), "started", "post page state")
   const tab = await browser.tab(HOST[platform])
   const job = made.jobs[0]
@@ -57,6 +58,7 @@ export const tests = {
     await until("posted", () => job.state === "posted")
     equal(await tab.evaluate(() => fixture.text), job.text.caption, "what TikTok posted")
     equal((await note(tab)).line, "Posted", "the note after posting")
+    equal(await noteOpenToPage(tab), false, "the page's own scripts can read the note")
     // An assisted post that went through is what unlocks "press Post for me" for the platform.
     ok(t.app.pressUnlocked.has("tiktok"), "press unlocked after an assisted post")
   },
@@ -70,7 +72,9 @@ export const tests = {
     for (const step of ["fill_title", "fill_caption", "audience", "visibility"]) ok(job.events.some(event => event.step === step), `step ${step} was reported`)
     ok(job.events.some(event => event.detail === "Visibility: Private, as saved on your channel"), "the saved visibility was reported, not changed")
     // The video's id is on the page before it is published, and is passed on as soon as the page is ready.
-    equal([job.post_id, job.url], ["FIXTUREvid01", "https://youtu.be/FIXTUREvid01"], "post id and url")
+    equal([job.post_id, job.url], ["FIXTUREvid1", "https://youtu.be/FIXTUREvid1"], "post id and url")
+    // YouTube's page does not show which account it is on, so nothing was compared: the note says to look.
+    ok((await note(tab)).more.includes("ReelForge has @fixtureuser for this channel, and could not check the account here"), `the note about the account (${(await note(tab)).more})`)
     await button.click()
     await until("posted", () => job.state === "posted")
     equal(await tab.evaluate(() => fixture.text), job.text, "what YouTube saved")
@@ -99,7 +103,7 @@ export const tests = {
     const { job, tab } = await toReady({ app, browser }, "youtube", video())
     await tab.locator("#done-button").click()
     await until(() => `posted (it is ${job.state})`, () => job.state === "posted")
-    equal(job.post_id, "FIXTUREvid01", "the video id found before the dialog closed")
+    equal(job.post_id, "FIXTUREvid1", "the video id found before the dialog closed")
   },
 
   async "YouTube: publishing while the video is still going up is seen as posted, not as a page gone wrong"({ app, site, browser, video }) {
@@ -113,7 +117,7 @@ export const tests = {
     const tab = await browser.tab("studio.youtube.com")
     await tab.locator("#done-button").click()
     await until(() => `posted (it is ${job.state}: ${job.error_message})`, () => job.state === "posted" || job.state === "failed")
-    equal([job.state, job.post_id], ["posted", "FIXTUREvid01"], "state and video id")
+    equal([job.state, job.post_id], ["posted", "FIXTUREvid1"], "state and video id")
   },
 
   async "X: the composer closing after the person's press counts as posted, without a made-up id"({ app, site, browser, video }) {
@@ -122,6 +126,82 @@ export const tests = {
     await tab.locator("[data-testid=tweetButton]").click()
     await until(() => `posted (it is ${job.state})`, () => job.state === "posted")
     equal([job.post_id, job.url], [null, null], "post id and url")
+  },
+
+  async "TikTok: going to the list of posts without pressing Post is never called posted"(t) {
+    // The page that lists a channel's posts is TikTok's sign that a post went out. The person can also just go
+    // there. Without a press nobody can say, and "posted" would block the video and unlock Press Post for me.
+    const { job, tab } = await toReady(t, "tiktok", t.video())
+    await tab.goto("https://www.tiktok.com/tiktokstudio/content")
+    await until(() => `the job to end (it is ${job.state})`, () => job.state !== "ready", 30000)
+    equal([job.state, job.error_code], ["unknown", "unknown_outcome"], "state and code")
+    ok(job.error_message.includes("did not see Post being pressed"), `message (${job.error_message})`)
+    equal([await tab.evaluate(() => window.fixture?.clicks ?? 0), t.app.pressUnlocked.has("tiktok")], [0, false], "presses, and whether the press was unlocked")
+  },
+
+  async "TikTok: the same page reached without a load, and without a press, is not posted either"(t) {
+    const { job, tab } = await toReady(t, "tiktok", t.video())
+    await tab.evaluate(() => {
+      history.pushState({}, "", "/tiktokstudio/content")
+      document.getElementById("app").innerHTML = "<h1>Posts</h1><p>No posts yet</p>"
+    })
+    await until(() => `the job to end (it is ${job.state})`, () => job.state !== "ready", 30000)
+    equal([job.state, job.error_code, t.app.pressUnlocked.has("tiktok")], ["unknown", "unknown_outcome", false], "state, code and the press lock")
+    equal((await note(tab)).line, "Not sure it posted", "the note")
+  },
+
+  async "YouTube: Ctrl+Enter in a text box and a closed dialog are not a post"(t) {
+    const { job, tab } = await toReady(t, "youtube", t.video())
+    await tab.evaluate(() => document.querySelector("ytcp-app").shadowRoot.querySelector("#description-textarea #textbox").focus())
+    await tab.keyboard.press("Control+Enter")
+    await sleep(400)
+    equal((await t.browser.jobRecord(job.id)).pressedByPerson === true, false, "a press was noticed")
+    await tab.evaluate(() => document.querySelector("ytcp-app").shadowRoot.querySelector("ytcp-uploads-dialog").remove())
+    await sleep(3500)
+    equal([job.state, await tab.evaluate(() => fixture.clicks), t.app.pressUnlocked.has("youtube")], ["ready", 0, false], "state, presses of Save and the press lock")
+  },
+
+  async "X: Ctrl+Enter with the post ready is the person's press"(t) {
+    t.site.mode.x = "mute"
+    const { job, tab } = await toReady(t, "x", t.video())
+    await tab.locator("[role=dialog] [data-testid=tweetTextarea_0]").focus()
+    await tab.keyboard.press("Control+Enter")
+    await until("the press to be noticed", async () => (await t.browser.jobRecord(job.id)).pressedByPerson === true)
+  },
+
+  async "YouTube: a Next that has become Publish is not clicked, with nobody having asked for a press"(t) {
+    t.site.mode.youtube = "next_publishes"
+    const { job, tab } = await toReady(t, "youtube", t.video())
+    equal([job.state, job.error_code, job.detail], ["failed", "hook_not_found", "a step's hook found the final button"], "state, code and detail")
+    ok(job.error_message.includes("led to its Publish or Save button, which ReelForge did not press"), `message (${job.error_message})`)
+    equal(await tab.evaluate(() => [fixture.clicks, fixture.posted]), [0, false], "presses the page saw")
+    equal(t.app.requests("POST", /\/press$/).length, 0, "press requests")
+  },
+
+  async "Instagram: a Next that has become Share is not clicked"(t) {
+    t.site.mode.instagram = "next_shares"
+    const { job, tab } = await toReady(t, "instagram", t.video())
+    equal([job.state, job.error_code], ["failed", "hook_not_found"], "state and code")
+    equal(await tab.evaluate(() => [fixture.clicks, fixture.posted]), [0, false], "presses the page saw")
+  },
+
+  async "a newer list from the app cannot point a step at the final button"({ app, browser, video }) {
+    // The app's selectors.json is newer and says Next is also found at #done-button, and that the last screen
+    // is never recognised: with that, the fourth press of "Next" would be a press of Save. The hooks whose
+    // element gets clicked are always the packed ones, so the script runs out of Next buttons and stops.
+    const list = quickSelectors()
+    list.platforms.youtube.hooks.next_button.strategies.push({ id: "evil", css: "#done-button" })
+    list.platforms.youtube.hooks.visibility.strategies = [{ id: "never", css: "no-such-element" }]
+    app.selectors = list
+    equal(await browser.pair(app), "ok", "pairing")
+    const made = app.createBatch(video(), ["youtube"])
+    await browser.post(app, made.batch)
+    const job = made.jobs[0]
+    await until(() => `the job to stop at the last screen (it is ${job.state}: ${job.step})`, () => ["ready", "failed", "posted", "unknown"].includes(job.state), 60000)
+    const tab = await browser.tab("studio.youtube.com")
+    equal(await tab.evaluate(() => [fixture.clicks, fixture.posted]), [0, false], "presses the page saw")
+    equal([job.state, job.detail], ["ready", "Next did not reach the last screen"], "where it stopped")
+    equal((await browser.storage("local")).selectors?.version, list.version, "the newer list was taken for everything else")
   },
 
   async "an empty text empties the box instead of leaving what the page put there"({ app, browser }) {

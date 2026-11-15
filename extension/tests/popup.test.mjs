@@ -88,6 +88,10 @@ export const tests = {
     const tiktok = popup.locator("[data-confirm=tiktok]")
     equal(await tiktok.locator("pre").allTextContents(), [film.text.tiktok.caption], "TikTok's exact text")
     ok((await text(tiktok)).includes("as @fixtureuser") && (await text(tiktok)).includes("You press Post yourself."), `TikTok's account and who presses (${await text(tiktok)})`)
+    // "as @handle" is checked only where the upload page shows its account (Instagram and X). On TikTok and
+    // YouTube the popup says so, instead of letting the line read as a promise.
+    ok((await text(popup.locator("[data-unchecked=tiktok]"))).includes("TikTok's upload page does not show its account, so ReelForge cannot check it."), "TikTok's account is not checked, and the popup says so")
+    equal(await popup.locator("[data-confirm=x] [data-unchecked]").count(), 0, "no such line where the account is checked")
     equal(await popup.locator("[data-confirm=x] pre").allTextContents(), [film.text.x.text], "X's exact text")
     await popup.getByRole("button", { name: "Open the upload pages" }).click()
     await until("the jobs to show", async () => (await popup.locator("[data-job]").count()) === 2)
@@ -127,6 +131,25 @@ export const tests = {
     await sleep(300)
     equal(browser.context.pages().filter(page => page.url().startsWith("https://")).length, 0, "upload tabs")
     equal(await popup.locator("[data-job]").count(), 0, "jobs in the popup")
+    // Called off as they were: no browser ever took them, so ReelForge keeps no trace of a post that was begun.
+    equal([app.requests("POST", /^\/v1\/jobs\/.*\/claim$/).length, [...app.jobs.values()].map(job => job.claimed_by)], [0, [null, null, null, null]], "claims, and who held the jobs")
+  },
+
+  async "posts that waited too long on the confirm screen are not called started"({ app, browser, video }) {
+    const film = video()
+    equal(await browser.pair(app), "ok", "pairing")
+    const popup = await browser.popup()
+    await popup.locator(`[data-video="${film.id}"]`).getByRole("button", { name: "Post" }).click()
+    await popup.getByRole("button", { name: "Continue" }).click()
+    await until("the confirm screen", () => popup.locator("[data-screen=confirm]").count())
+    for (const job of app.jobs.values()) job.created -= 11 * 60 * 1000  // the popup sat open over a coffee
+    await popup.getByRole("button", { name: /Open the upload/ }).click()
+    await until("the popup to say so", async () => (await text(popup.locator("main"))).includes("waited more than ten minutes"))
+    ok((await text(popup.locator("[data-flash]"))).includes("Nothing was opened. Press Post again."), "what it says")
+    equal(await popup.locator("[data-screen=confirm]").count(), 0, "the confirm screen")
+    equal(browser.context.pages().filter(page => page.url().startsWith("https://")).length, 0, "upload tabs")
+    equal([...app.jobs.values()].map(job => job.state), ["expired", "expired", "expired", "expired"], "the jobs")
+    equal((await browser.storage()).pending, undefined, "nothing is kept to come back to")
   },
 
   async "a popup closed on the confirm screen comes back to it"({ app, browser, video }) {
@@ -167,7 +190,7 @@ export const tests = {
     for (const platform of ["tiktok", "youtube", "instagram", "x"]) app.posted.set(`${film.id}:${platform}`, `https://example.com/${platform}`)
     await popup.getByRole("button", { name: "Continue" }).click()
     await until("the blocked platforms", async () => (await popup.locator("[data-blocked]").count()) === 4)
-    ok((await text(popup.locator("[data-blocked=tiktok]"))).includes("TikTok: Already posted on TikTok."), "why TikTok is blocked")
+    ok((await text(popup.locator("[data-blocked=tiktok]"))).includes("TikTok: Already posted: ReelForge found this video's post there."), "why TikTok is blocked")
     ok((await text(popup.locator("[data-screen=confirm]"))).includes("Nothing new to post."), "nothing to post")
     equal(await popup.getByRole("button", { name: /Open the upload/ }).count(), 0, "buttons that would open a page")
     equal((await browser.storage()).pending, undefined, "nothing is kept to come back to")

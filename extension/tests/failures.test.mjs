@@ -102,6 +102,14 @@ export const tests = {
     equal(t.browser.tabs("reelforge.tools").length + t.browser.tabs("www.tiktok.com").length, 0, "tabs opened")
   },
 
+  async "nor is any other address on the platform's own site: the extension opens its one upload page"(t) {
+    t.app.uploadPages.tiktok = "https://www.tiktok.com/login?redirect_url=https%3A%2F%2Fexample.com"
+    const job = await stopped(t, "tiktok")
+    equal([job.error_code, job.step], ["extension_outdated", "open_tab"], "error code and step")
+    await sleep(300)
+    equal(t.browser.tabs("www.tiktok.com").length, 0, "tabs opened")
+  },
+
   async "a different account is a question, not a stop: continue from the popup"(t) {
     t.site.mode.x = "wrong_account"
     equal(await t.browser.pair(t.app), "ok", "pairing")

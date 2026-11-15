@@ -41,6 +41,46 @@ export const tests = {
     equal(t.app.createBatch(t.app.videos[0], ["tiktok"]).blocked.length, 1, "a second job is blocked")
   },
 
+  async "a tab closed after the person's press, before the page was called ready: unknown, not \"nothing was posted\""(t) {
+    // YouTube takes a press of Save while the video is still going up. This copy shows nothing after it.
+    t.site.mode.youtube = "slow_mute"
+    const job = await start(t, "youtube", t.video())
+    await until(() => `the last screen (it is ${job.state} ${job.step})`, () => job.step === "upload" && job.events.some(event => event.step === "visibility"), 30000)
+    const tab = await t.browser.tab("studio.youtube.com")
+    await tab.locator("#done-button").click()
+    await until("the press to be noticed", async () => (await t.browser.jobRecord(job.id)).pressedByPerson === true)
+    equal(job.state, "filling", "what the app knows when the tab goes")
+    await tab.close()
+    await until(() => `the job to end (it is ${job.state})`, () => job.state !== "filling")
+    equal([job.state, job.error_code], ["unknown", "unknown_outcome"], "state and code")
+    equal((await t.browser.jobRecord(job.id)).outbox, [], "nothing is left unsaid")
+  },
+
+  async "a report ReelForge could not take just then (its database was busy) is sent again"(t) {
+    const { job, tab } = await toReady(t, "tiktok", t.video())
+    t.app.busy = 2
+    await tab.locator(FINAL).click()
+    await until("the first try", () => t.app.requests("POST", /\/event$/).some(entry => entry.status === 503))
+    equal([job.state, (await t.browser.jobRecord(job.id)).outbox.map(report => report.state)], ["ready", ["posted"]], "the app's state, and what the browser still has to say")
+    // Nobody asks twice: the popup opening (or the half-minute check) brings it.
+    const popup = await t.browser.popup()
+    await until(() => `the app to hear (it is ${job.state})`, () => job.state === "posted", 45000)
+    await until("the browser's outbox to be empty", async () => (await t.browser.jobRecord(job.id)).outbox.length === 0)
+    await popup.close()
+  },
+
+  async "a job's tab taken to another site this extension can see gets no script and none of the job's text"(t) {
+    t.site.mode.tiktok = "slow"
+    const job = await start(t, "tiktok", t.video())
+    await until("the caption step", () => job.state === "filling")
+    const tab = await t.browser.tab("www.tiktok.com")
+    await tab.goto("https://x.com/compose/post")
+    await until(() => `the job to stop (it is ${job.state})`, () => job.state === "failed", 20000)
+    equal([job.error_code, job.error_message], ["tab_closed", "This tab left TikTok before the post was ready. Nothing was posted."], "error")
+    await sleep(700)
+    equal([await note(tab), await tab.evaluate(() => [fixture.files.length, document.querySelector("[data-reelforge-note]") !== null])], [null, [0, false]], "what the extension put on X's page")
+  },
+
   async "a full page load to the platform's posted page is seen as posted"(t) {
     t.site.mode.tiktok = "fullnav"
     const { job, tab } = await toReady(t, "tiktok", t.video())
@@ -65,7 +105,7 @@ export const tests = {
     t.app.pressUnlocked.add("tiktok")
     const settings = await t.browser.popup()
     await settings.evaluate(() => chrome.storage.local.set({ press: { tiktok: true } }))
-    const { job, tab } = await toReady(t, "tiktok", t.video(), { press: true })
+    const { job, tab } = await toReady(t, "tiktok", t.video(), { press: true, yes: true })
     await until("the press", () => job.state === "posting")
     await until("the page's question", async () => (await note(tab)).line === "TikTok is asking you something")
     await tab.reload()
