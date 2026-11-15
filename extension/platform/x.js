@@ -5,8 +5,11 @@
   rf.flows.x = {
     final: "post_button",
     button: "Post",
+    last: { css: "[data-testid='tweetButton'], [data-testid='tweetButtonInline']", names: ["post"] },
     fields: ["text"],
     neverPress: true,
+    // Ctrl+Enter posts on X, so it counts as the person's press there.
+    keys: true,
 
     async fill(job) {
       await rf.step("uploading", "upload", "X is taking the video in")

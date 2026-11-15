@@ -294,6 +294,9 @@
 
   rf.click = el => el.click()
 
+  // The one press of the platform's final button (run.js, with the person's yes and ReelForge's grant).
+  rf.pressFinal = el => el.click()
+
   rf.readText = el => (/^(textarea|input)$/.test(el.localName) ? el.value : el.innerText)
 
   const sameText = (a, b) => clean(a) === clean(b)

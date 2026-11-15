@@ -5,6 +5,7 @@
   rf.flows.instagram = {
     final: "share",
     button: "Share",
+    last: { css: "", names: ["share"] },
     fields: ["caption"],
 
     async open() {

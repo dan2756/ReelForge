@@ -57,21 +57,27 @@ void (async () => {
     await rf.report({ state: "posted", step: "confirm", ...postInfo() })
   }
 
-  // The person's own press of the final button (or Ctrl+Enter, which posts on X). If the tab then closes before
-  // the platform confirms, ReelForge knows to ask "did it post?" instead of saying nothing happened.
-  let pressed = false
+  // The person's own press of the final button (or Ctrl+Enter where that posts, which is X). If the tab then
+  // closes before the platform confirms, ReelForge knows to ask "did it post?" instead of saying nothing
+  // happened. Either way the button has to be there and switched on: a key pressed in a text box on a page
+  // that cannot post yet is not a press.
+  let pressed = job.state === "posting" || job.pressedByPerson
   function noticePress() {
     const tell = () => {
       if (pressed) return
       pressed = true
       rf.send({ t: "job.event", pressedByPerson: true })
     }
-    const onClick = event => {
+    const live = () => {
       const button = rf.probe(flow.final)
-      if (event.isTrusted && button && rf.enabled(button) && event.composedPath().includes(button)) tell()
+      return button && rf.enabled(button) ? button : null
+    }
+    const onClick = event => {
+      const button = live()
+      if (event.isTrusted && button && event.composedPath().includes(button)) tell()
     }
     const onKey = event => {
-      if (event.isTrusted && event.key === "Enter" && (event.ctrlKey || event.metaKey)) tell()
+      if (flow.keys && event.isTrusted && event.key === "Enter" && (event.ctrlKey || event.metaKey) && live()) tell()
     }
     for (const doc of new Set([document, rf.probe(flow.final)?.ownerDocument || document])) {
       doc.addEventListener("click", onClick, true)
@@ -98,16 +104,26 @@ void (async () => {
   let signBroken = false
   const sent = () => (!signBroken && rf.sign("success")) || formGone()
 
+  // The sign is showing. It means "posted" only when a press was seen first: the page that lists a channel's
+  // posts looks the same to this script whether a post just went out or the person simply went there. Without
+  // a press nobody can say, so it is "not sure": never "posted" (which would also unlock Press Post for me),
+  // and never "nothing was posted" against the platform's own sign.
+  async function signSeen() {
+    if (pressed) return posted()
+    throw new rf.Stop("unknown_outcome", `${P} shows its sign that a post went out, but ReelForge did not see ${flow.button} being pressed. Check your profile before you post again.`, { state: "unknown" })
+  }
+
   async function watch() {
     rf.phase = "watch"
     noticePress()
     // The wait is a little longer than the 45 minutes ReelForge itself waits on a ready post.
     await rf.waitFor(sent, { timeout: 46 * 60 * 1000, pace: 1000 })
-    await posted()
+    await signSeen()
   }
 
-  // Press Post for the person. Asked for once; the app's ledger grants it once. After the click the page has
-  // to react in some way, or the press is reported as rejected and left to the person.
+  // Press Post for the person. Asked for once; the app's ledger grants it once. From the click on, the job
+  // ends as posted (the platform's own sign) or as "not sure", never as failed: a page that shows nothing for
+  // a few seconds may still have taken the click, and a post called failed would be offered again.
   async function press(button, cannot) {
     const stay = async why => {
       rf.say("Check it, then press Post", "ready", `ReelForge did not press for you: ${why}`)
@@ -122,23 +138,32 @@ void (async () => {
     rf.say("Pressing Post for you", "work")
     const before = location.href
     pressed = true
-    rf.click(button)
+    rf.pressFinal(button)
     await rf.report({ step: "press" })
     const asking = () => rf.probe("post_confirm") || rf.sign("challenge")
+    let reacted = true
     try {
       await rf.waitFor(() => rf.sign("success") || asking() || !button.isConnected || !rf.visible(button) || !rf.enabled(button) || location.href !== before,
         { timeout: 8000 })
     } catch (error) {
       if (error.code !== "timeout") throw error
-      throw new rf.Stop("press_rejected", `${P} did not react when ReelForge pressed Post. Check the tab: if it has not posted, press ${flow.button} yourself.`, { step: "press" })
+      // Nothing showed. That is not proof the click was ignored, so nothing is concluded yet and nothing is
+      // pressed again: the person is told to look, and the watch for the platform's sign goes on. If they
+      // press the button themselves now, that sign is how ReelForge hears of it.
+      reacted = false
+      rf.say(`${P} has not reacted`, "warn", `ReelForge pressed ${flow.button} and the page shows nothing yet. Look at this tab: if it has not posted, press ${flow.button} yourself.`)
+      await rf.report({ step: "press", detail: `${P} showed no reaction to the press yet` })
     }
-    await rf.report({ step: "confirm" })
-    if (asking() && !rf.sign("success")) rf.say(`${P} is asking you something`, "warn", "Answer it in this tab. ReelForge will not.")
+    if (reacted) {
+      await rf.report({ step: "confirm" })
+      if (asking() && !rf.sign("success")) rf.say(`${P} is asking you something`, "warn", "Answer it in this tab. ReelForge will not.")
+    }
     try {
-      await rf.waitFor(sent, { timeout: 5 * 60 * 1000, pace: 500 })
+      await rf.waitFor(sent, { timeout: rf.sel.success?.timeout_ms || 5 * 60 * 1000, pace: 500 })
     } catch (error) {
       if (error.code !== "timeout") throw error
-      throw new rf.Stop("unknown_outcome", `Post was pressed on ${P} and no confirmation was seen. Check your profile before you post again.`, { state: "unknown", step: "confirm" })
+      if (reacted) throw new rf.Stop("unknown_outcome", `Post was pressed on ${P} and no confirmation was seen. Check your profile before you post again.`, { state: "unknown", step: "confirm" })
+      throw new rf.Stop("press_rejected", `ReelForge pressed ${flow.button} on ${P} and saw no reaction, and no sign that it posted. Check your profile before you post again.`, { state: "unknown", step: "press" })
     }
     await posted()
     return true
@@ -183,12 +208,16 @@ void (async () => {
     const form = rf.sel.success?.gone_after_press
     if (form && !rf.probe(form)) {
       if (pressed) return posted()
-      throw new rf.Stop("tab_closed", `${P}'s upload form was closed before it was ready, and ReelForge saw no press of ${flow.button}. Nothing should have been posted.`)
+      // The video was on the page and the form is gone. Most likely it was closed, but a press this script
+      // did not see would look the same, so the person is asked instead of being told nothing was posted.
+      throw new rf.Stop("unknown_outcome", `${P}'s upload form closed before ReelForge had finished, and it saw no press of ${flow.button}. Check your profile before you post again.`, { state: "unknown" })
     }
     const button = end.hold ? rf.probe(end.hold) : await rf.find(flow.final)
     if (button) rf.outline(button)
     if (!pressed && rf.sign("success")) signBroken = true
-    const hint = end.more || (flow.button === "Post" ? "Nothing is posted until you do." : `On ${P} the button says ${flow.button}.`)
+    let hint = end.more || (flow.button === "Post" ? "Nothing is posted until you do." : `On ${P} the button says ${flow.button}.`)
+    // Where the page does not show which account it is on, nothing was checked: the person has to look.
+    if (!rf.sel.hooks.account && job.handle) hint += ` ReelForge has ${job.handle} for this channel, and could not check the account here: look at which one this tab is on.`
     rf.say("Check it, then press Post", "ready", hint)
     await rf.report({ state: "ready", step: "ready", detail: end.detail || (rf.fallback ? `${P}'s page has changed a little; still working` : undefined), ...postInfo() })
     rf.guard()
@@ -198,7 +227,8 @@ void (async () => {
   }
 
   // A fresh page for a job whose video was already attached: the form is gone. The only good news left is the
-  // platform's own "posted" page (TikTok goes there after Post). Nothing is ever attached or pressed again.
+  // platform's own "posted" page (TikTok goes there after Post), and only when Post was pressed before the
+  // page changed. Nothing is ever attached or pressed again.
   async function afterReload() {
     rf.phase = "watch"
     clearInterval(alive)
@@ -206,12 +236,12 @@ void (async () => {
       await rf.waitFor(() => rf.sign("success"), { timeout: 20000 })
     } catch (error) {
       if (error.code !== "timeout") throw error
-      if (job.state === "posting" || job.pressedByPerson) {
+      if (pressed) {
         throw new rf.Stop("unknown_outcome", `Post was pressed on ${P} and no confirmation was seen. Check your profile before you post again.`, { state: "unknown" })
       }
       throw new rf.Stop("tab_closed", `${P}'s upload page was left ${job.state === "ready" ? "before Post was pressed" : "before the post was ready"}. Nothing was posted.`)
     }
-    await posted()
+    await signSeen()
   }
 
   try {
@@ -230,7 +260,7 @@ void (async () => {
     const code = known ? error.code : "hook_not_found"
     const message = known ? error.message : `${P}'s page did something ReelForge did not expect. You can finish by hand in this tab.`
     rf.unoutline()
-    rf.say(code === "unknown_outcome" ? "Not sure it posted" : "Stopped", "bad", message)
+    rf.say(error.state === "unknown" ? "Not sure it posted" : "Stopped", "bad", message)
     await rf.report({
       state: error.state || "failed", step: error.step || rf.stepNow, error_code: code, error_message: message,
       detail: known ? error.detail : `script error: ${String(error?.message || error).slice(0, 120)}`,
