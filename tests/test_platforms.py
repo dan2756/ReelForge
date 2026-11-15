@@ -319,7 +319,8 @@ class Browser(unittest.TestCase):
                 mock.patch.object(browsers.subprocess, "run", run):
             self.assertEqual([browsers.major_version(chrome) for _ in range(3)], [153, 153, 153])
             self.assertIn("Chrome/153.0.0.0", browsers.user_agent(chrome))
-        self.assertEqual(asked, [["/opt/somewhere/chrome", "--version"]])
+        # the program as this system writes its path: \opt\somewhere\chrome on Windows
+        self.assertEqual(asked, [[str(chrome.exe), "--version"]])
 
     def test_the_version_follows_the_browser_when_it_is_updated(self):
         """The version was kept for as long as ReelForge ran, so a window left open across a browser update went on
