@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>X (ReelForge test copy)</title>
+<style>body { font: 14px system-ui; margin: 24px } [contenteditable] { border: 1px solid #999; padding: 8px; min-height: 40px } [role=dialog] { border: 2px solid #333; padding: 16px; margin-top: 16px } [aria-disabled="true"] { opacity: .4 }</style>
+</head>
+<body>
+<script>const MODE = "__MODE__"</script>
+<script src="/fixture/common.js"></script>
+<nav><a data-testid="AppTabBar_Profile_Link" role="link" href="/fixtureuser">Profile</a></nav>
+<main>
+  <!-- The home timeline's own composer sits behind the dialog and carries the same test ids. -->
+  <div data-testid="tweetTextarea_0" role="textbox" contenteditable="true"></div>
+  <input data-testid="fileInput" type="file" accept="image/jpeg,image/png,video/mp4,video/quicktime" style="display:none">
+  <button type="button" data-testid="tweetButtonInline" aria-disabled="true"><span>Post</span></button>
+</main>
+<div role="dialog" aria-modal="true" aria-labelledby="modal-header">
+  <h2 id="modal-header" style="display:none">Compose</h2>
+  <div data-testid="tweetTextarea_0" role="textbox" contenteditable="true" aria-label="Post text"></div>
+  <div data-testid="attachments"></div>
+  <input data-testid="fileInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime" style="display:none">
+  <button type="button" data-testid="tweetButton" aria-disabled="true"><span>Post</span></button>
+</div>
+<script>
+// Built from the hooks X uploaders use: [data-testid=tweetTextarea_0], input[data-testid=fileInput],
+// [data-testid=attachments] and [data-testid=tweetButton], which stays aria-disabled until there is text
+// and the media is processed.
+if (MODE === "wrong_account") document.querySelector("nav a").setAttribute("href", "/someoneelse")
+const dialog = document.querySelector("[role=dialog]")
+const box = dialog.querySelector("[data-testid=tweetTextarea_0]")
+const input = dialog.querySelector("input")
+const post = dialog.querySelector("[data-testid=tweetButton]")
+// "no_testid": X renamed its file input. The second way of finding it still works.
+if (MODE === "no_testid") input.removeAttribute("data-testid")
+let text = ""
+let ready = false
+const update = () => post.setAttribute("aria-disabled", String(!(text && ready)))
+
+// This editor keeps its own copy of the text, as Draft.js does, and redraws from it a moment after anything
+// touches the box. Typed input never reaches the copy, so it does not stay; a paste does.
+box.addEventListener("input", () => setTimeout(() => (box.textContent = text), 30))
+box.addEventListener("paste", event => {
+  event.preventDefault()
+  text = event.clipboardData.getData("text/plain")
+  box.textContent = text
+  update()
+})
+
+input.addEventListener("change", async event => {
+  // X throws away text typed before the media was added.
+  text = ""
+  box.textContent = ""
+  const file = await takeFile(input, event)
+  if (!file) return
+  setTimeout(() => dialog.querySelector("[data-testid=attachments]").append(document.createElement("video")), 200)
+  setTimeout(() => {
+    ready = true
+    update()
+  }, MODE === "slow" ? 6000 : 500)
+})
+
+post.addEventListener("click", event => {
+  if (!pressed(event, post)) return
+  fixture.text = text
+  fixture.posted = true
+  dialog.remove()
+  history.pushState({}, "", "/home")
+  document.body.insertAdjacentHTML("beforeend", '<div data-testid="toast" role="alert"><span>Your post was sent.</span> <a href="/fixtureuser/status/1799999999999999999">View</a></div>')
+})
+</script>
+</body>
+</html>
