@@ -860,6 +860,32 @@ class HandleTest(DbTest):
         self.assertEqual(db.forget_old_handle("youtube"), None)
         self.assertEqual(self.stored("youtube"), ["v1"])
 
+    def test_a_wrong_handle_from_before_the_update_is_asked_about_when_its_put_right(self):
+        """@me for a while, then @mrbest by mistake, all read by a ReelForge from before handle changes were written
+        down, and put right now. Everything stored was taken for @mrbest's, so @me's own videos in the new read
+        made it a new name for @mrbest: its videos stayed in the totals and nothing was asked. Only what was last
+        read while the handle was @mrbest is its."""
+        with db.connect() as c:  # as the older ReelForge stored it: readings under two handles, nothing about them
+            c.executemany("INSERT INTO account_stats (platform, ts, handle, followers, views) VALUES (?,?,?,?,?)",
+                          [("tiktok", at(60 * i), "@me" if i < 6 else "@mrbest", 100 + i, 800) for i in range(9)])
+            c.executemany("""INSERT INTO posts (platform, post_id, title, published_at, last_ts, views)
+                             VALUES ('tiktok', ?, ?, ?, ?, ?)""",
+                          [("mine1", "My video", at(-500), at(300), 500),
+                           ("mine_gone", "One I took down", at(-900), at(120), 300),
+                           ("big1", "Their video", at(-700), at(480), 2_000_000)])
+        db.add_post("tiktok", "posted1", None, "Posted through ReelForge, not read yet", None, at(470))
+        self.assertEqual(db.old_handles("tiktok"), [])
+        mine = [post("mine1", "My video", -500, views=510)]
+        self.assertEqual(self.read("@me", mine, 110, 540), "@mrbest")  # not a new name for @mrbest
+        self.assertEqual(len(self.copies()), 1)
+        found = db.handle_change("tiktok")
+        self.assertEqual((found["old"], found["posts"]), (["@mrbest"], ["big1"]))
+        self.assertEqual((found["first"], found["last"]), (at(360), at(480)))  # when it was @mrbest, for the dialog
+        self.assertEqual(db.forget_old_handle("tiktok")["posts"], 1)
+        self.assertEqual(self.stored(), ["mine_gone", "mine1", "posted1"])  # every one of @me's, read lately or not
+        with db.connect() as c:
+            self.assertEqual({r[0] for r in c.execute("SELECT handle FROM account_stats")}, {"@me"})
+
     def long_ago(self, platform: str, reads: list[tuple[datetime, str, list[str]]]) -> None:
         """Reads at real times in the past (compact goes by today's date): (when, handle, the ids of the posts,
         all uploaded long before)."""

@@ -363,14 +363,19 @@ def _handle_change(db: sqlite3.Connection, platform: str, handle: str, posts: li
     old = [dict(e) for e in was["old"]] if was else []
     at = was["at"] if was else ts
     if _handle(last) != new:
-        # What's stored and isn't an earlier handle's was read under the one that's going. Numbers you typed in are
-        # yours whatever the handle was, so they're no part of this: a platform with only those has nothing to ask.
+        # The handle that's going leaves behind what was last read while it was the handle (_stretch), unless that
+        # is an earlier handle's, written down already. A post last read before then is from another handle's time:
+        # a store from before ReelForge wrote handle changes down can hold several (yours, then a mistyped one),
+        # and taking all of it for the mistyped one's made putting it right look like a new name for it. A post
+        # never read at all (one posted through ReelForge) was read under nobody's. Numbers you typed in are yours
+        # whatever the handle was, so they're no part of this: a platform with only those has nothing to ask.
+        times, since = _stretch(db, platform, last)
         stored = {r[0] for r in db.execute(
-            "SELECT post_id FROM posts WHERE platform = ? AND post_id NOT LIKE 'manual-%'", (platform,))}
+            "SELECT post_id FROM posts WHERE platform = ? AND post_id NOT LIKE 'manual-%' AND last_ts >= ?",
+            (platform, since))}
         theirs = stored - {post_id for e in old for post_id in e["posts"]}
         old = [e for e in old if _handle(e["handle"]) != new]  # back to an earlier handle: its posts are this one's
         if theirs:
-            times = [r["ts"] for r in _under(db, platform, [last])]
             old.insert(0, {"handle": last, "posts": sorted(theirs), "first": times[0], "last": times[-1],
                            "sure": False})
         at = ts
@@ -388,6 +393,21 @@ def _handle_change(db: sqlite3.Connection, platform: str, handle: str, posts: li
         return None
     return {"record": record, "relabel": relabel, "before": before,
             "untold": untold and not any(e["sure"] for e in kept)}
+
+
+def _stretch(db: sqlite3.Connection, platform: str, handle: str) -> tuple[list[str], str]:
+    """The platform's newest readings under `handle`, back to the newest one under another handle: when they were
+    (oldest first), and the time from which a post's last reading was one of them ("" when the platform was never
+    read under another handle: any time, then). Old readings are thinned out (compact), so the stretch may have
+    begun before the first of its readings that's left. A post last read in between isn't counted as read under
+    `handle`, which only leaves it out of what you're asked about: it's never one of another handle's."""
+    times: list[str] = []
+    for r in db.execute("""SELECT ts, handle FROM account_stats WHERE platform = ? AND handle IS NOT NULL
+                           AND handle != '' ORDER BY ts DESC, rowid DESC""", (platform,)):
+        if _handle(r["handle"]) != _handle(handle):
+            return times[::-1], times[-1]
+        times.append(r["ts"])
+    return times[::-1], ""
 
 
 def _copy_first(handle: str) -> None:
