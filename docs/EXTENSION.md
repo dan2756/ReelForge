@@ -144,7 +144,9 @@ open (`dashboard/extension_api.py`).
   stops a web page from reaching it under a made-up name.
 - **No web pages.** A request that comes from a web page is refused, whatever it asks for. The browser says where a
   request comes from, and only the extension's own id (and ReelForge's own two pages) is let in. No answer ever
-  says "any site may read this".
+  says "any site may read this". Another extension id gets in only if it is written into
+  `dashboard/data/extension.json` by hand, under `extension_ids`. That list starts empty, and ReelForge never adds
+  to it.
 - **Pairing.** A browser is let in once, on the pair page. The page carries a secret that works one time, for ten
   minutes. The extension trades it for a token.
 - **The token.** Every call after that carries the token. ReelForge keeps only its SHA-256, in

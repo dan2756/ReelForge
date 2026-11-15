@@ -328,8 +328,10 @@ run never sits on the ports a real ReelForge and browser use. The calls, and wha
 [docs/EXTENSION.md](../docs/EXTENSION.md), "For developers".
 
 **The extension** is the `extension/` folder at the top of the ReelForge folder, loaded unpacked in the person's
-browser. `extension/README.md` says what is in it. The key in its `manifest.json` fixes its id, which is the only
-extension id the server lets in. It is its own program with its own tests.
+browser. `extension/README.md` says what is in it. The key in its `manifest.json` fixes its id, and the server lets
+in that extension id only, unless `extension_ids` in `data/extension.json` lists another (for a copy from a store,
+whose id is another: the list starts empty, and nothing in ReelForge adds to it). It is its own program with its own
+tests.
 
 **YouTube's API** (`platforms/youtube_api.py` and `youtube_api_tab.py`). The first is the Google side: the consent
 page and its one-request listener, the resumable upload, and the file it keeps for each profile
