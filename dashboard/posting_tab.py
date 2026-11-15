@@ -66,18 +66,22 @@ ACTIONS = {
 }
 # What each platform's text is called in its own boxes, for the question before a post.
 FIELDS = {"title": "Title", "description": "Description", "caption": "Caption", "text": "Post"}
-# What the button for each of a row's actions says.
+# What the button for each of a row's actions says. Short: a row that is posted keeps its two beside its numbers.
 LABELS = {"retry": "Try again", "cancel": "Cancel", "mark_posted": "It's posted", "not_posted": "It didn't post",
-          "open_post": "Open post", "post_again": "Post again…"}
+          "open_post": "Open", "post_again": "Post again…"}
 # Setting the extension up, once (docs/EXTENSION.md says the same at more length).
 SETUP = (
-    "Open your browser's extensions page: type chrome://extensions in the address bar (edge://extensions in Edge, "
-    "brave://extensions in Brave).",
+    "Open your browser's extensions page: type chrome://extensions in the address bar. In Edge it is "
+    "edge://extensions, in Brave brave://extensions.",
     "Switch on Developer mode, at the top right of that page.",
     "Press Load unpacked and pick the extension folder inside your ReelForge folder. Show the extension folder "
     "shows it and copies its path.",
     "Press Connect a browser. A ReelForge page opens in your browser and the extension connects there by itself.",
 )
+# Under the connected browsers. The extension works in your everyday browser, and ReelForge's own log-ins (for
+# reading stats) are in its own: neither says anything about the other.
+SIGNED_NOTE = ("That is what the extension saw in each browser. It is apart from the accounts connected on the Accounts "
+               "tab, which ReelForge reads your stats from.")
 # What happens after your yes to the question before a post: as it is asked, and with "stop before posting" off.
 HOW = ("ReelForge opens each upload page in your browser, attaches the video and fills in the text. You check it "
        "and press Post.")
@@ -257,15 +261,16 @@ class PostingTab:
             lines.append(Text(self.extension_problem, AMBER))
         if not self.demo:
             lines.append(Text(TESTED, MUTED))
-        # The Publish tab's one line about it while it isn't set up: what it is, and that nobody needs it.
-        hint = parts([(Text("Optional. ", MUTED), 0),
-                      (Text("The browser extension fills in each upload page for you.", MUTED), 1)])
+        # The Publish tab's one line about it while it isn't set up, under the line that says so: what it does, and
+        # that nobody needs it. The middle part is the one a narrow window keeps.
+        hint = parts([(Text("Optional. ", MUTED), 1), (Text("It can fill in the upload pages for you.", MUTED), 0),
+                      (Text(" You check each one and press Post.", MUTED), 2)])
         self.emit("extension", {
             "state": status["state"], "line": status["line"].json(), "lines": [t.json() for t in lines],
             "installs": status["installs"], "port": self.extension_port, "protocol": posting.PROTOCOL,
             "folder": str(folder), "folder_there": folder.is_dir(),
             "hint_dismissed": bool(self._safe(lambda: db.get_meta(HINT, False), False)),
-            "hint": hint, "steps": list(SETUP),
+            "hint": hint, "steps": list(SETUP), "signed_note": SIGNED_NOTE,
             # Why this window can't hand a post to the extension, whatever is connected ("": it can).
             "problem": "" if self.demo else self.extension_problem,
         })

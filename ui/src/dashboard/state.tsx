@@ -4,7 +4,7 @@
 import { createContext, useContext, useSyncExternalStore } from "react"
 import type { Bridge } from "../bridge"
 import type { Action } from "../lib/styled"
-import type { Init, ProfilesMenu } from "./types"
+import type { Init, PostInfo, PostingRow, ProfilesMenu } from "./types"
 
 /** Rows above a tab's own: the header (3) and the hairline under it. */
 export const TOP_ROWS = 4
@@ -45,6 +45,8 @@ export type Dialog =
   | { kind: "episode"; data: EpisodeData }
   | { kind: "signup"; data: SignupData }
   | { kind: "disconnect"; data: { key: string; title: string; note: import("../lib/styled").Segs } }
+  | { kind: "post"; data: PostData }
+  | { kind: "extension"; from?: "post" } // from: Post was pressed with no extension set up, so by hand is offered too
   | { kind: "profiles"; data: ProfilesMenu }
   | { kind: "delete_profile"; data: import("./Profiles").DeleteProfileData }
   | { kind: "discard_profile"; data: import("./Settings").DeletedProfile & { bin: string } }
@@ -71,6 +73,14 @@ export interface SignupData {
   steps: string[]
   button: string
   account: boolean
+}
+
+/** The question before a post: what post_info said, and for Post again on a platform's row, that platform alone. */
+export interface PostData {
+  info: PostInfo
+  caption: string // the form as it was asked about: exactly what the question shows is what gets posted
+  tags: string
+  only?: string[]
 }
 
 export interface LogData {
@@ -161,7 +171,7 @@ export class DashState {
 
   /** Connect a platform with the @handle typed for it: what's wrong with it shows under its box. */
   async connect(key: string, typed: string) {
-    const error = await this.bridge.call<string | null>("connect", key, typed)
+    const error = await this.bridge.ask<string | null>("connect", key, typed)
     this.set({ handles: { ...this.handles, [key]: typed }, handleErrors: { ...this.handleErrors, [key]: error ?? "" } })
   }
 
@@ -188,12 +198,46 @@ export class DashState {
     if (key !== this.init.profile.key) this.nav.profile(key, this.tab)
   }
 
+  /** Open a dialog on what the Python side says about it. Nothing to say (it has said why in a pop-up): no dialog. A
+   * call that failed is a pop-up too, never a silent nothing. */
   async openDialog(
-    kind: "log" | "remove" | "episode" | "signup" | "disconnect" | "profiles" | "delete_profile" | "factory_reset" | "uninstall" | "move_folder",
+    kind:
+      | "log"
+      | "remove"
+      | "episode"
+      | "signup"
+      | "disconnect"
+      | "post"
+      | "profiles"
+      | "delete_profile"
+      | "factory_reset"
+      | "uninstall"
+      | "move_folder",
     call: Promise<any>,
   ) {
-    const data = await call
+    let data
+    try {
+      data = await call
+    } catch (e) {
+      return this.bridge.failed(e)
+    }
     if (data) this.set({ dialog: { kind, data } as Dialog })
+  }
+
+  /** Post…: the question before a post, with each platform's exact text as the form has it now. only: Post again on a
+   * platform's row, which asks about that platform alone. */
+  openPost(only?: string[]): Promise<void> {
+    const { caption, tags } = this
+    return this.openDialog(
+      "post",
+      this.bridge.call<PostInfo | null>("post_info", caption, tags).then((info) => (info ? { info, caption, tags, only } : null)),
+    )
+  }
+
+  /** A button on a platform's posting row. Posting again asks first, since the video is already up there. */
+  postAction(row: PostingRow, action: string) {
+    if (action === "post_again") return void this.openPost([row.key])
+    this.bridge.send("post_action", row.job ?? row.key, action)
   }
 
   /** What a chip or a chart key does when clicked. */
@@ -213,6 +257,8 @@ export class DashState {
         return void this.openDialog("signup", b.call("signup_guide", "gmail"))
       case "disconnect":
         return void this.openDialog("disconnect", b.call("disconnect_info", args[0]))
+      case "extension":
+        return this.set({ dialog: { kind: "extension" } })
       case "close_drawer":
         return this.toggleDrawer(false)
       case "refresh":

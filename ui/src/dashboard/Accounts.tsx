@@ -1,6 +1,7 @@
 // The Accounts tab: connect the platforms you post to (ReelForge shows only the connected ones everywhere else), and
 // for each connected one where its stats come from, how fresh they are, its log-in / profile / refresh buttons, and
-// its followers over the time ReelForge has been reading them.
+// its followers over the time ReelForge has been reading them. Above them, one line for the browser extension
+// (Posting.tsx): it posts from your everyday browser, which is apart from these accounts.
 
 import { TextAttributes, type Renderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/react"
@@ -15,8 +16,9 @@ import { Chart } from "../ui/Chart"
 import { TextField } from "../ui/Fields"
 import { Fitted, Line } from "../ui/Line"
 import { Panel, Scroll, Wrapped } from "../ui/Panels"
+import { ExtensionStrip } from "./Posting"
 import { useDash } from "./state"
-import type { AccountPanelView, AccountsView } from "./types"
+import type { AccountPanelView, AccountsView, ExtensionView } from "./types"
 
 /** Rows a row of panels needs before it would squeeze what's in it: the name, the status, the buttons, the note and
  * some of the chart. */
@@ -25,11 +27,13 @@ const ROW_ROWS = 20
 export function Accounts() {
   const s = useDash()
   const accounts = useView<AccountsView>(s.bridge, "accounts")
+  // The extension's line, in your own ReelForge once it's known how the extension is (the demo doesn't use it).
+  const strip = Boolean(useView<ExtensionView>(s.bridge, "extension")) && !s.init.demo
   const panels = accounts?.panels ?? []
   const rows = [panels.slice(0, 2), panels.slice(2, 4)].filter((r) => r.length)
   // A window too short for the panels to share its height without squeezing them scrolls instead.
   const { height } = useTerminalDimensions()
-  const room = height - 6 - (accounts?.hint ? 2 : 0) // the header, the status bar, the space above
+  const room = height - 6 - (accounts?.hint ? 2 : 0) - (strip ? 2 : 0) // the header, the status bar, the space above
   const tight = (room - (rows.length - 1)) / Math.max(rows.length, 1) < ROW_ROWS
   const grid = rows.map((row, i) => (
     <box key={i} flexDirection="row" gap={1} {...(tight ? { height: ROW_ROWS + 6, flexShrink: 0 } : { flexGrow: 1, flexBasis: 0 })}>
@@ -39,13 +43,21 @@ export function Accounts() {
       {row.length === 1 ? <box flexGrow={1} flexBasis={0} /> : null}
     </box>
   ))
+  if (!accounts) {
+    return (
+      <text fg={DASH.muted} marginTop={1} marginLeft={1}>
+        Reading your accounts…
+      </text>
+    )
+  }
   return (
     <box flexDirection="column" flexGrow={1} paddingTop={1} gap={1}>
-      {accounts?.hint ? (
+      {accounts.hint ? (
         <box paddingLeft={1} flexShrink={0}>
           <Fitted parts={accounts.hint} />
         </box>
       ) : null}
+      {strip ? <ExtensionStrip /> : null}
       {tight ? (
         <Scroll flexGrow={1} scrollY>
           <box flexDirection="column" gap={1} flexShrink={0}>

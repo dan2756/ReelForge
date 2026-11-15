@@ -8,7 +8,7 @@ import { metricTitle, pickVariant } from "../src/dashboard/titles"
 import type { MetricView, Variant } from "../src/dashboard/types"
 import { fit } from "../src/lib/fit"
 import { fmtNum, shortNum } from "../src/lib/format"
-import { plain, segsLen, type Parts } from "../src/lib/styled"
+import { plain, segsLen, wrappedRows, type Parts } from "../src/lib/styled"
 import { PLATFORM, restyle, tone } from "../src/theme"
 import { bell, BELL_WIDTH, faceCells, faceWidth, sparkline, stackedSparkline } from "../src/ui/Graphics"
 import { inline, mdBlocks } from "../src/ui/Panels"
@@ -188,5 +188,17 @@ describe("the palette", () => {
     const msg = JSON.parse('{"d": {"color": "#FF4040", "caption": "#fyp #ff4040ish #facade"}}', restyle)
     expect(msg.d.color).toBe(PLATFORM.youtube!)
     expect(msg.d.caption).toBe("#fyp #ff4040ish #facade") // a hashtag is never a colour
+  })
+})
+
+describe("wrapped text", () => {
+  test("the rows a text takes at a width, as it wraps at its spaces", () => {
+    expect(wrappedRows("", 10)).toBe(1)
+    expect(wrappedRows("one two", 10)).toBe(1)
+    expect(wrappedRows("one two three", 10)).toBe(2) // "one two" / "three"
+    expect(wrappedRows("one two three four five", 9)).toBe(3) // "one two" / "three" / "four five"
+    expect(wrappedRows("exactly-10 and more", 10)).toBe(2)
+    expect(wrappedRows("a-word-wider-than-the-width", 10)).toBe(3) // it breaks inside
+    expect(wrappedRows("anything", 0)).toBe(8) // never less than a column
   })
 })

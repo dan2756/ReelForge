@@ -109,6 +109,27 @@ export function truncate(segs: Segs, width: number): Segs {
   return out
 }
 
+/** Rows a text takes when it's wrapped at its spaces to `width` columns (a word wider than that breaks inside). For
+ * giving a scrolling area the height of what's in it: by itself it takes all the height it can get. */
+export function wrappedRows(text: string, width: number): number {
+  const room = Math.max(width, 1)
+  let rows = 1
+  let used = 0
+  for (const word of text.split(" ")) {
+    const n = cellLen(word)
+    if (used && used + 1 + n > room) {
+      rows++
+      used = 0
+    }
+    used += (used ? 1 : 0) + n
+    while (used > room) {
+      rows++
+      used -= room
+    }
+  }
+  return rows
+}
+
 /** Pad the segments with spaces to `width` columns. */
 export function pad(segs: Segs, width: number, right = false): Segs {
   const n = segsLen(segs)

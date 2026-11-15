@@ -130,7 +130,7 @@ describe("the header and the bell", () => {
     expect([...top[2]!].slice(x, x + 13).join("")).toBe("╰───────────╯")
     expect(publishButton(h)).toEqual({ fg: DASH.good, bg: DASH.bg })
     await clickText(h, "↑ Publish", 2)
-    expect(frame(h)).toContain("UPLOAD")
+    expect(frame(h)).toContain("BY HAND")
     expect(publishOpen(h)).toBe(true)
     expect(activeTab(h)).toBe("") // no tab along the top is lit, and the bar under them has gone
     expect(top[2]!.slice(0, x)).toContain("▔")
@@ -391,23 +391,6 @@ describe("the drawer", () => {
     const h = await window("overview", [180, 50], true)
     await press(h, "escape")
     expect(frame(h)).not.toContain("NOTIFICATIONS")
-  })
-})
-
-describe("publish", () => {
-  test("YouTube's Copy caption sits under its button, above Copy YouTube hashtags", async () => {
-    const h = await window("publish", [200, 56], false, { unconnected: ["x"] })
-    const at = (label: string) => {
-      const i = rows(h).findIndex((r) => r.includes(label))
-      return [i, rows(h)[i]!.indexOf(label)]
-    }
-    const [buttonRow, buttonCol] = at("YouTube →")
-    const [captionRow, captionCol] = at("Copy caption")
-    const [tagsRow] = at("Copy YouTube hashtags")
-    expect(captionRow).toBe(buttonRow + 2)
-    expect(tagsRow).toBe(captionRow + 2)
-    expect(Math.abs(captionCol - buttonCol)).toBeLessThan(4) // both centred in the same column
-    expect(frame(h).split("Copy caption").length).toBe(2) // no second Copy caption by itself
   })
 })
 

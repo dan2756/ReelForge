@@ -530,9 +530,10 @@ class ExtensionView(PostingTest):
         said = " ".join(plain(line) for line in view["lines"])
         self.assertIn("You check it and press Post", said)
         self.assertIn("not yet on the live sites", said)  # never more than the tests have shown
-        # The Publish tab's one line about it, the least needed part last, and the steps to set it up.
+        # The Publish tab's one line about it (a narrow window keeps the part ranked 0), and the steps to set it up.
         self.assertEqual([(plain(text), rank) for text, rank in view["hint"]],
-                         [("Optional. ", 0), ("The browser extension fills in each upload page for you.", 1)])
+                         [("Optional. ", 1), ("It can fill in the upload pages for you.", 0),
+                          (" You check each one and press Post.", 2)])
         self.assertEqual(len(view["steps"]), 4)
         self.assertIn("chrome://extensions", view["steps"][0])
         self.assertIn("Load unpacked", view["steps"][2])
@@ -603,6 +604,7 @@ class ExtensionView(PostingTest):
         (install,) = self.view(w)["installs"]
         self.assertEqual(install["accounts"], {"tiktok": {"signed_in": True, "handle": "@me"}})
         self.assertEqual(install["signed"], "signed in there: TikTok @me")
+        self.assertIn("apart from the accounts connected on the Accounts tab", w.view("extension")["signed_note"])
 
     def test_what_a_browser_is_signed_in_to_reads_as_a_line(self):
         names = {"tiktok": "TikTok", "youtube": "YouTube", "instagram": "Instagram", "x": "X"}
