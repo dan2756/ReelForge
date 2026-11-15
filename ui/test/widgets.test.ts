@@ -285,5 +285,9 @@ describe("wrapped text", () => {
     expect(wrappedRows("exactly-10 and more", 10)).toBe(2)
     expect(wrappedRows("a-word-wider-than-the-width", 10)).toBe(3) // it breaks inside
     expect(wrappedRows("anything", 0)).toBe(8) // never less than a column
+    expect(wrappedRows("one two", 7)).toBe(1)
+    expect(wrappedRows("  one two", 7)).toBe(2) // an indented line: its spaces are drawn, so "two" no longer fits
+    expect(wrappedRows("  one two", 9)).toBe(1)
+    expect(wrappedRows("one  two", 7)).toBe(2) // and so is a doubled space inside it
   })
 })

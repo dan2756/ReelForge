@@ -217,5 +217,7 @@ in `assets/sfx/<source>/`, add a manifest entry with its licence, then use its n
 ## Publishing
 
 ReelForge lists every `episodes/<id>/final/<id>.mp4` on its Publish tab (`reelforge publish`), newest first,
-with the post pre-filled from `episode.json`'s `title` and the hashtag line of `final/caption.txt`. You post by
-hand from there; nothing in the kit posts for you.
+with the post pre-filled from `episode.json`'s `title` and the hashtag line of `final/caption.txt`. You post from
+there, and every post starts with your own press: by hand, with the browser extension ([EXTENSION.md](EXTENSION.md))
+or, for YouTube, through its own API ([YOUTUBE-API.md](YOUTUBE-API.md)). Nothing in the pipeline posts, and no
+command does.

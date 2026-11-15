@@ -2,7 +2,8 @@
 
 This is what opens when you type `reelforge` in a terminal (or use the ReelForge shortcut): your stats on TikTok,
 YouTube, Instagram and X, the **Publish** tab where every finished video waits for you to post it, a notifications
-drawer, and one-click updates. ReelForge never posts anything itself.
+drawer, and one-click updates. Nothing is posted without your press: you post from Publish by hand, with the
+optional browser extension, or for YouTube through its own API (see [Publish](#publish) below).
 
 ![ReelForge's Overview, with the notifications drawer open](docs/overview.png)
 
@@ -20,11 +21,16 @@ drawer, and one-click updates. ReelForge never posts anything itself.
 ReelForge shows only the platforms you've connected: first-time setup connects the ones you give it a handle for, and
 **Accounts** connects (or disconnects) any of them later. TikTok and YouTube stats start straight away; Instagram
 and X need **Log in** once (see below). With nothing connected yet, ReelForge opens on Accounts. It looks best in
-Windows Terminal with the window maximised.
+Windows Terminal with the window maximised, and is drawn for 80 columns by 24 rows and up: in a smaller window a
+tab that doesn't fit scrolls, Refresh, Help and Quit are the signs ↻ ? × at the top, and on Publish the videos go
+above the form.
 Everything is a button on the page it applies to, for the mouse or the keyboard: **1**-**7** open the tabs in the
 order they're shown, **u** opens Publish (the green button at the top right), **r** / **R** refresh / force a
-refresh, **p** opens the profile menu, **Tab** moves between buttons, lists and fields (**Enter** presses, the arrows
-move through a list), **Esc** closes the drawer or a dialog or leaves a text field, and **Ctrl+Q** quits.
+refresh, **n** opens and closes the notifications, **p** opens the profile menu, **Tab** moves between buttons,
+lists and fields (**Enter** presses, the arrows move through a list) and scrolls what it lands on into view,
+**Page Up** and **Page Down** scroll a tab or a dialog that is longer than the window, **Esc** closes the drawer or
+a dialog or leaves a text field, and **Ctrl+Q** quits. A few things are still for the mouse only: the chips on a
+line (a chart's ranges, Show on Videos, Remove, Disconnect, Mark all read) and a table's headings.
 
 The window is an [OpenTUI](https://github.com/anomalyco/opentui) app (`ui/` in the ReelForge folder), run by Bun; setup
 puts Bun in `tools/bun` and the window's packages in `ui/node_modules`, and ReelForge gets them again by itself if
@@ -85,7 +91,7 @@ just leaves Publish out).
 | **Overview** | A tile per platform (and all of them added up): followers in big numbers, views, likes, the change over 24 hours and views per hour (on All platforms, each platform's share). Under the tiles, today's **badges** (below). Then **views**, **followers** and **likes** gained over time, stacked by platform: each bar is the shortest stretch the window has room for (an hour on 24H when it's wide enough, a few hours or a day on the longer ranges), with yellow ▼ marks where each video went up (hours the computer was off are filled in with an estimate, what the readings either side gained shared out evenly, hatched ╱╱ on top of what was read; an estimate is never the best bar), your **top performers** (with their views 12 hours in) and how your **latest video** is doing. |
 | **Videos** | Every video on every platform: views, **views 12 hours in** (so new and old videos compare fairly; "in 5h" until a video is that old, — when the computer was off then), likes, comments, shares, engagement, share rate, views per hour and score. Click a header to sort. Above the chart, the highlighted video's **badges**. **Fix episode** if a post was grouped with the wrong video; **Export CSV** saves everything as a spreadsheet, with when each post went up (date, weekday, hour and UTC time) and its views 1, 6, 12 and 24 hours in. |
 | **Compare** | The **platform scoreboard**, or one video side by side on every platform against that platform's typical video. **Newest**, **Oldest** and **Most views** beside the episodes sort them (most views: each one's views on every platform added up). |
-| **Publish** | Finished videos, newest first, with the platforms each one is already on. Pick one, check the caption and hashtags (the preview shows exactly what each platform gets), then use the platform buttons. Under the list, the **best time to post** on each platform. |
+| **Publish** | Finished videos, newest first, with the platforms each one is already on. Pick one and check the caption and hashtags (the preview shows exactly what each platform gets). **POST** has a row for each platform that says where its post stands, and **Post…**, for the browser extension. **BY HAND** has each platform's own button. Under the list, the **best time to post** on each platform. See [Publish](#publish) below. |
 | **Stats** | Your **views**, **followers** and **likes** added up across your platforms, over time. **Add up** ticks the platforms the totals count (click one to leave it out, and again to count it); the range is 24H, 48H, 7D, 30D or ALL. Each chart is the total as a filled area from ReelForge's readings: a stretch the computer was off for is filled in with an estimate, the straight line between the readings either side, hatched ╱╱ and marked estimated when you point at it (a platform whose log-in ran out for a while is estimated the same way, and the total is hatched where that platform is most of it); an estimate is never a best day or hour. A platform whose reads stopped counts with its last reading (its row says when that was), and the totals start once every platform counted has its first reading. Point at a chart for the totals then and each platform's part; yellow ▼ marks show where videos went up. Beside each chart, every platform's number now, its gain over the range, its gains hour by hour (or day by day) and its share of the total. |
 | **Accounts** | Every platform: **Connect** one with your @handle (or **Sign up** for one you don't have yet: it opens the platform's own sign-up page, with the steps beside it, in a private window of your browser once you have more than one profile) and **Disconnect** one you've stopped using (its stats stay saved). For a connected one: where its stats come from, when they were last and will next be read, the last error if any, **Log in** (Instagram, X), **Open profile** and **Refresh now**. |
 | **Settings** | This channel's answers from first-time setup (**Change your answers**), an **FAQ** (click a question for its answer; the first says which model your AI uses and how hard it thinks, which your AI app decides, not ReelForge), the **Tab order** (above), what ReelForge set up on this computer (**Background refresh**, the hourly stats read, with a switch to turn it on or off; the `reelforge` command and the icon, each with its button), **Restart** (ReelForge closes and opens again straight away), and your **Profiles**: **Delete…** beside each one this window can delete, **New profile**, and the deleted ones, each with **Restore** (see Profiles above). At the bottom, **Factory reset** (every channel's settings, logins and stats into a backup in `backups`, then first-time setup again; videos stay) and **Uninstall** (videos and channels kept in a folder beside ReelForge, the rest to the Recycle Bin or the Trash). Both ask for the channel's name; `reelforge reset` and `reelforge uninstall` do the same. |
@@ -97,7 +103,7 @@ sign a video is spreading.
 
 ## Notifications
 
-The **bell** in the top-right corner opens the drawer on the right; the bell, **Close** or Esc
+The **bell** in the top-right corner (or **n**) opens the drawer on the right; the bell, **n**, **Close** or Esc
 closes it. The number on the bell's shoulder is how many are unread; **Mark all read** clears
 it. The **×** beside a notification deletes it (Delete does the same for the highlighted one), and **Clear
 all** deletes every one. Click a notification to see what it's about, from any tab (the drawer stays open, so you
@@ -169,8 +175,10 @@ downloads when there's neither), and keeps using the one it started with. Log in
 and carries on; after that it opens your profile in the
 background about once an hour and reads the numbers the page shows you. It never posts, likes or follows anything.
 These are the same pages a browser loads, so a site redesign can break a reader until ReelForge is updated. If a
-login ever stops working, **Type in stats** (on that platform's Accounts panel) opens a box to type numbers in by
-hand.
+login ever stops working, **Type in stats** (on that platform's Accounts panel) opens TYPE IN STATS, a box to type
+numbers in by hand. Once ReelForge reads the platform itself again, the numbers you typed become that post's history
+for the time it couldn't. A number lower than the one saved before is not stored straight away: Save says so, and
+replaces the saved one only when you press Save again.
 
 Platforms report lifetime totals, so ReelForge saves a snapshot every time it reads them and builds the charts from
 those snapshots: they fill in the longer it runs. **Background stats** (the Settings tab's **Background refresh**
@@ -188,10 +196,36 @@ What each platform gets follows your channel's caption rules from first-time set
 (**Copy caption** under YouTube's button) with the hashtags as its description, and the caption alone on X unless you
 allowed hashtags there.
 
-Each platform button copies that platform's text, shows the file in Explorer, Finder or your file manager (drag it
-into the upload page) and
-opens the upload page. **Open all** opens every page with the TikTok text copied; use the Copy buttons for the
-others. ReelForge looks for the new posts 10 and 30 minutes later and matches them to the video by their caption.
+Under the caption and hashtags, **POST** has the picked video's review line and a row for each connected platform
+that says where its post stands, in words: not posted, the upload page opened by hand, each step of a post under
+way, posted, failed and why, or "did it post?" when ReelForge lost track. A row has the buttons that fit its state:
+**Try again**, **Cancel**, **It's posted**, **It didn't post**, **Open**, **Post again…**. Nothing is posted
+without your press, and there are three ways to post:
+
+- **By hand**, under **BY HAND**. Each platform's button copies that platform's text, shows the file in Explorer,
+  Finder or your file manager (drag it into the upload page) and opens the upload page. **Open all** opens every
+  page with the TikTok text copied; use the Copy buttons for the others. ReelForge looks for the new posts 10 and
+  30 minutes later and matches them to the video by their caption. This needs nothing set up, and is not held back
+  by a review.
+- **With the browser extension** (optional): **Post…**. A question shows each platform's exact text and account,
+  with a tick box for each, and **Start** hands the ticked ones to the extension. Your own browser opens each
+  upload page, and the extension attaches the video and fills in the text. It stops there: you check the page and
+  press Post. (It presses Post itself only where **Press Post for me** is switched on in its own settings and you
+  switched off **Stop before the Post button** in the question, or ticked the press in its popup, and never on X.)
+  Until a browser is connected, **Post…** shows the steps to set it up (**Set it up** beside it, and
+  **Browsers…** once one is connected, open the same dialog, with **Connect a browser** and **Show the extension
+  folder**). It is tested against copies of the upload pages, not yet on the live sites.
+  [docs/EXTENSION.md](../docs/EXTENSION.md) is its guide.
+- **To YouTube through its own API** (optional), with a Google Cloud project you make yourself. ReelForge uploads
+  the video itself when you press it on the Publish tab, private unless you choose otherwise, and you connect on
+  Google's page each time you open ReelForge. It is tested against a stand-in for Google and has never uploaded a
+  video to YouTube itself. [docs/YOUTUBE-API.md](../docs/YOUTUBE-API.md) is its guide.
+
+A video from the pipeline goes with the extension or the API only when QA passed on that exact file and the review
+says APPROVED for that cut. A video that is up on a platform is not posted there again unless you ask for it
+(**Post again…**), and one whose post ReelForge lost track of is never tried again by itself: you say whether it
+posted.
+
 **Remove** above the list (or a right-click on a video) hides it from the list or moves it to the Recycle Bin (the
 Trash on a Mac or Linux PC);
 **Show hidden** brings hidden videos back.
@@ -220,9 +254,17 @@ platforms you're connected to and answering the questions again keeps them.
 ## Your data
 
 Everything stays on this computer in `dashboard/data/` (another profile's in `profiles/<name>/dashboard/data/`):
-`stats.db` (snapshots, posts, the upload log and your notifications), a dated backup of it in `data/backups/` once a
-day, and `data/browser/` (ReelForge's browser profile with your Instagram/X logins: keep it private, never share or
-upload it).
+`stats.db` (snapshots, posts, the upload log, the posts ReelForge helped with and your notifications), a dated
+backup of it in `data/backups/` once a day, and `data/browser/` (ReelForge's browser profile with your Instagram/X
+logins: keep it private, never share or upload it).
+
+Two more files are there once you use the optional ways to post, and both are private too:
+
+- `dashboard/data/extension.json`: the browsers connected to the extension, one file for every profile: each one's
+  name, when it connected and was last seen, and what it was last seen signed in to. Of a browser's token it holds
+  only the SHA-256, never the token.
+- `youtube_api.json`, one for each profile: the id and secret of your own Google Cloud client, and your choices.
+  The sign-in itself is never in a file: it stays in the open window that connected.
 
 ## Troubleshooting
 
@@ -233,6 +275,8 @@ upload it).
 | The bottom left of the window says a platform's last refresh failed | The Accounts tab shows the error. TikTok sometimes shows a captcha to a background browser: ReelForge tries again next time. |
 | Instagram "wants to check it's you" | Press **Log in again** and follow Instagram's steps in the window that opens. |
 | A finished video isn't in the Publish list | Run `reelforge publish-check episodes/<id>` in the ReelForge folder: it says what's missing. |
+| A post with the extension stopped | Its row on Publish says why, and what to do is in [docs/EXTENSION.md](../docs/EXTENSION.md), "When something goes wrong". You can always finish by hand. |
+| A post through YouTube's API failed | Its row says why in a sentence: [docs/YOUTUBE-API.md](../docs/YOUTUBE-API.md), "When something goes wrong". |
 | A post is grouped with the wrong video | Videos tab: highlight it and press **Fix episode**. ReelForge keeps your choice. |
 | An update didn't finish | The message on the Updates tab says why and what to do: usually **Update and restart** again, which carries on from where it stopped. |
 | `config.toml has a typo` | Fix the line it names, or delete `dashboard/config.toml` and run `reelforge channel`. |
@@ -244,8 +288,79 @@ upload it).
 | `service.py`, `view.py` | what the window shows and what its buttons do; the window itself is the OpenTUI app in `ui/` (`ui/README.md`), which runs this through `studio/bridge.py` |
 | `__main__.py`, `sync.py`, `analytics.py`, `trends.py`, … | opening it, reading stats (httpx, and Playwright with an installed browser), and the numbers behind every chart |
 | `notify.py`, `badges.py`, `besttime.py` | notifications, milestones, badges and the best time to post |
+| `posting.py`, `posting_tab.py` | the ledger of the posts ReelForge helps with, and the Publish tab's POST rows and Post… (below) |
+| `extension_api.py`, `web/` | the local server the browser extension talks to, and the two local pages it opens (below) |
+| `platforms/youtube_api.py`, `youtube_api_tab.py` | posting to YouTube through its own API: the Google side, and the window's side (below) |
 | `switcher.py` | the profile button and its menu: each profile's connected platforms and unread notifications (`studio/profiles.py` has the profiles themselves) |
 | `refresh.pyw` | what the hourly background job runs |
 | `config.example.toml` | the settings template; your own settings are in `config.toml` (written by first-time setup, not shared) |
 | `tests/` | from the ReelForge folder: `.venv\Scripts\python -m unittest discover -s dashboard/tests -t .` (macOS/Linux: `.venv/bin/python`); the window's own tests are in `ui/test/` (`bun test` in `ui/`) |
 | `data/` | your stats database, backups and ReelForge's browser profile: private, never shared |
+
+## Posting, for developers
+
+Posting by hand needs none of this: a platform's button copies, shows and opens (`service.py`), and a stats read
+finds the post later. The two optional ways share one ledger.
+
+**The ledger** (`posting.py`, tables `post_jobs` and `post_events` in `stats.db`). A job is one video going to one
+platform, by the extension (`via = "extension"`) or by YouTube's API (`via = "api"`). One press makes a batch: a job
+for each platform ticked. A job only moves forward:
+
+```
+queued → claimed → opening → uploading → filling → ready → posting → posted
+```
+
+Steps may be skipped. `ready` is everything filled in and the platform's own button waiting for the person;
+`posting` is the button being pressed for them (or, for the API, the last piece of the file on its way). A job can
+also end as `failed`, `cancelled` or `expired` (a queued one nobody took in ten minutes): nothing was posted, and a
+new job may be made. `unknown` is the state that matters most: Post was pressed, or may have been, and no
+confirmation came. Nothing ever retries such a job. Only the person's answer or a stats read that finds the post
+settles it. A video is the SHA-256 of its bytes, not its file name, and has at most one live job for each platform
+(a unique index holds that between windows too). Everything in `posting.py` is a plain function on the open
+database, so the window, the local server and the tests drive the same code. The words the window shows for a job,
+and its buttons, are written in `posting_tab.py`, a mixin of the window's service.
+
+**The local server** (`extension_api.py`). Each open window listens on `127.0.0.1`, on the first free port from
+47821 to 47830, for the extension and for the two local pages in `web/` (`/pair` and `/post/<batch>`). Its opening
+comment lists who gets in and why: a request must be addressed to exactly that address, must not come from a web
+page, and must carry a paired browser's token (only its SHA-256 is kept, in `data/extension.json`). No route takes
+a file path, and none of the window's own calls can be reached through it. `REELFORGE_EXTENSION_PORT` picks the
+port (`0`: any free one, `off`: none), and with `STUDIO_DRY_SYSTEM=1` and no port given nothing listens, so a test
+run never sits on the ports a real ReelForge and browser use. The calls, and what each refusal means, are in
+[docs/EXTENSION.md](../docs/EXTENSION.md), "For developers".
+
+**The extension** is the `extension/` folder at the top of the ReelForge folder, loaded unpacked in the person's
+browser. `extension/README.md` says what is in it. The key in its `manifest.json` fixes its id, and the server lets
+in that extension id only, unless `extension_ids` in `data/extension.json` lists another (for a copy from a store,
+whose id is another: the list starts empty, and nothing in ReelForge adds to it). It is its own program with its own
+tests.
+
+**YouTube's API** (`platforms/youtube_api.py` and `youtube_api_tab.py`). The first is the Google side: the consent
+page and its one-request listener, the resumable upload, and the file it keeps for each profile
+(`data/youtube_api.json`: the client's id and secret and the person's choices, never the sign-in, which is held in
+the memory of the window that connected). The second moves a job along the ledger (`run`, `settle_orphans`: plain
+functions) and is the window's side, `YouTubeApiTab`, a mixin listed before `PostingTab`. The addresses it talks
+to are constants, and the tests patch them to a stand-in. [docs/YOUTUBE-API.md](../docs/YOUTUBE-API.md), "For
+developers", lists the view and the calls.
+
+**Nothing starts a post but a press.** A job is made by `post_with_extension`, `post_with_api`, a row's own
+button, and Post in the extension's popup (which needs the browser's token). No `reelforge` command and no
+pipeline step makes one: `test_extension_api.py` reads the sources to hold that.
+
+**Tests.** With ReelForge's own (`dashboard/tests/`, the command above): `test_posting.py` (the ledger),
+`test_extension_api.py` (the server, the pairing and the two pages, against a real server on a free port with the
+test playing the extension), `test_posting_tab.py` (the window's side), and `test_youtube_api.py` and
+`test_youtube_api_tab.py`, against a stand-in for Google on the same computer (`tests/google.py`). The window
+itself: `ui/test/posting.test.tsx`. The extension's own suite is run with Node, from the ReelForge folder:
+
+```
+node extension/tests/run.mjs               everything: about nine minutes
+node extension/tests/run.mjs --stand-in    the suites with a stand-in for ReelForge
+node extension/tests/run.mjs --real        the suite with ReelForge's real server and ledger
+```
+
+It needs Node 22 and Playwright with its own Chromium, and ports 47821 to 47830 free, so ReelForge must be closed.
+The `--real` suite also needs the Python that has ReelForge's packages: the folder's `.venv`, or the one
+`REELFORGE_PYTHON` names. `.github/workflows/extension.yml` runs both on every push, and a release waits for them.
+None of these tests loads a live upload page, uses an account or reaches Google: they prove ReelForge's own
+machinery and that its halves agree, and say nothing about today's upload pages or a real upload.

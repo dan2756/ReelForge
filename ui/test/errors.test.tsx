@@ -97,7 +97,7 @@ describe("a call that fails in the ReelForge window", () => {
   })
 
   test("the Settings tab's typed-name dialogs: the pop-up says it didn't happen", async () => {
-    const h = await kit({ fail: ["factory_reset", "uninstall"] }, "settings")
+    const h = await kit({ fail: ["factory_reset", "uninstall"] }, "settings", [150, 72]) // tall enough for the danger zone
     for (const [button, title, go] of [
       ["Factory reset…", "FACTORY RESET", "Reset ReelForge"],
       ["Uninstall…", "UNINSTALL REELFORGE", "Uninstall ReelForge"],

@@ -98,6 +98,52 @@ def extension_check(r: Report) -> None:
         r.add(WARN, "Browser extension", f"couldn't be checked ({type(e).__name__}: {e})")
 
 
+def youtube_api_check(r: Report) -> None:
+    """Posting to YouTube through its own API (docs/YOUTUBE-API.md): which channels have given ReelForge the client
+    file of their Google Cloud project. The row says that and nothing from the file: not a value, and not the words
+    of an error that might carry one. It is optional, so no client anywhere is a pass, and the worst this row ever
+    is, is a warning."""
+    try:
+        from dashboard.platforms import youtube_api
+
+        from . import profiles
+
+        every = profiles.every()
+        have, without, unread = [], [], []
+        for p in every:
+            path = p.data / "youtube_api.json"   # each channel's own (youtube_api.store_path)
+            try:
+                store = json.loads(path.read_text("utf-8"))
+                if not isinstance(store, dict):
+                    raise ValueError
+            except FileNotFoundError:
+                without.append(p.name)
+                continue
+            except (OSError, ValueError):
+                unread.append(p)
+                continue
+            client = all(youtube_api._usable(store.get(key)) for key in ("client_id", "client_secret"))
+            (have if client else without).append(p.name)
+        if unread:
+            # With several channels the command says whose file it means (-p): left to itself it works on the
+            # first channel, and would give that one a client it never asked for.
+            files = ", ".join(P.rel(p.data / "youtube_api.json") for p in unread)
+            again = " and ".join(f"reelforge{'' if len(every) == 1 else f' -p {p.slug}'} youtube-api client FILE"
+                                 for p in unread)
+            r.add(WARN, "YouTube API", f"{files} can't be read, so ReelForge has no client there. Give it the client "
+                                       f"file again: {again}")
+        elif not have:
+            r.add(OK, "YouTube API", "not set up (optional: docs/YOUTUBE-API.md)")
+        else:
+            whose = "" if len(every) == 1 else f" for {', '.join(have)}"
+            rest = f" (not set up for {', '.join(without)})" if without else ""
+            # (the guide beside it: it is where the window's side of this is said, as far as it has got)
+            r.add(OK, "YouTube API", f"client on file{whose}{rest}. You connect in ReelForge's window each time it "
+                                     "opens (docs/YOUTUBE-API.md)")
+    except Exception as e:  # the window's own packages are missing, say: the rows above have that
+        r.add(WARN, "YouTube API", f"couldn't be checked ({type(e).__name__})")
+
+
 def checks(render_test: bool = False, quiet: bool = False) -> Report:
     """Every check, as a Report (printed line by line unless quiet)."""
     r = Report(quiet)
@@ -222,6 +268,7 @@ def checks(render_test: bool = False, quiet: bool = False) -> Report:
               (f" ({', '.join(unset)} not set up yet: its Settings in the profile menu)" if unset else ""))
 
     extension_check(r)
+    youtube_api_check(r)
 
     if render_test and not r.failed:
         render_check(r)

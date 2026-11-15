@@ -15,4 +15,5 @@
 | **Bun** (runs ReelForge's window) | [MIT and others](https://bun.com/docs/project/licensing) | No: setup downloads it from Bun's GitHub releases (checksum verified) into `tools/bun` |
 | **OpenTUI** (`@opentui/core`, `@opentui/react`) and **React**, the window's packages | [MIT](https://github.com/anomalyco/opentui/blob/main/LICENSE) | No: installed by Bun from npm into `ui/node_modules`, exactly the versions in `ui/bun.lock` |
 
-The videos you make are yours. The kit never uploads anything; you post by hand from ReelForge.
+The videos you make are yours. Nothing is posted without your press: you post from ReelForge's Publish tab, by hand, with
+the browser extension, or for YouTube through its own API.

@@ -107,10 +107,36 @@ def items(*, assistant: list[str], root: Path, episodes: Path, completed: Path, 
          "a": notes + " First-time setup only asks a few questions, so give it the full picture too: describe "
               f"{'your channel' if main else name} in the chat, or give it the path of a file about it (your notes, "
               "a doc, examples you like). It keeps your words as the channel's brief and plans every video from it."},
+        # Posting. What the extension and the API route have and haven't been tried on is said as their own pages
+        # say it (docs/EXTENSION.md, docs/YOUTUBE-API.md): neither has been used on the live sites.
         {"q": "Does ReelForge post for me?",
-         "a": "No. ReelForge never posts, uploads or sends anything. Finished videos wait on **Publish**: each "
-              "platform's button opens its upload page, copies exactly the text it needs and shows the video in "
-              f"{desktop.FILES}, so you drag it in and press Post."},
+         "a": "Not by itself, and never without your press. Finished videos wait on **Publish**. Under **BY HAND**, "
+              "each platform's button opens its upload page, copies exactly the text it needs and shows the video in "
+              f"{desktop.FILES}, so you drag it in and press Post.\n\n"
+              "Two optional things can do more of it: the browser extension, and for YouTube its own API. The next "
+              "answers say how. Your AI never posts."},
+        {"q": "What does the browser extension do?",
+         "a": "It is optional. With it, **Post…** on **Publish** opens each platform's upload page in your own "
+              "browser, attaches the video and fills in the text, then stops for you to check it. Until a browser is "
+              "connected, **Post…** shows the steps to set it up. The buttons under **BY HAND** work the same "
+              "without it.\n\n"
+              "It is tested against copies of the upload pages, not yet on the live sites. `docs/EXTENSION.md` in "
+              "the ReelForge folder says what it does and doesn't do."},
+        {"q": "Who presses Post?",
+         "a": "You do. The extension fills in the upload page and stops at the platform's own Post button. It "
+              "presses that button for you only where you switched on **Press Post for me** in the extension's own "
+              "settings, and only for a post you asked that for: with **Stop before the Post button** switched off "
+              "in ReelForge's question and your yes in your browser, or with **Press Post for me on …** ticked in "
+              "the extension's popup when you start the post there. Never on X.\n\n"
+              "Nothing starts a post but your press. ReelForge has no command for it, and your AI is told never to "
+              "post."},
+        {"q": "Can ReelForge upload to YouTube through its API?",
+         "a": "Yes, as an option. With a Google Cloud project you make yourself, ReelForge uploads a video through "
+              "YouTube's own API when you press it on **Publish**. You connect on Google's page each time you open "
+              "ReelForge.\n\n"
+              "It is tested against a stand-in for Google and has never uploaded to YouTube itself, so post your "
+              "first one as private and check it in YouTube Studio. `docs/YOUTUBE-API.md` in the ReelForge folder "
+              "has the steps."},
         {"q": "Where are my videos?",
          "a": f"On **Publish**, and as files: every video has its own folder in {episodes_at}, and a copy of "
               f"each finished one goes to {completed_at}."},
@@ -130,12 +156,14 @@ def items(*, assistant: list[str], root: Path, episodes: Path, completed: Path, 
         {"q": "How do I update ReelForge?",
          "a": "**Updates** checks for a new version every few hours while ReelForge is open, and the bell tells "
               "you when one is out. **Update and restart** installs it, and your channel, videos, stats and settings "
-              "stay as they are."},
+              "stay as they are. If you use the browser extension, press Reload on its card on your browser's "
+              "extensions page afterwards, so the browser runs the new version too."},
         {"q": "Can I move the ReelForge folder?",
          "a": f"Yes. ReelForge belongs in a folder of its own, {own}: when it's somewhere else, **Move…** beside "
               "**ReelForge's folder** on this tab puts it there (or `reelforge move FOLDER` in a terminal, for another "
               "folder on the same drive). Everything in it goes along, and the reelforge command, the icon and "
-              "Background refresh follow it. Moved it by hand? Run `reelforge setup` in its new place."},
+              "Background refresh follow it. Moved it by hand? Run `reelforge setup` in its new place. If you use "
+              "the browser extension, load it again from the new folder afterwards."},
         {"q": "Something isn't working.",
          "a": "Try **Restart** on this tab first: ReelForge closes and opens again. If that doesn't fix it, run "
               "`reelforge doctor` in a terminal: it checks everything ReelForge needs and says how to fix anything "

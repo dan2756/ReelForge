@@ -1,5 +1,5 @@
-"""ReelForge's window, the Python side: stats for TikTok, YouTube, Instagram and X, help posting by hand,
-notifications and updates.
+"""ReelForge's window, the Python side: stats for TikTok, YouTube, Instagram and X, help posting (by hand, with
+the browser extension, or for YouTube through its API), notifications and updates.
 
 The window itself is the OpenTUI app in ui/ (ui/src/dashboard/); this is what it shows and what its buttons do. It
 runs in studio/bridge.py's loop: the window calls the @rpc methods, and each update_* method sends one piece of the
@@ -2592,12 +2592,13 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
         done = move.take_marker()
         if not done:
             return
+        again = f" {done['extension']}" if done.get("extension") else ""   # a connected browser loads it anew
         self.notify(f"ReelForge is in {done.get('to')} now. If you open it in Claude Code or Codex, open this folder "
                     "from now on." + (" Some things couldn't follow it: run setup there." if done.get("problems")
-                                      else ""), title="Moved", timeout=20)
+                                      else "") + again, title="Moved", timeout=20)
         self._safe(lambda: notify.add("move", "ReelForge moved into its own folder",
-                                      f"From {done.get('from')} to {done.get('to')}.", key=f"moved:{done.get('ts')}",
-                                      tab="settings", read=True), False)
+                                      f"From {done.get('from')} to {done.get('to')}.{again}",
+                                      key=f"moved:{done.get('ts')}", tab="settings", read=True), False)
 
     # --- updates ------------------------------------------------------------------------------
 

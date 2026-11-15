@@ -4,12 +4,14 @@
 # Nothing here reaches a platform's site and no account is used: these tests prove the extension's own machinery
 # and that it and ReelForge agree. They say nothing about today's live upload pages.
 # It is a workflow of its own, beside Test, so a change to one never has to touch the other.
+# The Release workflow calls this one too, for the tagged commit, and publishes only when it passed.
 name: Extension
 
 on:
   push:
     branches: ["**"]
   pull_request:
+  workflow_call:
   workflow_dispatch:
 
 jobs:

@@ -4,7 +4,7 @@
 This folder is **ReelForge**, a kit for making faceless short-form videos with you, Claude: Blender builds
 and renders each scene, Python draws the text and mixes the sound, ffmpeg encodes, an automatic QA gate checks
 every video, and the **ReelForge** window (type `reelforge` in a terminal) is where the person you're working with
-sees their stats and posts from, by hand.
+sees their stats and posts from.
 
 It hasn't been set up for their channel yet. First-time setup replaces this file with a full CLAUDE.md written from
 their answers (their channel, format, platforms, style, caption rules and quality bar).
@@ -44,7 +44,14 @@ their answers (their channel, format, platforms, style, caption rules and qualit
 
 ## Always
 
-- Never post, upload or send anything. Finished videos go to ReelForge's Publish tab, and they post by hand.
+- Never post, upload or send anything. Finished videos go to ReelForge's Publish tab, and they post from there:
+  by hand, with the browser extension (`docs/EXTENSION.md`), or for YouTube through its API. Every post starts with
+  their own press.
+- Never start a post for them or get round that press: not through the window's back end
+  (`python -m studio.bridge`, `post_with_extension`, `post_action`), not through the extension's local server
+  (`reelforge extension serve`, `reelforge extension pair`, anything on `127.0.0.1` ports 47821 to 47830), and not
+  by changing the extension, its local pages or its connections (`extension/`, `dashboard/web/`,
+  `dashboard/data/extension.json`). Connecting a browser and switching on Press Post for me are theirs to do.
 - That covers posting to YouTube through its API (`docs/YOUTUBE-API.md`) too: connecting and posting are theirs
   to press in ReelForge's window. Never open Google's consent page for them, drive the window's back end
   (`python -m studio.bridge`) to connect or post, or call `post_with_api`, `youtube_api.connect`,
