@@ -199,6 +199,14 @@ class Question(PostingTest):
         self.assertEqual(info["how"], "ReelForge opens each upload page in your browser, attaches the video and fills "
                                       "in the text. You check it and press Post.")
         self.assertIn("always on X, you check it and press Post", info["how_press"])
+        # The switch alone presses nothing (docs/EXTENSION.md): the extension's own setting and your yes for
+        # this post in the browser are both needed, and without the yes it stops.
+        self.assertEqual(info["how_press"], (
+            "ReelForge opens each upload page in your browser, attaches the video and fills in the text. The "
+            "extension presses Post only where Press Post for me is switched on in its settings, and only after "
+            "you click Yes, press Post for me on the page that opens. Without that click it stops at the Post "
+            "button. Everywhere else, and always on X, you check it and press Post."))
+        self.assertNotIn("presses Post too", info["how_press"])
         by = {p["key"]: p for p in info["platforms"]}
         self.assertEqual(list(by), list(NAMES))
         self.assertEqual(by["youtube"]["text"], {"title": f"{CAPTION} #shorts", "description": TAGS})

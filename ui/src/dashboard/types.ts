@@ -269,7 +269,8 @@ export interface ExtensionView {
 
 /** One platform in the question before a post (post_info): the exact text for each of its boxes, the account, and
  * what stops it if anything does. again: it is up there already, and can be posted again when ticked. press: the
- * extension may press Post there, once "stop before posting" is switched off. */
+ * extension may press Post there, once "stop before posting" is switched off here. It then still presses only where
+ * Press Post for me is on in its own settings and you said yes for that post in the browser. */
 export interface PostInfoPlatform {
   key: string
   name: string
@@ -290,7 +291,7 @@ export interface PostInfo {
   why: string
   note: string // how far posting with the extension has been tested
   how: string // what happens next, in a sentence
-  how_press: string // ... with "stop before posting" switched off
+  how_press: string // ... with "stop before posting" switched off: what else the extension wants before it presses
 }
 
 /** One platform on the Accounts tab: on (connected), login (its handle is in, waiting for the one log-in) or off

@@ -371,11 +371,12 @@ describe("Post…", () => {
     expect(dialog(h)).toContain("Not checked by ReelForge: this video didn't come from the pipeline.")
     expect(dialog(h)).toContain("Stop before the Post button")
     expect(dialog(h)).toContain("You check it and press Post.") // as it starts: you press it
-    expect(dialog(h)).not.toContain("the extension presses Post too")
+    expect(dialog(h)).not.toContain("Yes, press Post for me")
     const [x, y] = find(h, "Stop before the Post button")!
     await h.t.mockMouse.click(x + 31, y) // its switch
     await h.settle(300)
-    expect(dialog(h)).toContain("Where you switched on Press Post for me in the extension's settings, the extension presses Post too. Everywhere else, and always on X, you check it and press Post.")
+    // The switch alone presses nothing: the extension's own setting and your click for this post in the browser too.
+    expect(dialog(h)).toContain("The extension presses Post only where Press Post for me is switched on in its settings, and only after you click Yes, press Post for me on the page that opens. Without that click it stops at the Post button. Everywhere else, and always on X, you check it and press Post.")
     await clickText(h, "✓  YouTube", 1) // TikTok and X will do
     await clickText(h, "✓  Instagram", 1)
     expect(dialog(h)).toContain("Stop before the Post button") // still: TikTok is ticked

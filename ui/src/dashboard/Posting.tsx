@@ -5,8 +5,10 @@
 // disconnecting one, the steps that set it up) and its one line on the Accounts tab (ExtensionStrip).
 //
 // dashboard/posting_tab.py sends the "posting" and "extension" views and writes their words. Nothing here posts by
-// itself: a post starts with your press in the question, and ends at the platform's own Post button. The extension
-// is optional, and everything on the Publish tab's By hand rows works without it.
+// itself: a post starts with your press in the question, and ends at the platform's own Post button. The question's
+// "Stop before the Post button" switch, off, is one of three things the extension wants before it presses that
+// button: Press Post for me on in its own settings, and your yes for that post in the browser, are the other two.
+// The extension is optional, and everything on the Publish tab's By hand rows works without it.
 
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/react"
@@ -148,7 +150,8 @@ const labelWidth = (platforms: PostInfoPlatform[]) => Math.max(0, ...platforms.f
 
 /** Post…: the video and its review, what happens next in a sentence, then each platform with its tick box, its account
  * and the exact text for each of its boxes (or why it can't go). Start hands the ticked ones to the extension, through
- * a page ReelForge opens in your browser. Nothing is posted here: the extension fills in each upload page and stops. */
+ * a page ReelForge opens in your browser. Nothing is posted here: the extension fills in each upload page and stops,
+ * unless you flip the switch here and also say yes on that page (the sentence under the video says which it is). */
 export function PostDialog({ data, close }: { data: PostData; close: () => void }) {
   const s = useDash()
   const { info, only } = data

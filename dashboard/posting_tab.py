@@ -19,7 +19,9 @@ extension_folder (show the folder to load in the browser) and dismiss_extension_
 is written here, so the window only draws them.
 
 Nothing here posts by itself. A post starts with post_with_extension, which only your press in the window calls, and
-ends at the platform's own Post button unless you switched "stop before posting" off for it.
+ends at the platform's own Post button. The extension presses that button only where all of this holds: you switched
+"stop before posting" off for the post, Press Post for me is on for the platform in the extension's own settings, and
+you said yes to it for that post in the browser, on the page that opens. Never on X.
 """
 
 from __future__ import annotations
@@ -87,11 +89,14 @@ SETUP = (
 SIGNED_NOTE = ("That is what the extension saw in each browser. It is apart from the accounts connected on the Accounts "
                "tab, which ReelForge reads your stats from.")
 # What happens after your yes to the question before a post: as it is asked, and with "stop before posting" off.
+# That switch alone presses nothing (docs/EXTENSION.md, "Two ways to post"): the extension also wants Press Post for
+# me switched on in its own settings, and your click for this post on the page that opens.
 HOW = ("ReelForge opens each upload page in your browser, attaches the video and fills in the text. You check it "
        "and press Post.")
-HOW_PRESS = ("ReelForge opens each upload page in your browser, attaches the video and fills in the text. Where you "
-             "switched on Press Post for me in the extension's settings, the extension presses Post too. Everywhere "
-             "else, and always on X, you check it and press Post.")
+HOW_PRESS = ("ReelForge opens each upload page in your browser, attaches the video and fills in the text. The "
+             "extension presses Post only where Press Post for me is switched on in its settings, and only after "
+             "you click Yes, press Post for me on the page that opens. Without that click it stops at the Post "
+             "button. Everywhere else, and always on X, you check it and press Post.")
 
 
 def numbers(post: dict) -> str:
@@ -459,8 +464,8 @@ class PostingTab:
                             force: list[str] | None = None, video: str | None = None) -> dict | None:
         """Your yes to the question: a job for each ticked platform (posting.create_batch), then the local page that
         hands them to the extension. stop_before: the extension stops at the platform's own Post button (off only
-        where post_info said press is available). force: the platforms to post to again although the video is up
-        there. video: the file the question was about (post_info's video.path), which the window sends back.
+        where post_info said press is available, and the extension then still asks you in the browser before it
+        presses). force: the platforms to post to again although the video is up there. video: the file the question was about (post_info's video.path), which the window sends back.
         Returns {"batch", "jobs": [{"id", "platform"}], "blocked": [...], "opened"}; None when there was
         nothing to start from."""
         if self.demo:
