@@ -300,6 +300,58 @@ class Making(LedgerTest):
         self.assertIn("Already posted", block["message"])
         self.assertEqual([j["platform"] for j in self.batch("youtube", force=("youtube",))["jobs"]], ["youtube"])
 
+    def test_a_post_made_by_hand_may_be_up_before_any_read_has_seen_it(self):
+        # The Publish tab's own button for a platform opens its upload page and notes that in the upload log. A
+        # post made there is invisible here until a stats read files it, and on Instagram and X that can take long.
+        db.log_upload("tiktok", "EP01.mp4", "manual", message="opened the upload page")
+        look = posting.preview(self.video, ["tiktok", "youtube"], CAPTION, TAGS, self.cfg)
+        self.assertEqual(sorted(look["blocked"]), ["tiktok"])
+        block = look["blocked"]["tiktok"]
+        self.assertEqual((block["reason"], block["message"]), (
+            "by_hand", "Its upload page was opened by hand in the last six hours. A post made there may be up "
+                       "before a stats read has seen it."))
+        self.assertIn("by_hand", posting.AGAIN)  # the question offers "again" for it
+        made = self.batch("tiktok", "youtube")
+        self.assertEqual(([j["platform"] for j in made["jobs"]], [b["reason"] for b in made["blocked"]]),
+                         (["youtube"], ["by_hand"]))
+        self.assertEqual(self.job(force=("tiktok",))["state"], "queued")  # you said so: it goes
+        # After six hours a post made there would no longer be filed under this video by its page's opening
+        # (analytics.auto_link), and the page's opening no longer stands in the way either.
+        self.video.write_bytes(b"another video")
+        db.log_upload("x", "ep01.mp4", "manual", message="opened the upload page")
+        self.assertEqual([b["reason"] for b in self.batch("x")["blocked"]], ["by_hand"])
+        with db.connect() as c:
+            c.execute("UPDATE uploads SET ts = ? WHERE platform = 'x'",
+                      ((datetime.now(timezone.utc) - timedelta(hours=6, minutes=1)).isoformat(timespec="seconds"),))
+        self.assertEqual(self.job("x")["state"], "queued")
+
+    def test_its_posted_is_yours_to_say_for_a_try_that_stopped_with_the_video_on_the_page(self):
+        # "TikTok changed its page ... you can finish by hand in this tab", and you did.
+        job = self.walk(self.job(), "opening", "uploading", "filling")
+        posting.advance(job["id"], "failed", install=CHROME, step="fill_caption", error_code="hook_not_found")
+        self.assertTrue(posting.reached_the_page(job["id"]))
+        said = posting.resolve(job["id"], True)
+        self.assertEqual((said["state"], said["detail"]), ("posted", "you said it's posted"))
+        self.assertEqual([b["reason"] for b in self.batch()["blocked"]], ["posted"])
+        # Not for a try that never got the video onto a page, nor for an upload through an API.
+        early = self.walk(self.job("youtube"), "opening")
+        posting.advance(early["id"], "failed", install=CHROME, error_code="not_signed_in")
+        self.assertFalse(posting.reached_the_page(early["id"]))
+        self.refused("bad_transition", posting.resolve, early["id"], True)
+        api = self.job("x", via={"x": "api"})
+        posting.advance(api["id"], "uploading", by="app")
+        posting.advance(api["id"], "failed", by="app", error_code="interrupted")
+        self.refused("bad_transition", posting.resolve, api["id"], True)
+        # Nor while another try at the same post stands: that one has the say.
+        self.video.write_bytes(b"one more video")
+        first = self.walk(self.job("instagram"), "uploading")
+        posting.cancel(first["id"], "you cancelled it")
+        second = self.job("instagram")
+        said = self.refused("bad_transition", posting.resolve, first["id"], True)
+        self.assertEqual(said.message, "Another try at this post stands now. Answer on its row.")
+        posting.cancel(second["id"])
+        self.assertEqual(posting.resolve(first["id"], True)["state"], "posted")
+
     def test_a_video_is_its_bytes_not_its_name(self):
         job = self.job()
         renamed = self.root / "videos" / "final cut.mp4"
@@ -492,7 +544,10 @@ class Moving(LedgerTest):
         self.assertEqual((aside["state"], aside["detail"]), ("cancelled", "posted by hand"))
         self.assertEqual(posting.cancel(job["id"], "posted by hand"), aside)
         self.refused("bad_transition", posting.resolve, job["id"], True)
-        self.assertEqual(self.job()["state"], "queued")
+        # The video may be up there by your hand now, which no stats read has seen yet: the next post there is
+        # one you ask for as a post again (test_a_post_made_by_hand_may_be_up_before_any_read_has_seen_it).
+        self.assertEqual([b["reason"] for b in self.batch()["blocked"]], ["by_hand"])
+        self.assertEqual(self.job(force=("tiktok",))["state"], "queued")
 
     def test_only_queued_expires_and_only_a_job_a_browser_has_goes_unknown(self):
         held = ("claimed", "opening", "uploading", "filling", "ready", "posting", "unknown")

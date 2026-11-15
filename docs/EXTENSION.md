@@ -130,6 +130,12 @@ Once the platform's button was pressed, by you in the tab or for you, the row ha
 can't be taken back. It says that it is waiting for the platform, and asks **It's posted** or **It didn't post**.
 If you say it didn't post and the extension then sees the post go up, the row asks "did it post?" again.
 
+A post you make by hand is one ReelForge can't see until a stats read finds it. So for six hours after you opened
+a platform's upload page by hand for a video (a button under **BY HAND**, or **Post by hand** on the local page),
+that platform starts unticked in the question, and goes only when you tick it to post there again. And a try that
+stopped with the video already on the platform's page, where you can finish by hand, has **It's posted** on its row
+beside **Try again**.
+
 If the extension is not in the browser that opened the page, the page says so, shows the set-up steps, and has a
 **Post by hand** button for each platform. That button does what the buttons under **BY HAND** on the Publish tab
 do: it copies the text, shows the file and opens the upload page.

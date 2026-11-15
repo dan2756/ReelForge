@@ -654,6 +654,25 @@ class Posting(ApiPosting):
         row = self.rows(w)["youtube"]
         self.assertEqual((row["state"], row["via"], row["actions"]), ("posted", "api", ["post_again"]))  # no link
 
+    def test_a_video_that_may_be_up_by_hand_goes_through_the_api_only_as_a_post_again(self):
+        """BY HAND's YouTube button opened the upload page. A post made there shows nowhere here until a stats read
+        finds it: the row offers no plain Post with API…, and the question says what a yes would mean."""
+        w = self.window()
+        w.call("tab_opened", "publish")
+        w.call("pick_file", str(self.video))
+        self.assertEqual(self.rows(w)["youtube"]["actions"], ["post_api"])
+        w.call("open_upload", "youtube", CAPTION, TAGS)
+        row = self.rows(w)["youtube"]
+        self.assertEqual((row["state"], row["actions"], row["api"]), ("none", [], {"force": True}))
+        info = w.call("youtube_api_info", CAPTION, TAGS)
+        self.assertEqual((info["can_post"], info["force"], info["blocked"]["reason"]), (True, True, "by_hand"))
+        self.assertEqual(info["again"], "If you posted it there, this would be a second video.")
+        refused = w.call("post_with_api", CAPTION, TAGS, "", False, self.yes_to(info))
+        self.assertEqual((refused["started"], [b["reason"] for b in refused["blocked"]]), (False, ["by_hand"]))
+        self.assertEqual(self.google.videos, [])
+        made = w.call("post_with_api", CAPTION, TAGS, "", True, self.yes_to(info))  # "Post it again"
+        self.assertEqual(self.over(w, made["jobs"][0]["id"])["state"], "posted")
+
     def test_a_cancel_that_arrives_with_the_last_piece_on_its_way_ends_nothing(self):
         """The row still showed Cancel (the window redraws once a second) when the last piece went out. A job that
         click freed would be offered again as if nothing had been sent, with the video maybe up: a second one."""

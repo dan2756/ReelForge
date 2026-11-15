@@ -59,6 +59,11 @@ POSTING_FOR = timedelta(minutes=15)  # Post pressed for you and then silent this
 OPENING_FOR = timedelta(minutes=20)  # ... before the video was on any page: nothing was posted
 FILLING_FOR = timedelta(minutes=45)  # ... with the video on the page: you may have pressed Post yourself
 CLOCK_SLACK = timedelta(minutes=2)   # a platform's clock and this computer's needn't agree to the second
+# How long an upload page you opened by hand stands in the way of a plain post there. A post made on that page is
+# invisible here until a stats read files it, and analytics.auto_link gives a post six hours from its page's opening
+# to count as that video's: for as long, posting the video there takes saying so, like any post again.
+BY_HAND_FOR = timedelta(hours=6)
+AGAIN = ("posted", "spotted", "unknown", "by_hand")  # why a platform is blocked, where "again" gets past it (force)
 
 X_LIMIT = videos.X_LIMIT
 DIGESTS = "video_digests"   # meta: {path: [size, mtime_ns, sha256]}, so a 100 MB video is read once, not at every look
@@ -333,7 +338,7 @@ def preview(video: Path, platforms: list[str], caption: str, tags: str, cfg: dic
         sha, episode = digest(video), db.episode_for_video(video.name)
         with db.connect() as c:
             for p in left:
-                block, _ = _standing(c, sha, p, episode["id"] if episode else None, force)
+                block, _ = _standing(c, sha, p, episode["id"] if episode else None, force, video.name)
                 if block:
                     blocked.append(block)
     return {"review": review, "texts": texts, "blocked": {b["platform"]: b for b in blocked}}
@@ -374,10 +379,24 @@ def _before(video: Path, texts: dict[str, dict], title: str, cfg: dict, demo: bo
     return review, blocked
 
 
-def _standing(c: sqlite3.Connection, sha: str, platform: str, episode: int | None,
-              force) -> tuple[dict | None, dict | None]:
+def by_hand(c: sqlite3.Connection, sha: str, platform: str, name: str) -> bool:
+    """Whether this video may be up on a platform by your own hand without ReelForge having seen it yet: its upload
+    page was opened by hand in the last six hours (the Publish tab's button, or the local page's Post by hand, which
+    also leaves its job cancelled as "posted by hand")."""
+    since = (_now() - BY_HAND_FOR).isoformat(timespec="seconds")
+    if c.execute("SELECT 1 FROM uploads WHERE platform = ? AND status = 'manual' AND lower(video) = lower(?) "
+                 "AND ts >= ? LIMIT 1", (platform, name, since)).fetchone():
+        return True
+    last = c.execute("SELECT state, detail, updated_at FROM post_jobs WHERE video_sha256 = ? AND platform = ? "
+                     "AND superseded = 0 ORDER BY rowid DESC LIMIT 1", (sha, platform)).fetchone()
+    return bool(last and last["state"] == "cancelled" and last["detail"] == "posted by hand"
+                and last["updated_at"] >= since)
+
+
+def _standing(c: sqlite3.Connection, sha: str, platform: str, episode: int | None, force,
+              name: str) -> tuple[dict | None, dict | None]:
     """For one platform, as the ledger and the stats stand: (why a new job can't be made for this video, the posted
-    or unknown job a forced one sets aside)."""
+    or unknown job a forced one sets aside). name: the video's file name, which the upload log goes by."""
     live = c.execute(f"SELECT * FROM post_jobs WHERE video_sha256 = ? AND platform = ? AND superseded = 0 "
                      f"AND state IN ({','.join('?' * len(LIVE))})", (sha, platform, *LIVE)).fetchone()
     if live and (live["state"] in IN_FLIGHT or platform not in force):
@@ -389,6 +408,10 @@ def _standing(c: sqlite3.Connection, sha: str, platform: str, episode: int | Non
     if spotted and platform not in force:
         return {"platform": platform, "reason": "spotted", "url": spotted["url"],
                 "message": "Already posted: ReelForge found this video's post there."}, None
+    if platform not in force and by_hand(c, sha, platform, name):
+        return {"platform": platform, "reason": "by_hand",
+                "message": "Its upload page was opened by hand in the last six hours. A post made there may be up "
+                           "before a stats read has seen it."}, None
     return None, None
 
 
@@ -404,7 +427,7 @@ def _create(video: Path, texts: dict[str, dict], title: str, cfg: dict, press: b
     with db.connect() as c:
         c.execute("BEGIN IMMEDIATE")  # the look and the insert are one step, whoever else is making jobs
         for p in left:
-            block, aside = _standing(c, sha, p, episode, force)
+            block, aside = _standing(c, sha, p, episode, force, video.name)
             if block:
                 blocked.append(block)
                 continue
@@ -529,6 +552,12 @@ def advance(job_id: str, state: str, *, by: str = "extension", install: str | No
         else:
             if by == "person" and pressed and state == "posted" and old["state"] in ON_THE_PAGE:
                 pass  # you pressed Post in the tab while the video was going up: "It's posted" is yours to say
+            elif by == "person" and state == "posted" and old["state"] in ("failed", "cancelled") and \
+                    _reached_the_page(c, old):
+                # The extension stopped, or you called it off, with the video on the platform's page, and you
+                # finished there by hand. Not while another try stands for this video: that one has the say.
+                if _another_stands(c, old):
+                    raise Refused("bad_transition", "Another try at this post stands now. Answer on its row.", old)
             elif not allowed(old["state"], state, by):
                 raise Refused("bad_transition", f"A post that is {old['state']} can't become {state}.", old)
             new = _write(c, old, state, by, step=step, progress=progress, detail=detail, error_code=error_code,
@@ -552,16 +581,34 @@ def _pressed(c: sqlite3.Connection, job_id: str) -> bool:
                      (job_id,)).fetchone() is not None
 
 
+def reached_the_page(job_id: str) -> bool:
+    """Whether a job of the extension's got its video onto the platform's page, where you can finish by hand."""
+    with db.connect() as c:
+        job = c.execute("SELECT * FROM post_jobs WHERE id = ?", (job_id,)).fetchone()
+        return bool(job and _reached_the_page(c, dict(job)))
+
+
+def _reached_the_page(c: sqlite3.Connection, job: dict) -> bool:
+    marks = ",".join("?" * 4)
+    return job["via"] == "extension" and c.execute(
+        f"SELECT 1 FROM post_events WHERE job = ? AND state IN ({marks}) LIMIT 1",
+        (job["id"], *ON_THE_PAGE, "ready", "posting")).fetchone() is not None
+
+
+def _another_stands(c: sqlite3.Connection, job: dict) -> bool:
+    return c.execute(f"SELECT 1 FROM post_jobs WHERE video_sha256 = ? AND platform = ? AND superseded = 0 "
+                     f"AND id != ? AND state IN ({','.join('?' * len(LIVE))})",
+                     (job["video_sha256"], job["platform"], job["id"], *LIVE)).fetchone() is not None
+
+
 def _back(c: sqlite3.Connection, old: dict, post_id: str | None, url: str | None) -> dict:
     """The browser says a post went up, for a job you ended with "It didn't post" after Post was pressed. That is
     news about a real post, and it isn't dropped: the job is "not sure" again, with the post's id and link if the
     page showed them, so nothing posts this video there once more until you have looked. Where another try stands
     for the video by now, this one is kept behind it and stands again if that try ends without a post."""
-    other = c.execute(f"SELECT 1 FROM post_jobs WHERE video_sha256 = ? AND platform = ? AND superseded = 0 "
-                      f"AND id != ? AND state IN ({','.join('?' * len(LIVE))})",
-                      (old["video_sha256"], old["platform"], old["id"], *LIVE)).fetchone()
-    c.execute("UPDATE post_jobs SET superseded = ? WHERE id = ?", (int(other is not None), old["id"]))
-    old = {**old, "superseded": int(other is not None)}
+    behind = int(_another_stands(c, old))
+    c.execute("UPDATE post_jobs SET superseded = ? WHERE id = ?", (behind, old["id"]))
+    old = {**old, "superseded": behind}
     return _write(c, old, "unknown", "app", post_id=post_id, url=url,
                   detail="the browser saw it posted after you said it didn't")
 

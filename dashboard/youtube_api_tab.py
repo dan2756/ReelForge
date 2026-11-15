@@ -87,6 +87,7 @@ KIDS_ASK = ("\"Made for kids\" is a declaration you make to YouTube, so ReelForg
 HOW = ("ReelForge uploads the video itself, through Google's API, with exactly this. Keep ReelForge open until its "
        "row says posted.")
 AGAIN_ASK = "It would be a second video."
+BY_HAND_ASK = "If you posted it there, this would be a second video."
 # A queued job waits ten minutes for its turn and no longer (posting.QUEUED_FOR: the clock expires it then, whoever
 # was to upload it). Said on its row while it waits, and when the wait is over. (TURN is short: with it the row is
 # still one row, Cancel and all, in a window 150 columns wide.)
@@ -448,7 +449,7 @@ class YouTubeApiTab:
                     said, act_on = to_look_at(job)
                     if said:
                         row["line"].append(["  " + said, AMBER if act_on else MUTED])
-            again = row["state"] in ("posted", "spotted")
+            again = row["state"] in ("posted", "spotted") or bool(row.get("by_hand"))  # up there, or may be
             if row["key"] != "youtube" or not (again or row["state"] in ("none", *posting.FREE)):
                 continue
             if connected:
@@ -506,7 +507,7 @@ class YouTubeApiTab:
             self.say_busy(e)
             return None
         text, block = look["texts"]["youtube"], look["blocked"].get("youtube")
-        again = bool(block and block["reason"] in ("posted", "spotted", "unknown"))
+        again = bool(block and block["reason"] in posting.AGAIN)
         send = {"privacy": out["privacy"], "made_for_kids": out["made_for_kids"], "title": text["title"],
                 "description": text["description"], "category": youtube_api.CATEGORY}
         # Your two choices first. In a window 24 rows tall only the first rows show without scrolling, and under a
@@ -530,7 +531,8 @@ class YouTubeApiTab:
                                  "size": f"{video.stat().st_size / 1024 / 1024:.1f} MB",
                                  "sha256": posting.digest(video)},
                 "review": look["review"], "send": send, "fields": fields, "can_post": not why, "why": why,
-                "force": again and not why, "blocked": block}
+                "force": again and not why, "blocked": block,
+                "again": BY_HAND_ASK if block and block["reason"] == "by_hand" else AGAIN_ASK}
 
     @rpc
     def youtube_api_connect(self, path: str = "", quiet: bool = False) -> bool | str:

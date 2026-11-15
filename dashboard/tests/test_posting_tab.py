@@ -520,6 +520,50 @@ class Posting(PostingTest):
         asked = {q["key"]: q for q in w.call("post_info", CAPTION, TAGS)["platforms"]}["tiktok"]
         self.assertEqual((asked["blocked"]["reason"], asked["again"]), ("unknown", True))
 
+    def test_a_video_that_may_be_up_by_hand_is_only_posted_there_when_you_say_again(self):
+        # BY HAND's own button opened TikTok's upload page. Whether a post was made there, nobody here knows until
+        # a stats read finds it: until then Post… must not go there by itself.
+        w = self.window()
+        w.call("open_upload", "tiktok", CAPTION, TAGS)
+        row = self.rows(w)["tiktok"]
+        self.assertEqual((row["state"], row["by_hand"], row["actions"]), ("none", True, []))
+        self.assertIn("upload page opened", plain(row["line"]))
+        self.assertFalse(self.rows(w)["youtube"]["by_hand"])
+        asked = {q["key"]: q for q in w.call("post_info", CAPTION, TAGS)["platforms"]}
+        self.assertEqual((asked["tiktok"]["blocked"]["reason"], asked["tiktok"]["again"]), ("by_hand", True))
+        self.assertIsNone(asked["youtube"]["blocked"])
+        plain_yes = self.post(w, "tiktok", "youtube")
+        self.assertEqual(([j["platform"] for j in plain_yes["jobs"]], [b["reason"] for b in plain_yes["blocked"]]),
+                         (["youtube"], ["by_hand"]))
+        (again,) = self.post(w, "tiktok", force=["tiktok"])["jobs"]  # ticked: "post there again"
+        self.assertEqual(again["platform"], "tiktok")
+
+    def test_posted_by_hand_from_the_local_page_is_not_tried_again_by_one_press(self):
+        w = self.window()
+        (job,) = self.post(w)["jobs"]
+        w.svc.post_by_hand(posting.get(job["id"]), "TikTok")  # what the local page's Post by hand does...
+        posting.cancel(job["id"], "posted by hand")              # ...and how it leaves the job
+        w.svc.jobs_changed(True)
+        row = self.rows(w)["tiktok"]
+        self.assertEqual((row["state"], row["by_hand"], row["actions"]), ("cancelled", True, ["post_again"]))
+        self.assertIn("○ cancelled (posted by hand)", plain(row["line"]))
+        w.call("post_action", job["id"], "retry")  # a Try again from the row as it was drawn before
+        self.assertEqual([j["state"] for j in posting.recent()], ["cancelled"])
+        self.assertIn("opened by hand in the last six hours", w.toasts()[-1])
+
+    def test_a_try_that_stopped_with_the_video_on_the_page_can_be_called_posted(self):
+        w = self.window()
+        (job,) = self.post(w)["jobs"]
+        self.work(job["id"], "uploading", "filling", "failed", step="fill_caption", error_code="hook_not_found",
+                  error_message="TikTok has changed its page. You can finish by hand in this tab.")
+        self.assertTrue(w.until(lambda: self.rows(w)["tiktok"]["state"] == "failed"))
+        self.assertEqual(self.rows(w)["tiktok"]["actions"], ["retry", "mark_posted"])
+        w.call("post_action", job["id"], "mark_posted")
+        row = self.rows(w)["tiktok"]
+        self.assertEqual((row["state"], row["actions"]), ("posted", ["post_again"]))
+        asked = {q["key"]: q for q in w.call("post_info", CAPTION, TAGS)["platforms"]}["tiktok"]
+        self.assertEqual((asked["blocked"]["reason"], asked["again"]), ("posted", True))
+
     def test_a_job_reelforge_lost_track_of_takes_your_word(self):
         w = self.window()
         made = self.post(w, "tiktok", "youtube")

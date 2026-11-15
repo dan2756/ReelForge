@@ -344,14 +344,23 @@ class PostingTab:
             url = (job["url"] if job and state == job["state"] else None) or (post["url"] if post else None)
             pressed = bool(job and state == job["state"] and state in PRESSABLE and job["via"] == "extension"
                            and self._safe(lambda: posting.pressed(job["id"]), False))
+            actions = [a for a in (PRESSED if pressed else ACTIONS[state]) if a != "open_post" or url]
+            if job and state == job["state"] and state in ("failed", "cancelled") and \
+                    self._safe(lambda: posting.reached_the_page(job["id"]), False):
+                # It stopped with the video on the platform's page, where you can finish by hand: yours to say.
+                actions.append("mark_posted")
+            # The video may be up there by your own hand (posting.by_hand): a new post is a post again, and is
+            # asked for like one, never started by one press of Try again.
+            hand = state in ("none", *posting.FREE) and self._by_hand(video, p.key)
+            if hand:
+                actions = ["post_again" if a == "retry" else a for a in actions]
             rows.append({"key": p.key, "name": p.name, "color": p.color, "state": state,
                          "line": state_line(job, post, p.name, opened.get(p.key), pressed).json(),
                          "busy": state in BUSY, "url": url,
                          "job": job["id"] if job and state == job["state"] else None,
                          # How that job goes: "extension" or "api". The window asks it before Try again.
                          "via": job["via"] if job and state == job["state"] else None,
-                         "actions": [a for a in (PRESSED if pressed else ACTIONS[state])
-                                     if a != "open_post" or url]})
+                         "by_hand": hand, "actions": actions})
         self.api_rows(rows, jobs, posts)  # what posting through YouTube's own API adds (youtube_api_tab.py)
         style = {"approved": GOOD, "none": MUTED, "demo": MUTED}.get(review["state"], f"bold {AMBER}")
         mark = {"approved": "✓ ", "none": "", "demo": ""}.get(review["state"], "! ")
@@ -362,6 +371,16 @@ class PostingTab:
                     # Only the extension is in the way: Post explains how to set it up instead of being greyed out.
                     setup=bool(why) and why == self.extension_needed(extension))
         self.emit("posting", view)
+
+    def _by_hand(self, video: Path, platform: str) -> bool:
+        def look() -> bool:
+            with db.connect() as c:
+                return posting.by_hand(c, posting.digest(video), platform, video.name)
+
+        try:
+            return bool(self._safe(look, False))
+        except OSError:
+            return False  # the video is gone
 
     def cant_post(self, video: Path, review: dict, extension: dict, rows: list[dict]) -> str:
         """Why Post with the extension can't be pressed for the picked video now ("": it can)."""
@@ -458,7 +477,7 @@ class PostingTab:
                 "fields": [{"label": FIELDS[k], "text": v or "—"} for k, v in look["texts"][p.key].items()],
                 "blocked": block, "review": look["review"]["state"],
                 # Posting again is yours to ask for, by name: only what is already up (or may be) can be forced.
-                "again": bool(block and block["reason"] in ("posted", "spotted", "unknown")),
+                "again": bool(block and block["reason"] in posting.AGAIN),
                 "press": posting.press_unlocked(p.key),
             })
         if self.demo:

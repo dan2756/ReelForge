@@ -113,8 +113,10 @@ Things to know:
 The same rules as for the extension apply. A video can have one post under way to YouTube, whichever way it goes.
 A video that is up on YouTube, or that a stats read has found there, is not posted again unless you ask for it by
 name: its row has **Again with API…**, whose question says that it makes a second video and whose button reads
-**Post it again**. A video is known by its content, not its file name. A video that came from the pipeline is
-posted only when QA passed on that exact file and the review says APPROVED for that cut.
+**Post it again**. The same goes for six hours after you opened YouTube's upload page by hand for the video: a
+post made there is one ReelForge can't see until a stats read finds it, so the question says that this would be a
+second video if you posted it there. A video is known by its content, not its file name. A video that came from the
+pipeline is posted only when QA passed on that exact file and the review says APPROVED for that cut.
 
 One video uploads at a time for a channel. A second one waits its turn, for up to ten minutes, and its row says
 so. If the first upload takes longer than that, the second never starts. Its row says it never started, and if
