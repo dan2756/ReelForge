@@ -265,8 +265,10 @@ class PostingTab:
         if not self.demo:
             lines.append(Text(TESTED, MUTED))
         # The Publish tab's one line about it while it isn't set up, under the line that says so: what it does, and
-        # that nobody needs it. The middle part is the one a narrow window keeps.
-        hint = parts([(Text("Optional. ", MUTED), 1), (Text("It can fill in the upload pages for you.", MUTED), 0),
+        # that nobody needs it. The middle part is the one a narrow window keeps, so it says by itself how far that
+        # has been tested (TESTED, in full, is in the dialog Set it up opens), in few enough words to show beside
+        # the line's two buttons in a window 120 columns wide.
+        hint = parts([(Text("Optional. ", MUTED), 1), (Text("Fills in upload pages (tested on copies).", MUTED), 0),
                       (Text(" You check each one and press Post.", MUTED), 2)])
         self.emit("extension", {
             "state": status["state"], "line": status["line"].json(), "lines": [t.json() for t in lines],

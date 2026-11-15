@@ -459,11 +459,12 @@ describe("without the extension", () => {
 
   test("one line says the extension exists, and Hide puts it away for good", async () => {
     const h = await kit({}, [120, 30])
-    expect(frame(h)).toContain("It can fill in the upload pages for you.")
-    expect(frame(h)).toMatch(/▐ Set it up ▌ +Hide/)
+    // What it does comes with how far that has been tested, in this window too, which only has room for the middle
+    // of the line: nothing else on the tab says it.
+    expect(frame(h)).toMatch(/┃ Fills in upload pages \(tested on copies\)\. +▐ Set it up ▌ +Hide/)
     await clickText(h, " Hide ", 2)
     await until(h, () => h.bridge.view<ExtensionView>("extension")!.hint_dismissed)
-    expect(frame(h)).not.toContain("It can fill in the upload pages for you.")
+    expect(frame(h)).not.toContain("Fills in upload pages")
     expect(frame(h)).not.toContain("Set it up")
     expect(frame(h)).toContain("○ Browser extension not connected") // still said, in one line
     expect(frame(h)).toContain("▐ Post… ▌")

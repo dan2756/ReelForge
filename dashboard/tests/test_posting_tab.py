@@ -603,8 +603,13 @@ class ExtensionView(PostingTest):
         self.assertIn("not yet on the live sites", said)  # never more than the tests have shown
         # The Publish tab's one line about it (a narrow window keeps the part ranked 0), and the steps to set it up.
         self.assertEqual([(plain(text), rank) for text, rank in view["hint"]],
-                         [("Optional. ", 1), ("It can fill in the upload pages for you.", 0),
+                         [("Optional. ", 1), ("Fills in upload pages (tested on copies).", 0),
                           (" You check each one and press Post.", 2)])
+        # What a narrow window keeps says by itself how far the extension is tested, and still fits beside the two
+        # buttons in a window 120 columns wide (43 columns there).
+        kept = "".join(plain(text) for text, rank in view["hint"] if rank == 0)
+        self.assertIn("tested on copies", kept)
+        self.assertLessEqual(cell_len(kept), 43)
         self.assertEqual(len(view["steps"]), 4)
         self.assertIn("chrome://extensions", view["steps"][0])
         self.assertIn("Load unpacked", view["steps"][2])
