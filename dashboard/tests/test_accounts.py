@@ -470,6 +470,35 @@ class WindowTest(unittest.TestCase):
         self.assertIn("error: saving YouTube's handle: PermissionError: [Errno 13] Permission denied: 'config.toml'",
                       sync.log_path().read_text("utf-8"))
 
+    def test_a_typed_in_number_that_goes_down_is_asked_about_first(self):
+        """Type in stats: a number lower than the one saved replaces it, so Save says so first and stores it when
+        pressed again. A slip the wrong way (3,400 where 34,000 was meant) is seen before it costs anything."""
+        self.forget("youtube", "instagram", "x")
+        every = self.real_platforms({"tiktok": "@mine", "instagram": "@mine"})
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()):
+            w = self.open(every, demo_mode=False)
+            eid = str(w.call("log_stats", "instagram")["episodes"][0]["id"])
+            typed = lambda: [p["views"] for p in db.posts_latest() if p["platform"] == "instagram"]  # noqa: E731
+            self.assertIsNone(w.call("save_logged_stats", "instagram", "120", {eid: "32,000"}))
+            self.assertEqual(typed(), [32_000])
+            self.assertEqual(w.call("log_stats", "instagram")["last"]["instagram"]["views"], {eid: 32_000})
+            asks = ("3,400 is lower than the 32,000 saved before. Press Save again if 3,400 is right: it replaces "
+                    "the 32,000.")
+            self.assertEqual(w.call("save_logged_stats", "instagram", "120", {eid: "3400"}), asks)
+            self.assertEqual(typed(), [32_000])  # nothing is stored yet
+            self.assertEqual(w.call("save_logged_stats", "instagram", "120", {eid: "3500"}),
+                             asks.replace("3,400", "3,500"))  # another number: asked about again
+            self.assertIsNone(w.call("save_logged_stats", "instagram", "120", {eid: "3500"}))  # Save again
+            self.assertEqual(typed(), [3_500])
+            self.assertIsNone(w.call("save_logged_stats", "instagram", "125", {eid: "3,600"}))  # up: nothing to ask
+            self.assertEqual(typed(), [3_600])
+            other = str(w.call("log_stats", "instagram")["episodes"][1]["id"])
+            self.assertIsNone(w.call("save_logged_stats", "instagram", "", {eid: "3,600", other: "900"}))
+            self.assertEqual(w.call("save_logged_stats", "instagram", "", {eid: "360", other: "90"}),
+                             "2 numbers are lower than the ones saved before. Press Save again if they're right: "
+                             "they replace those.")
+            self.assertEqual(sorted(typed()), [900, 3_600])
+
     def test_another_window_connecting_shows_here(self):
         """Every ReelForge window follows a platform connected (or disconnected) in another one."""
         self.forget("x")

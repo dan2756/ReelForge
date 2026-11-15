@@ -2304,9 +2304,11 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
         return {"platforms": [{"key": p.key, "name": p.name} for p in manual], "start": start, "episodes": episodes,
                 "last": last}
 
+    lower_asked: tuple | None = None  # the Save that was asked about a number going down: (platform, its numbers)
+
     @rpc
     def save_logged_stats(self, key: str, followers_text: str, views_text: dict) -> str | None:
-        """The dialog's Save: None once saved, or what to fix."""
+        """The dialog's Save: None once saved, or what to fix, or what to confirm by pressing Save again."""
         from .platforms.public import parse_count
 
         def number(text: str) -> int | None:
@@ -2325,6 +2327,22 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
             return "Whole numbers only, please (like 1234, 3,400 or 1.2K)."
         if followers is None and not views:
             return "Nothing to save yet."
+        # A number lower than the one saved for that video replaces it, in the readings it was saved in too
+        # (db._correct_typed): fine for a slip being put right, but the lower one may be the slip (3400 for 34000).
+        # So it's said first, and stored when Save is pressed again with the same numbers.
+        saved = {q["episode_id"]: q["views"] for q in self.posts
+                 if q["platform"] == key and q["post_id"].startswith(db.TYPED) and q["views"] is not None}
+        lower = [(n, saved[e]) for e, n in views.items() if n < saved.get(e, 0)]
+        asked = (key, sorted(views.items()))
+        if lower and self.lower_asked != asked:
+            self.lower_asked = asked
+            if len(lower) > 1:
+                return (f"{len(lower)} numbers are lower than the ones saved before. Press Save again if they're "
+                        "right: they replace those.")
+            n, was = lower[0]
+            return (f"{n:,} is lower than the {was:,} saved before. Press Save again if {n:,} is right: it "
+                    f"replaces the {was:,}.")
+        self.lower_asked = None
         try:
             self._save_logged(key, followers, views)
         except sqlite3.OperationalError as e:
