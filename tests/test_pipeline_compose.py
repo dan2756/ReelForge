@@ -320,5 +320,17 @@ class HudMemory(unittest.TestCase):
         self.assertEqual(overlay._hud_text(*args, **style).tobytes(), overlay.text_layer(*args, **style).tobytes())
 
 
+class Fonts(unittest.TestCase):
+    def test_a_face_the_machine_lacks_falls_back_to_the_regular_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            serif, bold, mono = (Path(tmp) / name for name in ("DejaVuSerif.ttf", "DejaVuSerif-Bold.ttf", "Mono.ttf"))
+            for font in (serif, bold, mono):
+                font.write_bytes(b"font")
+            elsewhere = Path("C:/Windows/Fonts")           # what find_fonts answers when nothing was found
+            found = (serif, elsewhere / "georgiai.ttf", bold, mono, elsewhere / "consolab.ttf")
+            self.assertEqual(compose.config._faces(found), (serif, serif, bold, mono, mono))
+            self.assertEqual(compose.config._faces((serif, serif, bold, mono, mono)), (serif, serif, bold, mono, mono))
+
+
 if __name__ == "__main__":
     unittest.main()

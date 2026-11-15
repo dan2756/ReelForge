@@ -102,5 +102,14 @@ def require_ffmpeg():
     return FFMPEG
 
 
+def _faces(fonts):
+    """(serif, italic, bold, mono, mono bold) with any face this machine doesn't have replaced by the regular one
+    beside it. Debian's fonts-dejavu-core has the serif without its italic, for one; find_fonts then answers with a
+    path from another system, and the story lines would stop the video step instead of being drawn upright."""
+    serif, italic, bold, mono, mono_bold = fonts
+    return (serif, italic if Path(italic).is_file() else serif, bold if Path(bold).is_file() else serif,
+            mono, mono_bold if Path(mono_bold).is_file() else mono)
+
+
 # Typography: Georgia (serif) and Consolas (mono) on Windows; the closest fonts elsewhere (studio/tools.py).
-FONT_SERIF, FONT_SERIF_ITALIC, FONT_SERIF_BOLD, FONT_MONO, FONT_MONO_BOLD = _tools.find_fonts()
+FONT_SERIF, FONT_SERIF_ITALIC, FONT_SERIF_BOLD, FONT_MONO, FONT_MONO_BOLD = _faces(_tools.find_fonts())
