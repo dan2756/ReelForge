@@ -286,8 +286,14 @@ Yes. ReelForge is free and open source. Making videos uses your own Claude Code 
 
 <br>
 
-No. ReelForge never posts, uploads or sends anything. Finished videos wait in Publish (the green button at the top
-of ReelForge), and you post them yourself.
+Not by itself, and never without your press. Finished videos wait in Publish (the green button at the top of
+ReelForge), and by default you post them yourself: each platform's button opens its upload page for you.
+
+Two optional things can do more of it for you. The [browser extension](docs/EXTENSION.md) attaches the video and
+fills in the upload page, and unless you choose otherwise you press Post there. For YouTube, ReelForge can also
+upload the video itself through YouTube's own API, with a Google Cloud project you make
+([docs/YOUTUBE-API.md](docs/YOUTUBE-API.md)). Both start only when you press them, and neither has been tried on
+the live sites yet: each page says where it stands. Your AI never posts.
 
 </details>
 
