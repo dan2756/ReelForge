@@ -354,6 +354,13 @@ class PostingTab:
             return extension.get("why") or "Update the browser extension first."
         return ""
 
+    def cant_hand_over(self) -> str:
+        """Why no post can be handed to the extension from this window now ("": one can): no browser is connected,
+        the extension needs an update, or this window isn't listening for it, so there is no page to open. Asked
+        before any job is made: one made first would only be called off again, and a Post again would have set the
+        post that is up aside for it."""
+        return self.extension_needed(self.extension_status()) or self.extension_problem
+
     # --- keeping it current ------------------------------------------------------------------------
 
     def jobs_changed(self, everywhere: bool = False) -> None:
@@ -450,7 +457,7 @@ class PostingTab:
                         "video now. Press Post… again to post this one.", title="Nothing was started",
                         severity="warning", timeout=12)
             return None
-        needed = self.extension_needed(self.extension_status())
+        needed = self.cant_hand_over()
         ticked = [k for k in platforms or [] if k in self.platforms]
         if needed or not ticked:
             self.notify(needed or "Tick a platform to post to first.", severity="warning", timeout=8)
@@ -484,7 +491,7 @@ class PostingTab:
                 why = "ReelForge couldn't open your browser" if self.extension_server is not None else \
                     "ReelForge isn't listening for the extension in this window"
                 self.notify(f"{why}, so it couldn't open the posting page and nothing was started. The buttons "
-                            "under UPLOAD still open each platform's page for you to post by hand.",
+                            "under BY HAND still open each platform's page for you to post by hand.",
                             title="Nothing was posted", severity="warning", timeout=15)
         self.picked_review = None
         self.jobs_changed(everywhere=True)
@@ -625,7 +632,7 @@ class PostingTab:
         if self.demo:
             self.notify("Demo mode: nothing is posted.", timeout=4)
             return
-        needed = self.extension_needed(self.extension_status()) if action in ("post_again", "retry") else ""
+        needed = self.cant_hand_over() if action in ("post_again", "retry") else ""
         if needed:
             self.notify(needed, severity="warning", timeout=8)
             return

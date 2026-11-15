@@ -4,7 +4,7 @@
 import { createContext, useContext, useSyncExternalStore } from "react"
 import type { Bridge } from "../bridge"
 import type { Action } from "../lib/styled"
-import type { Init, PostInfo, PostingRow, ProfilesMenu } from "./types"
+import type { ExtensionView, Init, PostInfo, PostingRow, ProfilesMenu } from "./types"
 
 /** Rows above a tab's own: the header (3) and the hairline under it. */
 export const TOP_ROWS = 4
@@ -265,8 +265,12 @@ export class DashState {
     )
   }
 
-  /** A button on a platform's posting row. Posting again asks first, since the video is already up there. */
+  /** A button on a platform's posting row. Posting again asks first, since the video is already up there. A window
+   * that can't hand a post to the extension (it isn't listening for it) says why instead, with by hand beside it, as
+   * Post… does: Post again and Try again would start something that is called off at once. */
   postAction(row: PostingRow, action: string) {
+    const ext = this.bridge.view<ExtensionView>("extension")
+    if ((action === "post_again" || action === "retry") && ext && ext.state !== "off" && ext.problem) return this.set({ dialog: { kind: "extension", from: "post" } })
     if (action === "post_again") return void this.openPost([row.key])
     this.bridge.send("post_action", row.job ?? row.key, action)
   }

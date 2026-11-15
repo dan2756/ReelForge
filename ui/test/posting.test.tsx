@@ -101,6 +101,13 @@ async function clickBelow(h: Headless, text: string, from: number, dx = 2) {
   await h.settle(500)
 }
 
+/** Click a button on a platform's row of the Publish tab (the same words can be on another platform's row). */
+async function clickOnRow(h: Headless, name: string, text: string) {
+  const at = frame(h).split("\n").findIndex((r) => new RegExp(`┃ ${name} +[○●✓×?]`).test(r))
+  if (at < 0) throw new Error(`${name} has no row on screen`)
+  await clickBelow(h, text, at)
+}
+
 describe("where each post stands", () => {
   test("a row for each platform says it in words, with the buttons for it, and they do what they say", async () => {
     const h = await kit({ extension: "on", jobs: { tiktok: ["uploading"], youtube: ["ready"], instagram: ["opening", "failed"], x: ["ready", "unknown"] } })
@@ -442,6 +449,39 @@ describe("the extension's dialog", () => {
     expect(frame(h)).toContain("Or post by hand now:")
     expect(frame(h)).not.toContain("POST THIS VIDEO")
     expect(posting(h).rows.every((r) => r.state === "none")).toBe(true)
+  })
+
+  test("in a window that isn't listening, Post again… and Try again say why too, and every row stays as it is", async () => {
+    const h = await kit({ extension: "on", jobs: { tiktok: ["opening", "failed"], x: ["ready", "posted"] }, spotted: { instagram: 2100 } }, [150, 45], {})
+    const why = "ReelForge isn't listening for the extension here (it is switched off)."
+    const made = jobsMade()
+    for (const [name, key, button, stands] of [
+      ["X", "x", "Post again…", "posted"],
+      ["Instagram", "instagram", "Post again…", "spotted"],
+      ["TikTok", "tiktok", "Try again", "failed"],
+    ] as const) {
+      await clickOnRow(h, name, button)
+      await until(h, () => frame(h).includes("BROWSER EXTENSION"))
+      expect(dialog(h)).toContain(why)
+      expect(frame(h)).toContain("Or post by hand now:")
+      expect(frame(h)).not.toContain("POST THIS VIDEO")
+      h.t.mockInput.pressKey("ESCAPE")
+      await h.settle(400)
+      expect(frame(h)).not.toContain("BROWSER EXTENSION")
+      expect(state(h, key)).toBe(stands)
+    }
+    expect(row(h, "X")).toContain("✓ posted")
+    expect(row(h, "TikTok")).toContain("× failed")
+    expect(jobsMade()).toBe(made) // not one made to be called off
+    expect(popups()).toEqual([])
+    // A call that reaches the Python side all the same is held back there, before any job is made.
+    await h.bridge.call("post_action", "x", "post_again")
+    await h.bridge.call("post_with_extension", ["x"], CAPTION, "#fyp #whatif #weather", true, ["x"], posting(h).video!.path)
+    await h.settle(500)
+    expect(popups().at(-1)).toBe(why)
+    expect(jobsMade()).toBe(made)
+    expect(state(h, "x")).toBe("posted")
+    expect(listed("opened.txt")).toEqual([])
   })
 
   test("an extension of another version says which side to update", async () => {

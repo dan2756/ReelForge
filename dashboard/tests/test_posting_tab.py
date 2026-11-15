@@ -307,7 +307,7 @@ class Posting(PostingTest):
         self.assertEqual(db.uploads(), [])  # no page opened: nothing for a later post to be filed under
         toast = w.sent("toast")[-1]
         self.assertEqual((toast["title"], toast["severity"]), ("Nothing was posted", "warning"))
-        self.assertIn("by hand", toast["body"])
+        self.assertIn("The buttons under BY HAND still open each platform's page", toast["body"])  # the tab's heading
         self.assertEqual(self.rows(w)["tiktok"]["actions"], ["retry"])
         self.page_opens = True  # nothing stands in the way of the next try
         self.assertEqual(len(self.post(w, "tiktok", "youtube")["jobs"]), 2)
@@ -319,6 +319,34 @@ class Posting(PostingTest):
         self.assertEqual((made["opened"], made["jobs"]), (False, []))
         self.assertIn("couldn't open the posting page", w.toasts()[-1])
         self.assertEqual([j["state"] for j in posting.recent()], ["cancelled"])
+
+    def test_a_window_that_is_not_listening_says_why_before_any_job_is_made(self):
+        """With no local server there is no page to hand a batch over on. Post, Post again and Try again say so
+        first: a job made and called off at once left a "cancelled" row, and a Post again set the post that is up
+        aside for it."""
+        w = self.window()
+        (posted,) = self.post(w)["jobs"]
+        self.work(posted["id"], "ready", "posted", url=TIKTOK_URL)
+        (failed,) = self.post(w, "youtube")["jobs"]
+        self.work(failed["id"], "opening", "failed", error_code="timeout")
+        before = [(j["id"], j["state"], j["superseded"]) for j in posting.recent()]
+        pages = list(self.pages)
+        w.svc.extension_problem = "ReelForge isn't listening for the extension here (it is switched off)."
+        w.forget()
+        self.assertIsNone(self.post(w, "instagram"))
+        self.assertIsNone(self.post(w, force=["tiktok"]))
+        w.call("post_action", posted["id"], "post_again")
+        w.call("post_action", failed["id"], "retry")
+        self.assertEqual(w.toasts(), [w.svc.extension_problem] * 4)
+        self.assertEqual([(j["id"], j["state"], j["superseded"]) for j in posting.recent()], before)
+        self.assertEqual(self.pages, pages)
+        w.svc.update_posting()
+        rows = self.rows(w)
+        self.assertEqual((rows["tiktok"]["state"], rows["youtube"]["state"], rows["instagram"]["state"]),
+                         ("posted", "failed", "none"))
+        # What needs no page still works: your word on a post, and opening one.
+        w.call("post_action", posted["id"], "open_post")
+        self.assertEqual(self.opened, [TIKTOK_URL])
 
     def test_a_second_press_for_the_same_video_and_platform_is_refused(self):
         w = self.window()

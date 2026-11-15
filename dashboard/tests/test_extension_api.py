@@ -1274,10 +1274,9 @@ class WindowServes(PostingTest):
                             for line in view["lines"]))
         self.assertEqual(w.toasts(), [])
         made = w.call("post_with_extension", ["tiktok"], CAPTION, TAGS, True, None)  # pressing Post says so, calmly
-        self.assertEqual((made["opened"], made["jobs"]), (False, []))
-        self.assertIn("isn't listening for the extension in this window, so it couldn't open the posting page",
-                      w.toasts()[-1])
-        self.assertEqual([j["state"] for j in posting.recent()], ["cancelled"])
+        self.assertIsNone(made)
+        self.assertIn("isn't listening for the extension in this window: every port from", w.toasts()[-1])
+        self.assertEqual(posting.recent(), [])  # and no job is made only to be called off
 
     def test_a_server_that_cannot_start_for_any_reason_never_stops_the_window(self):
         w = PublishTest.window(self)
