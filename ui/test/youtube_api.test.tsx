@@ -722,6 +722,18 @@ describe("Disconnect", () => {
     await h.settle(400)
     expect(row(h)).toBe("YouTube ○ not posted") // nothing on the row any more
   })
+
+  test("in a window that is not connected, says before and after that Google may still list ReelForge", async () => {
+    const h = await kit({ api: { client: true } })
+    await openApi(h)
+    await clickText(h, "▐ Disconnect ▌", 3)
+    // (It said "there is nothing to end at Google", and the pop-up after it the opposite.)
+    expect(dialog(h)).toContain("Disconnect? ReelForge forgets the client. This window is not connected, so it can't end ReelForge's access at Google. If you ever allowed it there, take it off yourself at myaccount.google.com/connections. No ReelForge window can post through the API until you give the client file again.")
+    await clickText(h, "▐ Disconnect ▌", 3) // the red one
+    await until(h, () => api(h).state === "off" && popups().length > 0)
+    expect(popups()).toEqual(["YouTube's API: Disconnected. ReelForge has forgotten the client. If you ever allowed ReelForge on Google's page, Google still lists it: take it off at https://myaccount.google.com/connections"])
+    expect([onFile(), (await google(h)).revoked]).toEqual([null, 0])
+  })
 })
 
 describe("when something goes wrong, or the window is small", () => {

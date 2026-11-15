@@ -75,8 +75,11 @@ WAITING = ("Google's consent page is open in your browser. Pick the Google accou
            "again.")
 LEAVE = {True: ("Disconnect? ReelForge forgets the client, then tells Google that this window's access has ended. "
                 "No ReelForge window can post through the API until you give the client file again."),
-         False: ("Disconnect? ReelForge forgets the client. This window is not connected, so there is nothing to end "
-                 "at Google. No ReelForge window can post through the API until you give the client file again.")}
+         # (This window has no sign-in to end. One that Google gave an earlier window may still be listed there.)
+         False: ("Disconnect? ReelForge forgets the client. This window is not connected, so it can't end "
+                 "ReelForge's access at Google. If you ever allowed it there, take it off yourself at "
+                 "myaccount.google.com/connections. No ReelForge window can post through the API until you give the "
+                 "client file again.")}
 START_AS = "A new post starts as the one you pick here. You can choose otherwise for one post, in its question."
 KIDS_ASK = ("\"Made for kids\" is a declaration you make to YouTube, so ReelForge never makes it for you. Until you "
             "answer, a post sends none and your channel's own audience setting in YouTube Studio applies.")

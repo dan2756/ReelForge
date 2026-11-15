@@ -254,13 +254,17 @@ class View(ApiPosting):
         words = w.view("youtube_api")["words"]
         self.assertEqual((words["caveat"], w.view("youtube_api")["wants_file"]), ("tested on a stand-in only", False))
         self.assertIn("then tells Google that this window's access has ended", words["leave"])
-        # A ReelForge opened since has no sign-in, so there is none to end, and no post on offer.
+        # A ReelForge opened since has no sign-in of its own to end, and no post on offer.
         self.reopen()
         w.svc.follow_youtube_api(changed=True)
         words = w.view("youtube_api")["words"]
         view = w.view("youtube_api")
         self.assertEqual((view["state"], words["caveat"], view["wants_file"]), ("again", "", False))  # Connect will do
-        self.assertIn("This window is not connected, so there is nothing to end at Google.", words["leave"])
+        # It doesn't say there is nothing to end at Google: an earlier window's sign-in may still be listed there,
+        # which is what the pop-up after Disconnect says (youtube_api.NO_GRANT), with the same address.
+        self.assertIn("This window is not connected, so it can't end ReelForge's access at Google. If you ever "
+                      "allowed it there, take it off yourself at myaccount.google.com/connections.", words["leave"])
+        self.assertIn("myaccount.google.com/connections", youtube_api.NO_GRANT)
         for said in words.values():
             self.assertNotIn("—", said)
 
