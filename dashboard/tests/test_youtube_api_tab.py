@@ -477,6 +477,54 @@ class Posting(ApiPosting):
         self.assertEqual(self.google.starts[0]["body"]["status"],
                          {"privacyStatus": "private", "selfDeclaredMadeForKids": True})
 
+    def test_every_button_of_a_post_that_went_through_the_api_works_from_its_row(self):
+        """What the window's row offers for a job whose via is "api", each pressed the way the window presses it
+        (post_action with the row's job): Cancel, Try again, It didn't post, It's posted and Open."""
+        w = self.window()
+        self.google.hold = threading.Event()
+        first = self.api_post(w)["jobs"][0]["id"]
+        self.assertTrue(w.until(lambda: self.rows(w)["youtube"]["state"] == "uploading"))
+        row = self.rows(w)["youtube"]
+        self.assertEqual((row["via"], row["job"], row["actions"]), ("api", first, ["cancel"]))
+        w.call("post_action", row["job"], "cancel")
+        self.google.hold.set()
+        self.assertEqual(self.over(w, first)["state"], "cancelled")
+        self.google.hold = None
+        # Try again, with the last answer lost for good this time: nobody knows whether it posted.
+        self.google.script, self.google.then = [None, None, None, "lost"], "drop"
+        row = self.rows(w)["youtube"]
+        self.assertEqual((row["via"], row["actions"]), ("api", ["retry", "post_api"]))
+        w.call("post_action", row["job"], "retry")
+        (second,) = [j for j in posting.recent() if j["id"] != first]
+        self.assertEqual((self.over(w, second["id"])["state"], second["via"]), ("unknown", "api"))
+        row = self.rows(w)["youtube"]
+        self.assertEqual((row["via"], row["job"], row["actions"]),
+                         ("api", second["id"], ["mark_posted", "not_posted"]))
+        w.call("post_action", row["job"], "not_posted")
+        self.assertEqual(self.rows(w)["youtube"]["state"], "cancelled")
+        # Once more, and this one goes up: Open opens the video's own link.
+        self.google.script, self.google.then = [], None
+        w.call("post_action", self.rows(w)["youtube"]["job"], "retry")
+        (third,) = [j for j in posting.recent() if j["id"] not in (first, second["id"])]
+        third = self.over(w, third["id"])
+        row = self.rows(w)["youtube"]
+        self.assertEqual((third["state"], row["via"], row["url"], row["actions"]),
+                         ("posted", "api", third["url"], ["open_post", "post_again"]))
+        opened = len(self.opened)
+        w.call("post_action", row["job"], "open_post")
+        self.assertEqual(self.opened[opened:], [third["url"]])
+        self.assertEqual(len(self.google.videos), 2)  # the one that was lost on its last piece, and this one
+        # One that ReelForge lost track of and you found in YouTube Studio: It's posted.
+        other = self.root / "videos" / "ep02.mp4"
+        other.write_bytes(BYTES[::-1])
+        w.call("pick_file", str(other))
+        self.google.script, self.google.then = [None, None, None, "lost"], "drop"
+        lost = self.posted(w)
+        self.assertEqual(lost["state"], "unknown")
+        w.call("post_action", self.rows(w)["youtube"]["job"], "mark_posted")
+        row = self.rows(w)["youtube"]
+        self.assertEqual((row["state"], row["via"], row["actions"]), ("posted", "api", ["post_again"]))  # no link
+
     def test_the_rows_own_button_posts_with_the_form_as_it_is_and_never_again(self):
         w = self.window()
         w.call("form_changed", "Typed since", "#one #two")
