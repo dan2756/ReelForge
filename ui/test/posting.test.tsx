@@ -318,6 +318,26 @@ describe("Post…", () => {
     expect(frame(h)).toContain("▐ Start 3 posts ▌") // the other three: X only when you tick it
   })
 
+  test("a Post again that fails leaves a post a stats read found standing: its row says posted, not failed", async () => {
+    const h = await kit({ extension: "on", spotted: { instagram: 2100 } })
+    await clickText(h, "Post again…", 2)
+    await until(h, () => frame(h).includes("POST THIS VIDEO"))
+    await clickText(h, "Start 1 post", 2)
+    await until(h, () => state(h, "instagram") === "queued")
+    await h.bridge.call("test_extension", "instagram", ["opening", "failed"])
+    await until(h, () => state(h, "instagram") === "spotted")
+    // The video is up there, whatever became of the second try: the row goes by the post, with its own buttons.
+    expect(state(h, "instagram")).toBe("spotted")
+    expect(row(h, "Instagram")).toMatch(/✓ posted +2\.10K views, 24h ago/)
+    expect(row(h, "Instagram")).toMatch(/▐ Open ▌ ▐ Post again… ▌/)
+    expect(row(h, "Instagram")).not.toContain("failed")
+    expect(row(h, "Instagram")).not.toContain("Try again")
+    expect(frame(h)).toContain("Instagram ✓") // its by-hand button says so too
+    await clickText(h, "▐ Post… ▌", 3)
+    await until(h, () => frame(h).includes("POST THIS VIDEO"))
+    expect(dialog(h)).toContain("○ Instagram @me Already posted: ReelForge found this video's post there. Tick it to post there again.")
+  })
+
   test("the question opens with the keyboard on Cancel, and Enter twice on Start is one yes", async () => {
     const h = await kit({ extension: "on" })
     await clickText(h, "▐ Post… ▌", 3)
