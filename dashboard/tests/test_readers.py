@@ -318,6 +318,15 @@ class LogIn(BrowserTest):
         self.assertEqual((w.opened, self.clock.now), ([browser.HOME_URLS["x"]], 90))
         self.assertIsNotNone(config.get_token("browser:x"))  # still logged in: that's a log-in
 
+    def test_closing_the_window_just_after_logging_in_is_a_log_in(self):
+        """ReelForge carries on "once you're in, or when you close the window": closing it in the few seconds after
+        the site set its cookie used to count as closed before logging in."""
+        self.window = w = Window(self.clock)
+        self.clock.at(20, lambda: w.jar.append(SESSION["instagram"]))
+        self.clock.at(21.5, lambda: setattr(w, "gone", True))  # in, and closed straight away
+        browser.login("instagram")
+        self.assertEqual(config.get_token("browser:instagram"), {"since": self.clock.time()})
+
     def test_closing_the_window_before_logging_in_says_so(self):
         """It used to say "TargetClosedError: BrowserContext.cookies: Target page, context or browser has been
         closed"."""

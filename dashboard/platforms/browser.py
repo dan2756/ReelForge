@@ -199,7 +199,9 @@ def login(platform: str, timeout: float = 600) -> None:
             if not _gone(e):
                 raise
             ended = "closed"
-    if ended != "done" and not (had and has):  # (a window closed or left open while still logged in counts as done)
+    # A window closed or left open while logged in counts as done: logged in all along, or closed in the moment
+    # after the site set its cookie (which used to count as closed before logging in).
+    if ended != "done" and not has:
         raise PlatformError("The login window closed before you finished logging in." if ended == "closed" else
                             f"The login window was open for {timeout / 60:.0f} minutes without a log-in, so ReelForge "
                             "closed it. Press Log in to try again.")
