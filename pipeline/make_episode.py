@@ -174,6 +174,10 @@ def deliver(spec, final, build):
     video = final / f"{spec['id']}.mp4"
     if not video.exists():
         raise SystemExit(f"deliver: {video} not found, run the video step first")
+    from studio.publish_check import review_state
+    if review_state(final.parent) == "stale":
+        raise SystemExit("deliver: the video changed after the review in build/qa/review.md, so that review is of an "
+                         "earlier cut. Run --steps qa, look at this cut, and write the review again.")
     qa_file = build / "qa" / "qa.json"
     if not qa_file.exists():
         raise SystemExit("deliver: no QA report, run --steps qa first")
