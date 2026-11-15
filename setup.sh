@@ -43,6 +43,16 @@ find_python() {
       return 0
     fi
   done
+  # None that a new .venv could be made with. A .venv that's here and works (the check studio/bootstrap.py makes: its
+  # Python runs and has pip) was made with a Python this passes over now, a 3.11 before 3.11.4, and ReelForge still
+  # runs on that one (it checks a .tar itself there, studio/tools.py). Setup carries on with it, so repairing or
+  # updating such a copy doesn't need a private Python downloaded first.
+  if [ -x .venv/bin/python ] &&
+     .venv/bin/python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1 &&
+     .venv/bin/python -m pip --version >/dev/null 2>&1; then
+    echo "$PWD/.venv/bin/python"
+    return 0
+  fi
   return 1
 }
 

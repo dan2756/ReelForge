@@ -2,8 +2,10 @@
 Python with tarfile's "data" filter and on one without (3.11.0 to 3.11.3, which Debian 12 ships), where asking for
 the filter was a TypeError and nothing could be unpacked at all."""
 
+import importlib.util
 import io
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -156,7 +158,8 @@ class Untar(unittest.TestCase):
 @unittest.skipIf(os.name == "nt", "setup.sh is the macOS and Linux setup")
 class SetupPython(unittest.TestCase):
     """setup.sh passes over a Python without tarfile's filter, as it does one without venv: a new install then gets
-    the private Python 3.13, which unpacks with the filter."""
+    the private Python 3.13, which unpacks with the filter. A copy set up with such a Python before keeps its .venv,
+    and setup carries on with that."""
 
     def usable(self, python: str) -> bool:
         text = (KIT / "setup.sh").read_text(encoding="utf-8")
@@ -173,6 +176,41 @@ class SetupPython(unittest.TestCase):
             old.chmod(0o755)
             self.assertFalse(self.usable(str(old)))
             self.assertFalse(self.usable(str(Path(folder) / "no-such-python")))
+
+    def find_python(self, kit: Path, path: Path, **env: str) -> str | None:
+        """What setup.sh's find_python prints in this ReelForge folder (None: it found none, and setup would offer
+        the private Python), with only the programs in `path` to find."""
+        text = (KIT / "setup.sh").read_text(encoding="utf-8")
+        functions = text[text.index("usable() {"):text.index("fetch() {")]
+        r = subprocess.run([shutil.which("bash"), "-c", functions + '\ncd "$0" && find_python', str(kit)],
+                           capture_output=True, text=True, timeout=120, env={"PATH": str(path), **env})
+        return r.stdout.strip() if r.returncode == 0 else None
+
+    @unittest.skipUnless(importlib.util.find_spec("pip"), "this Python stands in for a .venv's, which has pip")
+    def test_a_working_venv_made_with_an_older_python_is_carried_on_with(self):
+        # Debian 12: its Python 3.11.2 is all there is, and ReelForge was set up with it by an earlier version.
+        # Setup (which also repairs .venv after an update) asked to download a private Python just to get going,
+        # and stopped where nobody could answer.
+        with tempfile.TemporaryDirectory() as folder:
+            kit, programs = Path(folder) / "ReelForge", Path(folder) / "programs"
+            (kit / ".venv" / "bin").mkdir(parents=True)
+            programs.mkdir()
+            os.symlink(shutil.which("uname"), programs / "uname")
+            old = programs / "python3"                 # the only Python: this one, with tarfile as 3.11.2 has it
+            old.write_text("#!/bin/sh\n"
+                           f'exec "{sys.executable}" -c \'import sys, tarfile; del tarfile.data_filter; '
+                           'exec(sys.argv[1])\' "$2"\n' if FILTERS else f'#!/bin/sh\nexec "{sys.executable}" "$@"\n',
+                           encoding="utf-8")
+            old.chmod(0o755)
+            self.assertIsNone(self.find_python(kit, programs))                 # no .venv yet: the private Python
+            venv = kit / ".venv" / "bin" / "python"
+            venv.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+            venv.chmod(0o755)
+            self.assertEqual(self.find_python(kit, programs), str((kit / ".venv" / "bin" / "python").resolve()))
+            self.assertIsNone(self.find_python(kit, programs, STUDIO_OWN_PYTHON="1"))   # the tests' switch still holds
+            # one a setup that stopped part way left without pip is made again (bootstrap.py), which takes a Python
+            venv.write_text(f'#!/bin/sh\n[ "$1" = -m ] && exit 1\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+            self.assertIsNone(self.find_python(kit, programs))
 
 
 if __name__ == "__main__":
