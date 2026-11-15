@@ -225,7 +225,8 @@ middle of a post, and Disconnect. `docs/EXTENSION.md` has the whole list.
 Its first test holds the stand-in to the real server: it sends both the same hundred or so requests, every call
 the extension makes and the ways each can be refused, and compares the answers one by one.
 
-`.github/workflows/extension.yml` is there to run both on every push. It has not run yet.
+`.github/workflows/extension.yml` runs both on every push, on Linux, and a release waits for it. It has run there and
+passed.
 
 **The copies prove the extension's own machinery, not the live sites.** They show that the file really arrives
 (the page computes its size and SHA-256), that the exact text lands in the right boxes, that nothing is pressed

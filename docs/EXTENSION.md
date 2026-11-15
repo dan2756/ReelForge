@@ -310,6 +310,9 @@ Tested here, by automated tests: ReelForge's own (`dashboard/tests/test_extensio
   suite)
 - that the extension's folder goes into the downloads and is replaced by an update, and that the file of connected
   browsers survives an update, a move and goes to the backup on a factory reset
+- the same automated tests on GitHub's machines, on 15 November 2026: ReelForge's own passed there on Windows,
+  macOS and Linux (the Test workflow), and both of the extension's suites passed on Linux, with Playwright's
+  Chromium (`.github/workflows/extension.yml`, which runs them on every push)
 
 Looked at, not automated:
 
@@ -324,11 +327,11 @@ Not verified:
   YouTube, Instagram and X pages accept a video attached this way, where their boxes and buttons are, whether a
   scripted press of Post works, and how each shows that a post went up: all of that is only known from copies of
   those pages. That holds for every test above, the ones with the real server too.
-- The workflow that is to run both of the extension's suites on every push (`.github/workflows/extension.yml`).
-  It was written without a way to run it, so its first run on GitHub is its test. A release waits for it as well,
-  and that has not run either.
+- A release that waits for the extension's tests. The Release workflow now calls the Extension workflow and
+  publishes only after it, and no release has been made that way yet.
 - Chrome, Edge and Brave as you install them. The runs here used Chromium.
-- The server on Windows and macOS. Its tests ran on Linux here.
+- The extension itself on Windows and macOS. Its suites have only run on Linux. ReelForge's side, the server and
+  the ledger, passes its own tests on all three.
 - A real video's size and time through the extension.
 - The API facts marked "excerpt" in the table above, and whether YouTube's change for unreviewed projects holds for
   a real upload.
