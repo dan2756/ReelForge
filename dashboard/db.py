@@ -1,4 +1,5 @@
-"""SQLite store: stat snapshots over time, posts, episodes, the upload log and your notifications.
+"""SQLite store: stat snapshots over time, posts, episodes, the upload log, your notifications and the posting ledger
+(dashboard/posting.py keeps that one).
 
 Platforms mostly report lifetime totals, so every refresh writes a snapshot row. The charts
 are built from those snapshots; the longer ReelForge runs, the more history it has.
@@ -68,6 +69,36 @@ CREATE TABLE IF NOT EXISTS notifications (
     tab TEXT,
     read INTEGER NOT NULL DEFAULT 0,
     deleted INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS post_jobs (
+    id TEXT PRIMARY KEY,                 -- "pj_" + 16 hex
+    batch TEXT NOT NULL,                 -- "pb_" + 16 hex: one press of Post = one batch
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,   -- db.now_iso()
+    platform TEXT NOT NULL,
+    via TEXT NOT NULL,                   -- "extension" | "api"
+    video TEXT NOT NULL,                 -- file name
+    video_path TEXT NOT NULL,
+    video_sha256 TEXT NOT NULL,
+    video_size INTEGER NOT NULL,
+    episode_id INTEGER,
+    text TEXT NOT NULL,                  -- JSON snapshot of exactly what goes in the boxes
+    press INTEGER NOT NULL DEFAULT 0,    -- 1: the person switched "stop before posting" off
+    options TEXT NOT NULL DEFAULT '{}',  -- JSON, e.g. {"privacy": "private"} for via=api
+    review TEXT NOT NULL DEFAULT '',     -- approval state when the job was made (videos.approval)
+    state TEXT NOT NULL,
+    step TEXT, progress REAL, detail TEXT,
+    error_code TEXT, error_message TEXT,
+    post_id TEXT, url TEXT,
+    claimed_by TEXT,                     -- the extension install that took it
+    superseded INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS post_jobs_one_live ON post_jobs (video_sha256, platform)
+    WHERE superseded = 0 AND state IN
+    ('queued','claimed','opening','uploading','filling','ready','posting','posted','unknown');
+CREATE INDEX IF NOT EXISTS post_jobs_by_batch ON post_jobs (batch);
+CREATE TABLE IF NOT EXISTS post_events (
+    id INTEGER PRIMARY KEY, job TEXT NOT NULL, ts TEXT NOT NULL,
+    state TEXT, step TEXT, detail TEXT
 );
 """
 

@@ -432,7 +432,8 @@ def _place(posts: list[dict], episodes: list[dict], links: dict) -> tuple[dict, 
 
 
 def auto_link() -> int:
-    """File posts under episodes: by caption, else by the upload page opened just before, else as twins.
+    """File posts under episodes: by caption, else by the upload page opened (or the post started from ReelForge)
+    just before, else as twins.
 
     Every post not linked by hand (or by ReelForge when it posted) is checked again on each run, so fixes reach old
     mistakes
@@ -440,7 +441,8 @@ def auto_link() -> int:
     """
     opened: dict[str, list[tuple]] = {}
     for u in db.uploads(None):
-        if u["status"] in ("ok", "manual") and u["video"]:
+        # an upload page you opened (manual), or a post started with the extension or a platform's API
+        if u["status"] in ("ok", "manual", "extension", "api") and u["video"]:
             opened.setdefault(u["platform"], []).append((db.parse(u["ts"]), u["id"], db.video_file(u["video"]).name.lower()))
     for rows in opened.values():
         rows.sort()
