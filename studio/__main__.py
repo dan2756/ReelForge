@@ -423,8 +423,7 @@ def new_episode(argv: list[str]) -> int:
     (dest / "facts.md").write_text(facts, encoding="utf-8")
     print(f"Started {P.rel(dest)} from {P.rel(src.parent)}.")
     print("Next: write the title, lines, HUD, sound cues and facts.md, then build and look at the stills:")
-    print(f"  {P.venv_python()} {Path('pipeline') / 'make_episode.py'} {Path('episodes') / ep_id} "
-          f"--steps build,stills")
+    print(f"  {P.venv_python()} {Path('pipeline') / 'make_episode.py'} \"{P.rel(dest)}\" --steps build,stills")
     return 0
 
 

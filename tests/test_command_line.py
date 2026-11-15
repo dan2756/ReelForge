@@ -1,13 +1,16 @@
-"""The reelforge command's own answers (studio/__main__.py), in a scratch ReelForge folder: a word it doesn't know."""
+"""The reelforge command's own answers (studio/__main__.py), in a scratch ReelForge folder: a word it doesn't know,
+and the next command new-episode gives for a channel you added."""
 
 import io
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest import mock
 
+from studio import generate, profiles
 from studio.__main__ import main
 
-from test_profiles import Scratch
+from test_profiles import ANSWERS, Scratch
 
 
 class Commands(Scratch):
@@ -43,6 +46,22 @@ class Commands(Scratch):
         self.assertEqual(code, 0)
         for line in ("reelforge doctor", "reelforge channel", "reelforge publish-check", "reelforge profiles new"):
             self.assertIn(line, out)
+
+    def test_new_episode_for_an_added_channel_gives_a_next_command_for_that_channels_episode(self):
+        self.onboard_main()
+        extra = profiles.create("Cool Epic Facts")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**ANSWERS, "channel_name": extra.name}, extra)
+        code, out = self.run_main("-p", "cool-epic-facts", "new-episode", "snowball")
+        self.assertEqual(code, 0, out)
+        where = Path("profiles") / "cool-epic-facts" / "episodes" / "ep01_snowball"
+        self.assertTrue((self.root / where / "episode.json").is_file())
+        # it used to print episodes/ep01_snowball, the first channel's folder, where there is no such episode
+        self.assertIn(f'{Path("pipeline") / "make_episode.py"} "{where}" --steps build,stills', out)
+        profiles.use(profiles.main())
+        code, out = self.run_main("new-episode", "snowball")
+        self.assertEqual(code, 0, out)
+        self.assertIn(f'"{Path("episodes") / "ep01_snowball"}" --steps build,stills', out)
 
 
 if __name__ == "__main__":
