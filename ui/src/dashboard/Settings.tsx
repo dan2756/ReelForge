@@ -603,8 +603,10 @@ export function MoveFolder({ data, close }: { data: MoveData; close: () => void 
         </text>
       ) : null}
       <DialogButtons>
-        <Button id="move-cancel" label={data.problem ? "Close" : "Cancel"} autoFocus={Boolean(data.problem)} onPress={close} />
-        {data.problem ? null : <Button id="move-go" label="Move ReelForge" variant="primary" autoFocus onPress={go} />}
+        {/* Cancel has the keyboard when it opens, as in every other question: an Enter still held from Move…, or a
+            second one, otherwise moved the folder (and ReelForge closes to do it) before a word was read. */}
+        <Button id="move-cancel" label={data.problem ? "Close" : "Cancel"} autoFocus onPress={close} />
+        {data.problem ? null : <Button id="move-go" label="Move ReelForge" variant="primary" onPress={go} />}
       </DialogButtons>
     </Modal>
   )

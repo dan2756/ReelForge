@@ -498,6 +498,24 @@ describe("the danger zone on a channel that's set up", () => {
     expect(existsSync(join(tmp, "my-studio", "answers.json"))).toBe(true) // nothing moved by the window itself
   })
 
+  test("Move's question opens on Cancel: Enter twice on Move… moves nothing", async () => {
+    const h = await settings()
+    const underlined = () => h.t.captureSpans().lines.flatMap((l) => l.spans.filter((sp) => sp.attributes & TextAttributes.UNDERLINE).map((sp) => sp.text.trim())).filter(Boolean)
+    for (let i = 0; i < 80 && !underlined().includes("Move…"); i++) {
+      h.t.mockInput.pressKey("TAB")
+      await h.settle(100)
+    }
+    expect(underlined()).toContain("Move…")
+    h.t.mockInput.pressKey("RETURN")
+    await until(h, "MOVE REELFORGE")
+    expect(underlined()).toEqual(["Cancel"]) // the way out has the keyboard, not the button that moves
+    h.t.mockInput.pressKey("RETURN") // a second Enter
+    await h.settle(800)
+    expect(frame(h)).not.toContain("MOVE REELFORGE")
+    expect(asked()).toBeNull()
+    expect(h.exits).toEqual([])
+  })
+
   test("with a browser connected to the extension, each dialog says the one thing that leaves for you to do in it", async () => {
     const h = await settings()
     /** What a dialog says: the words inside its box, as one line. */
