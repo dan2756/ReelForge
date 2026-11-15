@@ -21,7 +21,7 @@ is written here, so the window only draws them.
 Nothing here posts by itself. A post starts with post_with_extension, which only your press in the window calls, and
 ends at the platform's own Post button. The extension presses that button only where all of this holds: you switched
 "stop before posting" off for the post, Press Post for me is on for the platform in the extension's own settings, and
-you said yes to it for that post in the browser, on the page that opens. Never on X.
+you said yes to it for that post in the browser, on ReelForge's own page, which opens first. Never on X.
 """
 
 from __future__ import annotations
@@ -94,13 +94,15 @@ SIGNED_NOTE = ("That is what the extension saw in each browser. It is apart from
                "tab, which ReelForge reads your stats from.")
 # What happens after your yes to the question before a post: as it is asked, and with "stop before posting" off.
 # That switch alone presses nothing (docs/EXTENSION.md, "Two ways to post"): the extension also wants Press Post for
-# me switched on in its own settings, and your click for this post on the page that opens.
+# me switched on in its own settings, and your click for this post on ReelForge's own page (dashboard/web/post.html),
+# which opens in your browser before any upload page does. Said as that page: "the page that opens" read as the
+# platform's upload page. HOW_PRESS is about the press alone, and no longer than three rows in a window 80 columns
+# wide: at six, the question had no row left for its platforms in a window 24 rows tall, and drew them over each other.
 HOW = ("ReelForge opens each upload page in your browser, attaches the video and fills in the text. You check it "
        "and press Post.")
-HOW_PRESS = ("ReelForge opens each upload page in your browser, attaches the video and fills in the text. The "
-             "extension presses Post only where Press Post for me is switched on in its settings, and only after "
-             "you click Yes, press Post for me on the page that opens. Without that click it stops at the Post "
-             "button. Everywhere else, and always on X, you check it and press Post.")
+HOW_PRESS = ("The extension presses Post only where Press Post for me is on in its settings, and after you click "
+             "Yes, press Post for me on ReelForge's own page, which opens first. Never on X. Otherwise you press "
+             "Post.")
 
 
 def numbers(post: dict) -> str:

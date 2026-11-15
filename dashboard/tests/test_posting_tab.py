@@ -6,7 +6,9 @@ page that hands it a batch is a stand-in (the server opens the real one)."""
 from __future__ import annotations
 
 import json
+import textwrap
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest import mock
 
 from dashboard import db, desktop, extension_api, posting, posting_tab
@@ -209,14 +211,18 @@ class Question(PostingTest):
         # may press it, and never on X.
         self.assertEqual(info["how"], "ReelForge opens each upload page in your browser, attaches the video and fills "
                                       "in the text. You check it and press Post.")
-        self.assertIn("always on X, you check it and press Post", info["how_press"])
+        self.assertIn("Never on X. Otherwise you press Post.", info["how_press"])
         # The switch alone presses nothing (docs/EXTENSION.md): the extension's own setting and your yes for
-        # this post in the browser are both needed, and without the yes it stops.
+        # this post in the browser are both needed, and otherwise you press. The yes is a button on ReelForge's
+        # own page, the one that opens first, and not on a platform's upload page.
         self.assertEqual(info["how_press"], (
-            "ReelForge opens each upload page in your browser, attaches the video and fills in the text. The "
-            "extension presses Post only where Press Post for me is switched on in its settings, and only after "
-            "you click Yes, press Post for me on the page that opens. Without that click it stops at the Post "
-            "button. Everywhere else, and always on X, you check it and press Post."))
+            "The extension presses Post only where Press Post for me is on in its settings, and after you click "
+            "Yes, press Post for me on ReelForge's own page, which opens first. Never on X. Otherwise you press "
+            "Post."))
+        page = (Path(extension_api.__file__).parent / "web" / "post.html").read_text("utf-8")
+        self.assertIn(">Yes, press Post for me</button>", page)  # the button the sentence names, where it says
+        # Three rows of the question in a window 80 columns wide (68 across), so the platforms keep rows under it.
+        self.assertLessEqual(len(textwrap.wrap(info["how_press"], 68)), 3)
         self.assertNotIn("presses Post too", info["how_press"])
         by = {p["key"]: p for p in info["platforms"]}
         self.assertEqual(list(by), list(NAMES))

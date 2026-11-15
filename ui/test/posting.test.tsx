@@ -424,7 +424,7 @@ describe("Post…", () => {
     await h.t.mockMouse.click(x + 31, y) // its switch
     await h.settle(300)
     // The switch alone presses nothing: the extension's own setting and your click for this post in the browser too.
-    expect(dialog(h)).toContain("The extension presses Post only where Press Post for me is switched on in its settings, and only after you click Yes, press Post for me on the page that opens. Without that click it stops at the Post button. Everywhere else, and always on X, you check it and press Post.")
+    expect(dialog(h)).toContain("The extension presses Post only where Press Post for me is on in its settings, and after you click Yes, press Post for me on ReelForge's own page, which opens first. Never on X. Otherwise you press Post.")
     await clickText(h, "✓  YouTube", 1) // TikTok and X will do
     await clickText(h, "✓  Instagram", 1)
     expect(dialog(h)).toContain("Stop before the Post button") // still: TikTok is ticked
@@ -432,6 +432,24 @@ describe("Post…", () => {
     await until(h, () => listed("opened.txt").length > 0 && !frame(h).includes("POST THIS VIDEO"))
     // What the page in the browser is told about the two posts: the press is allowed on TikTok, and never on X.
     expect(await pressFor(listed("opened.txt")[0]!)).toEqual({ tiktok: true, x: false })
+  })
+
+  test("in a window 80 columns by 24 rows the question keeps its platforms in view with that switch flipped", async () => {
+    // What the extension wants before it presses took six rows of that window, which left none for the platforms: two
+    // of them were drawn over each other in the row that was there. It is three rows now.
+    const h = await kit({ extension: "on", jobs: { tiktok: ["ready", "posted"] } }, [80, 24])
+    const clip = h.bridge.view<{ items: { id: string }[] }>("files")!.items.find((i) => i.id.endsWith("clip.mp4"))! // (below the two videos the list has room for)
+    await h.bridge.call("pick_file", clip.id)
+    await until(h, () => posting(h).video?.name === "clip.mp4")
+    h.t.mockInput.pressKey("\u001b[6~") // Page Down, to POST
+    await h.settle(400)
+    await clickText(h, "▐ Post… ▌", 3)
+    await until(h, () => frame(h).includes("POST THIS VIDEO"))
+    const [x, y] = find(h, "Stop before the Post button")!
+    await h.t.mockMouse.click(x + 31, y) // its switch
+    await h.settle(300)
+    for (const text of ["Never on X. Otherwise you press Post.", "✓  TikTok     @me", "Caption      Clip #fyp #whatif #weather", "Stop before the Post button", "▐ Cancel ▌", "▐ Start 4 posts ▌"])
+      expect(frame(h)).toContain(text)
   })
 
   test("with that switch left alone, Post is pressed for you nowhere, also where Press Post for me is unlocked", async () => {
