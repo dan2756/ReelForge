@@ -272,18 +272,17 @@ def line(value, limit: int) -> str | None:
 
 
 def post_url(platform: str, value) -> str | None:
-    """A post's link as the extension read it off the page, if it is an https address on that platform's own site."""
+    """A post's link as the extension read it off the page, if it is an https address on that platform's own site.
+    Only the plainest shape is taken: a host name and a path. Python and a browser read anything else differently
+    (a backslash, a name and password before the host), and it is a browser that opens this link."""
     url = line(value, 500)
-    if not url:
+    if not url or not re.fullmatch(r"https://[a-z0-9.-]+(/[^\s\\]*)?", url):
         return None
     try:
-        parts = urlsplit(url)
-        host = (parts.hostname or "").lower()
+        host = urlsplit(url).netloc
     except ValueError:
         return None
-    if parts.scheme != "https" or not any(host == h or host.endswith("." + h) for h in POST_HOSTS.get(platform, ())):
-        return None
-    return url
+    return url if any(host == h or host.endswith("." + h) for h in POST_HOSTS.get(platform, ())) else None
 
 
 def listed(cfg: dict) -> list[Path]:

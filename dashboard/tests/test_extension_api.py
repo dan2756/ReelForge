@@ -818,7 +818,15 @@ class Jobs(ApiTest):
                           ("https://evil.example/www.tiktok.com", False),
                           ("https://www.tiktok.com@evil.example/", False),
                           ("file:///etc/passwd", False), ("https://youtu.be/dQw4w9WgXcQ", False), ("", False),
-                          ("https://[::1", False)):
+                          ("https://[::1", False),
+                          # What a browser reads as another site than Python does, or with a log-in in it.
+                          ("https://evil.example\\@tiktok.com/@me/video/1", False),
+                          ("https://evil.example\\.tiktok.com/x", False),
+                          ("https://www.tiktok.com/@me\\video/1", False),
+                          ("https://me:secret@www.tiktok.com/@me/video/1", False),
+                          ("https://www.tiktok.com:8443/@me/video/1", False),
+                          ("https://WWW.TIKTOK.COM/@me/video/1", False), ("https://www.tiktok.com", True),
+                          ("https://www.tiktok.com/@me/video/1?lang=en#top", True)):
             self.assertEqual(extension_api.post_url("tiktok", url) is not None, kept, url)
         short = "https://youtu.be/dQw4w9WgXcQ"
         self.assertEqual(extension_api.post_url("youtube", short), short)
