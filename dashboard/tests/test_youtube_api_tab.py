@@ -78,6 +78,11 @@ class ApiPosting(PostingTest):
     def api_post(self, w: Window, privacy: str = "", force: bool = False) -> dict | None:
         return w.call("post_with_api", CAPTION, TAGS, privacy, force)
 
+    @staticmethod
+    def yes_to(info: dict) -> dict:
+        """What the window sends back with a yes: what its question (youtube_api_info) showed."""
+        return {"video": info["video"]["path"], "made_for_kids": info["send"]["made_for_kids"]}
+
     def posted(self, w: Window, privacy: str = "") -> dict:
         """Post the picked video through the API and wait until its job is over. Returns the job."""
         made = self.api_post(w, privacy)
@@ -560,7 +565,8 @@ class Posting(ApiPosting):
 
     def test_every_button_of_a_post_that_went_through_the_api_works_from_its_row(self):
         """What the window's row offers for a job whose via is "api", each pressed the way the window presses it
-        (post_action with the row's job): Cancel, Try again, It didn't post, It's posted and Open."""
+        (post_action with the row's job): Cancel, It didn't post, It's posted and Open. A try that ended without a
+        post offers a new post, which is the question and your yes (post_with_api)."""
         w = self.window()
         self.google.hold = threading.Event()
         first = self.api_post(w)["jobs"][0]["id"]
@@ -571,13 +577,12 @@ class Posting(ApiPosting):
         self.google.hold.set()
         self.assertEqual(self.over(w, first)["state"], "cancelled")
         self.google.hold = None
-        # Try again, with the last answer lost for good this time: nobody knows whether it posted.
+        # A new try, with the last answer lost for good this time: nobody knows whether it posted.
         self.google.script, self.google.then = [None, None, None, "lost"], "drop"
         row = self.rows(w)["youtube"]
-        self.assertEqual((row["via"], row["actions"]), ("api", ["retry", "post_api"]))
-        w.call("post_action", row["job"], "retry")
-        (second,) = [j for j in posting.recent() if j["id"] != first]
-        self.assertEqual((self.over(w, second["id"])["state"], second["via"]), ("unknown", "api"))
+        self.assertEqual((row["via"], row["job"], row["actions"]), ("api", first, ["post_api"]))
+        second = self.posted(w)
+        self.assertEqual((second["state"], second["via"]), ("unknown", "api"))
         row = self.rows(w)["youtube"]
         self.assertEqual((row["via"], row["job"], row["actions"]),
                          ("api", second["id"], ["mark_posted", "not_posted"]))
@@ -585,9 +590,7 @@ class Posting(ApiPosting):
         self.assertEqual(self.rows(w)["youtube"]["state"], "cancelled")
         # Once more, and this one goes up: Open opens the video's own link.
         self.google.script, self.google.then = [], None
-        w.call("post_action", self.rows(w)["youtube"]["job"], "retry")
-        (third,) = [j for j in posting.recent() if j["id"] not in (first, second["id"])]
-        third = self.over(w, third["id"])
+        third = self.posted(w)
         row = self.rows(w)["youtube"]
         self.assertEqual((third["state"], row["via"], row["url"], row["actions"]),
                          ("posted", "api", third["url"], ["open_post", "post_again"]))
@@ -625,15 +628,12 @@ class Posting(ApiPosting):
         self.assertEqual(w.sent("toast"), [])
         self.assertIn("× failed: Your Google Cloud project has used up", plain(self.rows(w)["youtube"]["line"]))
         self.google.script, self.google.then = [None, None, None, "lost"], "drop"
-        w.call("post_action", self.rows(w)["youtube"]["job"], "retry")
-        self.assertTrue(w.until(lambda: self.rows(w)["youtube"]["state"] == "unknown", 15))
-        self.assertTrue(w.until(lambda: not w.loop.live(("youtube-api",)), 15))
-        w.pump(0.1)
+        self.assertEqual(self.posted(w)["state"], "unknown")
         self.assertEqual(w.sent("toast"), [])
         # With another video picked by the time it ends, or another tab open, the pop-up says it.
         w.call("post_action", self.rows(w)["youtube"]["job"], "not_posted")
         self.google.script, self.google.then, self.google.hold = [], None, threading.Event()
-        w.call("post_action", self.rows(w)["youtube"]["job"], "retry")
+        self.assertTrue(self.api_post(w)["started"])
         self.assertTrue(w.until(lambda: self.rows(w)["youtube"]["state"] == "uploading"))
         w.call("pick_file", str(self.video))
         self.google.hold.set()
@@ -761,7 +761,7 @@ class Posting(ApiPosting):
         self.assertEqual((job["state"], job["post_id"], job["url"]), ("unknown", None, None))
         self.assertEqual(self.rows(w)["youtube"]["actions"], ["mark_posted", "not_posted"])
 
-    def test_a_refusal_fails_the_job_in_a_sentence_and_retry_goes_through_the_api_again(self):
+    def test_a_refusal_fails_the_job_in_a_sentence_and_the_row_offers_a_new_post(self):
         self.google.start_script = [(403, "quotaExceeded")]
         w = self.window(connect=False)  # no browser extension anywhere: this way of posting needs none
         job = self.posted(w)
@@ -769,36 +769,73 @@ class Posting(ApiPosting):
         self.assertEqual(job["error_message"], "Your Google Cloud project has used up today's YouTube API allowance. "
                                                "It starts again at midnight Pacific time. Nothing was posted.")
         row = self.rows(w)["youtube"]
-        self.assertEqual((row["state"], row["actions"]), ("failed", ["retry", "post_api"]))
+        self.assertEqual((row["state"], row["via"], row["actions"]), ("failed", "api", ["post_api"]))
         self.assertIn("× failed: Your Google Cloud project has used up today's", plain(row["line"]))
         toast = w.sent("toast")[-1]
         self.assertEqual((toast["title"], toast["severity"]), ("YouTube: not posted", "warning"))
         self.assertEqual((self.google.sessions, db.all_posts()), ({}, []))
-        w.call("youtube_api_defaults", "public")  # (a retry keeps what the failed one was to send)
-        w.call("post_action", job["id"], "retry")
-        (again,) = [j for j in posting.recent() if j["id"] != job["id"]]
-        again = self.over(w, again["id"])
-        self.assertEqual((again["state"], again["via"], again["text"], again["options"]),
-                         ("posted", "api", job["text"], job["options"]))
-        self.assertEqual(self.google.starts[1]["body"]["status"]["privacyStatus"], "private")
+        again = self.posted(w)
+        self.assertEqual((again["state"], again["via"]), ("posted", "api"))
         self.assertEqual((self.pages, len(self.google.videos)), ([], 1))  # no page for the extension was opened
 
-    def test_retry_with_the_sign_in_gone_says_connect_again(self):
+    def test_a_try_that_ended_without_a_post_is_never_sent_again_as_it_was(self):
+        """Try again on one of the extension's posts hands the same text to the extension, which stops at the
+        platform's own Post button. Through the API the same press would upload at once, with the old try's caption,
+        choice of who can see it and made-for-kids answer, whatever you have changed since. So a row whose try went
+        through the API has no Try again, the call behind it uploads nothing, and a new try sends what the form and
+        your choices say now."""
+        self.google.start_script = [(403, "quotaExceeded")]
+        w = self.window(connect=False)
+        job = self.posted(w, "public")
+        self.assertEqual((job["state"], json.loads(job["options"])),
+                         ("failed", {"privacy": "public", "made_for_kids": False}))
+        # Since then: the caption is corrected, posts are private from now on, and the videos are made for kids.
+        w.call("form_changed", "Typed since", TAGS)
+        w.call("youtube_api_defaults", "private", True)
+        w.forget()
+        w.call("post_action", job["id"], "retry")
+        (toast,) = w.sent("toast")
+        self.assertEqual((toast["title"], toast["severity"], toast["body"]), (
+            "Nothing was started", "warning",
+            f"Press {posting_tab.LABELS['post_api']} on the YouTube row to try again. Its question shows what will "
+            "be sent now."))
+        self.assertEqual((len(posting.recent()), len(self.google.starts), self.pages), (1, 1, []))
+        # Whichever way a try ended without a post: failed, called off, or never started.
+        for end in (lambda j: posting.cancel(j["id"], "you cancelled it"),
+                    lambda j: (self.age(j, 11, "created_at"), posting.expire_stale())):
+            other = self.job()
+            end(other)
+            w.svc.jobs_changed()
+            row = self.rows(w)["youtube"]
+            self.assertEqual((row["job"], row["via"], row["actions"]), (other["id"], "api", ["post_api"]))
+            w.call("post_action", other["id"], "retry")
+            self.assertEqual(posting.get(other["id"])["state"], row["state"])
+        self.assertEqual((len(posting.recent()), len(self.google.starts)), (3, 1))
+        # The new try: the question shows the form and the choices as they are now, and that is what goes out.
+        info = w.call("youtube_api_info", "", "")
+        self.assertEqual(info["send"], {"title": "Typed since #shorts", "description": TAGS, "privacy": "private",
+                                        "made_for_kids": True, "category": "22"})
+        made = w.call("post_with_api", "Typed since", TAGS, "", False, self.yes_to(info))
+        self.assertEqual(self.over(w, made["jobs"][0]["id"])["state"], "posted")
+        sent = self.google.starts[1]["body"]
+        self.assertEqual((sent["snippet"]["title"], sent["status"]),
+                         ("Typed since #shorts", {"privacyStatus": "private", "selfDeclaredMadeForKids": True}))
+
+    def test_a_post_with_the_sign_in_gone_says_connect_again(self):
         self.google.start_script = [(403, "quotaExceeded")]
         w = self.window()
         job = self.posted(w)
         self.google.end_grant()
         youtube_api._access.clear()
-        w.call("post_action", job["id"], "retry")
-        (again,) = [j for j in posting.recent() if j["id"] != job["id"]]
-        again = self.over(w, again["id"])
+        again = self.posted(w)
+        self.assertNotEqual(again["id"], job["id"])
         self.assertEqual((again["state"], again["error_code"]), ("failed", "not_connected"))
         self.assertEqual(again["error_message"], AGAIN["grant"] + " Nothing was posted.")
         view = w.view("youtube_api")
         self.assertEqual((view["state"], plain(view["line"])), ("again", "● YouTube API: connect again"))
         self.assertEqual(plain(view["lines"][0]), AGAIN["grant"])
-        self.assertEqual(self.rows(w)["youtube"]["actions"], ["retry", "connect_api"])  # nothing new until then
-        w.call("post_action", again["id"], "retry")
+        self.assertEqual(self.rows(w)["youtube"]["actions"], ["connect_api"])  # nothing new until then
+        self.assertIsNone(self.api_post(w))
         self.assertEqual(w.toasts()[-1], AGAIN["grant"])
         self.assertEqual(len(posting.recent()), 2)
         self.assertEqual(w.call("youtube_api_info", CAPTION, TAGS)["why"], AGAIN["grant"])
@@ -851,7 +888,7 @@ class Posting(ApiPosting):
         self.assertEqual(job["state"], "unknown")
         w.call("post_action", job["id"], "not_posted")
         row = self.rows(w)["youtube"]
-        self.assertEqual((row["state"], row["actions"]), ("cancelled", ["retry", "post_api"]))
+        self.assertEqual((row["state"], row["actions"]), ("cancelled", ["post_api"]))
         self.assertEqual(self.posted(w)["state"], "posted")
 
     def test_a_connection_that_stays_down_before_the_last_piece_fails_and_can_be_tried_again(self):
@@ -873,7 +910,7 @@ class Posting(ApiPosting):
         self.assertEqual((job["state"], job["detail"]), ("cancelled", "you cancelled it"))
         self.assertEqual((len(self.google.puts), self.google.videos), (1, []))
         self.assertNotIn("sessions", json.loads(self.api_store.read_text("utf-8")))
-        self.assertEqual(self.rows(w)["youtube"]["actions"], ["retry", "post_api"])
+        self.assertEqual(self.rows(w)["youtube"]["actions"], ["post_api"])
         self.assertEqual([t["title"] for t in w.sent("toast") if "YouTube" in t["title"]], [])  # you know already
 
     def test_while_the_last_piece_is_on_its_way_the_row_has_no_buttons(self):
@@ -1086,14 +1123,12 @@ class AfterAQuit(ApiPosting):
         w.svc.mind_the_jobs()  # what a window does when it starts, and every half minute
         self.assertTrue(w.until(lambda: self.rows(w)["youtube"]["state"] == "failed"))
         self.assertIn("ReelForge was closed during the upload", plain(self.rows(w)["youtube"]["line"]))
-        self.assertEqual(self.rows(w)["youtube"]["actions"], ["retry", "connect_api"])
-        w.call("post_action", job["id"], "retry")  # not before this window is connected
+        self.assertEqual(self.rows(w)["youtube"]["actions"], ["connect_api"])
+        self.assertIsNone(self.api_post(w))  # not before this window is connected
         self.assertEqual((w.toasts()[-1], len(posting.recent())), (AGAIN["session"], 1))
         w.call("post_action", job["id"], "connect_api")
-        self.assertTrue(w.until(lambda: self.rows(w)["youtube"]["actions"] == ["retry", "post_api"]))
-        w.call("post_action", job["id"], "retry")
-        (again,) = [j for j in posting.recent() if j["id"] != job["id"]]
-        self.assertEqual(self.over(w, again["id"])["state"], "posted")
+        self.assertTrue(w.until(lambda: self.rows(w)["youtube"]["actions"] == ["post_api"]))
+        self.assertEqual(self.posted(w)["state"], "posted")
         self.assertEqual(len(self.google.videos), 1)
 
     def test_on_the_last_piece_a_reelforge_opened_since_has_no_sign_in_to_ask_with(self):

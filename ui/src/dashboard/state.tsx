@@ -291,12 +291,13 @@ export class DashState {
    * Google's page is waiting for (the Python side's own row action says it in pop-ups, which piled up over the
    * rows). A window that can't hand a post to the extension (it isn't listening for it) says why instead, with by
    * hand beside it, as Post… does: Post again and Try again would start something that is called off at once. Try
-   * again on a post that went through the API has nothing to do with the extension, and goes ahead. */
+   * again on a post that went through the API would be an upload on one press, so it is the question too (the
+   * Python side offers no such button, and the question asks it about the form and the choices as they are now). */
   postAction(row: PostingRow, action: string) {
-    if (action === "post_api" || action === "post_api_again") return void this.openApiPost()
+    if (action === "post_api" || action === "post_api_again" || (action === "retry" && row.via === "api")) return void this.openApiPost()
     if (action === "connect_api") return this.set({ dialog: { kind: "youtube_api", connect: true } })
     const ext = this.bridge.view<ExtensionView>("extension")
-    const handsOver = action === "post_again" || (action === "retry" && row.via !== "api")
+    const handsOver = action === "post_again" || action === "retry"
     if (handsOver && ext && ext.state !== "off" && ext.problem) return this.set({ dialog: { kind: "extension", from: "post" } })
     if (action === "post_again") return void this.openPost([row.key])
     this.bridge.send("post_action", row.job ?? row.key, action)

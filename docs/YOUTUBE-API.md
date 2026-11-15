@@ -191,11 +191,13 @@ When Google's answer says how long the sign-in lasts, ReelForge shows how many d
 
 ## When something goes wrong
 
-A failed post says why in a sentence, and nothing was posted. These are the ones you are most likely to meet.
+A failed post says why in a sentence, and nothing was posted. Its row has **Post with API…** again. A new try
+starts with the question, like any post, so you see what it will send: the caption and your choices as they are
+then, not as they were. These are the sentences you are most likely to meet.
 
 | It says | What to do |
 |---|---|
-| ReelForge keeps YouTube's sign-in only while it is open | Connect in this window, then post or press Try again |
+| ReelForge keeps YouTube's sign-in only while it is open | Connect in this window, then press Post with API… |
 | YouTube's sign-in has run out or was taken back at Google | Connect again |
 | Google no longer knows the OAuth client | The client was deleted in Google Cloud. Make a new Desktop client and connect with its file |
 | Your Google Cloud project has used up today's YouTube API allowance | Wait until midnight Pacific time, or post this one by hand |
@@ -203,9 +205,9 @@ A failed post says why in a sentence, and nothing was posted. These are the ones
 | The Google account you connected has no YouTube channel | Connect again and pick the account, or the channel, that is yours |
 | Google didn't give ReelForge permission to upload | Connect again and allow it on Google's page |
 | YouTube didn't take the title | Shorten the caption, and take out any `<` or `>` |
-| YouTube couldn't be reached | Check your connection, then press Try again |
+| YouTube couldn't be reached | Check your connection, then press Post with API… again |
 | The video file changed after you pressed Post | Check the video, then post again |
-| ReelForge was closed during the upload | Nothing was posted. Press Try again |
+| ReelForge was closed during the upload | Nothing was posted. Press Post with API… again |
 | YouTube took the upload and rejected it | Look at the video in YouTube Studio. The reason is in brackets: "duplicate" is a video YouTube already has |
 | YouTube refused the upload (some word) | The word in brackets is Google's own, for a refusal ReelForge has no sentence for. Post this one by hand. If it came in answer to the last piece, the post is "not sure it posted" instead, because such a word proves nothing |
 
@@ -290,9 +292,10 @@ What the window gets and calls:
 | `post_action(job, "connect_api")` | the same as `youtube_api_connect("")`. The window's button for it opens the dialog and connects from there |
 
 A job goes `queued`, `uploading` (with `progress`), `posting` (the last piece is on its way), then `posted`, or
-ends as `failed` or `unknown`. Try again (`retry`) on a failed row goes through the API again. A posted job whose
-`step` is `confirm` has a sentence in `detail` about how YouTube stored the video: something for the person to
-look at. One whose `step` is `note` went without a made-for-kids answer, and its `detail` says so.
+ends as `failed` or `unknown`. A row whose job went through the API has no Try again (`retry`): a new try is a new
+post, from `post_api` and the question, and `post_action(job, "retry")` on such a job uploads nothing. A posted
+job whose `step` is `confirm` has a sentence in `detail` about how YouTube stored the video: something for the
+person to look at. One whose `step` is `note` went without a made-for-kids answer, and its `detail` says so.
 
 The sign-in is held in the window's process (`youtube_api._held`) and never written down, so `status()` in any
 other process says `again`, and `upload()` there has nothing to send with. A command never connects: its sign-in
@@ -317,7 +320,7 @@ Tested here, by automated tests that run with ReelForge's own (`dashboard/tests/
   error, the last answer lost and found, the last answer lost for good (not sure it posted, and one upload only),
   a sign-in that ends in the middle, every refusal ReelForge has a sentence for, and a refusal of the last piece
   that proves nothing (a word ReelForge doesn't know, or a "no" to the piece sent a second time): not sure it
-  posted, and no Try again
+  posted, and no button that posts it again
 - the read-back: a video YouTube stored as private when public was asked for
 - that who can see the video is in every request, and that the made-for-kids answer is in it once you have given
   one and never before

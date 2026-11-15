@@ -645,8 +645,9 @@ class PostingTab:
     def post_action(self, job: str, action: str) -> None:
         """A button on a platform's row. job: the row's job id, or its platform's key when it has none (a post the
         stats read found). cancel calls a job off; mark_posted and not_posted are your word on one ReelForge lost
-        track of; retry starts a failed one again with the same text; open_post opens the post; post_again starts
-        a new post of the picked video there, with the form's text as it is, stopping before Post."""
+        track of; retry starts a failed one again with the same text, through the extension, which stops before
+        Post (a try through YouTube's API has no retry: api_rows); open_post opens the post; post_again starts a
+        new post of the picked video there, with the form's text as it is, stopping before Post."""
         row = self._safe(lambda: posting.get(job), None) if job not in self.every else None
         platform = row["platform"] if row else job
         if self.api_action(row, platform, action):  # a button that goes through YouTube's API (youtube_api_tab.py)

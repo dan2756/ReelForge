@@ -463,24 +463,53 @@ describe("a post through the API", () => {
     expect(row(h)).toContain("YouTube has it as made for kids. ReelForge sent no answer to that, because you haven't given one, so this is your channel's own setting. Check its audience in YouTube Studio.")
   })
 
-  test("that YouTube refuses says why in a sentence, and Try again goes through the API again", async () => {
+  test("that YouTube refuses says why in a sentence, and a new try is the question again, with what is so by then", async () => {
     const h = await kit({ extension: "on", api: { client: "on", kids: false, google: { start_script: [[403, "quotaExceeded"]] } } })
     await ask(h)
+    await clickText(h, "○ Public", 2) // for this one post
     await clickText(h, "Post to YouTube", 2)
     await until(h, () => youtube(h).state === "failed")
     const why = "Your Google Cloud project has used up today's YouTube API allowance. It starts again at midnight Pacific time. Nothing was posted."
     expect(row(h)).toContain(`× failed: ${why}`)
-    expect(row(h)).toMatch(/▐ Try again ▌ ▐ Post with API… ▌$/)
+    // No Try again here: through the API it would be an upload on one press, of what the failed try was to send.
+    expect(row(h)).toMatch(/▐ Post with API… ▌$/)
+    expect(row(h)).not.toContain("Try again")
     expect(popups()).toEqual([])
     expect((await google(h)).videos).toEqual([])
-    // This window isn't listening for the browser extension, which stops a Try again that needs it. This one
-    // doesn't: it went through the API, and goes through it again.
+    // The call behind an extension row's Try again uploads nothing for this one, whoever makes it. And a row that came
+    // with the button all the same opens the question (this window isn't listening for the extension: it isn't asked).
+    await h.bridge.call("post_action", youtube(h).job, "retry")
+    await until(h, () => popups().length > 0)
+    expect(popups()).toEqual(["Nothing was started: Press Post with API… on the YouTube row to try again. Its question shows what will be sent now."])
     toasts.clear()
-    await clickText(h, "Try again", 2)
-    await until(h, () => youtube(h).state === "posted")
+    h.bridge.emit("posting", { ...posting(h), rows: posting(h).rows.map((r) => (r.key === "youtube" ? { ...r, actions: ["retry"] } : r)) })
+    await h.settle(300)
+    await ask(h, "Try again")
     expect(frame(h)).not.toContain("BROWSER EXTENSION")
+    expect(focused(h)).toBe("Cancel")
+    h.t.mockInput.pressKey("RETURN")
+    await h.settle(400)
+    expect([jobsMade(), (await google(h)).starts.length]).toEqual([1, 1])
+    // Since then the caption is corrected in the form, and the videos are made for kids after all.
+    await clickText(h, CAPTION, 2)
+    for (let i = 0; i < CAPTION.length + 3; i++) h.t.mockInput.pressKey("BACKSPACE")
+    await h.t.mockInput.typeText("What if hail tripled every 3 seconds?")
+    h.t.mockInput.pressKey("ESCAPE") // out of the box
+    await h.settle(300)
+    await openApi(h)
+    await clickText(h, "○ Yes", 2)
+    await until(h, () => api(h).made_for_kids === true && youtube(h).actions.includes("post_api"))
+    await clickText(h, "▐ Close ▌", 3)
+    // The question shows the caption and the choices as they are now, and private again: Public was for that one try.
+    await ask(h)
+    expect(dialog(h)).toContain("Title What if hail tripled every 3 seconds? #shorts")
+    expect(dialog(h)).toContain("Who can see it ▐ ● Private ▌ ○ Unlisted ○ Public Made for kids Yes")
+    await clickText(h, "Post to YouTube", 2)
+    await until(h, () => youtube(h).state === "posted")
     expect(row(h)).toContain("✓ posted")
-    expect([(await google(h)).videos, jobsMade(), listed("opened.txt")]).toEqual([["vid00000001"], 2, []]) // and no page for the extension
+    const sent = await google(h)
+    expect([sent.starts[1]!.snippet.title, sent.starts[1]!.status]).toEqual(["What if hail tripled every 3 seconds? #shorts", { privacyStatus: "private", selfDeclaredMadeForKids: true }])
+    expect([sent.videos, jobsMade(), listed("opened.txt")]).toEqual([["vid00000001"], 2, []]) // and no page for the extension
   })
 
   test("whose last piece got no answer is not sure it posted, and takes your word either way", async () => {
@@ -493,10 +522,11 @@ describe("a post through the API", () => {
     expect(popups()).toEqual([])
     await clickText(h, "It didn't post", 2)
     await until(h, () => youtube(h).state === "cancelled")
-    expect(row(h)).toMatch(/▐ Try again ▌ ▐ Post with API… ▌$/)
+    expect(row(h)).toMatch(/you said it didn't post\) .* ▐ Post with API… ▌$/)
     // Once more, lost the same way, and this time you find it in YouTube Studio.
     await google(h, "tell", { script: [null, null, "lost"], then: "drop" })
-    await clickText(h, "Try again", 2)
+    await ask(h)
+    await clickText(h, "Post to YouTube", 2)
     await until(h, () => youtube(h).state === "unknown")
     await clickText(h, "It's posted", 2)
     await until(h, () => youtube(h).state === "posted")
@@ -569,7 +599,7 @@ describe("a window opened afterwards", () => {
     expect(row(h)).toMatch(/^YouTube ○ not posted ▐ Post with API… ▌$/)
   })
 
-  test("a post that failed for want of a sign-in says to connect first, and Try again says it again", async () => {
+  test("a post that failed for want of a sign-in says to connect first, and its row offers Connect API and no post", async () => {
     const h = await kit({ api: { client: "on", kids: false } })
     await google(h, "end_grant") // Google ends the sign-in: revoked there, or its seven days are up
     await ask(h)
@@ -577,10 +607,12 @@ describe("a window opened afterwards", () => {
     await until(h, () => youtube(h).state === "failed")
     const why = "YouTube's sign-in has run out or was taken back at Google. Connect again. While your Google Cloud consent screen is in Testing, Google ends it after 7 days."
     expect(row(h)).toContain(`× failed: ${why} Nothing was posted.`)
-    expect(row(h)).toMatch(/▐ Try again ▌ ▐ Connect API ▌$/)
+    expect(row(h)).toMatch(/▐ Connect API ▌$/)
+    for (const button of ["Try again", "with API"]) expect(row(h)).not.toContain(button)
     expect(flat(h)).toContain("● YouTube API: connect again")
+    // A post asked for all the same says it again, and starts nothing.
     toasts.clear()
-    await clickText(h, "Try again", 2)
+    expect(await h.bridge.call("post_with_api", CAPTION, TAGS, "private", false)).toBeNull()
     await until(h, () => popups().length > 0)
     expect(popups()).toEqual([`YouTube's API: ${why}`])
     expect(jobsMade()).toBe(1)

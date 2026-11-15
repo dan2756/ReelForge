@@ -221,7 +221,8 @@ export interface PostingRow {
   via: "extension" | "api" | null // how that job goes: with the browser extension, or through YouTube's own API
   // retry, cancel, mark_posted, not_posted, open_post, post_again. On the YouTube row also post_api (the question
   // before a post through YouTube's API) while this window is connected to it, and connect_api (Google's page, to
-  // connect this window) while it isn't. The view's labels has the words for each: an action's name is never drawn.
+  // connect this window) while it isn't. A row whose job went through the API has no retry: a new try is post_api.
+  // The view's labels has the words for each: an action's name is never drawn.
   actions: string[]
   // The YouTube row, while this window is connected to YouTube's API and a post could start through it. force: the
   // video is up there already, so it would be a post again: the window's own button asks for that by name.

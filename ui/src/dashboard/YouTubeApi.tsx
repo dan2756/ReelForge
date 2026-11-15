@@ -5,9 +5,9 @@
 // sent, who can see it, and that this way of posting has never been run against YouTube itself.
 //
 // dashboard/youtube_api_tab.py sends the "youtube_api" view and writes its words; docs/YOUTUBE-API.md is the page for
-// the person. Nothing here uploads by itself: an upload starts with your yes in the question, and Try again on a row.
-// The sign-in is kept by the window's Python side while the window is open and never in a file, so every window
-// connects before it can post.
+// the person. Nothing here uploads by itself, and no press on a row does: an upload starts with your yes in the
+// question, and only there. The sign-in is kept by the window's Python side while the window is open and never in a
+// file, so every window connects before it can post.
 
 import { TextAttributes } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/react"

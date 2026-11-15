@@ -18,7 +18,9 @@ a window. The second is a mixin of the window's service (dashboard/service.py), 
 its mind_the_jobs runs first. One view, youtube_api (the connection: off, connecting, on or again), and the calls
 behind the buttons: youtube_api_info, youtube_api_connect, youtube_api_disconnect, youtube_api_defaults and
 post_with_api. PostingTab asks this half about its rows (api_rows) and their buttons (api_action). An upload starts
-only from post_with_api and from a row's post_api and Retry buttons, and only your press in the window calls those.
+only from post_with_api and from a row's post_api button, and only your press in the window calls those. A try that
+ended without a post is never sent again as it was: a new try is a new post, with the text and choices as they are
+now.
 
 The sign-in is held by the window that connected and is never in a file (youtube_api._held), so a window that has
 just opened says "again" until you connect in it, and nothing outside a connected window can upload.
@@ -412,12 +414,15 @@ class YouTubeApiTab:
         this window isn't connected, the row has connect_api there instead. A posted row says what the read-back
         found, or that the video is private, until a stats read has its numbers (only a video everyone can see has
         any). A row whose last piece is on its way has no buttons: only YouTube's word ends it. One that waits for
-        another video's upload to finish says that it is waiting its turn."""
+        another video's upload to finish says that it is waiting its turn. One whose try ended without a post has no
+        Try again: what that try was to send may not be what you would send now (the caption, who can see it, your
+        made-for-kids answer), so a new try starts like any post, from post_api and its question."""
         state = "off" if self.demo else youtube_api.status()["state"]
         connected = state == "on"
         for row in rows:
             job, post = jobs.get(row["key"]), posts.get(row["key"])
             if job is not None and job["via"] == "api" and row["job"] == job["id"]:
+                row["actions"] = [a for a in row["actions"] if a != "retry"]
                 if row["state"] == "posting":
                     row["actions"] = []
                 elif row["state"] == "queued" and self._safe(lambda: another_uploading(job["id"]), False):
@@ -439,16 +444,18 @@ class YouTubeApiTab:
 
     def api_action(self, row: dict | None, platform: str, action: str) -> bool:
         """A row's button that goes through the API, not the extension (PostingTab.post_action asks this first).
-        True when it was one: Retry on a job that went through the API, post_api, which posts the picked video
-        with the form's text as last typed and your choices, and never "again", or connect_api, which opens
-        Google's page to connect this window with the client on file."""
+        True when it was one: post_api, which posts the picked video with the form's text as last typed and your
+        choices, and never "again", connect_api, which opens Google's page to connect this window with the client
+        on file, or retry on a job that went through the API. No row offers that one, and it uploads nothing: it
+        says where a new try starts."""
         retry = action == "retry" and row is not None and row["via"] == "api"
         if not retry and not (action in ("post_api", "connect_api") and platform == "youtube"):
             return False
         if self.demo:
             self.notify("Demo mode: nothing is posted.", timeout=4)
         elif retry:
-            self.retry_with_api(row)
+            self.notify("Press Post with API… on the YouTube row to try again. Its question shows what will be sent "
+                        "now.", title="Nothing was started", severity="warning", timeout=10)
         elif action == "connect_api":
             self.youtube_api_connect("")
         else:
@@ -660,21 +667,6 @@ class YouTubeApiTab:
             self.say_busy(e)
             return None
         return self._api_started(made)
-
-    def retry_with_api(self, job: dict) -> None:
-        """Retry on a row whose post went through the API: the same text and choices once more, in a new job and a
-        new upload. Only a job that ended without a post has the button."""
-        said = youtube_api.status()
-        if said["state"] != "on":
-            self.notify(AGAIN[said["why"]] if said["state"] == "again" else NOT_CONNECTED, title="YouTube's API",
-                        severity="warning", timeout=10)
-            return
-        try:
-            self._api_started(posting.retry(job["id"], self.cfg))
-        except posting.Refused as e:
-            self.notify(e.message, title="YouTube", severity="warning", timeout=8)
-        except sqlite3.OperationalError as e:
-            self.say_busy(e)
 
     def _api_started(self, made: dict) -> dict:
         for b in made["blocked"]:
