@@ -384,7 +384,11 @@ class PostingTab:
         if not self._picked():
             return None
         video = self.selected_file
-        look = posting.preview(video, list(self.platforms), caption, tags, self.cfg, demo=self.demo)
+        try:
+            look = posting.preview(video, list(self.platforms), caption, tags, self.cfg, demo=self.demo)
+        except sqlite3.OperationalError as e:
+            self.say_busy(e)
+            return None
         self.picked_review = (video, look["review"])  # read afresh just now: the view follows it
         extension = self.extension_status()
         platforms = []
@@ -437,11 +441,11 @@ class PostingTab:
             made = posting.create_batch(self.selected_file, ticked, caption, tags, self.cfg,
                                         press=not stop_before, force=tuple(force or ()))
         except sqlite3.OperationalError as e:
-            self.notify(f"The stats database is busy ({e}). Try again in a moment.", severity="warning", timeout=8)
+            self.say_busy(e)
             return None
-        return self._started(made)
+        return self._hand_over(made)
 
-    def _started(self, made: dict) -> dict:
+    def _hand_over(self, made: dict) -> dict:
         """After jobs were made (or refused): say what was refused, open the local page for the rest."""
         refused: dict[str, list[str]] = {}  # one pop-up for each reason, naming the platforms it stops
         for b in made["blocked"]:
@@ -467,6 +471,10 @@ class PostingTab:
         return {"batch": made["batch"] if opened else None,
                 "jobs": [{"id": j["id"], "platform": j["platform"]} for j in made["jobs"]] if opened else [],
                 "blocked": made["blocked"], "opened": opened}
+
+    def say_busy(self, e: sqlite3.OperationalError) -> None:
+        """The database was locked by another ReelForge just then (as db_safe says it for the rest of the window)."""
+        self.notify(f"The stats database is busy ({e}). Try again in a moment.", severity="warning", timeout=8)
 
     def open_post_page(self, batch: str) -> bool:
         """Open the local page that hands a batch to the extension, in your browser. The local server does this
@@ -501,13 +509,13 @@ class PostingTab:
         try:
             if action == "post_again":
                 if self._picked():
-                    self._started(posting.create_batch(self.selected_file, [platform], *self.form_text, self.cfg,
+                    self._hand_over(posting.create_batch(self.selected_file, [platform], *self.form_text, self.cfg,
                                                        force=(platform,)))
                 return
             if row is None:
                 return
             if action == "retry":
-                self._started(posting.retry(row["id"], self.cfg))
+                self._hand_over(posting.retry(row["id"], self.cfg))
                 return
             if action == "cancel":
                 posting.cancel(row["id"], "you cancelled it")
@@ -516,7 +524,7 @@ class PostingTab:
         except posting.Refused as e:
             self.notify(e.message, title=name, severity="warning", timeout=8)
         except sqlite3.OperationalError as e:
-            self.notify(f"The stats database is busy ({e}). Try again in a moment.", severity="warning", timeout=8)
+            self.say_busy(e)
         self.jobs_changed(everywhere=True)
 
     @rpc

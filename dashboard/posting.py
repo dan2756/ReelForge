@@ -481,14 +481,24 @@ def expire_stale(now: datetime | None = None) -> int:
     rules = (("queued", "created_at", QUEUED_FOR, "expired", "not picked up in time"),
              ("ready", "updated_at", READY_FOR, "unknown", "no word since it was ready to post"),
              ("posting", "updated_at", POSTING_FOR, "unknown", "no confirmation after Post was pressed"))
-    moved = 0
-    with db.connect() as c:
-        c.execute("BEGIN IMMEDIATE")
+    def stale(c: sqlite3.Connection) -> list[tuple[dict, str, str]]:
+        found = []
         for state, column, limit, to, detail in rules:
             cut = (now - limit).isoformat(timespec="seconds")
-            for row in c.execute(f"SELECT * FROM post_jobs WHERE state = ? AND {column} <= ?", (state, cut)).fetchall():
-                _write(c, dict(row), to, "app", detail=detail)
-                moved += 1
+            found += [(dict(row), to, detail) for row in c.execute(
+                f"SELECT * FROM post_jobs WHERE state = ? AND {column} <= ?", (state, cut)).fetchall()]
+        return found
+
+    moved = 0
+    with db.connect() as c:
+        # A look first, which never waits: this runs every half minute in every window, and nearly always finds
+        # nothing. Only then the write, with the look taken again inside it.
+        if not stale(c):
+            return 0
+        c.execute("BEGIN IMMEDIATE")
+        for old, to, detail in stale(c):
+            _write(c, old, to, "app", detail=detail)
+            moved += 1
     if moved:
         db.bump()
     return moved
