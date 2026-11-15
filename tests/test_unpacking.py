@@ -69,8 +69,10 @@ class Untar(unittest.TestCase):
     def test_an_ordinary_archive_unpacks_the_same_on_both(self):
         folder = tarfile.TarInfo("ffmpeg-n7.1/bin")
         folder.type, folder.mode = tarfile.DIRTYPE, 0o755
-        good = self.archive(folder, ("ffmpeg-n7.1/bin/ffmpeg", "run me"), ("ffmpeg-n7.1/LICENSE.txt", "GPL"),
-                            self.link("ffmpeg-n7.1/bin/ff", "ffmpeg"), self.link("ffmpeg-n7.1/doc", "../ffmpeg-n7.1/bin"))
+        # links that stay inside the folder are fine too (left out on Windows, where making one needs a privilege)
+        links = [] if os.name == "nt" else [self.link("ffmpeg-n7.1/bin/ff", "ffmpeg"),
+                                            self.link("ffmpeg-n7.1/doc", "../ffmpeg-n7.1/bin")]
+        good = self.archive(folder, ("ffmpeg-n7.1/bin/ffmpeg", "run me"), ("ffmpeg-n7.1/LICENSE.txt", "GPL"), *links)
         for old in PYTHONS:
             with self.subTest(old_python=old):
                 out = self.dir / f"out-{old}"

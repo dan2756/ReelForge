@@ -142,7 +142,7 @@ class PartWayTest(unittest.TestCase):
         (self.root / ".venv" / "installed.txt").unlink()
         with mock.patch.object(update.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "")), \
                 self.assertRaises(update.UpdateError) as stopped:
-            update._after(self.root, "another requirements.txt", lambda *a: None, print)
+            update._after(self.root, "another requirements.txt", lambda *a: None, lambda text: None)
         self.assertIn("-m pip install -r requirements.txt", str(stopped.exception))
         self.assertNotIn("setup starts", str(stopped.exception))
 
