@@ -336,9 +336,10 @@ Tested here, by automated tests that run with ReelForge's own (`dashboard/tests/
   printed, logged, sent to the window, answered to it, put in an error, or kept in the stats database
 - the window (`ui/test/youtube_api.test.tsx`), drawn without a terminal and clicked through against the same
   stand-in, with "your browser" played by the test: the client file and a file that is refused, Connect and the
-  wait for Google's page, a no there, the two choices, the question and what it sends, a post from uploading to
-  posted with its link, a refusal, a post that is not sure, Cancel, a window opened afterwards (not connected, and
-  its Post starts nothing), and Disconnect
+  wait for Google's page, a no there, the two choices, the question and what it sends, a yes after the video's
+  file was replaced (nothing starts), a post from uploading to posted with its link, a refusal and the new try
+  after it, a post again that is refused, a post that is not sure, Cancel, a window opened afterwards (not
+  connected, and its Post starts nothing), and Disconnect
 
 Seen from Google itself, without any account:
 

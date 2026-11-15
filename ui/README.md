@@ -89,8 +89,11 @@ person; the Python side is `dashboard/youtube_api_tab.py`). In the window it is 
 - Every window connects again when it opens: the sign-in is kept by the window's Python side and never in a file.
   Until then the YouTube row has **Connect API**, which opens the dialog and Google's page in one press.
 - **Post with API…** on the YouTube row opens a question built from `youtube_api_info`: exactly what will be
-  sent, and who can see this one post. Its **Post to YouTube** calls `post_with_api` with what the question showed.
-  No press on a row uploads anything.
+  sent, and who can see this one post. Its **Post to YouTube** calls `post_with_api` with what the question showed
+  (the video, its file's SHA-256 and the made-for-kids answer), and the Python side starts nothing when one of
+  them is another by then.
+- No press on a row uploads anything. A row whose try through the API ended without a post has Post with API…
+  again and no Try again: a new try is a new question, about the form and the choices as they are then.
 
 Its tests (`test/youtube_api.test.tsx`) run against a stand-in for Google that listens inside the Python side
 (`test/youtube_api_preload.py`). Nothing in them reaches Google, and this way of posting has never been run
