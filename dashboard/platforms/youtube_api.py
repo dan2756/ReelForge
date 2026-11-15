@@ -170,11 +170,17 @@ def read_store() -> dict:
 def _read() -> dict:
     """The file, or {} while there is none or what is there isn't one. OSError when it is there and can't be read,
     which says nothing about the connection either way."""
-    try:
-        data = json.loads(store_path().read_text("utf-8"))
-    except (FileNotFoundError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    for attempt in range(4):
+        try:
+            data = json.loads(store_path().read_text("utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (FileNotFoundError, ValueError):
+            return {}
+        except PermissionError:  # Windows, while another ReelForge puts a new file in place: a moment later it is free
+            if attempt == 3:
+                raise
+            time.sleep(0.02)
+    return {}
 
 
 def change_store(change: Callable[[dict], object]):

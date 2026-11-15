@@ -871,6 +871,39 @@ class Store(ApiTest):
         self.store.write_text(json.dumps(odd), "utf-8")
         self.assertEqual(youtube_api.status()["state"], "off")  # nothing odd is ever put in a request
 
+    def busy(self, times: int):
+        """The file can't be opened the next times it is read, as on Windows while another ReelForge puts a new
+        one in its place. Returns the patch and the list its tries are counted in."""
+        real, tries = Path.read_text, []
+
+        def read_text(path, *args, **kw):
+            if path == self.store:
+                tries.append(path)
+                if len(tries) <= times:
+                    raise PermissionError(13, "The process cannot access the file because it is being used")
+            return real(path, *args, **kw)
+
+        return mock.patch.object(Path, "read_text", read_text), tries
+
+    def test_a_file_another_reelforge_is_just_replacing_is_read_a_moment_later(self):
+        self.connect()
+        youtube_api.set_defaults("unlisted")
+        patch, tries = self.busy(2)
+        with patch, mock.patch.object(youtube_api.time, "sleep") as waited:
+            said = youtube_api.status()
+        self.assertEqual((said["state"], said["privacy"], len(tries)), ("on", "unlisted", 3))
+        self.assertEqual(waited.call_count, 2)
+
+    def test_a_file_that_cannot_be_read_does_not_end_the_sign_in_of_an_upload_under_way(self):
+        self.connect()
+        patch, _ = self.busy(10 ** 6)
+        with patch, mock.patch.object(youtube_api.time, "sleep"):
+            self.assertEqual(youtube_api.read_store(), {})  # nothing can be said of what is on file...
+            youtube_api._access.clear()
+            self.assertIn(youtube_api.access_token(), self.google.access)  # ...which is not a disconnect
+            self.assertEqual(self.upload()["id"], "vid00000001")
+        self.assertEqual(youtube_api.status()["state"], "on")
+
     def test_your_choices_start_safe_and_only_take_what_they_know(self):
         said = youtube_api.status()
         self.assertEqual((said["privacy"], said["made_for_kids"]), ("private", False))
