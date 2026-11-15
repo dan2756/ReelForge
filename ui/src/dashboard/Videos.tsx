@@ -37,8 +37,9 @@ export function Videos() {
   return (
     <box flexDirection="column" flexGrow={1} marginTop={1} gap={1}>
       <Panel flexGrow={1} minHeight={8}>
-        <box height={1} marginBottom={1} flexShrink={0}>
-          <Fitted parts={videos?.hint} base={DASH.faint} />
+        {/* Show, then Open post, Fix episode and Export CSV: on a second row where one can't hold them */}
+        <box flexDirection="column" marginBottom={1} flexShrink={0}>
+          <Fitted parts={videos.hint} base={DASH.faint} rows />
         </box>
         <Table
           id="videos-table"

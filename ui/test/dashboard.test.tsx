@@ -102,6 +102,54 @@ describe("the Overview fits", () => {
   }
 })
 
+describe("the Overview in an 80-column window", () => {
+  test("every tile's numbers say what they are, and the day's change never runs into the name", async () => {
+    const h = await window("overview", [80, 24])
+    const tiles = rows(h).slice(TOP_ROWS + 1, TOP_ROWS + 1 + TILE_ROWS)
+    // (a column short, four of the five tiles were three bare numbers: 18K, 2.8M, 199K)
+    expect(tiles.join(" ").split(" views").length - 1).toBe(5)
+    expect(tiles.join(" ").split(" followers").length - 1).toBeGreaterThanOrEqual(2) // where the number leaves it room
+    expect(tiles[1]).not.toMatch(/[A-Za-z][▲▼]/)
+    for (const name of ["All", "TT", "YT", "IG", "X"]) expect(tiles[1]).toContain(name)
+  })
+})
+
+describe("the Videos tab in an 80-column window", () => {
+  test("keeps Open post, Fix episode and Export CSV, on a row under Show", async () => {
+    const h = await window("videos", [80, 24])
+    const lines = rows(h)
+    const show = lines.findIndex((r) => r.includes("SHOW"))
+    expect(lines[show + 1]).toContain("Open post   Fix episode   Export CSV") // (they were left out: no room on Show's row)
+    await clickText(h, " Fix episode ", 2)
+    await until(h, "WHICH VIDEO IS THIS?")
+    expect(frame(h)).toContain("WHICH VIDEO IS THIS?")
+  })
+})
+
+describe("the Compare tab in an 80-column window", () => {
+  test("has the episodes above the scoreboard, whose headings are no longer cut off", async () => {
+    const h = await window("compare", [80, 24])
+    const at = (text: string) => rows(h).findIndex((r) => r.includes(text))
+    expect(rows(h)[at("EPISODES")]).toContain("Newest   Oldest   Most views")
+    expect(at("EPISODES")).toBeLessThan(at("PLATFORM SCOREBOARD  which platform is working"))
+    expect(frame(h)).toMatch(/MEDIAN VIEWS PER VIDEO · AT \d+ HOURS/) // (it ended "· AT 2" beside the list)
+    expect(frame(h)).toContain("◆ Platform scoreboard")
+  })
+})
+
+describe("a dialog in a window 24 rows tall", () => {
+  test("keeps its words whole and its buttons in view: the list gives way, not the lines above it", async () => {
+    const h = await window("videos", [80, 24])
+    await clickText(h, " Fix episode ", 2)
+    await until(h, "WHICH VIDEO IS THIS?")
+    const flat = frame(h).replace(/[│┃]/g, " ").replace(/\s+/g, " ")
+    // (squeezed, its lines were drawn over each other: "ReelForgehmatchesopostsdtoavideosdbyotheirecaption")
+    expect(flat).toContain("ReelForge matches posts to videos by their caption. If it got this one wrong, pick the right video")
+    expect(frame(h)).toContain("Not one of my videos")
+    expect(frame(h)).toMatch(/▐ Cancel ▌ ▐ This one ▌/)
+  })
+})
+
 describe("the header and the bell", () => {
   test("the bell sits in the top right corner with the unread count, and opens and closes the drawer", async () => {
     const h = await window("overview", [122, 30])
@@ -197,6 +245,24 @@ describe("the header in a narrow window", () => {
     expect(activeTab(h)).toBe("Compare")
   })
 
+  test("the keys at the foot go one at a time as the window narrows, the help last", async () => {
+    const h = await window("overview", [180, 24])
+    const bar = () => rows(h)[23]!.trim().replace(/^DEMO\s+/, "")
+    const ALL = "Tab next button   1-7 tabs   u publish   r refresh   n notifications   p profiles   ? help"
+    expect(bar()).toBe(ALL)
+    let last = ALL
+    for (const w of [100, 90, 80, 70, 60, 50, 40]) {
+      h.t.resize(w, 24)
+      await h.settle(200)
+      const now = bar()
+      expect(now.length).toBeLessThanOrEqual(last.length)
+      expect(now).toMatch(/\? help$/) // the help lists every key: it stays longest
+      for (const hint of now.split(/ {3}/)) expect(ALL).toContain(hint) // whole hints only, never half of one
+      last = now
+    }
+    expect(last).not.toBe(ALL)
+  })
+
   test("n opens and closes the notifications, as the bell does", async () => {
     const h = await window("overview", [122, 30])
     expect(frame(h)).not.toContain("NOTIFICATIONS")
@@ -266,15 +332,15 @@ describe("keys", () => {
       }
       return ""
     }
-    for (let i = 0; i < 6 && focused() !== "Release page"; i++) await press(h, "tab")
-    expect(focused()).toBe("Release page")
+    for (let i = 0; i < 6 && focused() !== "Release page →"; i++) await press(h, "tab")
+    expect(focused()).toBe("Release page →")
     await h.t.mockInput.typeText("?")
     await h.settle(300)
     expect(frame(h)).toContain("HOW REELFORGE WORKS")
     expect(focused()).toBe("Close") // the dialog's own button, while it's open
     await press(h, "return")
     expect(frame(h)).not.toContain("HOW REELFORGE WORKS")
-    expect(focused()).toBe("Release page") // (nothing had it: Tab started again from the top)
+    expect(focused()).toBe("Release page →") // (nothing had it: Tab started again from the top)
     // Esc out of a text field takes the keyboard away for good: a dialog doesn't hand it back afterwards.
     await press(h, "u")
     for (let i = 0; i < 30 && !find(h, "What if everyone"); i++) await h.settle(100)
@@ -612,6 +678,9 @@ describe("profiles", () => {
       const bar = rows(h)[29]!
       for (const gone of ["TikTok", "YouTube", "Instagram", "TT ", "IG ", "updated"]) expect(bar).not.toContain(gone)
       expect(bar).toContain("u publish")
+      expect(bar).toMatch(/\? help\s*$/) // the help, which lists every key, is the last to go
+      expect(bar).toContain("1-7 tabs   u publish   r refresh   n notifications   p profiles   ? help")
+      if (w === 180) expect(bar).toContain("Tab next button   1-7 tabs")
       await open?.close()
       open = null
     }

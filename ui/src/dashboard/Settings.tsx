@@ -11,11 +11,11 @@ import { TextAttributes, type KeyEvent, type Renderable } from "@opentui/core"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useView } from "../bridge"
 import { reveal, useFocus } from "../lib/focus"
-import { lines, type Segs } from "../lib/styled"
+import type { Segs } from "../lib/styled"
 import { DASH, mix } from "../theme"
 import { Button } from "../ui/Button"
 import { Switch, TextField } from "../ui/Fields"
-import { Markdown, Modal, Panel, Reading, Scroll, Wrapped } from "../ui/Panels"
+import { DialogButtons, Markdown, Modal, Note, Panel, Reading, Scroll } from "../ui/Panels"
 import { PUBLISH_KEY, TAB_NAMES, useDash, type Tab } from "./state"
 
 export interface ComputerRow {
@@ -357,15 +357,15 @@ function Computer({ v }: { v: SettingsView }) {
     if (v.computer) setFlipped({})
   }, [v.computer])
   const width = Math.max(RESTART.length, ...(rows ?? []).map((row) => row.button.length)) + 4
-  // tone: green for what's on, grey for what's off, and amber for a row that says something went wrong: that one is
-  // read to its end, so it wraps where the others are cut at the panel's edge.
+  // tone: green for what's on, grey for what's off, and amber for a row that says something went wrong. What a row
+  // says wraps under itself where the window is too narrow for it on one line (it was cut at the button).
   const item = (key: string, label: string, value: string, tone: "good" | "warn" | "plain", control: ReactNode) => (
-    <box key={key} flexDirection="row" height={tone === "warn" ? undefined : 3} minHeight={3} flexShrink={0} alignItems="center" gap={1}>
+    <box key={key} flexDirection="row" minHeight={3} flexShrink={0} alignItems="center" gap={1}>
       <box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} justifyContent="center">
         <text attributes={TextAttributes.BOLD} wrapMode="none">
           {label}
         </text>
-        <text fg={tone === "good" ? DASH.good : tone === "warn" ? DASH.warn : DASH.muted} wrapMode={tone === "warn" ? "word" : "none"}>
+        <text fg={tone === "good" ? DASH.good : tone === "warn" ? DASH.warn : DASH.muted} wrapMode="word">
           {value}
         </text>
       </box>
@@ -493,7 +493,7 @@ export function DiscardProfile({ data, close }: { data: DeletedProfile & { bin: 
         </span>
         {`'s backup (${[data.size, data.where].filter(Boolean).join(", in ")}) goes to the ${data.bin} to free its space. Restore can't bring it back after that.`}
       </text>
-      <box flexDirection="row" justifyContent="flex-end" height={1} marginTop={2} flexShrink={0} gap={1}>
+      <DialogButtons>
         <Button id="db-cancel" label="Cancel" autoFocus onPress={close} />
         <Button
           id="db-discard"
@@ -504,7 +504,7 @@ export function DiscardProfile({ data, close }: { data: DeletedProfile & { bin: 
             s.bridge.send("discard_profile", data.id)
           }}
         />
-      </box>
+      </DialogButtons>
     </Modal>
   )
 }
@@ -575,14 +575,12 @@ export function FactoryReset({ data, close }: { data: ResetData; close: () => vo
   }
   return (
     <Modal name="factory-reset" title="FACTORY RESET" width={90}>
-      {lines(data.note).map((l, i) => (
-        <Wrapped key={i} segs={l.length ? l : [[" ", ""]]} flexGrow={0} />
-      ))}
+      <Note segs={data.note} width={90} />
       <Confirm id="reset-word" word={data.word} typed={typed} setTyped={setTyped} onSubmit={go} />
-      <box flexDirection="row" justifyContent="flex-end" height={1} marginTop={2} flexShrink={0} gap={1}>
+      <DialogButtons>
         <Button id="reset-cancel" label="Cancel" onPress={close} />
         <Button id="reset-go" label="Reset ReelForge" variant="error" disabled={!ok} onPress={go} />
-      </box>
+      </DialogButtons>
     </Modal>
   )
 }
@@ -597,18 +595,16 @@ export function MoveFolder({ data, close }: { data: MoveData; close: () => void 
   }
   return (
     <Modal name="move-folder" title="MOVE REELFORGE" width={90}>
-      {lines(data.note).map((l, i) => (
-        <Wrapped key={i} segs={l.length ? l : [[" ", ""]]} flexGrow={0} />
-      ))}
+      <Note segs={data.note} width={90} />
       {data.problem ? (
         <text marginTop={1} fg={DASH.warn} wrapMode="word" flexShrink={0}>
           {data.problem}
         </text>
       ) : null}
-      <box flexDirection="row" justifyContent="flex-end" height={1} marginTop={2} flexShrink={0} gap={1}>
+      <DialogButtons>
         <Button id="move-cancel" label={data.problem ? "Close" : "Cancel"} autoFocus={Boolean(data.problem)} onPress={close} />
         {data.problem ? null : <Button id="move-go" label="Move ReelForge" variant="primary" autoFocus onPress={go} />}
-      </box>
+      </DialogButtons>
     </Modal>
   )
 }
@@ -626,9 +622,7 @@ export function Uninstall({ data, close }: { data: UninstallData; close: () => v
   const what = data.channels.length ? `${data.videos} files, ${data.videos_size}` : ""
   return (
     <Modal name="uninstall" title="UNINSTALL REELFORGE" width={90}>
-      {lines(data.note).map((l, i) => (
-        <Wrapped key={i} segs={l.length ? l : [[" ", ""]]} flexGrow={0} />
-      ))}
+      <Note segs={data.note} width={90} />
       <text marginTop={1} fg={DASH.text} attributes={TextAttributes.BOLD} flexShrink={0}>
         Your videos and channels
       </text>
@@ -652,10 +646,10 @@ export function Uninstall({ data, close }: { data: UninstallData; close: () => v
         </text>
       )}
       <Confirm id="uninstall-word" word={data.word} typed={typed} setTyped={setTyped} onSubmit={go} />
-      <box flexDirection="row" justifyContent="flex-end" height={1} marginTop={2} flexShrink={0} gap={1}>
+      <DialogButtons>
         <Button id="uninstall-cancel" label="Cancel" onPress={close} />
         <Button id="uninstall-go" label="Uninstall ReelForge" variant="error" disabled={!ok} onPress={go} />
-      </box>
+      </DialogButtons>
     </Modal>
   )
 }

@@ -8,11 +8,12 @@ import { wrap } from "../src/dashboard/Drawer"
 import { cardLines, wrapLines } from "../src/dashboard/cards"
 import { metricTitle, pickVariant } from "../src/dashboard/titles"
 import type { MetricView, Variant } from "../src/dashboard/types"
-import { fit } from "../src/lib/fit"
+import { fit, fitRows } from "../src/lib/fit"
 import { fmtNum, shortNum } from "../src/lib/format"
 import { cellLen, plain, segsLen, wrappedRows, type Parts } from "../src/lib/styled"
 import { PLATFORM, restyle, tone } from "../src/theme"
 import { bell, BELL_WIDTH, faceCells, faceWidth, sparkline, stackedSparkline } from "../src/ui/Graphics"
+import { stretched } from "../src/ui/Lists"
 import { inline, mdBlocks, toasts } from "../src/ui/Panels"
 
 const VALUES = { followers: 12_900, views: 1_234_567, likes: 98_765 }
@@ -43,6 +44,8 @@ describe("cards", () => {
     expect(lines(24)[0]).toBe("12.9K followers +1.03K") // the " 24h" goes first
     expect(lines(21)).toEqual(["12.9K followers +1K", "1.23M views     +19K", "98.8K likes     −40"])
     expect(lines(13)).toEqual(["13K followers", "1.2M views", "99K likes"]) // labels outlast the changes
+    // a column short for "followers": views and likes keep their names (an 80-column window's tiles are this wide)
+    expect(cardLines({ followers: 2_540, views: 596_000, likes: 29_100 }, {}, 13).map(plain)).toEqual(["2.5K", "596K views", " 29K likes"])
     expect(lines(5)).toEqual([" 13K", "1.2M", " 99K"])
   })
 
@@ -59,6 +62,29 @@ describe("cards", () => {
     ]
     expect(plain(fit(parts, 30))).toBe("LIKES  198.6K total   ")
     expect(plain(fit(parts, 12))).toBe("LIKES  ") // not "LIKES  198.6"
+  })
+})
+
+describe("a line of chips and a table in a narrow window", () => {
+  test("the chips that always show go on a second row before any of them is left out", () => {
+    const parts: Parts = [
+      [[["SHOW  All   TikTok   YouTube   Instagram   X    ", ""]], 0],
+      [[["Open post   Fix episode   Export CSV", ""]], 0],
+      [[["    36 videos · click a header to sort", ""]], 1],
+    ]
+    expect(fitRows(parts, 130).map(plain)).toEqual(["SHOW  All   TikTok   YouTube   Instagram   X    Open post   Fix episode   Export CSV    36 videos · click a header to sort"])
+    expect(fitRows(parts, 100).map(plain)).toEqual(["SHOW  All   TikTok   YouTube   Instagram   X    Open post   Fix episode   Export CSV"]) // the hint goes first
+    expect(fitRows(parts, 76).map(plain)).toEqual(["SHOW  All   TikTok   YouTube   Instagram   X    ", "Open post   Fix episode   Export CSV"])
+    expect(plain(fit(parts, 76))).not.toContain("Export CSV") // (one row left them out)
+  })
+
+  test("the title column gives way so more of the numbers show, down to a width that still reads", () => {
+    const columns = [["platform", 4], ["title", 44], ["views", 8], ["score", 6]].map(([key, width]) => ({ key: key as string, label: [], width: width as number, right: false }))
+    const title = (width: number) => stretched(columns, width, "title").find((c) => c.key === "title")!.width
+    expect(title(100)).toBe(44 + 100 - 71) // room to spare: the title takes it
+    expect(title(71)).toBe(44)
+    expect(title(60)).toBe(33) // too narrow: it gives up what the numbers need
+    expect(title(30)).toBe(24) // but stays readable
   })
 })
 

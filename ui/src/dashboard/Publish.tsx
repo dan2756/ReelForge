@@ -113,10 +113,13 @@ function Best() {
   )
 }
 
+/** A field's name and its count, then the hint after them where the form has room for all of it (it was cut off
+ * mid-word where it hadn't). */
 function Label({ segs, fallback, first }: { segs: Segs | undefined; fallback: string; first?: boolean }) {
+  const all = segs ?? [[fallback, ""]]
   return (
     <box marginTop={first ? 1 : 0} flexShrink={0}>
-      <Line segs={segs ?? [[fallback, ""]]} base={DASH.muted} />
+      <Fitted parts={[[all.slice(0, 2), 0], [all.slice(2), 1]]} base={DASH.muted} flexGrow={1} />
     </box>
   )
 }
@@ -149,7 +152,7 @@ function Form({ page }: { page?: boolean }) {
       <PostBlock />
       <ByHand />
       <box backgroundColor={mix(DASH.surface, DASH.bg, 0.5)} marginTop={2} paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} flexDirection="column" flexShrink={0}>
-        <text fg={DASH.faint} attributes={TextAttributes.BOLD} flexShrink={0} marginBottom={1}>
+        <text fg={DASH.text} attributes={TextAttributes.BOLD} flexShrink={0} marginBottom={1}>
           PREVIEW
         </text>
         {(preview?.rows ?? []).map((r) => (

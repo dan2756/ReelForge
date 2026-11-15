@@ -14,7 +14,7 @@ import { Button } from "../ui/Button"
 import { ProgressBar } from "../ui/Graphics"
 import { Line } from "../ui/Line"
 import { Mascot } from "../ui/Mascot"
-import { Modal, Scroll, ToastStack, toasts, useTick, Wrapped } from "../ui/Panels"
+import { DialogButtons, Modal, Scroll, ToastStack, toasts, useTick, Wrapped } from "../ui/Panels"
 import { Frame, frameLayout } from "./Frame"
 import { Onboard } from "./Onboard"
 
@@ -377,10 +377,10 @@ function Work({ bridge, init, quit, keys, onNext, onAgain }: SetupProps & { keys
           <text wrapMode="word" flexShrink={0}>
             What has finished stays. A download that is under way stops, and setup carries on from there the next time you run it.
           </text>
-          <box flexDirection="row" height={1} marginTop={2} gap={2} flexShrink={0}>
-            <Button id="work-stay" label="Keep going" variant="primary" autoFocus onPress={() => setLeaving(false)} />
+          <DialogButtons>
+            <Button id="work-stay" label="Keep going" autoFocus onPress={() => setLeaving(false)} />
             <Button id="work-stop" label="Stop" variant="error" onPress={() => quit(0)} />
-          </box>
+          </DialogButtons>
         </Modal>
       ) : null}
     </Frame>

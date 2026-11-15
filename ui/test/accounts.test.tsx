@@ -115,7 +115,7 @@ describe("typing in stats", () => {
   test("numbers ReelForge can't take are said in red under the boxes, as under an @handle; good ones are saved", async () => {
     const h = await kit({ needs_login: ["x"] })
     await clickText(h, "Type in stats", 2)
-    await until(h, () => frame(h).includes("LOG STATS"))
+    await until(h, () => frame(h).includes("TYPE IN STATS"))
     await h.t.mockInput.typeText("lots") // the followers box has the keyboard
     await h.settle(200)
     h.t.mockInput.pressKey("RETURN")
@@ -128,8 +128,8 @@ describe("typing in stats", () => {
     await h.settle(200)
     expect(find(h, "Cancel")![1] - find(h, "Followers")![1]).toBeLessThan(10) // no rows of nothing where videos would be
     h.t.mockInput.pressKey("RETURN")
-    await until(h, () => !frame(h).includes("LOG STATS"))
-    expect(frame(h)).not.toContain("LOG STATS")
+    await until(h, () => !frame(h).includes("TYPE IN STATS"))
+    expect(frame(h)).not.toContain("TYPE IN STATS")
     expect(frame(h)).not.toContain("Something went wrong")
   })
 })

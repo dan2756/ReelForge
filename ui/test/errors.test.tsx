@@ -75,13 +75,13 @@ describe("a call that fails in the ReelForge window", () => {
   test("Type in stats: Save says so, and the dialog stays with what was typed", async () => {
     const h = await kit({ needs_login: ["x"], fail: "save_logged_stats" }, "accounts")
     await clickText(h, "Type in stats", 2)
-    await until(h, () => frame(h).includes("LOG STATS"))
+    await until(h, () => frame(h).includes("TYPE IN STATS"))
     await h.t.mockInput.typeText("1234")
     await h.settle(200)
     await clickText(h, "▐ Save ▌", 3)
     await until(h, () => frame(h).includes(SAID))
     expect(frame(h)).toContain("RuntimeError: boom")
-    expect(frame(h)).toContain("LOG STATS") // nothing was saved, so it didn't close as if it had
+    expect(frame(h)).toContain("TYPE IN STATS") // nothing was saved, so it didn't close as if it had
     expect(frame(h)).toContain("1234")
   })
 

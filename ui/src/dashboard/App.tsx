@@ -458,6 +458,7 @@ function Bell() {
 /** The keys at the foot of the window, with as many tabs as there are along the top, each with how soon it goes when
  * the window is too narrow for them all (the highest first: the help, which lists every key, stays longest). */
 const keysFor = (tabs: number): [string, string, number][] => [
+  ["Tab", "next button", 6],
   [`1-${tabs}`, "tabs", 1],
   [PUBLISH_KEY, "publish", 2],
   ["r", "refresh", 3],

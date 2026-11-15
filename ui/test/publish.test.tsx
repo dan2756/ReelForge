@@ -11,6 +11,7 @@ import { join } from "node:path"
 import { headless, type Headless } from "../scripts/headless"
 import { clickText, find } from "../scripts/shots"
 import { ROOT } from "../src/bridge"
+import { DASH } from "../src/theme"
 import { toasts } from "../src/ui/Panels"
 
 setDefaultTimeout(30_000)
@@ -84,6 +85,22 @@ describe("what you type in the form", () => {
     await until(h, () => frame(h).includes("My own words.") && shown() === mine)
     expect(frame(h)).toContain("jumped at the same time? My own words.") // (it came back as the video's own caption)
     expect(shown()).toBe(mine) // and what each platform would get follows
+  })
+})
+
+describe("headings", () => {
+  test("are all bold in the window's one text colour, whoever writes them", async () => {
+    const h = await demo([150, 56])
+    const hex = (c: { toInts(): [number, number, number, number] }) => "#" + c.toInts().slice(0, 3).map((v) => v.toString(16).padStart(2, "0")).join("")
+    const seen: Record<string, string> = {}
+    // (the Python side's are just "bold": the renderer's own white, a shade off the window's, until Line gave them it)
+    const HEADINGS = ["VIDEOS", "BEST TIME TO POST", "POST", "BY HAND", "PREVIEW", "RECENT UPLOADS"]
+    for (const line of h.t.captureSpans().lines)
+      for (const sp of line.spans) {
+        const name = HEADINGS.find((t) => sp.text.trim() === t)
+        if (name && sp.attributes & TextAttributes.BOLD) seen[name] = hex(sp.fg)
+      }
+    expect(seen).toEqual(Object.fromEntries(HEADINGS.map((t) => [t, DASH.text])))
   })
 })
 

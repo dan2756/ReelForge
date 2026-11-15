@@ -155,8 +155,8 @@ describe("Page Up and Page Down", () => {
     h.t.mockInput.pressKey(PAGE_DOWN)
     await h.settle(300)
     const lit = frame(h).split("\n").find((r) => r.includes("▌●")) ?? ""
-    expect(lit).not.toContain(titles[0]!.slice(0, 30)) // the highlight moved down a page of rows
-    expect(titles.some((t, i) => i > 2 && lit.includes(t.slice(0, 30)))).toBe(true)
+    expect(lit).not.toContain(titles[0]!.slice(0, 20)) // the highlight moved down a page of rows
+    expect(titles.some((t, i) => i > 2 && lit.includes(t.slice(0, 20)))).toBe(true)
   })
 })
 

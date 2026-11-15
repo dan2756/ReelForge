@@ -49,7 +49,7 @@ export function Updates() {
                 />
               ) : null}
               <Button id="update-check" label="Check now" disabled={u?.check_disabled ?? true} marginRight={1} onPress={() => s.bridge.send("check_updates")} />
-              <Button id="update-page" label="Release page" marginRight={1} onPress={() => s.bridge.send("release_page")} />
+              <Button id="update-page" label="Release page →" marginRight={1} onPress={() => s.bridge.send("release_page")} />
             </box>
             {progress ? (
               <box marginTop={1} flexShrink={0}>
@@ -63,7 +63,7 @@ export function Updates() {
             ) : null}
           </Panel>
           <Panel marginTop={1} flexGrow={1}>
-            <text fg={DASH.faint} attributes={TextAttributes.BOLD} flexShrink={0} marginBottom={1}>
+            <text fg={DASH.text} attributes={TextAttributes.BOLD} flexShrink={0} marginBottom={1}>
               WHAT'S NEW
             </text>
             <Scroll flexGrow={1} scrollY>

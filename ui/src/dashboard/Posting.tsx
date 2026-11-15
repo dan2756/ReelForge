@@ -18,7 +18,7 @@ import { DASH } from "../theme"
 import { Button } from "../ui/Button"
 import { Switch } from "../ui/Fields"
 import { Fitted } from "../ui/Line"
-import { Modal, Panel, Scroll, useWidth, Wrapped } from "../ui/Panels"
+import { DialogButtons, Modal, modalRoom, Panel, Scroll, useWidth, Wrapped } from "../ui/Panels"
 import { useDash, type PostData } from "./state"
 import type { ExtensionInstall, ExtensionView, FilesView, PlatformInfo, PostInfoPlatform, PostingRow, PostingView } from "./types"
 
@@ -135,14 +135,6 @@ function PostRow({ row, labels, nameWidth, room }: { row: PostingRow; labels: Re
 
 // ---------------------------------------------------------------- the question before a post
 
-function Buttons({ children }: { children: React.ReactNode }) {
-  return (
-    <box flexDirection="row" justifyContent="flex-end" height={1} marginTop={2} flexShrink={0} gap={1}>
-      {children}
-    </box>
-  )
-}
-
 /** Whether a platform can be ticked: nothing stops it, or it is up there already and can be posted again. */
 const tickable = (p: PostInfoPlatform) => !p.blocked || p.again
 /** Why a platform can't go, with how to post there again all the same where that can be asked for. Nothing when it's
@@ -151,9 +143,6 @@ const inTheWay = (p: PostInfoPlatform, said: string[]) =>
   p.blocked && !said.includes(p.blocked.message) ? p.blocked.message + (p.again ? " Tick it to post there again." : "") : ""
 const TICK = 3 // columns for a platform's tick box, and the indent of what's under it
 const labelWidth = (platforms: PostInfoPlatform[]) => Math.max(0, ...platforms.flatMap((p) => p.fields.map((f) => cellLen(f.label)))) + 2
-
-/** A dialog's width inside its border and padding (ui/Panels.tsx Modal), in a window this wide. */
-const modalRoom = (width: number, windowWidth: number) => Math.min(width, Math.floor(windowWidth * 0.95)) - 8
 
 /** Post…: the video and its review, what happens next in a sentence, then each platform with its tick box, its account
  * and the exact text for each of its boxes (or why it can't go). Start hands the ticked ones to the extension, through
@@ -213,10 +202,10 @@ export function PostDialog({ data, close }: { data: PostData; close: () => void 
           <Switch id="post-stop" value={stop} onChange={setStop} />
         </box>
       ) : null}
-      <Buttons>
+      <DialogButtons>
         <Button id="post-cancel" label={info.can_post ? "Cancel" : "Close"} autoFocus={!ok} onPress={close} />
         <Button id="post-start" label={busy ? "Opening your browser…" : chosen.length ? `Start ${count}` : "Start"} variant="primary" disabled={!ok} autoFocus={ok} onPress={() => void go()} />
-      </Buttons>
+      </DialogButtons>
     </Modal>
   )
 }
@@ -336,9 +325,9 @@ export function ExtensionDialog({ from, close }: { from?: "post"; close: () => v
         <text fg={DASH.muted} flexShrink={0}>
           Looking for the extension…
         </text>
-        <Buttons>
+        <DialogButtons>
           <Button id="ext-close" label="Close" autoFocus onPress={close} />
-        </Buttons>
+        </DialogButtons>
       </Modal>
     )
   }

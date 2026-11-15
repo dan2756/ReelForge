@@ -2,9 +2,10 @@
 // the corner (they slide in and fade out), and a little Markdown (release notes and the review in first-time setup).
 
 import { TextAttributes, type Renderable, type ScrollBoxRenderable } from "@opentui/core"
+import { useTerminalDimensions } from "@opentui/react"
 import { forwardRef, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { FocusScope, ScopeContext, useFocusManager, useTheme } from "../lib/focus"
-import { parseStyle, type Segs } from "../lib/styled"
+import { lines, parseStyle, plain, wrappedRows, type Segs } from "../lib/styled"
 import { mix, PICKED } from "../theme"
 import { useProgress, useTween } from "./Motion"
 
@@ -152,6 +153,40 @@ export function Modal({
           {children}
         </box>
       </FocusScope>
+    </box>
+  )
+}
+
+/** A dialog's width inside its border and padding (Modal), in a window this wide. */
+export const modalRoom = (width: number, windowWidth: number) => Math.min(width, Math.floor(windowWidth * 0.95)) - 8
+
+/** What a dialog says: lines of styled text, each wrapping to the dialog's width, in a scrolling area exactly as tall
+ * as they are. In a window too short for all of the dialog they scroll and its buttons stay in view. (Left to shrink
+ * instead, the lines were drawn over each other: "Which video is this?" in a window 24 rows tall.) width: the
+ * dialog's, as given to Modal. */
+export function Note({ segs, width = 100 }: { segs: Segs; width?: number }) {
+  const room = modalRoom(width, useTerminalDimensions().width) - 1 // a column kept free beside the scrollbar
+  const rows = lines(segs)
+  return (
+    <Scroll maxHeight={rows.reduce((n, l) => n + wrappedRows(plain(l), room), 0)} flexShrink={1} scrollY>
+      <box flexDirection="column" flexShrink={0} paddingRight={1}>
+        {rows.map((l, i) => (
+          <box key={i} flexDirection="row" flexShrink={0}>
+            <Wrapped segs={l.length ? l : [[" ", ""]]} />
+          </box>
+        ))}
+      </box>
+    </Scroll>
+  )
+}
+
+/** A dialog's buttons, the same in every dialog: at its foot, at the right, the way out first (Cancel, Close, Back:
+ * the one that has the keyboard where the other one can't be undone) and the button that does what the dialog is for
+ * last. */
+export function DialogButtons({ children }: { children: ReactNode }) {
+  return (
+    <box flexDirection="row" justifyContent="flex-end" height={1} marginTop={2} flexShrink={0} gap={1}>
+      {children}
     </box>
   )
 }
@@ -405,8 +440,9 @@ export function Markdown({ text, heading, spaced }: { text: string; heading?: st
 
 /** Styled text that wraps at spaces to its width. */
 export function Wrapped({ segs, flexGrow = 1 }: { segs: Segs; flexGrow?: number }) {
+  const theme = useTheme()
   return (
-    <text wrapMode="word" flexGrow={flexGrow} flexShrink={1}>
+    <text fg={theme.text} wrapMode="word" flexGrow={flexGrow} flexShrink={1}>
       {segs.map((s, i) => {
         const st = parseStyle(s[1])
         return (

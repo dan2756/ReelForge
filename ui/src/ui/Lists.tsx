@@ -93,12 +93,16 @@ export interface TableProps {
   stretch?: string
 }
 
-/** The columns, the stretching one widened to take whatever room the others leave. */
+const NARROWEST = 24 // columns the stretching column keeps in a table too narrow for all of its columns
+
+/** The columns, the stretching one widened to take whatever room the others leave. In a table too narrow for them
+ * all it gives way instead, down to NARROWEST columns, so more of the numbers after it show before the table's edge
+ * cuts them off. */
 export function stretched(columns: Column[], width: number, key: string): Column[] {
   const used = columns.reduce((n, c) => n + c.width + 2, 0) + 1 // 1: the scrollbar
   const extra = width - used
-  if (extra <= 0 || !columns.some((c) => c.key === key)) return columns
-  return columns.map((c) => (c.key === key ? { ...c, width: c.width + extra } : c))
+  if (!width || !extra) return columns
+  return columns.map((c) => (c.key === key ? { ...c, width: extra > 0 ? c.width + extra : Math.max(c.width + extra, Math.min(c.width, NARROWEST)) } : c))
 }
 
 export function Table(props: TableProps) {

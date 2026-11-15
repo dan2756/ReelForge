@@ -11,7 +11,7 @@ import { useFocusManager, useTheme } from "../lib/focus"
 import { Button } from "../ui/Button"
 import { CheckList, RadioSet, Switch, TextBox, TextField } from "../ui/Fields"
 import { Mascot, MASCOT_BODY } from "../ui/Mascot"
-import { Markdown, Modal, Scroll } from "../ui/Panels"
+import { DialogButtons, Markdown, Modal, Scroll } from "../ui/Panels"
 import type { SetupProps } from "./App"
 import { Frame, frameLayout } from "./Frame"
 
@@ -258,10 +258,10 @@ export function Onboard({ bridge, init, quit, onDone }: SetupProps & { onDone: (
       {leaving ? (
         <Modal name="quit" title="Leave without saving?" width={60}>
           <text flexShrink={0}>Your answers so far won't be saved.</text>
-          <box flexDirection="row" height={1} marginTop={2} gap={2} flexShrink={0}>
-            <Button id="stay" label="Keep going" variant="primary" autoFocus onPress={() => setLeaving(false)} />
+          <DialogButtons>
+            <Button id="stay" label="Keep going" autoFocus onPress={() => setLeaving(false)} />
             <Button id="leave" label="Leave" variant="error" onPress={() => quit(0)} />
-          </box>
+          </DialogButtons>
         </Modal>
       ) : null}
     </Frame>
@@ -430,10 +430,10 @@ function SignupGuide({
           ) : null}
         </>
       ) : null}
-      <box flexDirection="row" height={1} marginTop={2} gap={2} flexShrink={0}>
-        <Button id="guide-done" label="Done" variant="primary" onPress={() => void done()} />
+      <DialogButtons>
         <Button id="guide-back" label="Back" onPress={() => onDone(null)} />
-      </box>
+        <Button id="guide-done" label="Done" variant="primary" onPress={() => void done()} />
+      </DialogButtons>
     </Modal>
   )
 }

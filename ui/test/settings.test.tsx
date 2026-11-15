@@ -85,6 +85,16 @@ describe("the Settings tab", () => {
     }
   })
 
+  test("in an 80-column window what a row under On this computer says wraps, where it was cut off at its button", async () => {
+    const h = await window([80, 90])
+    expect(frame(h)).toContain("ON THIS COMPUTER")
+    // what the rows say, without the switch or button at the right of each (from column 46)
+    const said = frame(h).split("\n").map((r) => [...r].slice(2, 46).join("").trim()).join(" ").replace(/\s+/g, " ")
+    expect(said).toContain("on: your stats update every hour, even with ReelForge closed") // (it ended "... even with R")
+    expect(said).toContain("open ReelForge without typing a command")
+    expect(frame(h)).toContain("Turn off") // its button, still in full beside it
+  })
+
   test("Settings and Updates are the last two tabs, so 6 opens it and 7 Updates", async () => {
     open = await headless("dashboard", { demo: true, only_demos: true, tab: "overview" }, 150, 72, PRELOAD)
     await open.settle(2500)

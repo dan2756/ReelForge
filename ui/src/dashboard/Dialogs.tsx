@@ -5,12 +5,12 @@
 
 import { TextAttributes } from "@opentui/core"
 import { useState } from "react"
-import { lines, type Segs } from "../lib/styled"
+import type { Segs } from "../lib/styled"
 import { DASH } from "../theme"
 import { Button } from "../ui/Button"
 import { RadioSet, TextField } from "../ui/Fields"
 import { OptionList } from "../ui/Lists"
-import { Modal, Scroll, Wrapped } from "../ui/Panels"
+import { DialogButtons, Modal, Note, Scroll } from "../ui/Panels"
 import { useFocusManager } from "../lib/focus"
 import { ExtensionDialog, PostDialog } from "./Posting"
 import { DeleteProfile, ProfileMenu } from "./Profiles"
@@ -40,14 +40,6 @@ export function Dialogs() {
   return <EpisodePicker data={d.data} close={close} />
 }
 
-function Buttons({ children }: { children: React.ReactNode }) {
-  return (
-    <box flexDirection="row" justifyContent="flex-end" height={1} marginTop={2} flexShrink={0} gap={1}>
-      {children}
-    </box>
-  )
-}
-
 /** How ReelForge works: the tabs first, in the order they sit along the top, each with the number that opens it, then
  * Publish (the green button at the right) with its key, then the rest. */
 function Help({ close }: { close: () => void }) {
@@ -59,32 +51,40 @@ function Help({ close }: { close: () => void }) {
   return (
     <Modal name="help" title="HOW REELFORGE WORKS">
       <Scroll maxHeight={30} flexShrink={1} scrollY>
-        {topics.map(({ topic: [title, text, tab] }) => (
-          <box key={title} flexDirection="column" marginBottom={1} flexShrink={0}>
-            <text fg={DASH.text} attributes={TextAttributes.BOLD}>
-              {tab ? `${title} (${key(tab)})` : title}
-            </text>
-            <text fg={DASH.muted} wrapMode="word">
-              {text}
-            </text>
-          </box>
-        ))}
-        <text fg={DASH.text} attributes={TextAttributes.BOLD} flexShrink={0}>
-          Keys
-        </text>
-        {s.init.keys.map(([key, what]) => (
-          <text key={key} flexShrink={0}>
-            <span attributes={TextAttributes.BOLD}>{`  ${key.padEnd(8)}`}</span>
-            <span fg={DASH.muted}>{what}</span>
+        {/* a column kept free beside the scrollbar, which is drawn over the last one of text that wrapped before it showed */}
+        <box flexDirection="column" flexShrink={0} paddingRight={1}>
+          {topics.map(({ topic: [title, text, tab] }) => (
+            <box key={title} flexDirection="column" marginBottom={1} flexShrink={0}>
+              <text fg={DASH.text} attributes={TextAttributes.BOLD}>
+                {tab ? `${title} (${key(tab)})` : title}
+              </text>
+              <text fg={DASH.muted} wrapMode="word">
+                {text}
+              </text>
+            </box>
+          ))}
+          <text fg={DASH.text} attributes={TextAttributes.BOLD} flexShrink={0}>
+            Keys
           </text>
-        ))}
-        <text fg={DASH.muted} flexShrink={0}>
-          Everything else is a button on the page it applies to.
-        </text>
+          {s.init.keys.map(([key, what]) => (
+            // each key in a column as wide as the longest, what it does wrapping beside it
+            <box key={key} flexDirection="row" flexShrink={0}>
+              <text attributes={TextAttributes.BOLD} width={Math.max(...s.init.keys.map(([k]) => k.length), 0) + 4} flexShrink={0} wrapMode="none">
+                {`  ${key}`}
+              </text>
+              <text fg={DASH.muted} wrapMode="word" flexGrow={1} flexShrink={1}>
+                {what}
+              </text>
+            </box>
+          ))}
+          <text fg={DASH.muted} flexShrink={0}>
+            Everything else is a button on the page it applies to.
+          </text>
+        </box>
       </Scroll>
-      <Buttons>
+      <DialogButtons>
         <Button id="help-close" label="Close" variant="primary" autoFocus onPress={close} />
-      </Buttons>
+      </DialogButtons>
     </Modal>
   )
 }
@@ -113,7 +113,7 @@ function LogStats({ data, close }: { data: LogData; close: () => void }) {
     else close()
   }
   return (
-    <Modal name="log" title="LOG STATS">
+    <Modal name="log" title="TYPE IN STATS">
       <RadioSet
         id="ls-platform"
         options={data.platforms.map((p) => [p.key, p.name])}
@@ -175,10 +175,10 @@ function LogStats({ data, close }: { data: LogData; close: () => void }) {
           {problem}
         </text>
       ) : null}
-      <Buttons>
+      <DialogButtons>
         <Button id="ls-cancel" label="Cancel" onPress={close} />
         <Button id="ls-save" label="Save" variant="primary" onPress={() => void save()} />
-      </Buttons>
+      </DialogButtons>
     </Modal>
   )
 }
@@ -192,14 +192,12 @@ function Remove({ data, close }: { data: { path: string; note: import("../lib/st
   }
   return (
     <Modal name="remove" title="REMOVE VIDEO">
-      {lines(data.note).map((l, i) => (
-        <Wrapped key={i} segs={l.length ? l : [[" ", ""]]} flexGrow={0} />
-      ))}
-      <Buttons>
+      <Note segs={data.note} />
+      <DialogButtons>
         <Button id="rm-cancel" label="Cancel" autoFocus onPress={close} />
         <Button id="rm-hide" label="Hide from list" onPress={() => choose("hide")} />
         <Button id="rm-recycle" label={`Move to ${data.bin}`} variant="error" onPress={() => choose("recycle")} />
-      </Buttons>
+      </DialogButtons>
     </Modal>
   )
 }
@@ -214,10 +212,9 @@ function EpisodePicker({ data, close }: { data: EpisodeData; close: () => void }
   }
   return (
     <Modal name="episode" title="WHICH VIDEO IS THIS?">
-      {lines(data.note).map((l, i) => (
-        <Wrapped key={i} segs={l} flexGrow={0} />
-      ))}
-      <box marginTop={1} flexShrink={0} flexDirection="column">
+      <Note segs={data.note} />
+      {/* in a window too short for the whole list it gives way first (it scrolls by itself), before what's said above it */}
+      <box marginTop={1} flexShrink={8} minHeight={3} flexDirection="column">
         <OptionList
           id="episode-choices"
           items={data.options}
@@ -228,10 +225,10 @@ function EpisodePicker({ data, close }: { data: EpisodeData; close: () => void }
           onActivate={choose}
         />
       </box>
-      <Buttons>
+      <DialogButtons>
         <Button id="ep-cancel" label="Cancel" onPress={close} />
         <Button id="ep-pick" label="This one" variant="primary" disabled={!selected} onPress={() => selected && choose(selected)} />
-      </Buttons>
+      </DialogButtons>
     </Modal>
   )
 }
@@ -300,10 +297,10 @@ function SignUp({ data, close }: { data: SignupData; close: () => void }) {
           ) : null}
         </>
       ) : null}
-      <Buttons>
+      <DialogButtons>
         <Button id="su-cancel" label="Cancel" onPress={close} />
         <Button id="su-done" label={data.account ? "Connect" : "Done"} variant={data.account ? "primary" : "default"} onPress={() => done()} />
-      </Buttons>
+      </DialogButtons>
     </Modal>
   )
 }
@@ -319,14 +316,12 @@ function Disconnect({ data, close }: { data: { key: string; title: string; note:
   }
   return (
     <Modal name="disconnect" title={data.title}>
-      {lines(data.note).map((l, i) => (
-        <Wrapped key={i} segs={l.length ? l : [[" ", ""]]} flexGrow={0} />
-      ))}
-      <Buttons>
+      <Note segs={data.note} />
+      <DialogButtons>
         <Button id="dc-cancel" label="Cancel" autoFocus onPress={close} />
         {data.logged_in ? <Button id="disconnect-logout" label="Disconnect and log out" variant="error" onPress={() => go(true)} /> : null}
         <Button id="disconnect" label="Disconnect" variant="error" onPress={() => go(false)} />
-      </Buttons>
+      </DialogButtons>
     </Modal>
   )
 }
@@ -337,10 +332,8 @@ function LogOut({ data, close }: { data: { key: string; title: string; note: Seg
   const s = useDash()
   return (
     <Modal name="logout" title={data.title}>
-      {lines(data.note).map((l, i) => (
-        <Wrapped key={i} segs={l.length ? l : [[" ", ""]]} flexGrow={0} />
-      ))}
-      <Buttons>
+      <Note segs={data.note} />
+      <DialogButtons>
         <Button id="lo-cancel" label="Cancel" autoFocus onPress={close} />
         <Button
           id="logout"
@@ -351,7 +344,7 @@ function LogOut({ data, close }: { data: { key: string; title: string; note: Seg
             s.bridge.send("logout", data.key)
           }}
         />
-      </Buttons>
+      </DialogButtons>
     </Modal>
   )
 }
@@ -371,14 +364,12 @@ function HandleChange({ data, close }: { data: { key: string; title: string; not
   }
   return (
     <Modal name="handle-change" title={data.title}>
-      {lines(data.note).map((l, i) => (
-        <Wrapped key={i} segs={l.length ? l : [[" ", ""]]} flexGrow={0} />
-      ))}
-      <Buttons>
+      <Note segs={data.note} />
+      <DialogButtons>
         <Button id="hc-cancel" label="Cancel" autoFocus onPress={close} />
         <Button id="hc-keep" label={data.keep} onPress={keep} />
         <Button id="hc-forget" label={data.forget} variant="error" onPress={forget} />
-      </Buttons>
+      </DialogButtons>
     </Modal>
   )
 }

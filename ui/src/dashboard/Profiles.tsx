@@ -9,11 +9,11 @@ import { useTerminalDimensions } from "@opentui/react"
 import { useState } from "react"
 import { useView } from "../bridge"
 import { useFocus, FocusScope } from "../lib/focus"
-import { cellLen, lines, type Segs } from "../lib/styled"
+import { cellLen, type Segs } from "../lib/styled"
 import { DASH, mix } from "../theme"
 import { Button } from "../ui/Button"
 import { Line } from "../ui/Line"
-import { Modal, Wrapped } from "../ui/Panels"
+import { DialogButtons, Modal, Note } from "../ui/Panels"
 import { Confirm, typedMatches } from "./Settings"
 import { useDash } from "./state"
 import type { ProfileRow, ProfilesMenu, ProfileView } from "./types"
@@ -244,14 +244,12 @@ export function DeleteProfile({ data, close }: { data: DeleteProfileData; close:
   }
   return (
     <Modal name="delete-profile" title={`DELETE ${data.name.toUpperCase()}`} width={84}>
-      {lines(data.note).map((l, i) => (
-        <Wrapped key={i} segs={l.length ? l : [[" ", ""]]} flexGrow={0} />
-      ))}
+      <Note segs={data.note} width={84} />
       <Confirm id="dp-word" word={data.word} typed={typed} setTyped={setTyped} onSubmit={go} />
-      <box flexDirection="row" justifyContent="flex-end" height={1} marginTop={2} flexShrink={0} gap={1}>
+      <DialogButtons>
         <Button id="dp-cancel" label="Cancel" onPress={close} />
         <Button id="dp-delete" label={`Delete ${data.name}`} variant="error" disabled={!ok} onPress={go} />
-      </box>
+      </DialogButtons>
     </Modal>
   )
 }
