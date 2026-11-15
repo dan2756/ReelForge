@@ -6,6 +6,7 @@ The window's own Accounts tab (the Connect box, Sign up, Disconnect) is tested i
 from __future__ import annotations
 
 import shutil
+import sqlite3
 import tempfile
 import threading
 import unittest
@@ -464,11 +465,102 @@ class WindowTest(unittest.TestCase):
             with mock.patch.object(config, "save_handle", side_effect=denied):
                 self.assertIsNone(w.call("connect", "youtube", "@new"))
                 self.assertTrue(w.until(lambda: w.toasts()))
-            self.assertEqual(w.toasts(), ["YouTube's handle wasn't saved, and nothing changed. config.toml couldn't "
-                                          "be written."])
+            self.assertEqual(w.toasts(), ["YouTube's handle wasn't saved. ReelForge couldn't write your settings; "
+                                          "data/refresh.log says what stopped it."])
             self.assertNotIn("youtube", w.svc.platforms)
+            self.assertEqual(config.load_config()["youtube"].get("handle", ""), "")
+            w.forget()
+            with mock.patch.object(config, "save_handle", side_effect=denied):
+                w.call("disconnect", "tiktok")
+                self.assertTrue(w.until(lambda: w.toasts()))
+            self.assertEqual(w.toasts(), ["TikTok wasn't disconnected. ReelForge couldn't write your settings; "
+                                          "data/refresh.log says what stopped it."])
+            self.assertIn("tiktok", w.svc.platforms)
         self.assertIn("error: saving YouTube's handle: PermissionError: [Errno 13] Permission denied: 'config.toml'",
                       sync.log_path().read_text("utf-8"))
+
+    def test_a_handle_saved_part_way_says_what_is_true(self):
+        """The handle goes into several files in turn. When one after config.toml can't be written, the handle is
+        in config.toml and the platform connects a moment later: it used to say "wasn't saved, and nothing changed.
+        config.toml couldn't be written." all the same."""
+        every = self.real_platforms({"tiktok": "@mine"})
+        save = config.save_handle
+
+        def part_way(key: str, handle: str) -> None:
+            save(key, handle)  # config.toml has it
+            raise OSError(28, "No space left on device", "AGENTS.md")
+
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()):
+            w = self.open(every, demo_mode=False)
+            w.forget()
+            with mock.patch.object(config, "save_handle", part_way):
+                self.assertIsNone(w.call("connect", "youtube", "@new"))
+                self.assertTrue(w.until(lambda: "youtube" in w.svc.platforms))
+            self.assertIn("YouTube's handle is saved, but ReelForge couldn't finish updating your channel's other "
+                          "files (your AI's notes among them). data/refresh.log says what stopped it.", w.toasts())
+            self.assertFalse([t for t in w.toasts() if "wasn't saved" in t])
+            self.assertEqual(self.panel(w, "youtube")["state"], "on")
+        self.assertIn("error: saving YouTube's handle: OSError: [Errno 28] No space left on device: 'AGENTS.md'",
+                      sync.log_path().read_text("utf-8"))
+
+    def test_a_handle_in_config_toml_that_isnt_one_is_said_on_its_panel(self):
+        """A link pasted into config.toml as a handle counts as none (Platform.public_handle). The platform used
+        to show as not connected and nothing said why."""
+        self.forget("youtube", "instagram", "x")
+        every = self.real_platforms({"tiktok": "@mine"})
+        every["youtube"].cfg["handle"] = "https://www.youtube.com/@mine/shorts"  # typed into config.toml by hand
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()):
+            w = self.open(every, demo_mode=False)
+            panel = self.panel(w, "youtube")
+            self.assertEqual(panel["state"], "off")
+            self.assertIn("config.toml has https://www.youtube.com/@mine/shorts as your YouTube handle, which isn't "
+                          "one ReelForge can use, so it counts as none. Type your @handle and press Connect",
+                          plain(panel["body"]))
+            self.assertNotIn("config.toml", plain(self.panel(w, "x")["body"]))  # no handle at all: nothing to say
+
+    def test_a_typed_in_number_that_goes_down_is_asked_about_first(self):
+        """Type in stats: a number lower than the one saved replaces it, so Save says so first and stores it when
+        pressed again. A slip the wrong way (3,400 where 34,000 was meant) is seen before it costs anything."""
+        self.forget("youtube", "instagram", "x")
+        every = self.real_platforms({"tiktok": "@mine", "instagram": "@mine"})
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()):
+            w = self.open(every, demo_mode=False)
+            eid = str(w.call("log_stats", "instagram")["episodes"][0]["id"])
+            typed = lambda: [p["views"] for p in db.posts_latest() if p["platform"] == "instagram"]  # noqa: E731
+
+            def readings() -> list[int]:
+                with db.connect() as c:
+                    return [r[0] for r in c.execute("SELECT views FROM post_stats WHERE platform = 'instagram' AND "
+                                                    "post_id = ? ORDER BY ts, rowid", (f"manual-{eid}",))]
+
+            self.assertIsNone(w.call("save_logged_stats", "instagram", "120", {eid: "32,000"}))
+            self.assertEqual(typed(), [32_000])
+            self.assertEqual(w.call("log_stats", "instagram")["last"]["instagram"]["views"], {eid: 32_000})
+            asks = ("3,400 is lower than the 32,000 saved before. Press Save again if 3,400 is right: it replaces "
+                    "the 32,000.")
+            self.assertEqual(w.call("save_logged_stats", "instagram", "120", {eid: "3400"}), asks)
+            self.assertEqual(typed(), [32_000])  # nothing is stored yet
+            self.assertEqual(w.call("save_logged_stats", "instagram", "120", {eid: "3500"}),
+                             asks.replace("3,400", "3,500"))  # another number: asked about again
+            self.assertEqual(readings(), [32_000])
+            self.assertIsNone(w.call("save_logged_stats", "instagram", "120", {eid: "3500"}))  # Save again
+            self.assertEqual(typed(), [3_500])
+            self.assertEqual(readings(), [3_500, 3_500])  # the 32,000 it replaces, and the new reading
+            self.assertIsNone(w.call("save_logged_stats", "instagram", "125", {eid: "3,600"}))  # up: nothing to ask
+            self.assertEqual(typed(), [3_600])
+            # Save pressed again while the database is busy: that's said, and the next press doesn't ask again.
+            self.assertIn("3,000 is lower than the 3,600", w.call("save_logged_stats", "instagram", "", {eid: "3000"}))
+            with mock.patch.object(db, "record_snapshot", side_effect=sqlite3.OperationalError("database is locked")):
+                self.assertEqual(w.call("save_logged_stats", "instagram", "", {eid: "3000"}),
+                                 "The stats database is busy (database is locked). Try again in a moment.")
+            self.assertIsNone(w.call("save_logged_stats", "instagram", "", {eid: "3000"}))
+            self.assertEqual(typed(), [3_000])
+            other = str(w.call("log_stats", "instagram")["episodes"][1]["id"])
+            self.assertIsNone(w.call("save_logged_stats", "instagram", "", {eid: "3,600", other: "900"}))
+            self.assertEqual(w.call("save_logged_stats", "instagram", "", {eid: "360", other: "90"}),
+                             "2 numbers are lower than the ones saved before. Press Save again if they're right: "
+                             "they replace those.")
+            self.assertEqual(sorted(typed()), [900, 3_600])
 
     def test_another_window_connecting_shows_here(self):
         """Every ReelForge window follows a platform connected (or disconnected) in another one."""

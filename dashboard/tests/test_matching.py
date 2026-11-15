@@ -479,12 +479,15 @@ class TypedInTest(DbTest):
     """Numbers typed in for a platform ReelForge can't read yet (a manual-<episode> post each: the Accounts tab's Type
     in stats)."""
 
-    def typed(self, platform: str, numbers: dict[int, int], minutes: float) -> None:
-        """Save typed-in views per episode, the way the dialog's Save stores them."""
+    def typed(self, platform: str, numbers: dict[int, int], minutes: float, put_right: bool = True) -> None:
+        """Save typed-in views per episode, the way the dialog's Save stores them. put_right: as it does once
+        you've said a lower number is the right one (it asks first)."""
         titles = {e["id"]: e["title"] for e in db.episodes()}
         for eid in numbers:
             db.add_post(platform, f"manual-{eid}", eid, titles[eid], None, at(0))
-        read(platform, [post(f"manual-{eid}", titles[eid], 0, views=n) for eid, n in numbers.items()], minutes=minutes)
+        account = SimpleNamespace(handle="@yourchannel", followers=100, views=None, likes=None, posts=None)
+        db.record_snapshot(platform, account, [post(f"manual-{eid}", titles[eid], 0, views=n)
+                                               for eid, n in numbers.items()], at(minutes), put_right=put_right)
 
     def posts(self, platform: str) -> list[str]:
         with db.connect() as c:
@@ -499,13 +502,15 @@ class TypedInTest(DbTest):
         read("instagram", [post("ig777", CAPTIONS["instagram"].format(REAL["kite"][0]), 5, views=1350)], minutes=120)
         self.assertEqual(analytics.auto_link(), 1)
         self.assertEqual(where("instagram", "ig777"), (kite, "caption"))
-        # The kite video's typed numbers went with their readings; the jump video's post wasn't read, so its stay.
+        # The kite video's typed number is the real post's first reading now, and its stand-in is gone; the jump
+        # video's post wasn't read, so its typed number stays where it is.
         self.assertEqual(self.posts("instagram"), ["ig777", f"manual-{jump}"])
-        with db.connect() as c:
-            self.assertEqual(c.execute("SELECT COUNT(*) FROM post_stats WHERE post_id = ?",
-                                       (f"manual-{kite}",)).fetchone()[0], 0)
+        self.assertEqual(self.readings("instagram", f"manual-{kite}"), [])
+        self.assertEqual(self.readings("instagram", "ig777"), [1200, 1350])
+        self.assertEqual(self.readings("instagram", f"manual-{jump}"), [300])
         self.assertEqual(analytics.auto_link(), 0)
         self.assertEqual(self.posts("instagram"), ["ig777", f"manual-{jump}"])
+        self.assertEqual(self.readings("instagram", "ig777"), [1200, 1350])
 
     def test_typed_in_numbers_stay_while_no_post_is_read(self):
         kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
@@ -527,13 +532,36 @@ class TypedInTest(DbTest):
         analytics.auto_link()
         self.assertEqual(self.posts("x"), [f"manual-{kite}", "x1"])
         self.assertEqual(db.latest_accounts()["x"]["views"], 12000)
-        with db.connect() as c:
-            self.assertEqual(c.execute("SELECT COUNT(*) FROM post_stats WHERE post_id = ?",
-                                       (f"manual-{kite}",)).fetchone()[0], 1)
-        # Logged in again: the post itself is read, with newer numbers than the typed ones, which now go.
+        self.assertEqual(self.readings("x", f"manual-{kite}"), [12000])
+        # Logged in again: the post itself is read, with newer numbers than the typed ones.
         read("x", [post("x1", CAPTIONS["x"].format(REAL["kite"][0]), 5, views=12500)], minutes=48 * 60)
         analytics.auto_link()
         self.assertEqual(self.posts("x"), ["x1"])
+
+    def test_typed_in_numbers_become_the_real_posts_history(self):
+        """Weeks of numbers typed in while X was logged out used to be deleted, readings and all, the moment X was
+        read again: the post's history then jumped from its last read before the log-out to today. They are its
+        readings for those weeks now, as typed, between what was read before and after."""
+        kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
+        jump = db.create_episode(REAL["jump"][0], video(REAL["jump"][1]), at(-50))
+        week = 7 * 24 * 60
+        read("x", [post("x1", CAPTIONS["x"].format(REAL["kite"][0]), 5, views=9000),
+                   post("x2", CAPTIONS["x"].format(REAL["jump"][0]), 425, views=700)], minutes=600)
+        analytics.auto_link()
+        for n, views in enumerate((10_000, 11_000, 12_000), start=1):  # logged out since: typed in once a week
+            self.typed("x", {kite: views, jump: 800}, n * week)
+            analytics.auto_link()  # (what the other platforms' refreshes run meanwhile)
+        # Logged in again. X's page shows the kite post only: the jump one has left it.
+        read("x", [post("x1", CAPTIONS["x"].format(REAL["kite"][0]), 5, views=12_500)], minutes=4 * week)
+        analytics.auto_link()
+        self.assertEqual(self.posts("x"), [f"manual-{jump}", "x1", "x2"])  # jump's wait until its post is read
+        self.assertEqual(self.readings("x", "x1"), [9000, 10_000, 11_000, 12_000, 12_500])
+        self.assertEqual([v for _, v in db.post_series(at(-1000))["x", "x1"]], [9000, 10_000, 11_000, 12_000, 12_500])
+        self.assertEqual(self.readings("x", f"manual-{jump}"), [800, 800, 800])
+        self.assertEqual(next(p["views"] for p in db.posts_latest() if p["post_id"] == "x1"), 12_500)  # as read
+        self.assertEqual(where("x", "x1"), (kite, "caption"))
+        with db.connect() as c:  # nothing typed in was dropped on the way
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM post_stats WHERE platform = 'x'").fetchone()[0], 9)
 
     def test_a_typed_in_number_can_be_put_right(self):
         """34000 typed where 3400 was meant: the video, the account and their charts all come down to 3400."""
@@ -584,6 +612,46 @@ class TypedInTest(DbTest):
         self.assertEqual([r["views"] for r in db.account_series("instagram", "")],
                          [10_900, 20_900, 30_900, 4_300, 4_300, 34_900])
         self.assertEqual(db.latest_accounts()["instagram"]["views"], 34_900)
+
+    def test_a_lower_number_changes_nothing_saved_before_until_you_say_its_right(self):
+        """The dialog asks before a lower number replaces the one saved. Stored without that say, it's one more
+        reading: the list shows it, and every reading from before is as it was."""
+        kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
+        jump = db.create_episode(REAL["jump"][0], video(REAL["jump"][1]), at(-50))
+        week = 7 * 24 * 60
+        for n, views in enumerate((10_000, 20_000, 30_000, 32_000), start=1):
+            self.typed("instagram", {kite: views, jump: 900}, n * week)
+        self.typed("instagram", {kite: 3_400, jump: 900}, 5 * week, put_right=False)
+        self.assertEqual(self.readings("instagram", f"manual-{kite}"), [10_000, 20_000, 30_000, 32_000, 3_400])
+        self.assertEqual([r["views"] for r in db.account_series("instagram", "")],
+                         [10_900, 20_900, 30_900, 32_900, 4_300])
+        self.assertEqual(next(p["views"] for p in db.posts_latest() if p["post_id"] == f"manual-{kite}"), 3_400)
+        self.typed("instagram", {kite: 34_000, jump: 900}, 5 * week + 5)  # the right one: nothing was lost
+        self.assertEqual([v for _, v in db.post_series(at(-1000))["instagram", f"manual-{kite}"]],
+                         [10_000, 20_000, 30_000, 32_000, 32_000, 34_000])
+
+    def test_a_slip_put_right_days_later_leaves_the_accounts_total_too(self):
+        """A slip saved twice within minutes (the second Save was for the other video) and put right days later. By
+        then the video keeps one reading from those hours and the account both (db.compact thins the account's
+        later), and the account's other one kept the slip, so its chart did. A Save from the same hours that was
+        right stays as it is."""
+        kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
+        jump = db.create_episode(REAL["jump"][0], video(REAL["jump"][1]), at(-50))
+        now = datetime.now(timezone.utc).replace(second=0, microsecond=0)  # (compact goes by today's date)
+        day = (now - timedelta(days=5)).replace(hour=10, minute=0)
+        minutes = lambda when: (when - T0).total_seconds() / 60  # noqa: E731
+        for platform, first in (("x", 34_000), ("instagram", 3_100)):
+            self.typed(platform, {kite: 3_000, jump: 100}, minutes(day - timedelta(days=3)))
+            self.typed(platform, {kite: first, jump: 100}, minutes(day))  # on X the slip, on Instagram the right one
+            self.typed(platform, {kite: 34_000, jump: 150}, minutes(day + timedelta(minutes=2)))
+        db.compact(min_hours=0)
+        for platform, first in (("x", 34_100), ("instagram", 3_200)):
+            self.assertEqual(self.readings(platform, f"manual-{kite}"), [3_000, 34_000])  # one left from those hours
+            self.assertEqual([r["views"] for r in db.account_series(platform, "")], [3_100, first, 34_150])
+            self.typed(platform, {kite: 3_400, jump: 150}, minutes(now))
+            self.assertEqual(self.readings(platform, f"manual-{kite}"), [3_000, 3_400, 3_400])
+        self.assertEqual([r["views"] for r in db.account_series("x", "")], [3_100, 3_550, 3_550, 3_550])
+        self.assertEqual([r["views"] for r in db.account_series("instagram", "")], [3_100, 3_200, 3_550, 3_550])
 
     def test_putting_a_typed_in_number_right_leaves_read_numbers_alone(self):
         kite = db.create_episode(REAL["kite"][0], video(REAL["kite"][1]), at(-60))
@@ -792,6 +860,32 @@ class HandleTest(DbTest):
         self.assertEqual(db.forget_old_handle("youtube"), None)
         self.assertEqual(self.stored("youtube"), ["v1"])
 
+    def test_a_wrong_handle_from_before_the_update_is_asked_about_when_its_put_right(self):
+        """@me for a while, then @mrbest by mistake, all read by a ReelForge from before handle changes were written
+        down, and put right now. Everything stored was taken for @mrbest's, so @me's own videos in the new read
+        made it a new name for @mrbest: its videos stayed in the totals and nothing was asked. Only what was last
+        read while the handle was @mrbest is its."""
+        with db.connect() as c:  # as the older ReelForge stored it: readings under two handles, nothing about them
+            c.executemany("INSERT INTO account_stats (platform, ts, handle, followers, views) VALUES (?,?,?,?,?)",
+                          [("tiktok", at(60 * i), "@me" if i < 6 else "@mrbest", 100 + i, 800) for i in range(9)])
+            c.executemany("""INSERT INTO posts (platform, post_id, title, published_at, last_ts, views)
+                             VALUES ('tiktok', ?, ?, ?, ?, ?)""",
+                          [("mine1", "My video", at(-500), at(300), 500),
+                           ("mine_gone", "One I took down", at(-900), at(120), 300),
+                           ("big1", "Their video", at(-700), at(480), 2_000_000)])
+        db.add_post("tiktok", "posted1", None, "Posted through ReelForge, not read yet", None, at(470))
+        self.assertEqual(db.old_handles("tiktok"), [])
+        mine = [post("mine1", "My video", -500, views=510)]
+        self.assertEqual(self.read("@me", mine, 110, 540), "@mrbest")  # not a new name for @mrbest
+        self.assertEqual(len(self.copies()), 1)
+        found = db.handle_change("tiktok")
+        self.assertEqual((found["old"], found["posts"]), (["@mrbest"], ["big1"]))
+        self.assertEqual((found["first"], found["last"]), (at(360), at(480)))  # when it was @mrbest, for the dialog
+        self.assertEqual(db.forget_old_handle("tiktok")["posts"], 1)
+        self.assertEqual(self.stored(), ["mine_gone", "mine1", "posted1"])  # every one of @me's, read lately or not
+        with db.connect() as c:
+            self.assertEqual({r[0] for r in c.execute("SELECT handle FROM account_stats")}, {"@me"})
+
     def long_ago(self, platform: str, reads: list[tuple[datetime, str, list[str]]]) -> None:
         """Reads at real times in the past (compact goes by today's date): (when, handle, the ids of the posts,
         all uploaded long before)."""
@@ -908,7 +1002,9 @@ class HandleTest(DbTest):
             self.assertEqual(refresh().errors, [])
         notes = [n for n in notify.recent() if (n["key"] or "").startswith("handle:")]
         self.assertEqual([(n["key"], n["title"]) for n in notes], [("handle:tiktok:me", "TikTok is now read as @me")])
-        self.assertIn("read as @mrbest", notes[0]["body"])
+        self.assertEqual(notes[0]["body"], "Its stats so far were read as @mrbest, and none of @mrbest's videos are "
+                         "among @me's, so they look like another account's. ReelForge saved a copy from before, "
+                         "next to the stats database.")  # what was seen, not "they hold both accounts now"
         self.assertEqual(notify.target(notes[0]), notify.Target("accounts", account="tiktok"))
         self.assertEqual(len(self.copies()), 1)
 
@@ -943,6 +1039,15 @@ class CompactTest(DbTest):
         stamp = today.stat().st_mtime_ns
         db.compact(min_hours=0)  # once a day: today's stays as it is
         self.assertEqual(today.stat().st_mtime_ns, stamp)
+
+    def test_the_backup_is_noted_as_made_when_it_was_made(self):
+        """Today's copy is there already at every start but the day's first. Each start noted it as backed up just
+        now, so Settings said "backed up 3m ago" for a copy that could be most of a day old."""
+        today = db.daily_backup()
+        made = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(hours=5)
+        os.utime(today, (made.timestamp(), made.timestamp()))
+        self.assertEqual(db.daily_backup(), today)  # there already: nothing is copied
+        self.assertEqual(db.parse(db.last_backup()["ok"]), made)
 
     def test_failed_backup_never_stops_compaction(self):
         (self.dir / "backups").write_text("a file where the folder should be")

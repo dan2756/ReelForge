@@ -1850,11 +1850,15 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
                 then = "" if p.public_stats else ", then log in once in ReelForge's own browser window"
                 if private is None:
                     private = signup.private_name(others) if signup is not None and others else ""
+                body = Text()
+                if p.refused_handle:  # a handle typed into config.toml that isn't one: say so, not just "off"
+                    body.append(f"config.toml has {p.refused_handle[:60]} as your {p.name} handle, which isn't one "
+                                "ReelForge can use, so it counts as none. ", TYPICAL)
+                body.append(f"Type your @handle and press Connect to see {p.name} in ReelForge{then}. No account "
+                            "yet? Sign up makes one" + (f", in a private {private} window." if private else "."),
+                            MUTED)
                 panel.update(
-                    status=Text("○ not connected", f"bold {MUTED}").json(), status_short=None,
-                    body=Text(f"Type your @handle and press Connect to see {p.name} in ReelForge{then}. No account "
-                              "yet? Sign up makes one" + (f", in a private {private} window." if private else "."),
-                              MUTED).json(),
+                    status=Text("○ not connected", f"bold {MUTED}").json(), status_short=None, body=body.json(),
                     note=Text(p.setup_note, MUTED).json(), signup=signup is not None)
                 panels.append(panel)
                 continue
@@ -2222,10 +2226,25 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
         try:
             config.save_handle(p.key, handle)
         except Exception as e:
-            why = str(e) if isinstance(e, config.ConfigError) else "config.toml couldn't be written."
             sync.log([f"error: saving {p.name}'s handle: {detail(e)}"])
-            self.loop.call_soon(self.notify, f"{p.name}'s handle wasn't saved, and nothing changed. {why}", "",
-                                "error", 12)
+            # The handle goes into several files in turn, config.toml among the last (studio.generate.set_account),
+            # so which one failed isn't known here, and some may have been written. config.toml is the one
+            # ReelForge goes by: what it holds now says whether the handle was saved.
+            try:
+                kept = str((config.load_config().get(p.key) or {}).get("handle", ""))
+            except Exception:
+                kept = None
+            done, not_done = (f"{p.name}'s handle is saved", f"{p.name}'s handle wasn't saved") if handle else \
+                (f"{p.name} is disconnected", f"{p.name} wasn't disconnected")
+            if kept == handle:
+                self.loop.call_soon(self.notify, f"{done}, but ReelForge couldn't finish updating your channel's "
+                                                 "other files (your AI's notes among them). data/refresh.log says "
+                                                 "what stopped it.", "", "warning", 12)
+                self.loop.call_soon(self.account_saved, p, handle)
+                return
+            why = str(e) if isinstance(e, config.ConfigError) else \
+                "ReelForge couldn't write your settings; data/refresh.log says what stopped it."
+            self.loop.call_soon(self.notify, f"{not_done}. {why}", "", "error", 12)
             return
         self.loop.call_soon(self.account_saved, p, handle)
 
@@ -2304,9 +2323,11 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
         return {"platforms": [{"key": p.key, "name": p.name} for p in manual], "start": start, "episodes": episodes,
                 "last": last}
 
+    lower_asked: tuple | None = None  # the Save that was asked about a number going down: (platform, its numbers)
+
     @rpc
     def save_logged_stats(self, key: str, followers_text: str, views_text: dict) -> str | None:
-        """The dialog's Save: None once saved, or what to fix."""
+        """The dialog's Save: None once saved, or what to fix, or what to confirm by pressing Save again."""
         from .platforms.public import parse_count
 
         def number(text: str) -> int | None:
@@ -2325,13 +2346,29 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
             return "Whole numbers only, please (like 1234, 3,400 or 1.2K)."
         if followers is None and not views:
             return "Nothing to save yet."
+        # A number lower than the one saved for that video replaces it, in the readings it was saved in too
+        # (db._correct_typed): fine for a slip being put right, but the lower one may be the slip (3400 for 34000).
+        # So it's said first, and stored that way only when Save is pressed again with the same numbers.
+        saved = {q["episode_id"]: q["views"] for q in self.posts
+                 if q["platform"] == key and q["post_id"].startswith(db.TYPED) and q["views"] is not None}
+        lower = [(n, saved[e]) for e, n in views.items() if n < saved.get(e, 0)]
+        asked = (key, sorted(views.items()))
+        if lower and self.lower_asked != asked:
+            self.lower_asked = asked
+            if len(lower) > 1:
+                return (f"{len(lower)} numbers are lower than the ones saved before. Press Save again if they're "
+                        "right: they replace those.")
+            n, was = lower[0]
+            return (f"{n:,} is lower than the {was:,} saved before. Press Save again if {n:,} is right: it "
+                    f"replaces the {was:,}.")
         try:
-            self._save_logged(key, followers, views)
-        except sqlite3.OperationalError as e:
+            self._save_logged(key, followers, views, put_right=bool(lower))
+        except sqlite3.OperationalError as e:  # (what you said about a lower number still stands for the next try)
             return f"The stats database is busy ({e}). Try again in a moment."
+        self.lower_asked = None
         return None
 
-    def _save_logged(self, key: str, followers: int | None, views: dict[int, int]) -> None:
+    def _save_logged(self, key: str, followers: int | None, views: dict[int, int], put_right: bool = False) -> None:
         p = self.every[key]
         episodes = {e["id"]: e for e in db.episodes()}
         posts = []
@@ -2349,7 +2386,7 @@ class Dashboard(StatsTab, SettingsTab, PostingTab, Service):
                                   likes=None, comments=None, shares=None))
         if followers is None and self.latest.get(key):
             followers = self.latest[key]["followers"]
-        db.record_snapshot(key, Account(handle=p.handle, followers=followers), posts)
+        db.record_snapshot(key, Account(handle=p.handle, followers=followers), posts, put_right=put_right)
         self.tell_others()
         self.notify(f"{p.name} stats saved.", timeout=3)
         self.reload()

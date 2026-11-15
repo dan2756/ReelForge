@@ -17,7 +17,7 @@ from unittest import mock
 import httpx
 
 from dashboard import config, db, sync
-from dashboard.platforms import Account, PlatformError, TikTok, YouTube, browser, public
+from dashboard.platforms import Account, PlatformError, TikTok, X, YouTube, browser, public
 
 AGAIN = "ReelForge tries again at the next refresh."
 CHANNEL = ('<link rel="canonical" href="https://www.youtube.com/channel/UC' + "a" * 22 + '">'
@@ -42,8 +42,9 @@ class YouTubePages(unittest.TestCase):
 
     def site(self, **answers) -> list[str]:
         """Stand in for YouTube. answers: what a kind of page ("channel", "feed", "shorts", "watch", or one video's
-        id) gives instead of its usual page: a status code, a page's text, or an error to raise. Returns the list the
-        addresses asked for are added to."""
+        id) gives instead of its usual page: a status code, a page's text, or an error to raise (or something to
+        call for one of those, each time the page is asked for). Returns the list the addresses asked for are added
+        to."""
         asked: list[str] = []
 
         def answer(request: httpx.Request) -> httpx.Response:
@@ -53,6 +54,8 @@ class YouTubePages(unittest.TestCase):
                 ("shorts", SHORTS) if url.endswith("/shorts") else \
                 ("watch", WATCH) if "watch?v=" in url else ("channel", CHANNEL)
             given = answers.get(url.rsplit("=", 1)[-1], answers.get(kind, usual))
+            if callable(given):
+                given = given()
             if isinstance(given, Exception):
                 raise given
             return httpx.Response(given, text="") if isinstance(given, int) else httpx.Response(200, text=given)
@@ -108,6 +111,28 @@ class YouTubePages(unittest.TestCase):
         self.site(shorts=httpx.ConnectError("reset"))
         account, posts = public.youtube("somechannel")
         self.assertEqual((account.followers, len(posts), account.warning), (1200, 15, ""))
+
+    def test_videos_pages_that_dont_answer_are_given_up_on(self):
+        """A page that doesn't answer takes the client's 15 seconds, and every window's refresh waits for the read.
+        All ten were tried, two and a half minutes of it, where the first used to end the read. Now the videos'
+        own pages get 20 seconds between them, and the rest wait for the next read."""
+        clock = Clock()
+        with mock.patch.object(public, "time", clock):
+            asked = self.site(watch=lambda: clock.sleep(15) or httpx.ReadTimeout("timed out"))
+            account, posts = public.youtube("somechannel")
+            self.assertEqual(self.watched(asked), OLDER[:2])  # the second was started 15 seconds in, the third not
+            self.assertEqual((account.followers, len(posts), account.warning), (1200, 15, ""))  # the feed's are kept
+            # Slow all the way, the feed too: said, with what was given up on in the log.
+            self.site(feed=httpx.ReadTimeout("timed out"),
+                      watch=lambda: clock.sleep(15) or httpx.ReadTimeout("timed out"))
+            account, posts = public.youtube("somechannel")
+            self.assertEqual((posts, account.warning),
+                             ([], f"YouTube's videos weren't read this time, only its subscribers. {AGAIN}"))
+            self.assertIn("the videos' pages from feed0000002 on: left for the next read after 20s", account.detail)
+            # Pages that answer, each in a second and a half, are all read.
+            asked = self.site(watch=lambda: clock.sleep(1.5) or WATCH)
+            _, posts = public.youtube("somechannel")
+            self.assertEqual((len(self.watched(asked)), len(posts)), (10, 25))
 
     def test_no_videos_at_all_is_said(self):
         self.site(feed=httpx.ReadTimeout("timed out"), shorts=httpx.ConnectError("reset"))
@@ -607,6 +632,21 @@ class Handles(unittest.TestCase):
                               ("me and you", ""), ("..", ""), ("me@evil.example", ""), ("a\\b", "")):
             self.assertEqual(TikTok({"handle": typed}).public_handle, handle, typed)
         self.assertFalse(YouTube({"handle": "youtube.com/@me"}).connected())
+
+    def test_a_handle_written_another_way_is_still_that_handle(self):
+        """A YouTube handle in another alphabet, copied from the address bar in its %-form, and a handle with a
+        slash after it: both name the page they always did, but counted as none once handles were checked, and
+        the platform dropped out of ReelForge without a word. What a %-form stands for is still checked."""
+        for typed, handle in (("@%D0%BA%D0%B0%D0%BD%D0%B0%D0%BB", "канал"), ("@me/", "me"), ("me%2Fabout", ""),
+                              ("me%3Ftab=1", ""), ("@%40me", ""), ("100%", ""), ("/", "")):
+            self.assertEqual(YouTube({"handle": typed}).public_handle, handle, typed)
+        channel = YouTube({"handle": "@%D0%BA%D0%B0%D0%BD%D0%B0%D0%BB"})
+        self.assertEqual((channel.handle, channel.connected(), channel.refused_handle), ("@канал", True, ""))
+        self.assertEqual(str(httpx.URL(f"https://www.youtube.com/@{channel.public_handle}")),
+                         "https://www.youtube.com/@%D0%BA%D0%B0%D0%BD%D0%B0%D0%BB")  # the page it always opened
+        # One that still counts as none is kept, to say on its Accounts panel what config.toml has.
+        self.assertEqual(X({"handle": " https://x.com/me?s=20 "}).refused_handle, "https://x.com/me?s=20")
+        self.assertEqual((X({"handle": "@me"}).refused_handle, X({}).refused_handle), ("", ""))
 
 
 if __name__ == "__main__":

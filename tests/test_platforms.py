@@ -321,6 +321,37 @@ class Browser(unittest.TestCase):
             self.assertIn("Chrome/153.0.0.0", browsers.user_agent(chrome))
         self.assertEqual(asked, [["/opt/somewhere/chrome", "--version"]])
 
+    def test_the_version_follows_the_browser_when_it_is_updated(self):
+        """The version was kept for as long as ReelForge ran, so a window left open across a browser update went on
+        presenting the old one, and a look-up that failed once stayed "unknown". It is asked again when the
+        browser's program file has changed, and until it has answered."""
+        said = ["", "Google Chrome 153.0.7500.12\n", "Google Chrome 154.0.7600.3\n"]
+        asked = []
+
+        def run(cmd, **how):
+            asked.append(cmd)
+            return mock.Mock(stdout=said[len(asked) - 1])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp, "chrome")
+            exe.write_bytes(b"153")
+            chrome = browsers.Browser("Chrome", exe)
+            with mock.patch.object(browsers, "WINDOWS", False), mock.patch.object(browsers, "MAC", False), \
+                    mock.patch.object(browsers.subprocess, "run", run):
+                self.assertEqual(browsers.major_version(chrome), 0)  # it didn't say: not kept
+                self.assertEqual([browsers.major_version(chrome) for _ in range(3)], [153, 153, 153])
+                exe.write_bytes(b"154")  # the update replaced the program
+                os.utime(exe, ns=(exe.stat().st_atime_ns, exe.stat().st_mtime_ns + 10 ** 9))
+                self.assertEqual([browsers.major_version(chrome) for _ in range(3)], [154, 154, 154])
+                self.assertIn("Chrome/154.0.0.0", browsers.user_agent(chrome))
+            self.assertEqual(len(asked), 3)
+            # Windows reads the folder beside the program each time, so there is nothing to go stale.
+            for v in ("141.0.3537.71", "142.0.3595.5"):
+                Path(tmp, v).mkdir()
+                with mock.patch.object(browsers, "WINDOWS", True):
+                    self.assertEqual(browsers.major_version(browsers.Browser("Edge", Path(tmp, "msedge.exe"), True)),
+                                     int(v[:3]))
+
     @unittest.skipUnless(os.environ.get("REELFORGE_BROWSER_TEST") == "1", "set REELFORGE_BROWSER_TEST=1")
     def test_the_browser_starts_headless(self):
         """The browser ReelForge would read stats with starts with its own profile and shows its user agent."""
