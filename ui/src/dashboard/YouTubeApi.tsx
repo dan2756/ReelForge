@@ -91,7 +91,8 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
     setWhy(typeof said === "string" ? said : "")
     if (said !== true) return
     setPath("")
-    fm.focus("api-close") // Google's page is open: a second Enter doesn't open it again
+    // Google's page is open: a second Enter doesn't open it again. (Unless Esc closed the dialog meanwhile.)
+    if (fm.has("api-close")) fm.focus("api-close")
   }
   useEffect(() => {
     if (now && api?.state === "again" && !api.wants_file) void connect("")
