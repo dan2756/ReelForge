@@ -564,6 +564,23 @@ class Posting(ApiPosting):
         w.call("post_action", job["id"], "mark_posted")  # you looked in YouTube Studio: it is there
         self.assertEqual(self.rows(w)["youtube"]["state"], "posted")
 
+    def test_a_no_that_proves_nothing_after_the_last_piece_went_out_offers_no_retry(self):
+        # The last piece went out and no answer came; sent again, it is refused. The first sending may have made
+        # the video, so a Retry here could make a second one.
+        self.google.script = [None, None, None, "drop", None, (403, "forbidden")]
+        w = self.window()
+        job = self.posted(w)
+        self.assertEqual((job["state"], job["error_code"]), ("unknown", None))
+        row = self.rows(w)["youtube"]
+        self.assertEqual((row["state"], row["actions"]), ("unknown", ["mark_posted", "not_posted"]))
+        w.call("post_action", job["id"], "retry")
+        w.call("post_action", "youtube", "post_api")
+        self.assertEqual((len(posting.recent()), len(self.google.starts)), (1, 1))
+        # A word ReelForge doesn't know, in answer to the last piece, is no proof either.
+        w.call("post_action", job["id"], "not_posted")
+        self.google.script = [None, None, None, (400, "somethingNobodyHasSeen")]
+        self.assertEqual(self.posted(w)["state"], "unknown")
+
     def test_unknown_that_you_say_did_not_post_can_be_posted(self):
         self.google.script, self.google.then = [None, None, None, "404"], None
         w = self.window()

@@ -694,6 +694,7 @@ def upload(video: Path, title: str, description: str, privacy: str, made_for_kid
             if stop():
                 raise Stopped()
             end = min(sent + CHUNK, size)
+            again = out  # the piece that ends the upload left before: this would be a second sending of it
             try:
                 if stuck > TRIES:
                     raise ApiError("offline", "The connection to YouTube kept breaking, so the upload stopped.")
@@ -712,8 +713,9 @@ def upload(video: Path, title: str, description: str, privacy: str, made_for_kid
                         sleep(_pause(stuck))
                     what, value = _where(http, uri, size, fresh=what == "auth")
             except ApiError as e:
-                # Once the last piece has gone out, only YouTube's own "no" to that piece means nothing was posted.
-                if out and not e.definite:
+                # Once the last piece has gone out, only YouTube's own "no" to its first sending means nothing was
+                # posted. A "no" to a second sending may be about a video the first one made after all.
+                if out and (again or not e.definite):
                     raise Unknown() from None
                 raise
             if what == "made":
@@ -851,8 +853,9 @@ def _refusal(r: httpx.Response) -> ApiError:
     known = next((x for x in reasons if x in REFUSALS), None)
     if known:
         return ApiError(*REFUSALS[known], definite=True)
+    # A word this file doesn't know is shown, and proves nothing about what YouTube did with the upload.
     said = _word(reasons[0]) if reasons else f"error {r.status_code}"
-    return ApiError("refused", f"YouTube refused the upload ({said}).", definite=bool(reasons))
+    return ApiError("refused", f"YouTube refused the upload ({said}).")
 
 
 def _made(data: dict) -> dict:

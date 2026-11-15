@@ -191,7 +191,7 @@ A failed post says why in a sentence, and nothing was posted. These are the ones
 | The video file changed after you pressed Post | Check the video, then post again |
 | ReelForge was closed during the upload | Nothing was posted. Press Retry |
 | YouTube took the upload and rejected it | Look at the video in YouTube Studio. The reason is in brackets: "duplicate" is a video YouTube already has |
-| YouTube refused the upload (some word) | The word in brackets is Google's own, for a refusal ReelForge has no sentence for. Post this one by hand |
+| YouTube refused the upload (some word) | The word in brackets is Google's own, for a refusal ReelForge has no sentence for. Post this one by hand. If it came in answer to the last piece, the post is "not sure it posted" instead, because such a word proves nothing |
 
 **Not sure it posted** is not a failure. It means the video may be up. Look in YouTube Studio first.
 
@@ -297,7 +297,9 @@ Tested here, by automated tests that run with ReelForge's own (`dashboard/tests/
   not connected and send nothing, and a sign-in put into the file by hand is never used
 - the upload: in pieces, a 503 in the middle and carrying on, a piece that arrived although its answer was an
   error, the last answer lost and found, the last answer lost for good (not sure it posted, and one upload only),
-  a sign-in that ends in the middle, and every refusal ReelForge has a sentence for
+  a sign-in that ends in the middle, every refusal ReelForge has a sentence for, and a refusal of the last piece
+  that proves nothing (a word ReelForge doesn't know, or a "no" to the piece sent a second time): not sure it
+  posted, and no Retry
 - the read-back: a video YouTube stored as private when public was asked for
 - that who can see the video and the made-for-kids answer are in every request
 - the ledger: what may not be posted twice, in both directions between the extension and the API; cancelling;

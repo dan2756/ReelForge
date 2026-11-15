@@ -620,6 +620,38 @@ class Uploading(ApiTest):
         self.assertTrue(e.definite)
         self.assertEqual(self.google.videos, [])
 
+    def test_a_refusal_of_the_last_piece_in_a_word_this_file_does_not_know_is_unknown(self):
+        self.google.script = [None, None, None, (400, "somethingNobodyHasSeen")]
+        with self.assertRaises(Unknown):  # a word nobody has seen is no proof that nothing was posted
+            self.upload()
+        self.assertEqual(len(self.google.starts), 1)
+        self.google.script = [None, (400, "somethingNobodyHasSeen")]  # before the last piece it is a plain failure
+        e = self.refused("refused", self.upload)
+        self.assertEqual((e.message, e.definite), ("YouTube refused the upload (somethingNobodyHasSeen).", False))
+
+    def test_a_refusal_of_the_last_piece_sent_a_second_time_is_unknown(self):
+        # The answer to the last piece is lost, and the session, asked, hasn't taken the piece in yet. It then
+        # does, and the piece sent again is refused. That "no" is about the second sending: the video is up.
+        g, late = self.google, {}
+        g.script = [None, None, None, "lost", None, (403, "forbidden")]
+
+        def on_put(n: int) -> None:
+            (session,) = g.sessions.values()
+            if n == 4:  # the question where it stands
+                late.update(data=bytes(session["data"]), video=session["video"])
+                session["data"], session["video"] = bytearray(late["data"][:3000]), None
+                g.videos.clear()
+            elif n == 5:  # the last piece, again
+                session["data"], session["video"] = bytearray(late["data"]), late["video"]
+                g.videos.append(session)
+
+        g.on_put = on_put
+        with self.assertRaises(Unknown):
+            self.upload()
+        self.assertEqual(self.ranges()[3:], [f"bytes 3000-{SIZE - 1}/{SIZE}", f"bytes */{SIZE}",
+                                             f"bytes 3000-{SIZE - 1}/{SIZE}"])
+        self.one_video()
+
     def test_every_refusal_google_documents_is_a_sentence(self):
         for reason, (code, sentence) in youtube_api.REFUSALS.items():
             with self.subTest(reason):
