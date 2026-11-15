@@ -244,6 +244,22 @@ describe("connecting", () => {
     expect(dialog(h)).toContain(NOT_HERE)
     expect(dialog(h)).toContain(UNPROVEN)
     expect(dialog(h)).not.toContain("CLIENT FILE") // Connect uses the one on file
+    // Close has the keyboard, not Connect: an Enter still held from YouTube API… closes the dialog again, where it
+    // used to open Google's consent page.
+    expect(focused(h)).toBe("Close")
+    h.t.mockInput.pressKey("RETURN")
+    await h.settle(300)
+    expect(frame(h)).not.toContain("YOUTUBE API")
+    expect(focused(h)).toBe("YouTube API…") // the keyboard is back on the button
+    h.t.mockInput.pressKey("RETURN") // open
+    await h.settle(300)
+    h.t.mockInput.pressKey("RETURN") // and closed
+    await h.settle(300)
+    expect([frame(h).includes("YOUTUBE API"), listed("opened.txt"), api(h).state]).toEqual([false, [], "again"])
+    // Connect is one Tab on, and one press.
+    await openApi(h)
+    h.t.mockInput.pressKey("TAB")
+    await h.settle(200)
     expect(focused(h)).toBe("Connect")
     h.t.mockInput.pressKey("RETURN")
     await until(h, () => api(h).state === "on")
@@ -807,18 +823,19 @@ describe("when something goes wrong, or the window is small", () => {
     await h.settle(400)
     await openApi(h)
     for (const text of ["YOUTUBE API", "○ YouTube API: not connected in this window", "Guide: docs/YOUTUBE-API.md", "▐ Disconnect ▌", "▐ Close ▌", "▐ Connect ▌"]) expect(frame(h)).toContain(text)
-    expect(focused(h)).toBe("Connect")
-    // Tab goes round: the two choices, each of their options (scrolled into view), then the buttons.
+    expect(focused(h)).toBe("Close")
+    // Tab goes round: Connect, the two choices, each of their options (scrolled into view), then the buttons again.
     const seen: string[] = []
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 10; i++) {
       h.t.mockInput.pressKey("TAB")
       await h.settle(200)
       seen.push(focused(h))
     }
-    expect(seen).toEqual(["● Private", "○ Unlisted", "○ Public", "● Not answered", "○ No", "○ Yes", "Disconnect", "Close", "Connect"])
+    expect(seen).toEqual(["Connect", "● Private", "○ Unlisted", "○ Public", "● Not answered", "○ No", "○ Yes", "Disconnect", "Close", "Connect"])
     expect(frame(h)).toContain("▐ Connect ▌")
     h.t.mockInput.pressKey("RETURN")
     await until(h, () => api(h).state === "connecting")
+    expect(focused(h)).toBe("Close") // (a second Enter doesn't open Google's page again)
     // While Google's page waits: what it is waiting for, and the way out, with where the guide is still whole.
     for (const text of ["● Waiting for your answer on Google's page", "You have ten minutes", "Guide: docs/YOUTUBE-API.md", "▐ Close ▌", "▐ Open Google's page again ▌"]) expect(frame(h)).toContain(text)
     await google(h, "answer", "yes")

@@ -13,6 +13,7 @@ import { TextAttributes } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/react"
 import { useEffect, useRef, useState } from "react"
 import { useView } from "../bridge"
+import { useFocusManager } from "../lib/focus"
 import { cellLen, plain, wrappedRows, type Action, type Parts, type Seg } from "../lib/styled"
 import { DASH } from "../theme"
 import { Button } from "../ui/Button"
@@ -69,6 +70,7 @@ const CHOICE = 24 // columns for what each of the two choices is called, before 
  * press was the ask: Google's page opens at once. */
 export function ApiDialog({ connect: now, close }: { connect?: boolean; close: () => void }) {
   const s = useDash()
+  const fm = useFocusManager()
   const api = useView<YouTubeApiView>(s.bridge, "youtube_api")
   const { width } = useTerminalDimensions()
   const [path, setPath] = useState("")
@@ -84,7 +86,9 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
     const opening = await s.bridge.ask<boolean>("youtube_api_connect", file, true)
     setBusy(false)
     setBad(Boolean(file) && !opening)
-    if (opening) setPath("")
+    if (!opening) return
+    setPath("")
+    fm.focus("api-close") // Google's page is open: a second Enter doesn't open it again
   }
   useEffect(() => {
     if (now && api?.state === "again" && !api.wants_file) void connect("")
@@ -219,9 +223,11 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
             {/* (not while Google's page is waiting: one thing at a time, and with it where the guide is no longer
                 fits beside the buttons in a window 80 columns wide) */}
             {api.client && !waiting ? <Button id="api-disconnect" label="Disconnect" onPress={() => setLeaving(true)} /> : null}
-            <Button id="api-close" label="Close" autoFocus={on || waiting} onPress={close} />
+            {/* Close has the keyboard when the dialog opens, unless the box for the file does: an Enter still held
+                from the button that opened it closes it again. On Connect it opened Google's consent page. */}
+            <Button id="api-close" label="Close" autoFocus={!api.wants_file || waiting} onPress={close} />
             {api.client && !on && !api.wants_file ? (
-              <Button id="api-connect" label={waiting ? "Open Google's page again" : "Connect"} variant="primary" autoFocus={!waiting} disabled={busy} onPress={() => void connect("")} />
+              <Button id="api-connect" label={waiting ? "Open Google's page again" : "Connect"} variant="primary" disabled={busy} onPress={() => void connect("")} />
             ) : null}
           </>
         )}
