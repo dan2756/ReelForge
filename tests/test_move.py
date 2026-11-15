@@ -306,6 +306,33 @@ class AtOnce(MoveScratch):
         self.assertIn("The hourly stats read is off now, and couldn't be turned on again: reelforge stats on does it.",
                       self.said)
 
+    def test_a_move_stopped_while_it_waited_for_a_stats_read_puts_the_hourly_read_back(self):
+        """Ctrl+C in the two minutes a read under way is given: the job was off already, and the folder kept the
+        note of a move that never happened."""
+        done = []
+
+        def note(what, answer=None):
+            done.append(what)
+            return answer
+
+        def stopped(say):
+            note("wait")
+            raise KeyboardInterrupt
+
+        p = move.plan()
+        p.system["stats"] = True
+        with mock.patch.object(P, "WINDOWS", False), mock.patch.object(P, "dry_system", lambda: False), \
+                mock.patch.object(move.os, "chdir"), mock.patch.object(reset, "_wait_for_reads", stopped), \
+                mock.patch("studio.stats_schedule.disable", lambda: note("off", "Background stats are off.")), \
+                mock.patch("studio.stats_schedule.enable", lambda: note("on", "stats ok")), \
+                mock.patch("studio.stats_schedule.status", return_value="on"), \
+                self.assertRaises(KeyboardInterrupt):
+            self.quiet(move.go, p)
+        self.assertEqual(done, ["off", "wait", "on"])
+        self.assertTrue(self.root.is_dir())
+        self.assertFalse((self.root / move.STATE).exists())   # no note of a move left in a folder that didn't move
+        self.assertFalse(self.home.exists())
+
     def test_a_folder_without_the_hourly_read_leaves_the_scheduler_alone(self):
         with mock.patch("studio.stats_schedule.disable") as off, mock.patch("studio.stats_schedule.enable") as on:
             code, moved, _ = self.go()

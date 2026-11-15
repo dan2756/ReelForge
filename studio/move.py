@@ -462,8 +462,18 @@ def go(p: Plan, reopen: bool = False, pause: bool = True, say=print) -> tuple[in
             + (" and opens ReelForge again." if reopen else "."))
         return 0, False
     os.chdir(p.target.parent)   # not inside the folder that's moving
-    stats = _stats_off(p, say)
-    err = rename(p)
+    try:
+        stats = _stats_off(p, say)
+        err = rename(p)
+    except BaseException:
+        # Stopped in between (Ctrl+C while it waited for a stats read to finish): the folder hasn't moved, so its
+        # note goes and the hourly read goes back on, where it was.
+        _undo(p)
+        if p.system.get("stats"):
+            from . import reset
+
+            reset._stats_on_again()
+        raise
     if err:
         _undo(p)
         say(f"{KIT_NAME} didn't move ({err}), and nothing else changed.")

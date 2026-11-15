@@ -177,6 +177,42 @@ class FactoryReset(ResetScratch):
         self.assertIn("the hourly stats read is off now", done.problems[-1])   # it couldn't be: that is a change
         self.assertFalse(done.unchanged)
 
+    def test_one_stopped_while_it_waited_for_a_stats_read_puts_the_hourly_read_back(self):
+        """Ctrl+C in the two minutes a read under way is given. The job was off already, nothing had been reset, and
+        nothing said so."""
+        asked = []
+
+        def stopped(say):
+            asked.append("wait")
+            raise KeyboardInterrupt
+
+        with mock.patch("studio.stats_schedule.status", return_value="on"), \
+                mock.patch("studio.stats_schedule.disable", lambda: asked.append("off") or "Background stats are off."), \
+                mock.patch("studio.stats_schedule.enable", lambda: asked.append("on") or "on again"), \
+                mock.patch.object(reset, "_wait_for_reads", stopped), self.assertRaises(KeyboardInterrupt):
+            self.quiet(reset.factory_reset)
+        self.assertEqual(asked, ["off", "wait", "on"])
+        self.assertTrue((self.root / "dashboard/data/stats.db").is_file())
+        self.assertFalse((self.root / "backups").exists())
+
+    def test_backups_being_a_file_is_an_answer_and_puts_the_hourly_read_back(self):
+        (self.root / "backups").write_text("not a folder", encoding="utf-8")
+        asked, done = self.with_the_hourly_read(move=lambda src, dst, wait=10: REAL_MOVE(src, dst, wait=0))
+        self.assertEqual([what for what, _ in asked], ["off", "wait", "on"])
+        self.assertEqual((len(done.problems), done.unchanged), (1, True))
+        self.assertIn("is in use (", done.problems[0])
+        self.assertTrue((self.root / "dashboard/data/stats.db").is_file())
+
+    def test_from_the_command_line_a_wait_for_a_stats_read_is_said(self):
+        def waits(say):
+            say("  Waiting for a stats read to finish (at most 2 minutes)...")
+
+        out = io.StringIO()
+        with mock.patch.object(reset, "_wait_for_reads", waits), mock.patch.object(reset, "_interactive", lambda: False), \
+                redirect_stdout(out):
+            self.assertEqual(reset.reset_main(["--yes"]), 0)
+        self.assertIn("\nWaiting for a stats read to finish (at most 2 minutes)...\n", out.getvalue())
+
     def test_in_a_terminal_reelforge_opens_again_on_settings_after_one_that_changed_nothing(self):
         reset.request("reset")
         with mock.patch.object(reset, "_move", side_effect=in_use("my-studio")), \

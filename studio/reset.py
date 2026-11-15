@@ -117,10 +117,12 @@ def fmt_size(n: int) -> str:
 def _move(src: Path, dst: Path, wait: float = 10) -> str | None:
     """Rename src to dst (the same drive, so nothing is copied), trying again for a few seconds while something has
     it open. Returns what went wrong, or None."""
-    dst.parent.mkdir(parents=True, exist_ok=True)
     end = time.monotonic() + wait
     while True:
         try:
+            # (Making the folder it goes into is part of the move: "backups" being a file is an answer like any
+            # other, not a traceback that leaves a reset half started.)
+            dst.parent.mkdir(parents=True, exist_ok=True)
             os.rename(src, dst)
             return None
         except OSError as e:
@@ -322,15 +324,22 @@ def factory_reset(say=print) -> Done:
     # starting up as the stats go into the backup would make a new, empty store where they were.
     job_was_on, unchecked = False, ""
     try:
-        from . import stats_schedule
+        try:
+            from . import stats_schedule
 
-        if stats_schedule.status() == "on":
-            job_was_on = True
-            say("  " + stats_schedule.disable())
-    except Exception as e:  # the scheduler isn't there: nothing to turn off
-        unchecked = f"The hourly stats read couldn't be checked ({e})."
-    _wait_for_reads(say)
-    done.problems, done.unchanged = _move_all([(p, dest / p.relative_to(ROOT)) for p, _ in items], dest)
+            if stats_schedule.status() == "on":
+                job_was_on = True
+                say("  " + stats_schedule.disable())
+        except Exception as e:  # the scheduler isn't there: nothing to turn off
+            unchecked = f"The hourly stats read couldn't be checked ({e})."
+        _wait_for_reads(say)
+        done.problems, done.unchanged = _move_all([(p, dest / p.relative_to(ROOT)) for p, _ in items], dest)
+    except BaseException:
+        # Stopped in between (Ctrl+C while it waited for a stats read to finish, or a fault of its own): the
+        # reset didn't happen, so the hourly read is not left off with nothing said.
+        if job_was_on:
+            _stats_on_again()
+        raise
     if done.problems:
         try:
             BACKUPS.rmdir()   # when this made it for the backup, and it's empty again
@@ -829,7 +838,8 @@ def reset_main(argv: list[str]) -> int:
         if not _ask(confirm_word()):
             print("Nothing was changed.")
             return 1
-    done = factory_reset(say=lambda line: None)   # the list above says what moves
+    # The list above says what moves. A wait for a stats read to finish is said: it can take two minutes.
+    done = factory_reset(say=lambda line: print(line.strip()) if "Waiting for a stats read" in line else None)
     _report(done, "The factory reset")
     if done.problems:
         return 1
