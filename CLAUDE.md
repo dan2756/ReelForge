@@ -45,5 +45,9 @@ their answers (their channel, format, platforms, style, caption rules and qualit
 ## Always
 
 - Never post, upload or send anything. Finished videos go to ReelForge's Publish tab, and they post by hand.
+- That covers posting to YouTube through its API (`docs/YOUTUBE-API.md`) too: connecting and posting are theirs
+  to press in ReelForge's window. Never open Google's consent page for them, drive the window's back end
+  (`python -m studio.bridge`) to connect or post, or call `post_with_api`, `youtube_api.connect`,
+  `youtube_api.upload` or `youtube_api_tab.run`.
 - Use your strongest model at high effort for video work.
 - Read `README.md` for what the kit does, and `docs/` for the pipeline, the quality bar and the sound rules.

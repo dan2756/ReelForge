@@ -95,6 +95,26 @@ class FactoryReset(ResetScratch):
         self.assertFalse(store.exists())
         self.assertEqual(extension_api.read_store(), {})  # brand-new: no browser is connected, until one connects again
 
+    def test_each_channels_connection_to_youtubes_api_goes_to_the_backup_too(self):
+        from dashboard import db
+        from dashboard.platforms import youtube_api
+
+        with mock.patch.object(db, "_path", None):  # no stats open: the profile says whose file it is
+            first = youtube_api.store_path()
+            youtube_api.set_defaults("unlisted")
+            profiles.use(self.second)
+            second = youtube_api.store_path()
+            youtube_api.set_defaults("public")
+            profiles.use(profiles.main())
+            self.assertEqual((first, second), (self.root / "dashboard/data/youtube_api.json",
+                                               self.root / "profiles/cool-epic-facts/dashboard/data/youtube_api.json"))
+            done = self.quiet(reset.factory_reset)
+            for rel, privacy in (("dashboard/data/youtube_api.json", "unlisted"),
+                                 ("profiles/cool-epic-facts/dashboard/data/youtube_api.json", "public")):
+                self.assertEqual(json.loads((done.where / rel).read_text(encoding="utf-8")), {"privacy": privacy})
+            self.assertFalse(first.exists() or second.exists())
+            self.assertEqual(youtube_api.status()["state"], "off")  # brand-new: nothing is connected
+
     def test_a_second_reset_leaves_the_bootstrap_notes_where_they_are(self):
         self.quiet(reset.factory_reset)
         items = [p.name for p, _ in reset.reset_items()]

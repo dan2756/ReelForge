@@ -210,6 +210,17 @@ class AtOnce(MoveScratch):
         self.assertEqual(extension_api.read_store(), before)  # the same ReelForge to the extension, at its new place
         self.assertEqual(extension_api.folder(), self.home / "extension")  # (the folder to load again in the browser)
 
+    def test_the_connection_to_youtubes_api_goes_along(self):
+        from dashboard import db
+        from dashboard.platforms import youtube_api
+
+        with mock.patch.object(db, "_path", None):  # no stats open: the folder says where the file is
+            youtube_api.set_defaults("unlisted")
+            self.assertEqual(youtube_api.store_path(), self.root / "dashboard" / "data" / "youtube_api.json")
+            self.go()
+            self.assertEqual(youtube_api.store_path(), self.home / "dashboard" / "data" / "youtube_api.json")
+            self.assertEqual(youtube_api.status()["privacy"], "unlisted")
+
     def test_from_the_window_reelforge_opens_again_from_the_new_place(self):
         self.write("bin/reelforge", "#!/bin/sh\n")
         code, moved, execv = self.go(reopen=True)
