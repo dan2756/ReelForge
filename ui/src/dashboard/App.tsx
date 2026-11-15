@@ -41,7 +41,7 @@ export function DashboardApp({ bridge, init, quit, nav }: { bridge: Bridge; init
       bridge.on("toast", (t) => toasts.add(t)),
       bridge.on("tab", (d) => state.set({ tab: d.tab })),
       bridge.on("pick", (d) => state.pick(d.id)),
-      bridge.on("focus", (d) => setTimeout(() => focus.focus(d.id), 50)),
+      bridge.on("focus", (d) => setTimeout(() => focus.show(d.id), 50)),
       bridge.on("exit", (d) => quit(d.code ?? 0, d.result ?? undefined)), // result: {restart: true} from Restart
       // A picked video's caption and hashtags, for the Publish form (whichever tab is open when it's picked).
       bridge.on("form", (d) => state.set({ caption: d.caption ?? "", tags: d.tags ?? "" })),

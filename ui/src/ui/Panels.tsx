@@ -2,8 +2,8 @@
 // the corner (they slide in and fade out), and a little Markdown (release notes and the review in first-time setup).
 
 import { TextAttributes, type Renderable, type ScrollBoxRenderable } from "@opentui/core"
-import { forwardRef, useEffect, useState, useSyncExternalStore, type ReactNode } from "react"
-import { FocusScope, useTheme } from "../lib/focus"
+import { forwardRef, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
+import { FocusScope, ScopeContext, useFocusManager, useTheme } from "../lib/focus"
 import { parseStyle, type Segs } from "../lib/styled"
 import { mix, PICKED } from "../theme"
 import { useProgress, useTween } from "./Motion"
@@ -439,7 +439,8 @@ export function useTick(on: boolean, ms = 120): number {
   return tick
 }
 
-/** A scrolling area (the mouse wheel scrolls it), with a thin scrollbar in the window's colours. */
+/** A scrolling area, with a thin scrollbar in the window's colours: the mouse wheel scrolls it, Tab brings the control
+ * it lands on into view, and Page Up and Page Down scroll it from the keyboard (lib/focus.tsx). */
 export const Scroll = forwardRef<
   ScrollBoxRenderable,
   {
@@ -453,10 +454,18 @@ export const Scroll = forwardRef<
   }
 >(function Scroll(p, ref) {
   const theme = useTheme()
+  const fm = useFocusManager()
+  const scope = useContext(ScopeContext)
+  const own = useRef<ScrollBoxRenderable | null>(null)
+  useEffect(() => (own.current ? fm.addScroll(own.current, scope) : undefined), [fm, scope])
   const bar = { trackOptions: { foregroundColor: mix(theme.bg, theme.muted, 0.35), backgroundColor: mix(theme.bg, theme.surface, 0.5) } }
   return (
     <scrollbox
-      ref={ref}
+      ref={(node: ScrollBoxRenderable | null) => {
+        own.current = node
+        if (typeof ref === "function") ref(node)
+        else if (ref) ref.current = node
+      }}
       flexGrow={p.flexGrow}
       flexShrink={p.flexShrink ?? 1}
       height={p.height}

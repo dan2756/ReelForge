@@ -114,7 +114,10 @@ export function Table(props: TableProps) {
     const key = rows[i]?.key ?? null
     if (key !== null) props.onSelect?.(key)
   }
+  // A table with nothing to pick, or nothing in it, is no stop for Tab: the keyboard would sit on it and do nothing.
+  const idle = !rows.length || (!props.onSelect && !props.onActivate)
   const { ref, focused, focus } = useFocus(props.id, {
+    disabled: idle,
     onKey: (key) => {
       if (isEnter(key) && index >= 0 && props.selected) {
         props.onActivate?.(props.selected)
@@ -126,6 +129,10 @@ export function Table(props: TableProps) {
       return true
     },
   })
+  // The keyboard arrives (Tab) on a table with no row highlighted yet: its first row is, so it shows where it is.
+  useEffect(() => {
+    if (focused && index < 0) select(rows.findIndex((r) => r.key !== null))
+  }, [focused])
   // keep the highlighted row in view (once the table knows its height: before that every row but the first looks
   // out of view, and a table drawn again would scroll its highlighted row up to the top)
   const view = useRef({ offset, shown })
@@ -167,7 +174,7 @@ export function Table(props: TableProps) {
       onSizeChange={function (this: Renderable) {
         setTableWidth(this.width)
       }}
-      onMouseDown={() => focus()}
+      onMouseDown={() => !idle && focus()}
       onMouseScroll={(e) => {
         const d = e.scroll?.direction === "up" ? -3 : e.scroll?.direction === "down" ? 3 : 0
         setOffset((o) => Math.min(Math.max(o + d, 0), Math.max(rows.length - shown, 0)))
@@ -264,6 +271,7 @@ export function OptionList(props: OptionListProps) {
     if (it && !it.disabled) props.onSelect?.(it.id)
   }
   const { ref, focused, focus } = useFocus(props.id, {
+    disabled: !items.length, // (an empty list is no stop for Tab)
     onKey: (key) => {
       if (isEnter(key) && props.selected) {
         props.onActivate?.(props.selected)

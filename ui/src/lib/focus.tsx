@@ -25,6 +25,8 @@ export class FocusManager {
   scopes: string[] = ["app"]
   /** In each scope, what last had the keyboard there: a dialog that closes hands it back. */
   private last = new Map<string, string>()
+  /** The scrolling areas on screen, each with its scope: Page Up and Page Down scroll one. */
+  private scrolls = new Map<ScrollBoxRenderable, string>()
 
   subscribe = (fn: () => void) => {
     this.listeners.add(fn)
@@ -60,6 +62,19 @@ export class FocusManager {
 
   blur() {
     this.focus(null)
+  }
+
+  /** Give a control the keyboard and bring it into view (the Python side asks for one by name: Log in, after a
+   * clicked notification, in a panel that may be scrolled away). */
+  show(id: string) {
+    this.focus(id)
+    const node = this.items.get(id)?.node()
+    if (node) reveal(node)
+  }
+
+  addScroll(node: ScrollBoxRenderable, scope: string): () => void {
+    this.scrolls.set(node, scope)
+    return () => void this.scrolls.delete(node)
   }
 
   get current(): Focusable | undefined {
@@ -122,14 +137,34 @@ export class FocusManager {
       return true
     }
     const f = this.current
-    if (f && f.scope !== this.scope) return false
-    return Boolean(f?.onKey?.(key))
+    if (f && f.scope === this.scope && f.onKey?.(key)) return true
+    return this.page(key)
+  }
+
+  /** Page Up and Page Down, when what has the keyboard has no use for them: scroll the area it sits in, or else the
+   * biggest one on screen (the tab, or the open dialog's), a screenful less a row. Without this a tab or a dialog
+   * longer than the window could only be read with the mouse wheel. Not while a text field has the keyboard. */
+  private page(key: KeyEvent): boolean {
+    const by = key.name === "pagedown" ? 1 : key.name === "pageup" ? -1 : 0
+    if (!by || this.typing) return false
+    const here = [...this.scrolls].filter(([n, scope]) => scope === this.scope && isShown(n) && n.scrollHeight > n.viewport.height).map(([n]) => n)
+    const node = this.current?.scope === this.scope ? this.current.node() : null
+    const area = here.find((n) => node && inside(node, n)) ?? here.sort((a, b) => b.viewport.width * b.viewport.height - a.viewport.width * a.viewport.height)[0]
+    if (!area) return false
+    area.scrollBy({ x: 0, y: by * Math.max(area.viewport.height - 1, 1) })
+    key.preventDefault()
+    return true
   }
 }
 
-/** Scroll every scrolling area a control sits in, up or down, until it shows: Tab reaches the ones scrolled out of
- * view too, and Enter would press a button nobody can see. */
-function reveal(n: Renderable) {
+function inside(n: Renderable, area: Renderable): boolean {
+  for (let p = n.parent as Renderable | null; p; p = p.parent as Renderable | null) if (p === area) return true
+  return false
+}
+
+/** Scroll every scrolling area a control (or a row of one) sits in, up or down, until it shows: Tab reaches the ones
+ * scrolled out of view too, and Enter would press a button nobody can see. */
+export function reveal(n: Renderable) {
   for (let p = n.parent as Renderable | null; p; p = p.parent as Renderable | null) {
     if (!(p instanceof ScrollBoxRenderable)) continue
     const top = p.viewport.y

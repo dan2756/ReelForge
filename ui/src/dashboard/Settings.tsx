@@ -10,7 +10,7 @@
 import { TextAttributes, type KeyEvent, type Renderable } from "@opentui/core"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useView } from "../bridge"
-import { useFocus } from "../lib/focus"
+import { reveal, useFocus } from "../lib/focus"
 import { lines, type Segs } from "../lib/styled"
 import { DASH, mix } from "../theme"
 import { Button } from "../ui/Button"
@@ -171,12 +171,19 @@ function Faq({ items, grow }: { items: FaqItem[]; grow: boolean }) {
   const [cursor, setCursor] = useState(0)
   const [hover, setHover] = useState<number | null>(null)
   const toggle = (i: number) => setOpen((o) => (o === i ? null : i))
+  const rows = useRef(new Map<number, Renderable>())
+  /** Move to a question with the arrows, scrolling the tab to it: the list is longer than a short window. */
+  const move = (to: number) => {
+    setCursor(to)
+    const row = rows.current.get(to)
+    if (row) reveal(row)
+  }
   const { ref, focused, focus } = useFocus("settings-faq", {
     disabled: !items.length,
     onKey: (key: KeyEvent) => {
       const n = items.length
-      if (key.name === "up") setCursor((c) => (c - 1 + n) % n)
-      else if (key.name === "down") setCursor((c) => (c + 1) % n)
+      if (key.name === "up") move((cursor - 1 + n) % n)
+      else if (key.name === "down") move((cursor + 1) % n)
       else if (key.name === "return" || key.name === "enter" || key.name === "space") toggle(cursor)
       else return false
       key.preventDefault()
@@ -192,6 +199,7 @@ function Faq({ items, grow }: { items: FaqItem[]; grow: boolean }) {
           return (
             <box key={item.q} flexDirection="column" flexShrink={0}>
               <box
+                ref={(n: Renderable | null) => void (n ? rows.current.set(i, n) : rows.current.delete(i))}
                 flexDirection="row"
                 flexShrink={0}
                 backgroundColor={here ? DASH.cursor : hover === i ? DASH.raised : undefined}
