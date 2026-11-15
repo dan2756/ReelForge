@@ -459,8 +459,12 @@ def lint(ep_dir):
               else f"{len(cue_sounds(cues))} sounds, all in the manifest")
 
     problems = config.caption_problems(spec)
-    R.add("caption rules (from episode.json)", "FAIL" if problems else "PASS",
-          "; ".join(problems) or "the title and hashtags fit the channel's rules")
+    # A demo is built under whatever rules the channel has (doctor --render-test builds the duck), and it can't
+    # ship: its hashtags breaking those rules is no reason to stop a build. The caption step still stops on them.
+    demo = bool(spec.get("demo"))
+    R.add("caption rules (from episode.json)", "PASS" if not problems else ("WARN" if demo else "FAIL"),
+          "; ".join(problems) + (" (a demo: only its caption step stops on this)" if problems and demo else "")
+          or "the title and hashtags fit the channel's rules")
     return R
 
 

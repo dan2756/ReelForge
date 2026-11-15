@@ -124,6 +124,26 @@ class Lint(Episode):
         self.assertIn("6 hashtags in episode.json, the channel's maximum is 5", detail)
         self.assertIn("put hashtags in episode.json 'hashtags', not in the title", detail)
 
+    def test_a_demo_is_built_under_any_caption_rules(self):
+        """`doctor --render-test` builds the duck demo under the channel's own rules, and its five hashtags break
+        most of them: fewer hashtags, none at all, another first tag on TikTok."""
+        demo = qa.config.ROOT / "examples" / "demo_doubling_duck" / "episode.json"
+        self.spec = json.loads(demo.read_text(encoding="utf-8"))
+        for most, first in ((3, "fyp"), (0, "fyp"), (5, "foryou")):
+            with self.subTest(max_hashtags=most, first=first), \
+                    mock.patch.multiple(qa.config, MAX_HASHTAGS=most, TIKTOK_FIRST_TAG=first, PLATFORMS=["tiktok"]):
+                report, got = self.lint(series=False)
+                self.assertTrue(report.passed, report.checks)
+                status, detail = got["caption rules (from episode.json)"]
+                self.assertEqual(status, "WARN")
+                self.assertIn("(a demo: only its caption step stops on this)", detail)
+        del self.spec["demo"]                           # the same hashtags in an episode that can ship
+        with mock.patch.multiple(qa.config, MAX_HASHTAGS=3, TIKTOK_FIRST_TAG="fyp", PLATFORMS=["tiktok"]):
+            report, got = self.lint(series=False)
+        self.assertFalse(report.passed)
+        self.assertEqual(got["caption rules (from episode.json)"],
+                         ("FAIL", "5 hashtags in episode.json, the channel's maximum is 3"))
+
     def test_before_anything_is_built_the_spec_is_still_checked(self):
         report, got = self.lint(series=False)
         self.assertTrue(report.passed, report.checks)
