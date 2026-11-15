@@ -1581,7 +1581,7 @@ class Dashboard(StatsTab, SettingsTab, Service):
     def form_changed(self, caption: str, tags: str) -> None:
         """Show exactly what each platform will get, and the caption/hashtag limits."""
         item = self.form_item(caption, tags)
-        caption_len = len(item.text_for("x"))
+        caption_len = len(videos.strip_hashtags(item.caption))  # the caption alone, whatever X gets after it
         n = len(videos.tag_list(item.tags))
         label = Text("Hashtags  ")
         label.append(f"{n}/{videos.MAX_TAGS}", BAD if n > videos.MAX_TAGS else MUTED)

@@ -1,8 +1,11 @@
-"""Captions copied for a post (dashboard.videos): hashtags move to the tag list."""
+"""Captions copied for a post (dashboard.videos): hashtags move to the tag list, and never into a title."""
 
 import unittest
+from pathlib import Path
+from unittest import mock
 
 from dashboard import videos
+from dashboard.platforms import PublishItem
 
 
 class StripHashtags(unittest.TestCase):
@@ -24,3 +27,27 @@ class StripHashtags(unittest.TestCase):
         self.assertNotIn("fyp#", text)
         self.assertIn("#fyp", text)
         self.assertIn("#whatif", text)
+
+
+class Title(unittest.TestCase):
+    """A channel that uses hashtags on X ("Use hashtags on X?" in first-time setup): the X post gets them, a title
+    doesn't."""
+
+    CAPTION, TAGS = "What if gravity doubled every second?", "#whatif #physics #gravity"
+
+    def test_the_title_has_no_hashtags_when_x_gets_them(self):
+        item = PublishItem(Path("ep01.mp4"), self.CAPTION, self.TAGS)
+        with mock.patch.object(videos, "X_TAGS", True):
+            self.assertEqual(item.text_for("x"), f"{self.CAPTION} {self.TAGS}")
+            self.assertEqual(item.title, self.CAPTION)
+            self.assertEqual(item.youtube_title, f"{self.CAPTION} #shorts")
+        self.assertEqual(item.title, self.CAPTION)  # and as it always was without them
+
+    def test_a_long_caption_is_cut_in_the_caption_not_in_the_hashtags(self):
+        caption = "What if every drop of rain in a storm doubled in size every ten seconds on the way down to you?"
+        with mock.patch.object(videos, "X_TAGS", True):
+            item = PublishItem(Path("ep01.mp4"), caption, self.TAGS)
+            self.assertEqual(item.title, caption[:100])
+            self.assertEqual(item.youtube_title, f"{caption[:92].rstrip()} #shorts")
+            self.assertEqual(item.youtube_title.count("#"), 1)
+

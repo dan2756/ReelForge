@@ -51,8 +51,11 @@ class PublishItem:
 
     @property
     def title(self) -> str:
-        """The caption without hashtags: YouTube's title and the episode's name in ReelForge."""
-        return self.text_for("x")[:100]
+        """The caption without hashtags: YouTube's title and the episode's name in ReelForge. Never the X post: that
+        one carries the hashtags when the channel uses them on X."""
+        from ..videos import strip_hashtags
+
+        return strip_hashtags(self.caption)[:100]
 
     @property
     def youtube_title(self) -> str:
