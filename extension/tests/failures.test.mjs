@@ -134,6 +134,7 @@ export const tests = {
     await until("the job to stop", () => job.state === "failed")
     equal(job.error_code, "wrong_account", "error code")
     const tab = await t.browser.tab("x.com")
-    equal([await tab.evaluate(() => fixture.files.length), (await note(tab)).line], [0, "Stopped"], "nothing attached, and the note")
+    await until("the note to say so", async () => (await note(tab)).line === "Stopped")
+    equal(await tab.evaluate(() => fixture.files.length), 0, "files given to the page")
   },
 }

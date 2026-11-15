@@ -79,7 +79,7 @@ It is never offered for X. X's rules name scripting its website and suspend acco
 
 After the press the extension waits for the platform's own confirmation. If the page does not react to the press,
 it says so and leaves the button to you. If the page reacts but never confirms, the post is marked "not sure" and
-you are asked. Nothing is ever pressed, attached or tried a second time.
+ReelForge asks you whether it posted. Nothing is ever pressed, attached or tried a second time.
 
 ## What it may do, and why
 
@@ -115,7 +115,7 @@ open, and what was already attached or filled in stays there.
 | `timeout` | The page stopped answering. |
 | `app_unreachable` | ReelForge was closed before the video was handed over. |
 | `press_rejected` | Press Post for me pressed, and the page did not react. |
-| `unknown_outcome` | Post was pressed and no confirmation was seen. Check your profile, then answer "It posted" or "It did not post". |
+| `unknown_outcome` | Post was pressed and no confirmation was seen. Check your profile, then tell ReelForge whether it posted, on its Publish tab. Nothing is posted again until you have. |
 | `extension_outdated` | ReelForge is newer than this copy of the extension. Press Reload on its card. |
 
 A stopped post has **Finish by hand** in the extension's window: the text with a Copy button, and the platform's

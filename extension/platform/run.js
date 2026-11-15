@@ -53,8 +53,8 @@ void (async () => {
 
   async function posted() {
     rf.unoutline()
+    rf.say("Posted", "good")
     await rf.report({ state: "posted", step: "confirm", ...postInfo() })
-    rf.say("Posted", "good", "ReelForge has noted it.")
   }
 
   // The person's own press of the final button (or Ctrl+Enter, which posts on X). If the tab then closes before
@@ -226,11 +226,11 @@ void (async () => {
     const code = known ? error.code : "hook_not_found"
     const message = known ? error.message : `${P}'s page did something ReelForge did not expect. You can finish by hand in this tab.`
     rf.unoutline()
+    rf.say(code === "unknown_outcome" ? "Not sure it posted" : "Stopped", "bad", message)
     await rf.report({
       state: error.state || "failed", step: error.step || rf.stepNow, error_code: code, error_message: message,
       detail: known ? error.detail : `script error: ${String(error?.message || error).slice(0, 120)}`,
       ...(code === "not_signed_in" ? { account: { signed_in: false, handle: null } } : {}),
     })
-    rf.say(code === "unknown_outcome" ? "Not sure it posted" : "Stopped", "bad", message)
   }
 })()

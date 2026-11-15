@@ -43,7 +43,8 @@ export function advice(code, platform) {
     tab_closed: "Post again when you are ready.",
     press_rejected: `Check the tab. If it has not posted, press ${PLATFORMS[platform]?.button || "Post"} yourself.`,
     changed: "Check the video in ReelForge, then post again.",
-    unknown_outcome: `Check your ${p} profile before you post again, then say here whether it posted.`,
+    // Only the person can settle this one, and ReelForge takes that answer in its own window.
+    unknown_outcome: `Check your ${p} profile. Then tell ReelForge whether it posted, on its Publish tab.`,
   }[code] || "You can finish by hand in the tab."
 }
 

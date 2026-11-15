@@ -155,11 +155,9 @@ export class FakeApp {
   move(job, body) {
     const state = body.state
     if (!FROM_EXTENSION.includes(state)) return false
-    if (ENDED.includes(job.state)) return false
-    if (job.state === "unknown") {
-      // Only the person resolves an unknown: "It's posted" or "It didn't post".
-      if (state !== "posted" && state !== "cancelled") return false
-    } else if (state === "unknown") {
+    // An unknown job is settled only by the person, in ReelForge itself, or by a stats read. Never from here.
+    if (ENDED.includes(job.state) || job.state === "unknown") return false
+    if (state === "unknown") {
       if (job.state !== "ready" && job.state !== "posting") return false
     } else if (state !== "failed" && state !== "cancelled" && ORDER.indexOf(state) < ORDER.indexOf(job.state)) {
       return false
@@ -306,8 +304,12 @@ export class FakeApp {
       const video = this.videos.find(v => v.id === body.video)
       if (!video) return fail(404, "no_video", "That video is not in the Publish list.")
       if (!video.postable) return fail(409, "not_postable", video.why || "This video cannot be posted.")
-      const made = this.createBatch(video, body.platforms || [], { press: body.press === true })
-      return send(201, { batch: made.batch, jobs: made.jobs.map(job => this.view(job)), blocked: made.blocked })
+      const ticked = (body.platforms || []).filter(platform => this.handles[platform])
+      if (!ticked.length) return fail(400, "no_platform", "Pick a platform that is connected in ReelForge.")
+      const made = this.createBatch(video, ticked, { press: body.press === true })
+      // With every platform blocked there is no batch to speak of.
+      const none = made.jobs.length === 0
+      return send(none ? 200 : 201, { batch: none ? null : made.batch, jobs: made.jobs.map(job => this.view(job)), blocked: made.blocked })
     }
     const batch = /^\/v1\/batch\/(pb_[0-9a-f]{16})$/.exec(path)
     if (request.method === "GET" && batch) {

@@ -650,24 +650,6 @@ export async function cancel(id) {
   return { ok: true }
 }
 
-// "It posted" or "It did not post" for a job nobody could confirm. The app may want this answered in its own
-// window instead, and then says so.
-export async function resolve(id, posted) {
-  const job = await getJob(id)
-  if (!job || job.state !== "unknown") return { ok: false }
-  const state = posted ? "posted" : "cancelled"
-  try {
-    const res = await withApp(job, async found => app.api(found, `/v1/jobs/${id}/event`, {
-      method: "POST", body: { install: await app.install(), state, detail: "answered in the extension" },
-    }))
-    if (!res.ok) return { ok: false, message: "Answer this one in ReelForge, on the Publish tab." }
-  } catch {
-    return { ok: false, message: "Open ReelForge first." }
-  }
-  await patch(id, { state, error_code: null, error_message: null, port: job.port })
-  return { ok: true }
-}
-
 export async function dismiss(id) {
   const job = await getJob(id)
   if (job && isFinal(job.state)) await session.remove(key(id))

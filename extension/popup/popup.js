@@ -141,11 +141,7 @@ function jobCard(job) {
     body = h("div", { class: "notice bad" },
       h("p", { text: job.error_message || `ReelForge could not tell whether this reached ${p}.` }),
       h("p", { class: "small soft", text: advice("unknown_outcome", job.platform) }))
-    const answer = posted => async () => {
-      const done = await ask("ui.resolve", { job: job.id, posted })
-      if (!done?.ok) flash = done?.message || "ReelForge did not take that answer."
-    }
-    actions = [button("It posted", `yes:${job.id}`, answer(true)), button("It did not post", `nope:${job.id}`, answer(false)), showTab]
+    actions = [showTab, button("Dismiss", `dismiss:${job.id}`, () => ask("ui.dismiss", { job: job.id }))]
   } else if (isFinal(job.state)) {
     body = [
       h("p", { text: stateLine(job) }),
@@ -251,7 +247,7 @@ function choose() {
         }
         const pending = { port: answer.port, batch: answer.batch, title: video.title || video.name }
         // Kept until it is confirmed or cancelled: a popup closes whenever the person clicks elsewhere.
-        await session.set({ pending })
+        if (answer.jobs.some(job => job.via === "extension")) await session.set({ pending })
         view = { name: "confirm", ...pending, jobs: answer.jobs, blocked: answer.blocked }
       }, "primary", !picked.length),
       button("Back", "back", async () => { view = { name: "home" } }),

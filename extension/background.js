@@ -77,7 +77,6 @@ const routes = {
     "ui.override": message => jobs.override(String(message.job), message.go === true),
     "ui.focus": message => jobs.focus(String(message.job)),
     "ui.cancel": message => jobs.cancel(String(message.job)),
-    "ui.resolve": message => jobs.resolve(String(message.job), message.posted === true),
     "ui.dismiss": message => jobs.dismiss(String(message.job)),
     "ui.press": message => panel.setPress(String(message.platform), message.on),
     "ui.disconnect": async () => { const done = await panel.disconnect(); await jobs.settle(); return done },

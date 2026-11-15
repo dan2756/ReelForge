@@ -157,6 +157,24 @@ export const tests = {
     equal([...app.jobs.values()].map(job => job.platform), ["tiktok", "x"], "jobs")
   },
 
+  async "when ReelForge blocks every platform that was chosen, the popup says why and opens nothing"({ app, browser, video }) {
+    const film = video()
+    equal(await browser.pair(app), "ok", "pairing")
+    const popup = await browser.popup()
+    await popup.locator(`[data-video="${film.id}"]`).getByRole("button", { name: "Post" }).click()
+    await until("the choose screen", () => popup.locator("[data-screen=choose]").count())
+    // Between the popup's last look and the press of Continue, the stats reader found the video on every platform.
+    for (const platform of ["tiktok", "youtube", "instagram", "x"]) app.posted.set(`${film.id}:${platform}`, `https://example.com/${platform}`)
+    await popup.getByRole("button", { name: "Continue" }).click()
+    await until("the blocked platforms", async () => (await popup.locator("[data-blocked]").count()) === 4)
+    ok((await text(popup.locator("[data-blocked=tiktok]"))).includes("TikTok: Already posted on TikTok."), "why TikTok is blocked")
+    ok((await text(popup.locator("[data-screen=confirm]"))).includes("Nothing new to post."), "nothing to post")
+    equal(await popup.getByRole("button", { name: /Open the upload/ }).count(), 0, "buttons that would open a page")
+    equal((await browser.storage()).pending, undefined, "nothing is kept to come back to")
+    await popup.getByRole("button", { name: "Back" }).click()
+    await until("the list again", () => popup.locator("[data-video]").count())
+  },
+
   async "a stopped job says what happened and what to do, and offers the text to finish by hand"({ app, site, browser, video }) {
     site.mode.x = "signed_out"
     const film = video()
@@ -184,7 +202,7 @@ export const tests = {
     await until("the row to go", async () => (await popup.locator("[data-job]").count()) === 0)
   },
 
-  async "a post nobody could confirm asks the person, and takes the answer to the app"({ app, site, browser, video }) {
+  async "a post nobody could confirm says so, and where to answer"({ app, site, browser, video }) {
     site.mode.tiktok = "mute"
     const { job, tab } = await toReady({ app, browser }, "tiktok", video())
     await tab.locator("[data-e2e=post_video_button]").click()
@@ -193,10 +211,11 @@ export const tests = {
     await until("unknown", () => job.state === "unknown")
     const popup = await browser.popup()
     const row = popup.locator("[data-job]")
-    await until("the question", async () => (await row.count()) && (await text(row)).includes("Not sure") === false && (await text(row)).includes("no confirmation was seen"))
-    await row.getByRole("button", { name: "It posted" }).click()
-    await until(() => `the app to have it as posted (it is ${job.state})`, () => job.state === "posted")
-    await until("the row to follow", async () => (await row.getAttribute("data-state")) === "posted")
+    await until("the row", () => row.count())
+    const words = await text(row)
+    ok(words.includes("no confirmation was seen"), `what happened (${words})`)
+    ok(words.includes("Check your TikTok profile. Then tell ReelForge whether it posted, on its Publish tab."), `what to do (${words})`)
+    equal(await row.locator(".chip").textContent(), "not sure", "the state chip")
   },
 
   async "two channels open: the popup offers both and follows the choice"({ app, browser, video }) {
