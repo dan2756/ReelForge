@@ -17,7 +17,8 @@ The first half of this file is plain functions on the ledger (run, settle_orphan
 a window. The second is a mixin of the window's service (dashboard/service.py), listed before PostingTab so that
 its mind_the_jobs runs first. One view, youtube_api (the connection: off, connecting, on or again), and the calls
 behind the buttons: youtube_api_info, youtube_api_connect, youtube_api_disconnect, youtube_api_defaults and
-post_with_api. Only the last one, and Retry on a failed row, start an upload, and only the window calls them.
+post_with_api. PostingTab asks this half about its rows (api_rows) and their buttons (api_action). An upload starts
+only from post_with_api and from a row's post_api and Retry buttons, and only your press in the window calls those.
 """
 
 from __future__ import annotations
