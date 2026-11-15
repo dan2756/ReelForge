@@ -69,7 +69,7 @@ class WindowTest(unittest.TestCase):
                     "completed_dir": str(root / "none"), **{key: {} for key in PLATFORM_KEYS}}
         db.init(root / "demo.db")
         demo.seed()
-        for state in (sync._attempted, sync.last_errors):
+        for state in (sync._attempted, sync.last_errors, sync.last_warnings):
             state.clear()
             self.addCleanup(state.clear)
 
@@ -277,6 +277,20 @@ class WindowTest(unittest.TestCase):
             self.assertNotIn("tiktok", self.buttons(w))
             self.assertEqual(self.panel(w, "tiktok")["state"], "off")
             self.assertIn("tiktok", db.stored_platforms())
+
+    def test_a_read_that_got_only_part_shows_on_its_panel(self):
+        w = self.open(demo.platforms())
+        said = "Only TikTok's totals were read this time, not its videos. TikTok's video list took too long to answer."
+        sync.last_warnings["tiktok"] = (db.now_iso(), said)
+        w.call("update_accounts")
+        self.assertIn(said, plain(self.panel(w, "tiktok")["body"]))
+        self.assertNotIn("Only TikTok's", plain(self.panel(w, "youtube")["body"]))
+        self.assertNotIn("TikTok", plain(w.view("header")["line"]))  # it was read: not a failed refresh at the foot
+        sync.last_errors["tiktok"] = (db.now_iso(), "TikTok couldn't be reached (is this computer online?).")
+        w.call("update_accounts")  # a read that failed outright says only that
+        body = plain(self.panel(w, "tiktok")["body"])
+        self.assertIn("last read failed: TikTok couldn't be reached", body)
+        self.assertNotIn(said, body)
 
     def test_another_window_connecting_shows_here(self):
         """Every ReelForge window follows a platform connected (or disconnected) in another one."""

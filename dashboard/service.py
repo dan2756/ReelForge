@@ -1837,9 +1837,12 @@ class Dashboard(StatsTab, SettingsTab, Service):
                     if rows:
                         since = db.parse(rows[0]["ts"]).astimezone().strftime("%b %d").replace(" 0", " ")
                         body.append(f" · history since {since}", MUTED)
+            warning = sync.last_warnings.get(p.key)
             if error:
                 body.append(f"\n\nlast read failed: {error[1]}" if state == "login" else
                             f"\nlast read failed: {error[1]}", BAD)
+            elif warning:  # read, but not all of it (TikTok's totals without its videos)
+                body.append(f"\n{warning[1]}", TYPICAL)
             note = "Demo data, made up on this PC." if self.demo and not pretend else p.setup_note
             panel.update(
                 status=status.json(), status_short=short.json() if short else None, body=body.json(),

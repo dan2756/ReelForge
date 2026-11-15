@@ -20,7 +20,7 @@ from datetime import datetime
 from studio import browsers
 
 from .. import config
-from .base import Account, PlatformError, Post, first_line
+from .base import Account, PlatformError, Post, detail, first_line
 
 LOGIN_URLS = {"instagram": "https://www.instagram.com/accounts/login/", "x": "https://x.com/i/flow/login"}
 SESSION_COOKIES = {"instagram": ("instagram.com", "sessionid"), "x": ("x.com", "auth_token")}
@@ -182,6 +182,25 @@ def _walk(node):
             yield from _walk(v)
 
 
+def _posts(items, make, name: str) -> tuple[list[Post], str, str]:
+    """A Post from each item (make(item); None for one that isn't a video). An item that isn't made the way the
+    reader expects is left out instead of failing the whole read. Returns the posts, and when any were left out what
+    to tell you and the first one's error, for the log."""
+    posts, odd = [], []
+    for item in items:
+        try:
+            post = make(item)
+        except (KeyError, TypeError, ValueError, AttributeError) as e:
+            odd.append(e)
+            continue
+        if post is not None:
+            posts.append(post)
+    if not odd:
+        return posts, "", ""
+    return posts, (f"{len(odd)} of {name}'s videos {'was' if len(odd) == 1 else 'were'} left out of this read: "
+                   "ReelForge couldn't make sense of what the page said about them."), detail(odd[0])
+
+
 # --- TikTok (no login) -----------------------------------------------------------------------
 
 def tiktok_profile_stats(page_html: str) -> dict | None:
@@ -222,10 +241,9 @@ def tiktok(handle: str) -> tuple[Account, list[Post]]:
         raise PlatformError(f"TikTok didn't load @{handle}'s profile (wrong handle, or a captcha); "
                             "it tries again next refresh.")
 
-    posts = []
-    for it in items.values():
+    def post(it: dict) -> Post:
         s = {**(it.get("stats") or {}), **{k: int(v) for k, v in (it.get("statsV2") or {}).items() if str(v).isdigit()}}
-        posts.append(Post(
+        return Post(
             post_id=str(it["id"]),
             title=first_line(it.get("desc")),
             url=f"https://www.tiktok.com/@{handle}/video/{it['id']}",
@@ -235,9 +253,11 @@ def tiktok(handle: str) -> tuple[Account, list[Post]]:
             comments=int(s.get("commentCount", 0)),
             shares=int(s.get("shareCount", 0)),
             saves=int(s["collectCount"]) if "collectCount" in s else None,
-        ))
+        )
+
+    posts, warning, why = _posts(items.values(), post, "TikTok")
     return Account(handle=f"@{handle}", followers=stats.get("followerCount"), likes=stats.get("heartCount"),
-                   posts=stats.get("videoCount")), posts
+                   posts=stats.get("videoCount"), warning=warning, detail=why), posts
 
 
 # --- Instagram (log in once) -----------------------------------------------------------------
@@ -300,13 +320,13 @@ def parse_instagram(got: dict[str, list], handle: str) -> tuple[Account, list[Po
                 if "pk" in d and "code" in d and "like_count" in d and "media_type" in d}
 
     posts_tab, reels_tab = media("PolarisProfilePostsQuery"), media("PolarisProfileReelsTabContentQuery")
-    posts = []
-    for pk in dict.fromkeys([*reels_tab, *posts_tab]):  # every reel, newest first, without repeats
+
+    def post(pk: str) -> Post | None:
         m = {**posts_tab.get(pk, {}), **{k: v for k, v in reels_tab.get(pk, {}).items() if v is not None}}
         if m.get("media_type") != 2 and m.get("product_type") != "clips":
-            continue  # photos and carousels aren't episodes
+            return None  # photos and carousels aren't episodes
         taken = m.get("taken_at") or ((int(pk) >> 23) + IG_EPOCH_MS) // 1000
-        posts.append(Post(
+        return Post(
             post_id=pk,
             title=first_line((m.get("caption") or {}).get("text")),
             url=f"https://www.instagram.com/reel/{m['code']}/",
@@ -315,8 +335,12 @@ def parse_instagram(got: dict[str, list], handle: str) -> tuple[Account, list[Po
             likes=int(m.get("like_count") or 0),
             comments=int(m.get("comment_count") or 0),
             shares=m.get("reshare_count"),
-        ))
-    return Account(handle=f"@{handle}", followers=user.get("follower_count"), posts=user.get("media_count")), posts
+        )
+
+    # every reel, newest first, without repeats
+    posts, warning, why = _posts(dict.fromkeys([*reels_tab, *posts_tab]), post, "Instagram")
+    return Account(handle=f"@{handle}", followers=user.get("follower_count"), posts=user.get("media_count"),
+                   warning=warning, detail=why), posts
 
 
 # --- X (log in once) -------------------------------------------------------------------------
@@ -382,18 +406,19 @@ def parse_x(got: dict[str, list], handle: str) -> tuple[Account, list[Post]]:
     followers = (user.get("relationship_counts") or {}).get("followers", legacy_user.get("followers_count"))
     user_id = user.get("rest_id")
 
-    posts, seen = [], set()
-    for d in _walk([got.get(t, []) for t in X_TIMELINES]):
+    seen = set()
+
+    def post(d: dict) -> Post | None:
         t = _x_tweet(d)
         if not t or t["id_str"] in seen or (user_id and t.get("user_id_str") != user_id):
-            continue
+            return None
         seen.add(t["id_str"])
         if "retweeted_status_result" in t:
-            continue
+            return None
         media = ((t.get("extended_entities") or {}).get("media") or []) + ((t.get("entities") or {}).get("media") or [])
         if not any(m.get("type") in ("video", "animated_gif") for m in media):
-            continue  # only video posts are episodes
-        posts.append(Post(
+            return None  # only video posts are episodes
+        return Post(
             post_id=t["id_str"],
             title=first_line(t["full_text"]),
             url=f"https://x.com/{handle}/status/{t['id_str']}",
@@ -403,5 +428,8 @@ def parse_x(got: dict[str, list], handle: str) -> tuple[Account, list[Post]]:
             comments=t.get("reply_count", 0),
             shares=t.get("retweet_count", 0) + t.get("quote_count", 0),
             saves=t.get("bookmark_count"),
-        ))
-    return Account(handle=f"@{handle}", followers=followers, posts=legacy_user.get("statuses_count")), posts
+        )
+
+    posts, warning, why = _posts(_walk([got.get(t, []) for t in X_TIMELINES]), post, "X")
+    return Account(handle=f"@{handle}", followers=followers, posts=legacy_user.get("statuses_count"),
+                   warning=warning, detail=why), posts
