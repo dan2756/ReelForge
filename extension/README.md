@@ -37,9 +37,10 @@ you first choose the platforms, then see the exact text and the account for each
 For each platform the extension then:
 
 1. opens one tab on the platform's own upload page (the first one comes to the front, the rest load behind it);
-2. checks this browser is signed in there, and where the page shows the account, that it is the one ReelForge has
-   for the channel. A different account is a question in the extension's window (**Post as @other** or **Stop**),
-   never a silent stop and never a silent go;
+2. checks this browser is signed in there, and where the page shows the account (Instagram and X), that it is the
+   one ReelForge has for the channel. A different account is a question in the extension's window (**Post as
+   @other** or **Stop**), never a silent stop and never a silent go. TikTok's and YouTube's upload pages do not
+   show their account, so there the extension's window and the note on the page tell you to look yourself;
 3. hands the page the video. The bytes come from ReelForge through the extension, and the page gets them only if
    their size and SHA-256 match what you confirmed;
 4. fills in the text, in one go, and reads it back;
@@ -62,7 +63,8 @@ What counts here is whether this browser is signed in.
 
 ## Press Post for me
 
-Off by default, and stored only in the extension, where a program on your computer cannot switch it on.
+Off by default. The switches are stored only in the extension. ReelForge never reads or sets them, and they are
+not kept in its folder.
 
 The platforms' terms restrict automated posting, and nobody can promise an account is safe when a program presses
 the button. Pressing Post yourself is the safer choice.
@@ -73,13 +75,19 @@ If you still want it, it takes all of these:
 - ReelForge has already seen one post to that platform go through with you pressing (until then the switch is
   locked and says why);
 - you switch "stop before posting" off for that one post;
+- you say yes to it for that post, in this browser, with your own click: the extension's own button when you start
+  the post in its window, or **Yes, press Post for me** on the page ReelForge opens when you start it there. The
+  extension listens for that click itself, and a click made by a script does not count. A post page that was only
+  opened presses nothing;
 - ReelForge grants the press, once per post.
 
 It is never offered for X. X's rules name scripting its website and suspend accounts for it.
 
-After the press the extension waits for the platform's own confirmation. If the page does not react to the press,
-it says so and leaves the button to you. If the page reacts but never confirms, the post is marked "not sure" and
-ReelForge asks you whether it posted. Nothing is ever pressed, attached or tried a second time.
+After the press the extension waits for the platform's own confirmation. If the page shows no reaction, it says so
+in its note and tells you to look: press the button yourself if the post has not gone out, and the platform's
+confirmation is how ReelForge hears of it. If no confirmation comes, the post is marked "not sure" and ReelForge
+asks you whether it posted. It is never marked failed after a press, because a failed post is offered again.
+Nothing is ever pressed, attached or tried a second time.
 
 ## What it may do, and why
 
@@ -87,13 +95,19 @@ ReelForge asks you whether it posted. Nothing is ever pressed, attached or tried
 |---|---|
 | `storage` | Its pairing token, your "Press Post for me" switches, and the state of posts in progress. All of it stays in this browser, where only the extension's own pages and worker can read it. Nothing uses the browser's sync storage. |
 | `alarms` | A check every 30 seconds while a post is under way (it picks a post back up after the browser restarts its background worker), and one every 5 minutes otherwise, so ReelForge can say this browser is connected. No alarm at all before the first pairing. |
-| `scripting` | Putting the platform script into a tab, and only into a tab the extension itself opened for a post you started. |
+| `scripting` | Putting the platform script into a tab, and only into a tab the extension itself opened for a post you started, while that tab is on that post's own platform. |
 | `http://127.0.0.1/*` | Talking to ReelForge on this computer (ports 47821 to 47830) and running on its two local pages, `/pair` and `/post/…`. Not `localhost`, and no other local page. |
 | `https://www.tiktok.com/*`, `https://www.youtube.com/*`, `https://studio.youtube.com/*`, `https://www.instagram.com/*`, `https://x.com/*` | The four upload pages. YouTube's upload address redirects into Studio, so it needs both. |
 | `https://reelforge.tools/*` | The website can ask "is the extension installed?" and "is the app reachable and paired?". It gets a version number and three yes-or-no facts. It cannot start anything and never sees a caption, a file name or a channel name. |
 
-It asks for no `tabs`, `cookies`, `debugger`, `webRequest` or all-sites access. It loads no code from anywhere, has
-no analytics and sends nothing to anyone but the platform page you are posting to.
+It asks for no `tabs`, `cookies`, `debugger`, `webRequest` or all-sites access. It loads no code from anywhere and
+has no analytics. It talks to ReelForge on this computer and to the platform page you are posting to, and to
+nobody else. Its token goes only to a port that has just proved to be the ReelForge this browser connected to: a
+program that merely answers on one of ReelForge's ports is told nothing and believed in nothing.
+
+It is loaded from your ReelForge folder, and that is the limit of all of this. A program that can change the files
+in that folder, or that runs as you, can change what the extension does. `docs/EXTENSION.md` says so under "What
+keeps it safe".
 
 On a platform's site it does nothing at all unless a post you started opened that tab. With no post under way, your
 other tabs do not even wake it.
@@ -111,11 +125,11 @@ open, and what was already attached or filled in stays there.
 | `challenge` | A captcha or a verification. Finish it yourself. |
 | `platform_error` | The page showed an error of its own. Its words are passed on. |
 | `changed` | The video file is no longer the one you confirmed. |
-| `tab_closed` | The tab was closed or left before Post was pressed. Nothing was posted. |
+| `tab_closed` | The tab was closed, or left the platform, before Post was pressed. Nothing was posted. |
 | `timeout` | The page stopped answering. |
 | `app_unreachable` | ReelForge was closed before the video was handed over. |
-| `press_rejected` | Press Post for me pressed, and the page did not react. |
-| `unknown_outcome` | Post was pressed and no confirmation was seen. Check your profile, then tell ReelForge whether it posted, on its Publish tab. Nothing is posted again until you have. |
+| `press_rejected` | Press Post for me pressed, and the page showed no reaction and no sign that it posted. The post is "not sure", like the next row, not failed. |
+| `unknown_outcome` | Post was pressed, or may have been, and no confirmation was seen. Also when the platform shows its sign that a post went out and no press was seen, and when the upload form closed before the extension had finished. Check your profile, then tell ReelForge whether it posted, on its Publish tab. Nothing is posted again until you have. |
 | `extension_outdated` | ReelForge is newer than this copy of the extension. Press Reload on its card. |
 
 A stopped post has **Finish by hand** in the extension's window: the text with a Copy button, and the platform's
@@ -140,10 +154,16 @@ anything breaks.
 `signed_in`, `signed_out`, `challenge` and `success` are page-level signs: part of the address, a hook, or both.
 `gone_after_press` names the form whose closing, after the final button was pressed, also counts as posted.
 
-The file is data. The steps live in `platform/*.js`, so editing a hook can only change where the code looks. To fix
-a hook, edit the file and raise `"version"`. ReelForge serves its own copy to the extension, and a newer one is used
-at once, without a Reload. The role and text ways are in English, plus the Chinese labels the sources list for
-Instagram; the attribute and id ways do not depend on language.
+The file is data, and the steps live in `platform/*.js`. Where the code looks decides what it clicks, though, so two
+rules are written in code. A click on the way to the last screen is refused when its element is the platform's
+final button, sits around or inside it, or carries its words (`rf.click` in `platform/engine.js`). And the hooks
+whose element gets clicked, the final button's hook and the `success` signs are always taken from the copy packed
+with the extension (`PACKED_HOOKS` in `shared/consts.js`).
+
+To fix a hook, edit the file and raise `"version"`. ReelForge serves its own copy to the extension, and for every
+other hook a newer one is used at once, without a Reload. A fix to a clicked hook takes a Reload. The role and
+text ways are in English, plus the Chinese labels the sources list for Instagram; the attribute and id ways do not
+depend on language.
 
 Where the hooks come from, by the date of the file they were read in: YouTube Studio from
 [fawazahmed0/youtube-uploader](https://github.com/fawazahmed0/youtube-uploader) (2026-01) and
@@ -180,7 +200,7 @@ node extension/tests/run.mjs press        # only tests with "press" in their nam
 ```
 
 They need Node 22 and Playwright with its own Chromium (branded Chrome and Edge no longer load an extension from
-the command line). ReelForge must be closed while they run: they use its ports. A full run takes four to five
+the command line). ReelForge must be closed while they run: they use its ports. A full run takes about seven
 minutes.
 
 The tests load this folder as an unpacked extension into headless Chromium, with a stand-in for the ReelForge app
@@ -188,10 +208,14 @@ The tests load this folder as an unpacked extension into headless Chromium, with
 (`tests/fixtures/`). The browser is told to resolve the platforms' names to a server on this computer, so the
 extension sees the real addresses while nothing leaves the machine and no account is used.
 
+The last suite (`tests/real.test.mjs`) swaps the stand-in for ReelForge's real server and ledger, started on a
+scratch channel by `tests/real_app.py`. It needs the Python that has ReelForge's packages: the folder's own
+`.venv`, or the one `REELFORGE_PYTHON` names. Without one it is skipped, and the run says so.
+
 **The copies prove the extension's own machinery, not the live sites.** They show that the file really arrives
 (the page computes its size and SHA-256), that the exact text lands in the right boxes, that nothing is pressed
-without the grant, and that each failure is noticed and reported. They cannot show that TikTok's page still has
-the hook it had when someone last wrote it down.
+without your click and the grant, that no step clicks the final button, and that each failure is noticed and
+reported. They cannot show that TikTok's page still has the hook it had when someone last wrote it down.
 
 ## What still has to be checked with real accounts
 
@@ -210,14 +234,16 @@ TikTok has Save draft, and Instagram and X can be stopped before the final butto
    check: no source names a place on their upload pages that shows the handle.
 6. The signs of a post going out: TikTok's move to `/tiktokstudio/content`, YouTube's dialog after Publish,
    Instagram's wording after Share, X's toast. And that the post's id read from YouTube's link and X's toast is the
-   one ReelForge's stats use.
+   one ReelForge's stats use. Also that your own press of each final button is noticed (a real click on the
+   element the hook finds): a sign with no press seen is reported as "not sure", not as posted.
 7. Instagram's flow for a video on your account: the Create menu, the "shared as reels" notice, the two Next
    screens, and whether a professional account differs.
 8. YouTube's "Made for kids" and visibility with and without saved channel defaults, and the altered-content
    question, which this extension never answers.
 9. Whether a tab that loads in the background still uploads at full speed, with four posts started at once.
 10. Press Post for me, on each of the three platforms where it is offered: that a scripted press is accepted at
-    all, and what TikTok asks afterwards. Use a private or draft post.
+    all, how long each page takes to react to it (the extension says "has not reacted" after 8 seconds), and what
+    TikTok asks afterwards. Use a private or draft post.
 11. How often TikTok asks for a verification, or slows uploads, with this way of posting.
 12. Real file sizes. The video is handed over in 4 MB pieces and checked against its SHA-256. Measured here with
     stand-in files: 64 MB in about 3 seconds, 150 MB in about 7.

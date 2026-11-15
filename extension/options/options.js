@@ -1,7 +1,8 @@
 // Settings: press Post for me (per platform, off unless switched on here) and Disconnect.
 //
-// The switches live in this browser only (chrome.storage.local). ReelForge on the computer cannot read or set
-// them, so nothing but a person on this page can turn the press on.
+// The switches live in this browser only (chrome.storage.local). ReelForge never reads or sets them, and they
+// are not stored in its folder. That is all it means: this extension is loaded from that folder, so a program
+// that can change the files there, or run as the person, can change what the extension does.
 import { PLATFORMS, PRESS_PLATFORMS } from "../shared/consts.js"
 import { h } from "../shared/dom.js"
 

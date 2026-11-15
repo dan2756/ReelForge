@@ -1057,6 +1057,25 @@ class Pages(ApiTest):
                          ["no-referrer", "no-store", "DENY"])
         self.assertNotIn("set-cookie", page.headers)
 
+    def test_the_post_page_has_the_one_button_the_extension_takes_as_your_yes_to_a_press(self):
+        # The extension presses Post only after a real click on the element the page marks data-rf-press. One
+        # button carries the mark, it starts out of sight, and the page's own script never clicks it.
+        page = self.ask("GET", self.url.split(str(self.port), 1)[1]).body.decode()
+        self.assertEqual(page.count("data-rf-press"), 1)
+        self.assertRegex(page, r'<section id="press"[^>]* hidden>')
+        self.assertIn('<button type="button" id="press-yes" class="btn small" data-rf-press>Yes, press Post for me'
+                      "</button>", page)
+        script = (extension_api.WEB / "page.js").read_text("utf-8")
+        self.assertIn('"reelforge:press"', script)  # it hears the extension's answer
+        self.assertNotRegex(script, r"\.click\(\)|dispatchEvent")
+        pair = self.ask("GET", self.server.pair_url().split(str(self.port), 1)[1]).body.decode()
+        self.assertNotIn("data-rf-press", pair)
+        # The page is told which posts asked for the press, so it knows when to ask.
+        asked = self.job("instagram", press=True)
+        told = self.ask("GET", self.server.post_url(asked["batch"]).split(str(self.port), 1)[1]
+                        .replace("/post/", "/v1/page/batch/")).json
+        self.assertEqual([j["press"] for j in told["jobs"]], [True])
+
     def test_a_page_needs_its_own_key(self):
         other = self.job("x")
         theirs = self.server.post_url(other["batch"]).split("?k=")[1]

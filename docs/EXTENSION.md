@@ -19,8 +19,9 @@ before you press Post. The last section of this page says exactly what has been 
 - It does one thing on a platform's site: fill in the upload page of a post you started. It does nothing on those
   sites at any other time. On reelforge.tools it answers whether it is installed, and that is all. It touches no
   other site.
-- It is not a bot. A post starts only when you press Post, in ReelForge's window or in the extension's own popup.
-  Your AI cannot start one: there is no command, script or pipeline step that does.
+- It is not a bot. A post starts when you press Post, in ReelForge's window or in the extension's own popup.
+  ReelForge has no command and no pipeline step that starts one, and your AI is told never to post. That is a
+  rule it is given, not a wall: "What keeps it safe" says what a program on your computer could still do.
 - It is not an official integration. It uses the same upload pages you would use by hand, so when a platform
   changes its page, the extension can lose its way until ReelForge is updated. It then says so and leaves you to
   finish by hand.
@@ -63,20 +64,30 @@ Things to know:
 | Ends | with everything filled in and the platform's Post button waiting for you | when the extension has pressed that button |
 | Who presses Post | you | the extension, once |
 | Where | TikTok, YouTube, Instagram, X | TikTok, YouTube, Instagram. Never X |
-| Switched on | nothing to switch on | in the extension's own settings, for each platform, and only for a post you started with "stop before posting" switched off |
+| Switched on | nothing to switch on | in the extension's own settings, for each platform. Then, for each post: "stop before posting" switched off, and your yes in the browser |
 
-Press Post for me is off until you switch it on, and it cannot be switched on from ReelForge's folder: the choice is
-kept inside the browser, where your AI cannot reach it. It is offered for a platform only after one post there that
-the extension filled in, you pressed, and ReelForge saw go up. ReelForge allows the press once for each post. If it
-cannot confirm that the post went up, it marks the post "not sure it posted" and never tries again by itself: you
-check your profile and say what happened.
+Press Post for me is off until you switch it on, on the extension's settings page. ReelForge never sets that
+switch, and it is not kept in ReelForge's folder. It is offered for a platform only after one post there that the
+extension filled in, you pressed, and ReelForge saw go up.
+
+The switch alone presses nothing. For each post the extension also wants your own click in that browser: the
+popup's button when you start the post there, or **Yes, press Post for me** on the page ReelForge opens when you
+start it in the window. Without that click it fills everything in and stops, whatever the post asked for, and the
+note on the page says why.
+
+ReelForge allows the press once for each post. From the press on, a post ends as posted or as "not sure it posted",
+never as failed: a page that shows nothing after the press may still have taken it. ReelForge never tries such a
+post again by itself. You check your profile and say what happened.
 
 ## What is automatic, and what never is
 
 Automatic, once you have pressed Post in ReelForge or in the popup:
 
 - opening one tab for each platform you ticked
-- checking that the browser is signed in there, and to the account ReelForge has for that platform
+- checking that the browser is signed in there. On Instagram and X it also checks that it is the account
+  ReelForge has for that platform, and asks you when it is another one. TikTok's and YouTube's upload pages do not
+  show which account they are on, so nothing is checked there: look at the tab before you press. The popup and
+  the note on the page say so
 - attaching the video
 - typing the title, caption and hashtags, exactly as ReelForge showed them to you when you confirmed
 - saying where each post stands, in ReelForge's window and on the page that opened
@@ -126,6 +137,13 @@ open (`dashboard/extension_api.py`).
   minutes. The extension trades it for a token.
 - **The token.** Every call after that carries the token. ReelForge keeps only its SHA-256, in
   `dashboard/data/extension.json`, a file only you can read. Disconnecting a browser ends its token at once.
+- **Which ReelForge.** Ten ports on your computer are easy for another program to listen on. Before the extension
+  sends its token, or believes anything it is told, the port has to prove it is the ReelForge that browser
+  connected to: it answers a fresh random number in a way only that ReelForge can. A program that merely says it
+  is ReelForge is shown as "not connected" and is sent nothing.
+- **What gets clicked.** On the way to a platform's last screen the extension clicks Next, Create and OK. It
+  refuses to click anything that is, or carries the words of, the platform's final button, and the list that says
+  where those buttons are comes with the extension, not from ReelForge while it runs.
 - **Little to ask for.** The extension can see the Publish list, take a post you started, fetch that post's video,
   and report on it. A video is asked for by its job, never by a path. None of the window's own actions (removing a
   video, resetting, deleting a profile) can be reached this way.
@@ -136,8 +154,14 @@ open (`dashboard/extension_api.py`).
 What reelforge.tools can ask the extension: whether it is installed, its version, and whether ReelForge is open and
 connected. It gets no captions, no file names and no channel names, and it cannot start anything.
 
-What this does not protect against: a program already running as you on this computer. It can read your videos and
-your ReelForge folder directly, with or without the extension.
+What this does not protect against: a program already running as you on this computer, or one that can change the
+files in your ReelForge folder. The extension is loaded from that folder. Its code and its list of page hooks are
+files there, and the browser reads some of them afresh for every post. Such a program can change what the
+extension does: start a post, and press Post, with no switch and no click. It can also read your videos directly.
+An AI that works in your ReelForge folder is such a program. What keeps it from posting is that it is told not
+to, and that ReelForge gives it no command for it. Two smaller things are also left open: a page that you open on
+one of ReelForge's ports can ask the extension to connect to whatever serves it, and a program that listens on
+ReelForge's port in the two seconds after ReelForge closes could be sent the token once.
 
 ## Why not the platforms' own posting APIs
 
@@ -169,8 +193,8 @@ The row for a post says what happened. These are the reasons the extension gives
 | `challenge` | The platform is asking you to prove it's you | Do what it asks in the tab. Then post again, or finish by hand there |
 | `platform_error` | The platform showed an error of its own | Read it in the tab. You can finish by hand there |
 | `timeout` | Nothing happened in time | The tab is still open. Finish by hand there |
-| `tab_closed` | The tab was closed before the post went up | Post again when you are ready |
-| `press_rejected` | The platform did not take the extension's press | Press Post yourself in the tab |
+| `tab_closed` | The tab was closed, or left the platform, before Post was pressed | Post again when you are ready |
+| `press_rejected` | The extension pressed Post, and saw no reaction and no sign that it posted. The post is "not sure it posted", not failed | Check your profile on the platform. Then say on the Publish tab whether it posted |
 | `changed` | The video file was replaced after you pressed Post in ReelForge | Check the video in ReelForge, then post again |
 | `unknown_outcome` | ReelForge cannot tell whether it posted | Check your profile on the platform. Then say on the Publish tab whether it posted |
 
@@ -178,8 +202,12 @@ Two states are worth knowing:
 
 - **The extension didn't pick it up.** A post that no browser takes within ten minutes expires. Nothing happened.
   Start it again.
-- **Not sure it posted.** Post was pressed, or was about to be, and no confirmation came. ReelForge never tries
+- **Not sure it posted.** Post was pressed, or may have been, and no confirmation came. ReelForge never tries
   such a post again. It settles when you say what happened, or when a stats read finds the post.
+
+A post whose browser goes silent (it crashed, was closed for good, or lost the extension) does not stay under way
+for ever. After 20 minutes without a word it has failed, if the video was not on a page yet. After 45 minutes it is
+"not sure it posted", if it was: the platform's own button was there to press.
 
 You can always finish by hand: in the tab the extension opened, or with a by-hand button.
 
@@ -203,7 +231,7 @@ Calls are JSON under `/v1`. `hello` and `pair/claim` need no token; the rest nee
 
 | Call | What it does |
 |---|---|
-| `GET /v1/hello` | who is here: the app, its version, its channel, whether your token is good |
+| `GET /v1/hello` | who is here: the app, its version, its channel. With `install` and `nonce` it adds `proof`: an HMAC-SHA-256 of `reelforge hello\n<nonce>\n<port>\n<app_id>`, keyed with the SHA-256 of that browser's token. The extension sends no token here |
 | `POST /v1/pair/claim` | trade a pair page's secret for a token (the extension only) |
 | `POST /v1/seen` | the extension's hello, with what it last saw signed in |
 | `GET /v1/state` | the channel, its platforms, the newest videos and where each stands |
@@ -238,7 +266,13 @@ Tested here, by automated tests that run with ReelForge's own (`dashboard/tests/
   actions can be reached
 - every call in the table above, against a real server on a free port, with the test playing the extension
 - the video route: whole, in parts, a part that does not exist, a video replaced after the post was started
-- the ledger: every state a post can be in, what refuses a second post, the one press of Post
+- the ledger: every state a post can be in, what refuses a second post, the one press of Post, what the clock
+  ends, and that a post again that gets nowhere leaves the post before it standing
+- the extension against this server, both real, in headless Chromium with the copies of the upload pages
+  (`extension/tests/real.test.mjs`, the last suite of `node extension/tests/run.mjs`): pairing, a post from
+  ReelForge's post page to "posted" with its id in the stats, four platforms at once, the popup's Post and
+  Cancel, the press with and without your click on the page, a page that shows nothing after the press, a busy
+  database, a video replaced after Post, ReelForge restarted on another port, and posts that waited too long
 - that the extension's folder goes into the downloads and is replaced by an update, and that the file of connected
   browsers survives an update, a move and goes to the backup on a factory reset
 
@@ -246,12 +280,8 @@ Looked at, not automated:
 
 - the two local pages, in headless Chromium at 1100 and 360 pixels wide: no extension, working, ended, by hand,
   ReelForge closed, connected, and a pairing that failed. They made no request to anywhere but ReelForge.
-- the extension itself with this server, in Chromium, by hand. It connected through the pair page and was handed a
-  batch for all four platforms. With the extension's own copies of the upload pages served under the platforms'
-  addresses, it took each job, fetched the video from ReelForge, attached it, filled in the text and stopped at
-  ready, and the local page followed every step. With no pages to reach at all, every post ended as failed and
-  said why, on the page and in the extension's popup. These were runs by hand: the extension's own tests use a
-  stand-in for this server, and the server's tests a stand-in for the extension.
+- the extension with this server and no pages to reach at all, in Chromium, by hand: every post ended as failed
+  and said why, on the page and in the extension's popup.
 
 Not verified:
 
