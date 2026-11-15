@@ -9,10 +9,10 @@ A job moves along ORDER and never backwards:
 
 Steps may be skipped (the extension goes from claimed straight to uploading). ready means everything is filled in and
 the platform's own Post button is waiting for you; posting means the extension was allowed to press it. From
-anywhere before posted a job can end as failed or cancelled; a queued one nobody picked up in 10 minutes expires
-(nothing happened). The state that matters most is unknown: Post was pressed, or was about to be, and no confirmation
+anywhere before posting a job can end as failed or cancelled; a queued one nobody picked up in 10 minutes expires
+(nothing happened). The state that matters most is unknown: Post was pressed, or may have been, and no confirmation
 came. Nothing ever retries such a job. Only you ("It's posted" / "It didn't post") or a stats read that finds the
-post settle it.
+post settle it. Once the extension was allowed to press, it can only end the job as posted or unknown.
 
 A video is the SHA-256 of its bytes, never its file name, and it can have one live job per platform: while a job is
 queued, under way, posted or unknown, a second one for the same video and platform is refused (the unique index
@@ -80,7 +80,7 @@ FAILURES = {
     "platform_error": "{name} showed an error",
     "timeout": "nothing happened in time",
     "tab_closed": "the tab was closed before it posted",
-    "press_rejected": "{name} didn't take the press: press Post yourself in the tab",
+    "press_rejected": "{name} showed no reaction to the press: check your profile there before you post again",
     "changed": "the video file changed after you pressed Post here",
     "unknown_outcome": "ReelForge can't tell whether it posted: check your profile there",
 }
@@ -449,6 +449,8 @@ def allowed(old: str, new: str, by: str) -> bool:
         return by in ("person", "reconcile") and new in ("posted", "cancelled")
     if by in ("person", "reconcile") and new == "posted":
         return old in WAITING  # "It's posted" makes sense once the post was ready to go
+    if old == "posting" and by == "extension" and new in ("failed", "cancelled"):
+        return False  # Post was pressed for you: what the browser calls over is "not sure" (see advance)
     if new in ("failed", "cancelled"):
         return True
     if new == "expired":
@@ -471,6 +473,11 @@ def advance(job_id: str, state: str, *, by: str = "extension", install: str | No
         old = _locked(c, job_id)
         if install is not None and old["claimed_by"] != install:
             raise Refused("not_yours", "Another browser took this post.", old)
+        if by == "extension" and old["state"] == "posting" and state in ("failed", "cancelled"):
+            # The press was granted, so the click may have landed whatever the page showed afterwards. A browser
+            # that gives up from here leaves a job nobody is sure of, with its own word on why: free again only
+            # on your "It didn't post", or settled by a stats read. Never free for a retry that would press twice.
+            state = "unknown"
         if not allowed(old["state"], state, by):
             raise Refused("bad_transition", f"A post that is {old['state']} can't become {state}.", old)
         new = _write(c, old, state, by, step=step, progress=progress, detail=detail, error_code=error_code,

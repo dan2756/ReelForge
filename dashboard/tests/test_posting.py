@@ -388,8 +388,9 @@ class Moving(LedgerTest):
     def test_any_job_under_way_can_fail_or_be_cancelled_and_then_it_is_over(self):
         for old in posting.IN_FLIGHT:
             for end in ("failed", "cancelled"):
-                for by in ("extension", "app"):
-                    self.assertTrue(posting.allowed(old, end, by), f"{old} -> {end} by {by}")
+                self.assertTrue(posting.allowed(old, end, "app"), f"{old} -> {end} by app")
+                # The one exception: once Post was pressed for you, the browser can't call the job over.
+                self.assertEqual(posting.allowed(old, end, "extension"), old != "posting", f"{old} -> {end}")
             self.assertTrue(posting.allowed(old, "cancelled", "person"))
         may_say = {"app": (*posting.LIVE, *posting.FREE), "extension": posting.EXTENSION_STATES,
                    "person": ("posted", "cancelled"), "reconcile": ("posted",)}
@@ -548,6 +549,29 @@ class Pressing(LedgerTest):
         self.refused("already_pressed", posting.grant_press, job["id"], CHROME)
         posting.advance(job["id"], "posted", install=CHROME)
         self.refused("already_pressed", posting.grant_press, job["id"], CHROME)
+
+    def test_after_the_press_the_browser_can_only_say_posted_or_not_sure(self):
+        # The extension gives up when the page shows nothing within seconds of its click. The click may have been
+        # taken all the same, so that is never a job to try again: a second try would press Post a second time.
+        self.earlier_post()
+        for end in ("failed", "cancelled"):
+            job = self.walk(self.job(press=True), *STEPS)
+            posting.grant_press(job["id"], CHROME)
+            said = posting.advance(job["id"], end, install=CHROME, step="press", error_code="press_rejected",
+                                   error_message="TikTok did not react to the press.")
+            self.assertEqual((said["state"], said["step"], said["error_code"], said["error_message"]),
+                             ("unknown", "press", "press_rejected", "TikTok did not react to the press."))
+            self.refused("bad_transition", posting.retry, job["id"], self.cfg)
+            (block,) = self.batch(press=True)["blocked"]
+            self.assertEqual((block["reason"], block["job"]), ("unknown", job["id"]))
+            self.refused("bad_transition", posting.advance, job["id"], "failed", install=CHROME)  # nor afterwards
+            # Yours to say: "It didn't post" frees the video, and only then.
+            self.assertEqual(posting.resolve(job["id"], False)["state"], "cancelled")
+            self.video.write_bytes(self.video.read_bytes() + b"+")
+        # ReelForge itself still can (an upload through a platform's own API hears the platform's word).
+        job = self.walk(self.job(press=True), *STEPS)
+        posting.grant_press(job["id"], CHROME)
+        self.assertEqual(posting.advance(job["id"], "failed", by="app", error_code="timeout")["state"], "failed")
 
     def test_two_asks_at_once_get_one_grant(self):
         self.earlier_post()
