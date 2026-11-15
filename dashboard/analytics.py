@@ -365,6 +365,7 @@ def _place(posts: list[dict], episodes: list[dict], links: dict) -> tuple[dict, 
     for e in sorted(episodes, key=lambda e: m.order[e["id"]]):
         if e["video"]:
             files.setdefault(db.video_file(e["video"]).name.lower(), []).append(e["id"])
+    bare = {e["id"] for e in episodes if not e["video"]}  # made from posts alone (twins): no video of their own
     placed = dict(links)
     # A fixed link holds its episode's place on that platform, except numbers you typed in (manual-<episode>): the
     # real post takes that place once ReelForge can read it (and the typed ones then go: db.retire_typed).
@@ -387,9 +388,10 @@ def _place(posts: list[dict], episodes: list[dict], links: dict) -> tuple[dict, 
                 claims.append((2, kept, current, p))
         claims += [(1, 0.0, eid, p) for eid in files.get(p["upload"], ())]
     # One post per platform per episode, strongest claim first. On a tie the post already there keeps it (and a post
-    # stays in the episode it is in), then the one posted first, then the older episode.
+    # stays in the episode it is in), then the one posted first, then an episode that has a video (its ✓ on Publish
+    # goes by that), then the older episode.
     claims.sort(key=lambda c: (-c[0], -round(c[1], 6), c[2] != links[c[3]["ref"]][0], c[3]["published_at"] or "",
-                               c[3]["ref"], m.order[c[2]]))
+                               c[3]["ref"], c[2] in bare, m.order[c[2]]))
     for tier, _, eid, p in claims:
         ref = p["ref"]
         if placed[ref][0] is None and (eid, ref[0]) not in taken:
@@ -423,7 +425,8 @@ def _place(posts: list[dict], episodes: list[dict], links: dict) -> tuple[dict, 
 
 
 def auto_link() -> int:
-    """File posts under episodes: by caption, else by the upload page opened just before, else as twins.
+    """File posts under episodes: by caption, else by the upload page opened (or the post started from ReelForge)
+    just before, else as twins.
 
     Every post not linked by hand (or by ReelForge when it posted) is checked again on each run, so fixes reach old
     mistakes
@@ -431,7 +434,8 @@ def auto_link() -> int:
     """
     opened: dict[str, list[tuple]] = {}
     for u in db.uploads(None):
-        if u["status"] in ("ok", "manual") and u["video"]:
+        # an upload page you opened (manual), or a post started with the extension or a platform's API
+        if u["status"] in ("ok", "manual", "extension", "api") and u["video"]:
             opened.setdefault(u["platform"], []).append((db.parse(u["ts"]), u["id"], db.video_file(u["video"]).name.lower()))
     for rows in opened.values():
         rows.sort()

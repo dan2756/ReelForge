@@ -1,7 +1,10 @@
-"""The updater (studio.update): versions, how a copy was installed, and copying a new version over a folder."""
+"""The updater (studio.update): versions, how a copy was installed, and copying a new version over a folder. Also the
+Updates tab's Check now (dashboard.service)."""
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -12,6 +15,8 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
+from dashboard import db, demo, service
+from dashboard.tests.window import Window, plain
 from studio import update
 
 
@@ -238,6 +243,44 @@ class WhatsNewTest(unittest.TestCase):
             # in until they've updated) shows a bullet's wrapped lines as loose lines at the left edge.
             self.assertRegex(line, r"^(|## What's new in .+|- \*\*[^*]+\*\* .+|  - \S.+|Already have ReelForge\? .+)$")
             self.assertLessEqual(len(line), 140, line)
+
+
+class CheckNowTest(unittest.TestCase):
+    """Check now on the Updates tab: "Checking…" goes when the check is over, however it ends."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(setattr, db, "_path", db._path)
+        db.init(Path(tmp.name) / "stats.db")
+        self.w = Window({"refresh_minutes": 0, "videos_dir": str(Path(tmp.name) / "videos")}, demo.platforms())
+        self.addCleanup(self.w.close)
+        self.w.svc.demo = False  # the demo's Check now does nothing
+        self.w.forget()
+
+    def check(self, answer) -> list:
+        with mock.patch.object(service.kit_update, "check", side_effect=answer), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.w.call("check_updates")
+            self.assertTrue(self.w.until(lambda: len(self.w.sent("update_step")) > 1))
+        return self.w.sent("update_step")
+
+    def test_the_answer_replaces_checking(self):
+        info = {"current": "1.0.0", "latest": "1.0.0", "newer": False, "notes": "", "url": "", "error": ""}
+        steps = self.check(lambda: dict(info))
+        self.assertEqual(plain(steps[0]["status"]), "Checking…")
+        self.assertEqual(steps[-1], {})  # nothing over the tab's own status line any more
+        self.assertIn("the newest version", plain(self.w.view("update")["status"]))
+
+    def test_a_check_that_raises_clears_it_too(self):
+        steps = self.check(RuntimeError("no such thing"))
+        self.assertEqual(steps[-1], {})
+
+    def test_an_update_under_way_keeps_its_progress_line(self):
+        self.w.svc.updating = True
+        self.w.svc.update_progress("Downloading", 1, 2)
+        self.w.svc.after_update_check({"current": "1.0.0", "latest": "1.1.0", "newer": True, "error": ""}, False)
+        self.assertIn("Downloading", plain(self.w.view("update_step")["step"]))
 
 
 if __name__ == "__main__":

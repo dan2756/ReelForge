@@ -1,4 +1,5 @@
-"""SQLite store: stat snapshots over time, posts, episodes, the upload log and your notifications.
+"""SQLite store: stat snapshots over time, posts, episodes, the upload log, your notifications and the posting ledger
+(dashboard/posting.py keeps that one).
 
 Platforms mostly report lifetime totals, so every refresh writes a snapshot row. The charts
 are built from those snapshots; the longer ReelForge runs, the more history it has.
@@ -69,6 +70,36 @@ CREATE TABLE IF NOT EXISTS notifications (
     read INTEGER NOT NULL DEFAULT 0,
     deleted INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS post_jobs (
+    id TEXT PRIMARY KEY,                 -- "pj_" + 16 hex
+    batch TEXT NOT NULL,                 -- "pb_" + 16 hex: one press of Post = one batch
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,   -- db.now_iso()
+    platform TEXT NOT NULL,
+    via TEXT NOT NULL,                   -- "extension" | "api"
+    video TEXT NOT NULL,                 -- file name
+    video_path TEXT NOT NULL,
+    video_sha256 TEXT NOT NULL,
+    video_size INTEGER NOT NULL,
+    episode_id INTEGER,
+    text TEXT NOT NULL,                  -- JSON snapshot of exactly what goes in the boxes
+    press INTEGER NOT NULL DEFAULT 0,    -- 1: the person switched "stop before posting" off
+    options TEXT NOT NULL DEFAULT '{}',  -- JSON, e.g. {"privacy": "private"} for via=api
+    review TEXT NOT NULL DEFAULT '',     -- approval state when the job was made (videos.approval)
+    state TEXT NOT NULL,
+    step TEXT, progress REAL, detail TEXT,
+    error_code TEXT, error_message TEXT,
+    post_id TEXT, url TEXT,
+    claimed_by TEXT,                     -- the extension install that took it
+    superseded INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS post_jobs_one_live ON post_jobs (video_sha256, platform)
+    WHERE superseded = 0 AND state IN
+    ('queued','claimed','opening','uploading','filling','ready','posting','posted','unknown');
+CREATE INDEX IF NOT EXISTS post_jobs_by_batch ON post_jobs (batch);
+CREATE TABLE IF NOT EXISTS post_events (
+    id INTEGER PRIMARY KEY, job TEXT NOT NULL, ts TEXT NOT NULL,
+    state TEXT, step TEXT, detail TEXT
+);
 """
 
 _path: Path | None = None
@@ -95,6 +126,8 @@ def init(path: Path, demo: bool = False) -> None:
         notes = {r["name"] for r in db.execute("PRAGMA table_info(notifications)")}
     if not have.issuperset((*LATEST_COLUMNS, "link")) or "deleted" not in notes:
         _migrate()
+    if get_meta(TWINS_MERGED) is None:
+        _merge_twins()
 
 
 def _migrate() -> None:
@@ -128,6 +161,51 @@ def _migrate() -> None:
                              p["platform"], p["post_id"]) for p in linked])
         if "deleted" not in notes:  # the × on a notification hides it (see notify.delete)
             db.execute("ALTER TABLE notifications ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+
+
+TWINS_MERGED = "twins_merged"  # the meta key that says _merge_twins has been over this database
+
+
+def _merge_twins() -> None:
+    """Once per database: undo the double episodes older versions made. Posts ReelForge couldn't place got an
+    episode of their own with no video (a twin, analytics._place). Opening an upload page for that video afterwards
+    made a second episode, with the video and no posts, so the video never got its ✓ and the posts never got their
+    video. The twin takes the video and the empty episode goes, after a copy of the database is saved (see backup)."""
+    from .analytics import _key  # imported here because analytics imports this module
+
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")  # a second ReelForge starting at the same moment waits here, then finds it done
+        if get_meta(TWINS_MERGED, conn=db) is not None:
+            return
+        rows = db.execute("""SELECT e.*, (SELECT COUNT(*) FROM posts p WHERE p.episode_id = e.id) AS posts
+                             FROM episodes e ORDER BY e.created_at, e.id""").fetchall()
+        twins: dict[str, list] = {}
+        merges = []
+        for e in rows:
+            key = _key(e["title"])
+            if not key:
+                continue
+            if not e["video"] and e["posts"]:
+                twins.setdefault(key, []).append(e)
+            elif e["video"] and not e["posts"] and twins.get(key) and _made_before(e["video"], twins[key][-1]):
+                merges.append((twins[key].pop(), e))  # the twin last made before it
+        if merges:
+            backup("twins")
+        for twin, empty in merges:
+            db.execute("UPDATE episodes SET video = ? WHERE id = ?", (empty["video"], twin["id"]))
+            db.execute("DELETE FROM episodes WHERE id = ?", (empty["id"],))
+        db.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", (TWINS_MERGED, json.dumps(now_iso())))
+
+
+def _made_before(video: str, twin: sqlite3.Row) -> bool:
+    """Whether a twin episode's posts can be of this video file: they went up after the file was made (a twin is
+    dated by its first post). A file that is newer is another video with the same caption. One that isn't on this
+    computer can't be checked, and counts."""
+    try:
+        made = Path(video).stat().st_mtime
+    except OSError:
+        return True
+    return made <= parse(twin["created_at"]).timestamp() + 3600  # an hour's slack for clocks that disagree
 
 
 def backup(why: str) -> Path:
@@ -754,6 +832,28 @@ def episode_for_video(name: str) -> sqlite3.Row | None:
     with connect() as db:
         rows = db.execute("SELECT * FROM episodes WHERE video IS NOT NULL ORDER BY id DESC").fetchall()
     return next((e for e in rows if video_file(e["video"]).name.lower() == name), None)
+
+
+def adopt_episode(title: str, video: str) -> int:
+    """The episode a video's posts go under, when you start posting it: the newest one made from a file of this
+    name; else a twin (an episode ReelForge made by itself from posts that matched each other, so it has no video)
+    with this caption, which takes the video, because those posts were this video's all along; else a new one. In
+    one go, so two windows starting at the same moment can't each make one."""
+    from .analytics import _key  # imported here because analytics imports this module
+
+    name, key = video_file(video).name.lower(), _key(title)
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        rows = db.execute("SELECT * FROM episodes ORDER BY id DESC").fetchall()
+        for e in rows:
+            if e["video"] and video_file(e["video"]).name.lower() == name:
+                return e["id"]
+        for e in rows:
+            if not e["video"] and key and _key(e["title"]) == key and _made_before(video, e):
+                db.execute("UPDATE episodes SET video = ? WHERE id = ?", (video, e["id"]))
+                return e["id"]
+        return db.execute("INSERT INTO episodes (title, video, created_at) VALUES (?,?,?)",
+                          (title, video, now_iso())).lastrowid
 
 
 def create_episode(title: str, video: str | None = None, created_at: str | None = None) -> int:

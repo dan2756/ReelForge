@@ -130,10 +130,11 @@ def _no_browser() -> None:
     signup.launch = lambda command: None
     signup.private_browser = lambda: signup.Private("Chrome", ("chrome", "--incognito"))
 
-    def opened(url: str) -> None:
+    def opened(url: str) -> bool:
         if os.environ.get("REELFORGE_OPENED"):
             with open(os.environ["REELFORGE_OPENED"], "a", encoding="utf-8", newline="\n") as f:
                 f.write(url + "\n")
+        return True  # as a browser that opened would answer
 
     desktop.open_url = opened
 

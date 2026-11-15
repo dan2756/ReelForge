@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en" data-rf-page="post" data-rf-protocol="{{protocol}}" data-rf-port="{{port}}" data-rf-batch="{{batch}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Posting · ReelForge</title>
+<link rel="icon" href="/assets/icon.svg">
+<link rel="stylesheet" href="/assets/page.css">
+<script src="/assets/page.js" defer></script>
+</head>
+<body>
+<main class="page">
+  <p class="brand"><img src="/assets/icon.svg" alt="" width="22" height="22"> ReelForge</p>
+  <h1 id="title">Posting your video</h1>
+  <p id="video" class="soft">Asking ReelForge where this stands…</p>
+
+  <p id="notice" class="notice" role="status" hidden></p>
+
+  <section id="setup" class="panel" aria-labelledby="setup-title" hidden>
+    <h2 id="setup-title">The extension isn't in this browser</h2>
+    <p id="setup-why">ReelForge's browser extension fills in each platform's upload page for you. It isn't loaded
+      in this browser, or it is switched off. Add it now, or post by hand with the buttons below.</p>
+    <ol class="steps">
+      <li>Open your browser's extensions page: type <code>chrome://extensions</code> in the address bar
+        (in Edge <code>edge://extensions</code>, in Brave <code>brave://extensions</code>).</li>
+      <li>Switch on <b>Developer mode</b>, at the top right of that page.</li>
+      <li id="setup-folder">Press <b>Load unpacked</b> and pick this folder:
+        <span class="copyline"><code id="folder" class="path"></code>
+          <button type="button" class="btn small" data-copy="folder">Copy</button></span></li>
+      <li>Come back to this page and reload it.</li>
+    </ol>
+    <p class="soft small">It works in Chrome, Edge and Brave. Is the extension in another browser? Open this page
+      there: <button type="button" class="linkish" data-copy="address">copy this page's address</button>.</p>
+  </section>
+
+  <ul id="rows" class="rows"></ul>
+  <p id="empty" class="soft" hidden>ReelForge has no posts for this page any more. Its Publish tab shows where
+    each video stands.</p>
+
+  <p id="note" class="foot soft small"></p>
+  <noscript><p class="notice">This page needs JavaScript to follow ReelForge. ReelForge's Publish tab shows the
+    same thing.</p></noscript>
+</main>
+</body>
+</html>

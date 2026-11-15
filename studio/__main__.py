@@ -33,6 +33,9 @@
   reelforge sounds             download the Mixkit sound effects
   reelforge new-episode SLUG [--from EXAMPLE]   start episodes/epNN_<slug>/ from an example
   reelforge publish-check episodes/<id>         is this video ready in the Publish tab?
+  reelforge extension [folder|pair|serve]       the browser extension that fills in upload pages (optional): where
+                               it stands, its folder to load in your browser, connecting a browser, and listening
+                               for it without the window. It never starts a post: you do (docs/EXTENSION.md)
 
   reelforge reset [--yes]      factory reset: every channel's settings, log-ins and stats back to brand-new (into a
                                backup in backups/), then first-time setup again; your first channel's videos stay
@@ -588,6 +591,13 @@ def dispatch(argv: list[str] | None = None) -> int:
     if cmd == "publish-check":
         from . import publish_check
         return publish_check.main(rest)
+    if cmd == "extension":
+        try:
+            from dashboard import extension_api
+        except ImportError as e:
+            print(f"ReelForge's extension commands can't start: {e}. Run setup again (setup.bat or ./setup.sh).")
+            return 3
+        return extension_api.main(rest)
     if cmd == "tools":
         from . import tools
         print("blender:", tools.find_blender())

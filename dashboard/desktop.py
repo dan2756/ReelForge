@@ -201,14 +201,19 @@ def _linux_reveal(path: Path) -> None:
     open_url(path.parent.as_uri())
 
 
-def open_url(url: str) -> None:
+def open_url(url: str) -> bool:
+    """Open a page in your browser. False when none could be started (no browser set up, a computer with no
+    desktop), so whoever asked can say so."""
     import webbrowser  # imported on first use: it's slow to load and only needed on a click
 
-    webbrowser.open(url)
+    try:
+        return bool(webbrowser.open(url))
+    except webbrowser.Error:
+        return False
 
 
-def open_upload_page(platform: str) -> None:
-    open_url(UPLOAD_PAGES[platform])
+def open_upload_page(platform: str) -> bool:
+    return open_url(UPLOAD_PAGES[platform])
 
 
 def profile_url(platform: str, handle: str) -> str:
