@@ -381,8 +381,12 @@ def allowed(old: str, new: str, by: str) -> bool:
         return False
     if new == old:
         return True  # said again: a sign of life, with the step it is on now
-    if old == "posted" or old in FREE:
-        return False  # over
+    if old in FREE:
+        # Over. You can still set one aside as cancelled (you posted that one by hand instead): either way there
+        # was no post, so it changes nothing about what may be posted next.
+        return by == "person" and new == "cancelled"
+    if old == "posted":
+        return False
     if old == "unknown":  # only you, or a stats read, can say what happened
         return by in ("person", "reconcile") and new in ("posted", "cancelled")
     if by in ("person", "reconcile") and new == "posted":
@@ -473,7 +477,7 @@ def resolve(job_id: str, posted: bool) -> dict:
 def expire_stale(now: datetime | None = None) -> int:
     """What the clock decides, to be run every so often: a job nobody picked up in 10 minutes expires, and one that
     was ready (for 45 minutes) or being posted (for 15) without a word since becomes unknown. Returns how many."""
-    now = now or _now()
+    now = (now or _now()).astimezone(timezone.utc)  # as the rows' times are written
     rules = (("queued", "created_at", QUEUED_FOR, "expired", "not picked up in time"),
              ("ready", "updated_at", READY_FOR, "unknown", "no word since it was ready to post"),
              ("posting", "updated_at", POSTING_FOR, "unknown", "no confirmation after Post was pressed"))
@@ -543,8 +547,12 @@ def _write(c: sqlite3.Connection, old: dict, state: str, by: str, **fields) -> d
     new = dict(old)
     given = {k: v for k, v in fields.items() if v is not None}
     if state == old["state"]:
-        if state in FREE or (state == "posted" and not {"post_id", "url"} & given.keys()):
-            return new  # over already: nothing to add
+        if state in FREE:
+            given = {k: v for k, v in given.items() if k == "detail"}  # over: only a word on why can follow
+        elif state == "posted":
+            given = {k: v for k, v in given.items() if k in ("post_id", "url")}  # up: only its id and link can
+        if state in (*FREE, "posted") and all(old[k] == v for k, v in given.items()):
+            return new  # nothing to add
         given = {k: v for k, v in given.items() if k in ("step", "progress", "detail") or not old[k]}
     else:
         new.update(state=state, step=None, progress=None, detail=None)

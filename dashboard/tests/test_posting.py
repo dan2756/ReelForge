@@ -373,14 +373,16 @@ class Moving(LedgerTest):
                 for by in ("extension", "app"):
                     self.assertTrue(posting.allowed(old, end, by), f"{old} -> {end} by {by}")
             self.assertTrue(posting.allowed(old, "cancelled", "person"))
+        may_say = {"app": (*posting.LIVE, *posting.FREE), "extension": posting.EXTENSION_STATES,
+                   "person": ("posted", "cancelled"), "reconcile": ("posted",)}
         for over in ("posted", "failed", "cancelled", "expired"):
             for new in (*posting.LIVE, *posting.FREE):
-                for by in ("extension", "app", "person", "reconcile"):
-                    self.assertEqual(posting.allowed(over, new, by), new == over and (
-                        by in ("app",) or (by == "extension" and new in posting.EXTENSION_STATES)
-                        or (by == "person" and new in ("posted", "cancelled")) or (by == "reconcile" and
-                                                                                    new == "posted")),
-                        f"{over} -> {new} by {by}")
+                for by, states in may_say.items():
+                    # Only the same state said again, by someone who may say it at all. The one exception: you can
+                    # set a failed or expired job aside as cancelled (you posted that one by hand instead).
+                    expected = (new == over and new in states) or \
+                        (by == "person" and new == "cancelled" and over in ("failed", "expired"))
+                    self.assertEqual(posting.allowed(over, new, by), expected, f"{over} -> {new} by {by}")
         job = self.walk(self.job(), "opening")
         failed = posting.advance(job["id"], "failed", install=CHROME, step="find_input", error_code="hook_not_found",
                                  error_message="TikTok changed its page.")
@@ -389,6 +391,12 @@ class Moving(LedgerTest):
         for new in ("uploading", "posted", "cancelled", "unknown"):
             self.refused("bad_transition", posting.advance, job["id"], new, install=CHROME)
         self.assertEqual(posting.advance(job["id"], "failed", install=CHROME), failed)  # said twice: nothing changes
+        # Posted by hand instead: yours to say, and it stays a job that ended without a post of its own.
+        aside = posting.cancel(job["id"], "posted by hand")
+        self.assertEqual((aside["state"], aside["detail"]), ("cancelled", "posted by hand"))
+        self.assertEqual(posting.cancel(job["id"], "posted by hand"), aside)
+        self.refused("bad_transition", posting.resolve, job["id"], True)
+        self.assertEqual(self.job()["state"], "queued")
 
     def test_only_queued_expires_and_only_ready_or_posting_goes_unknown(self):
         for old in (*posting.LIVE, *posting.FREE):
@@ -609,6 +617,13 @@ class Clock(LedgerTest):
         self.assertEqual(posting.expire_stale(), 0)
         self.assertEqual(self.state(job), "uploading")
         self.assertEqual(posting.expire_stale(datetime.now(timezone.utc) + timedelta(days=1)), 0)
+
+    def test_the_clock_can_be_given_in_any_time_zone(self):
+        job = self.job()
+        tokyo = timezone(timedelta(hours=9))
+        self.assertEqual(posting.expire_stale(datetime.now(tokyo) + timedelta(minutes=9)), 0)
+        self.assertEqual(posting.expire_stale(datetime.now(tokyo) + timedelta(minutes=11)), 1)
+        self.assertEqual(self.state(job), "expired")
 
 
 class Reconciling(LedgerTest):
