@@ -6,6 +6,7 @@ BACKUPS, EPISODES and COMPLETED. For the first profile they're the ReelForge fol
 
 from __future__ import annotations
 
+import errno
 import os
 import sys
 from pathlib import Path
@@ -103,7 +104,11 @@ def write_atomic(path: Path, data: str | bytes) -> None:
         with tmp.open("wb") as f:
             f.write(data if isinstance(data, bytes) else data.encode("utf-8"))
             f.flush()
-            os.fsync(f.fileno())
+            try:
+                os.fsync(f.fileno())
+            except OSError as e:    # a folder on a drive that has no such thing (some network shares): go on
+                if e.errno not in (errno.EINVAL, errno.ENOTSUP, errno.ENOSYS):
+                    raise
         replace(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)

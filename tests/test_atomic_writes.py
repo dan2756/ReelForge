@@ -42,6 +42,12 @@ class WriteAtomic(unittest.TestCase):
             self.assertEqual(f.read_text(encoding="utf-8"), "old and complete\n")
             self.assertEqual([p.name for p in self.dir.iterdir()], ["studio.toml"])
 
+    def test_a_drive_that_cant_flush_to_disk_still_gets_the_file(self):
+        f = self.dir / "studio.toml"
+        with mock.patch.object(P.os, "fsync", side_effect=OSError(22, "Invalid argument")):   # some network shares
+            P.write_atomic(f, "new\n")
+        self.assertEqual(f.read_text(encoding="utf-8"), "new\n")
+
     def test_a_file_someone_is_reading_is_tried_again_for_a_moment(self):
         # Windows refuses to replace a file another program has open (the hourly job reading config.toml)
         f = self.dir / "config.toml"
