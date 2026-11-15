@@ -302,5 +302,23 @@ class Preview(Composing):
         self.assertEqual(compose.sheet_label(ep, 1.0), ("1.00 s  [cover]  [no picture yet]", "You are a duck."))
 
 
+class HudMemory(unittest.TestCase):
+    def test_a_counter_that_changes_every_frame_does_not_fill_the_text_caches(self):
+        import overlay
+        canvas = Image.new("RGBA", (compose.W, compose.H), (30, 60, 90, 255))
+        kept = overlay.text_layer.cache_info().currsize, overlay.glow_layer.cache_info().currsize
+        for n in range(40):
+            overlay.draw_hud(canvas, n / 30, "SIZE", f"{n * 1234:,} ft", f"{n} DOUBLINGS", "")
+        self.assertEqual((overlay.text_layer.cache_info().currsize, overlay.glow_layer.cache_info().currsize), kept)
+        self.assertLessEqual(overlay._hud_text.cache_info().currsize, 24)
+        self.assertGreater(overlay._hud_text.cache_info().hits, 30)        # the label never changed: still cached
+
+    def test_the_hud_is_drawn_exactly_as_before(self):
+        import overlay
+        args = ("1,234 ft", compose.config.FONT_MONO_BOLD, 80)
+        style = {"fill": (255, 255, 255), "shadow": 200, "blur": 7, "align": "left", "outline": 5}
+        self.assertEqual(overlay._hud_text(*args, **style).tobytes(), overlay.text_layer(*args, **style).tobytes())
+
+
 if __name__ == "__main__":
     unittest.main()
