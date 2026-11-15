@@ -675,22 +675,28 @@ class PostingTab:
         self.follow_extension()
 
     @rpc
-    def extension_folder(self) -> None:
+    def extension_folder(self, quiet: bool = False) -> str | None:
         """Show the extension's folder in the file manager, with its path on the clipboard: it is the folder to
-        pick after Load unpacked on your browser's extensions page."""
+        pick after Load unpacked on your browser's extensions page. quiet: asked for in the extension's dialog,
+        which says itself what happened: the answer is the sentence, and no pop-up says it over the dialog's
+        buttons (Connect a browser, the next step, among them)."""
         if self.demo:
             self.notify("The demo doesn't use the browser extension.", timeout=4)
-            return
+            return None
         folder = extension_api.folder()
         if not folder.is_dir():
-            self.notify(f"This ReelForge has no extension folder yet ({folder}). Update ReelForge on the Updates "
-                        "tab to get it.", severity="warning", timeout=12)
-            return
+            said = (f"This ReelForge has no extension folder yet ({folder}). Update ReelForge on the Updates tab to "
+                    "get it.")
+            if not quiet:
+                self.notify(said, severity="warning", timeout=12)
+            return said
         desktop.reveal(folder)
         self.copy_text(str(folder))
-        self.notify(f"It is showing in {desktop.FILES_WINDOW}, and its path is copied. On your browser's "
-                    "extensions page, switch on Developer mode, press Load unpacked and pick it.",
-                    title="The extension's folder", timeout=15)
+        said = (f"It is showing in {desktop.FILES_WINDOW}, and its path is copied. On your browser's extensions "
+                "page, switch on Developer mode, press Load unpacked and pick it.")
+        if not quiet:
+            self.notify(said, title="The extension's folder", timeout=15)
+        return said
 
     @rpc
     def post_action(self, job: str, action: str) -> None:

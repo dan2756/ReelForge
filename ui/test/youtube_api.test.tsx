@@ -242,10 +242,20 @@ describe("connecting", () => {
     toasts.clear()
     await google(h, "answer", "no")
     await until(h, () => api(h).state === "off")
-    expect(popups()).toEqual(["YouTube's API: You said no on Google's page, so nothing was connected."])
+    // Said in the dialog that asked. As a pop-up it sat on the dialog's Close for fifteen seconds.
+    await until(h, () => dialog(h).includes("You said no"))
+    expect(dialog(h)).toContain("CLIENT FILE You said no on Google's page, so nothing was connected.")
+    expect(popups()).toEqual([])
     expect(dialog(h)).toContain("○ YouTube API not connected")
-    expect(dialog(h)).toContain("CLIENT FILE")
+    expect(frame(h)).not.toContain("/path/to/client_secret_….json") // the path is still in the box: no second paste
+    expect(frame(h)).toContain(`┃ ${tmp.slice(0, 20)}`)
     expect([onFile(), youtube(h).actions]).toEqual([null, []])
+    // Something typed puts it away again, for what the box is for.
+    await clickText(h, tmp.slice(0, 20), 2) // (into the box: Close has the keyboard since Google's page opened)
+    await h.t.mockInput.typeText("x")
+    await h.settle(300)
+    expect(dialog(h)).not.toContain("You said no")
+    expect(dialog(h)).toContain("CLIENT FILE Type or paste where the client file is")
   })
 
   test("with a client on file, a window that has just opened says it is not connected, and Connect is one press", async () => {
@@ -742,9 +752,10 @@ describe("Disconnect", () => {
     await until(h, () => api(h).state === "off")
     expect([onFile(), (await google(h)).revoked]).toEqual([null, 1])
     expect(dialog(h)).toContain("○ YouTube API not connected")
-    expect(dialog(h)).toContain("CLIENT FILE")
-    expect(popups().at(-1)).toBe("YouTube's API: Disconnected. ReelForge has forgotten the connection, and Google has ended it.")
-    toasts.clear()
+    // How it went is said in the dialog, where the box's own words were. A pop-up came up over Close.
+    await until(h, () => dialog(h).includes("Disconnected."))
+    expect(dialog(h)).toContain("CLIENT FILE Disconnected. ReelForge has forgotten the connection, and Google has ended it.")
+    expect(popups()).toEqual([])
     h.t.mockInput.pressKey("ESCAPE")
     h.t.mockInput.pressKey("ESCAPE")
     await h.settle(400)
@@ -790,8 +801,15 @@ describe("Disconnect", () => {
     // (It said "there is nothing to end at Google", and the pop-up after it the opposite.)
     expect(dialog(h)).toContain("Disconnect? ReelForge forgets the client. This window is not connected, so it can't end ReelForge's access at Google. If you ever allowed it there, take it off yourself at myaccount.google.com/connections. No ReelForge window can post through the API until you give the client file again.")
     await clickText(h, "▐ Disconnect ▌", 3) // the red one
-    await until(h, () => api(h).state === "off" && popups().length > 0)
-    expect(popups()).toEqual(["YouTube's API: Disconnected. ReelForge has forgotten the client. If you ever allowed ReelForge on Google's page, Google still lists it: take it off at https://myaccount.google.com/connections"])
+    await until(h, () => api(h).state === "off" && dialog(h).includes("Disconnected."))
+    // (the address wraps after its last slash)
+    expect(dialog(h).replace("google.com/ connections", "google.com/connections")).toContain("CLIENT FILE Disconnected. ReelForge has forgotten the client. If you ever allowed ReelForge on Google's page, Google still lists it: take it off at https://myaccount.google.com/connections")
+    expect(popups()).toEqual([])
+    for (const [w, rows] of [[120, 30], [80, 24]] as const) {
+      h.t.resize(w, rows)
+      await h.settle(400)
+      expect(frame(h)).toMatch(/▐ Close ▌ +│/) // Close is there to press, with nothing over it
+    }
     expect([onFile(), (await google(h)).revoked]).toEqual([null, 0])
   })
 })

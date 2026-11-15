@@ -432,6 +432,30 @@ class Buttons(ApiPosting):
         youtube_api.desktop.open_url(w.svc.api_consent.url())  # now you answer the page of the newer try
         self.assertTrue(w.until(lambda: w.view("youtube_api")["state"] == "on"))
 
+    def test_while_the_dialog_is_open_it_says_how_connecting_and_disconnecting_went_and_no_pop_up_does(self):
+        """A pop-up comes up over the dialog's own buttons (Close, in a window 120 columns by 30 rows), and its first
+        click only puts the pop-up away. The dialog tells the Python side when it opens and closes."""
+        w = self.window()
+        w.call("youtube_api_dialog", True)
+        self.assertEqual(w.view("youtube_api")["said"], [])
+        w.forget()
+        w.call("youtube_api_disconnect")
+        self.assertTrue(w.until(lambda: w.view("youtube_api")["state"] == "off" and w.view("youtube_api")["said"]))
+        self.assertEqual(plain(w.view("youtube_api")["said"]),
+                         "Disconnected. ReelForge has forgotten the connection, and Google has ended it.")
+        self.assertEqual(w.sent("toast"), [])
+        # A no on Google's page, the same way. A new try starts with nothing said.
+        self.google.consent = "no"
+        self.assertIs(w.call("youtube_api_connect", str(self.client_file), True), True)
+        self.assertTrue(w.until(lambda: "You said no" in plain(w.view("youtube_api")["said"])))
+        self.assertEqual(plain(w.view("youtube_api")["said"]), "You said no on Google's page, so nothing was connected.")
+        self.assertEqual(w.sent("toast"), [])
+        # Closed, the dialog has nothing left to say, and what happens from then on is a pop-up as before.
+        w.call("youtube_api_dialog", False)
+        self.assertEqual(w.view("youtube_api")["said"], [])
+        w.call("youtube_api_disconnect")
+        self.assertTrue(w.until(lambda: w.toasts() == ["YouTube's API wasn't connected."]))
+
     def test_disconnect_forgets_it_and_tells_google(self):
         w = self.window()
         w.call("youtube_api_disconnect")

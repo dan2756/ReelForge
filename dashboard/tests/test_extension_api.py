@@ -1642,11 +1642,21 @@ class WindowServes(PostingTest):
             reveal.assert_called_once_with(self.folder)
         self.assertEqual(self.copied, [str(self.folder)])
         self.assertIn("Load unpacked", w.toasts()[-1])
+        # Asked for in the extension's dialog (quiet), the sentence is the answer and the dialog says it: a pop-up
+        # sat on that dialog's own buttons, Connect a browser among them.
+        w.forget()
+        with mock.patch.object(desktop, "reveal"):
+            said = w.call("extension_folder", True)
+        self.assertEqual(said, f"It is showing in {desktop.FILES_WINDOW}, and its path is copied. On your browser's "
+                               "extensions page, switch on Developer mode, press Load unpacked and pick it.")
+        self.assertEqual((w.sent("toast"), len(self.copied)), ([], 2))
         (self.folder / "manifest.json").unlink()
         self.folder.rmdir()
+        self.assertIn("has no extension folder yet", w.call("extension_folder", True))
+        self.assertEqual(w.sent("toast"), [])
         w.call("extension_folder")
         self.assertIn("has no extension folder yet", w.toasts()[-1])
-        self.assertEqual(len(self.copied), 1)
+        self.assertEqual(len(self.copied), 2)
 
 
 class CommandLine(ApiTest):

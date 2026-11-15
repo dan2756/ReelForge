@@ -347,6 +347,7 @@ export function ExtensionDialog({ from, close }: { from?: "post"; close: () => v
   const { width } = useTerminalDimensions()
   const [leaving, setLeaving] = useState<string | null>(null) // the browser Disconnect was pressed for
   const [waiting, setWaiting] = useState(false) // the page that connects a browser was opened
+  const [shown, setShown] = useState("") // what Show the extension folder did, said here
   // Each connected browser with when it connected. One that connects again keeps its place in the list and gets a new
   // time, so this, not how many there are, says that the page that opened has connected a browser.
   const pairs = (ext?.installs ?? []).map((b) => `${b.install} ${b.paired}`)
@@ -368,8 +369,12 @@ export function ExtensionDialog({ from, close }: { from?: "post"; close: () => v
     )
   }
   const pair = async () => {
+    setShown("")
     if (await s.bridge.ask<boolean>("pair_extension")) setWaiting(true)
   }
+  // (true: this dialog says what happened. As a pop-up it sat on this dialog's buttons for fifteen seconds, Connect a
+  // browser among them, which is the next thing to press.)
+  const showFolder = async () => setShown((await s.bridge.ask<string | null>("extension_folder", true)) || "")
   const ps = connected?.platforms ?? s.init.platforms
   // Under a browser's name: what it was last seen signed in to, or the question once Disconnect is pressed for it.
   const under = (b: ExtensionInstall) => (leaving === b.install ? `Disconnect ${b.name}? It can't take posts from ReelForge until you connect it again.` : b.signed)
@@ -391,6 +396,10 @@ export function ExtensionDialog({ from, close }: { from?: "post"; close: () => v
         <box flexDirection="row" flexShrink={0}>
           {/* (said here and not in a pop-up, which sat on this dialog's buttons) */}
           <Wrapped segs={[["● Waiting for your browser: the page that opened connects it by itself. No extension in that browser yet? The page says how to add it.", DASH.warn]]} />
+        </box>
+      ) : shown ? (
+        <box flexDirection="row" flexShrink={0}>
+          <Wrapped segs={[[`The extension's folder: ${shown}`, DASH.muted]]} />
         </box>
       ) : null}
       {/* What it is, then its browsers or its steps: the part that scrolls, in a window too short for all of it, so
@@ -471,7 +480,7 @@ export function ExtensionDialog({ from, close }: { from?: "post"; close: () => v
       ) : null}
       <box flexDirection="row" flexWrap="wrap" marginTop={2} flexShrink={0} columnGap={1} rowGap={1}>
         <Button id="ext-pair" label={ext.installs.length ? "Connect another browser" : "Connect a browser"} variant={reachable(ext) ? "default" : "primary"} autoFocus={!reachable(ext)} onPress={() => void pair()} />
-        <Button id="ext-folder" label="Show the extension folder" onPress={() => s.bridge.send("extension_folder")} />
+        <Button id="ext-folder" label="Show the extension folder" onPress={() => void showFolder()} />
         <box flexGrow={1} />
         {from === "post" && reachable(ext) ? <Button id="ext-post" label="Post…" variant="primary" autoFocus onPress={() => void s.openPost()} /> : null}
         <Button id="ext-close" label="Close" autoFocus={reachable(ext) && from !== "post"} onPress={close} />

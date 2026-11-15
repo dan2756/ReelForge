@@ -339,6 +339,8 @@ class YouTubeApiTab:
     api_consent: youtube_api.Consent | None = None  # the try at connecting that is waiting for you, or the last one
     api_quiet = False                               # that try was asked for in the dialog, which says how it goes
     api_seen: float | None | bool = False           # the connection file's time as last shown (False: not yet)
+    api_dialog = False                              # the window's dialog for the connection is open
+    api_said: tuple[str, bool] = ("", False)        # what that dialog has to say of what it asked for (and: amber)
 
     def mind_the_jobs(self) -> None:
         """At start and every half minute, before PostingTab's own: a connection another window made or ended, and
@@ -384,6 +386,9 @@ class YouTubeApiTab:
             line = Text("● Waiting for your answer", f"bold {AMBER}").append(" on Google's page", f"bold {AMBER}")
             line.append("  it opened in your browser", MUTED)
         return {"state": "connecting" if waiting else said["state"], "line": line.json(),
+                # How the last thing the dialog asked for went, while it is open ([]: nothing to say): see _api_say.
+                "said": Text(self.api_said[0], AMBER if self.api_said[1] else MUTED).json() if self.api_said[0]
+                else [],
                 "lines": [t.json() for t in lines], "client": said["client"], "channel": said["channel"],
                 "privacy": said["privacy"], "made_for_kids": said["made_for_kids"],
                 "privacies": [{"key": key, "label": WHO[key]} for key in PRIVACY], "docs": DOCS,
@@ -482,6 +487,22 @@ class YouTubeApiTab:
     # --- what the buttons call ---------------------------------------------------------------------
 
     @rpc
+    def youtube_api_dialog(self, shown: bool) -> None:
+        """The window's dialog for the connection opened (shown) or closed. While it is open, how connecting and
+        disconnecting went is said in it (the view's "said") and not in a pop-up: a pop-up comes up over the
+        dialog's own buttons, and its first click only puts the pop-up away."""
+        self.api_dialog, self.api_said = bool(shown), ("", False)
+        self.emit("youtube_api", self.youtube_api_view())
+
+    def _api_say(self, message: str, *, warning: bool = False, timeout: float = 15) -> None:
+        """How something the connection's dialog asked for went: in the dialog while it is open, else a pop-up."""
+        if self.api_dialog:
+            self.api_said = (message, warning)
+        else:
+            self.notify(message, title="YouTube's API", severity="warning" if warning else "information",
+                        timeout=timeout)
+
+    @rpc
     def youtube_api_info(self, caption: str = "", tags: str = "") -> dict | None:
         """The connection (youtube_api_view), and for the picked video ("video": its path, name, size and "sha256",
         which is the file as it is now) what a post through the API would send:
@@ -548,6 +569,7 @@ class YouTubeApiTab:
             return False
         if self.api_consent is not None:
             self.api_consent.cancel()  # an earlier try still waiting: this one takes its place
+        self.api_said = ("", False)    # ... and what the last one had to say is over
         file = (path or "").strip().strip("\"'")
         try:
             self.api_consent = youtube_api.connect(
@@ -581,7 +603,7 @@ class YouTubeApiTab:
             self.notify(f"{outcome['message']} {starts} {UNPROVEN}", title="YouTube's API",
                         severity="information" if privacy == "private" else "warning", timeout=20)
         elif outcome["code"] != "cancelled":
-            self.notify(outcome["message"], title="YouTube's API", severity="warning", timeout=15)
+            self._api_say(outcome["message"], warning=True)
         self.follow_youtube_api(changed=True)
 
     @rpc
@@ -591,8 +613,9 @@ class YouTubeApiTab:
             self.notify("The demo doesn't use YouTube's API.", timeout=4)
             return
         if self.loop.live(("youtube-api",)):
-            self.notify("An upload to YouTube is under way. Let it finish, or cancel it, then disconnect.",
-                        title="YouTube's API", severity="warning", timeout=10)
+            self._api_say("An upload to YouTube is under way. Let it finish, or cancel it, then disconnect.",
+                          warning=True, timeout=10)
+            self.follow_youtube_api(changed=True)
             return
         if self.api_consent is not None:
             self.api_consent.cancel()
@@ -607,19 +630,17 @@ class YouTubeApiTab:
 
     def _api_disconnected(self, done: dict) -> None:
         if "error" in done:
-            self.notify(done["error"], title="YouTube's API", severity="warning", timeout=12)
+            self._api_say(done["error"], warning=True, timeout=12)
         elif not done["was"]:
-            self.notify("YouTube's API wasn't connected.", timeout=6)
+            self._api_say("YouTube's API wasn't connected.", timeout=6)
         elif done["revoked"] is False:
-            self.notify("ReelForge has forgotten the connection, but Google couldn't be told (is this computer "
-                        "online?). Take ReelForge's access away yourself at https://myaccount.google.com/connections",
-                        title="YouTube's API", severity="warning", timeout=25)
+            self._api_say("ReelForge has forgotten the connection, but Google couldn't be told (is this computer "
+                          "online?). Take ReelForge's access away yourself at https://myaccount.google.com/connections",
+                          warning=True, timeout=25)
         elif done["revoked"]:
-            self.notify("Disconnected. ReelForge has forgotten the connection, and Google has ended it.",
-                        title="YouTube's API", timeout=10)
+            self._api_say("Disconnected. ReelForge has forgotten the connection, and Google has ended it.", timeout=10)
         else:  # this window wasn't connected, so it had no sign-in to end at Google
-            self.notify(f"Disconnected. ReelForge has forgotten the client. {youtube_api.NO_GRANT}",
-                        title="YouTube's API", timeout=20)
+            self._api_say(f"Disconnected. ReelForge has forgotten the client. {youtube_api.NO_GRANT}", timeout=20)
         self.follow_youtube_api(changed=True)
 
     @rpc

@@ -78,6 +78,7 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
   const [why, setWhy] = useState("") // why the last try at connecting couldn't start, in the Python side's words
   const [leaving, setLeaving] = useState(false) // Disconnect was pressed: asking
   const [busy, setBusy] = useState(false)
+  const [read, setRead] = useState("") // what the Python side said that something typed since has put away
   /** Connect: with the client file at this path, or ("") with the one on file. The answer is true when Google's page
    * is opening, and the view follows your answer on that page. When it can't start, the answer is the sentence that
    * says why, which is shown here. (true: this dialog says how it goes, so the Python side sends no pop-up to sit on
@@ -90,12 +91,17 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
     setBad(Boolean(file) && said !== true)
     setWhy(typeof said === "string" ? said : "")
     if (said !== true) return
-    setPath("")
+    // (What was typed stays in the box until the connection is made: after a no on Google's page, a path as long as
+    // these are had to be pasted a second time.)
     // Google's page is open: a second Enter doesn't open it again. (Unless Esc closed the dialog meanwhile.)
     if (fm.has("api-close")) fm.focus("api-close")
   }
   useEffect(() => {
+    // While this dialog is open, the Python side says in it how connecting and disconnecting went (the view's
+    // "said"). As pop-ups those came up over its Close button, and the first click there only put the pop-up away.
+    s.bridge.send("youtube_api_dialog", true)
     if (now && api?.state === "again" && !api.wants_file) void connect("")
+    return () => s.bridge.send("youtube_api_dialog", false)
   }, [])
   if (!api) {
     return (
@@ -111,6 +117,7 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
   }
   const waiting = api.state === "connecting"
   const on = api.state === "on"
+  const said = plain(api.said) === read ? [] : api.said // what the Python side has to say, until something is typed
   // (typed: the box's own word on what is in it, which is ahead of this dialog's when Enter follows a paste at once)
   const withFile = (typed = path) => (typed.trim() ? void connect(typed) : setBad(true))
   const kids = api.made_for_kids === null ? "" : api.made_for_kids ? "yes" : "no"
@@ -131,6 +138,10 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
       {waiting || (why && !api.wants_file) ? (
         <box flexDirection="row" marginTop={1} flexShrink={0}>
           <Wrapped segs={[[waiting ? api.words.waiting : why, DASH.warn]]} />
+        </box>
+      ) : said.length && !api.wants_file ? (
+        <box flexDirection="row" marginTop={1} flexShrink={0}>
+          <Wrapped segs={said} />
         </box>
       ) : null}
       {/* What scrolls, in a window too short for all of it, so that the box for the file, what it is for and the
@@ -175,9 +186,9 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
             CLIENT FILE
           </text>
           <box flexDirection="row" flexShrink={0}>
-            {/* (why a file wasn't taken, in the place of what the box is for, until something else is typed: under
-                it there is no row to spare in a window 24 rows tall) */}
-            <Wrapped segs={why ? [[why, DASH.warn]] : [[api.words.file, DASH.muted]]} />
+            {/* (why a file wasn't taken, or how what this dialog asked for went, in the place of what the box is
+                for, until something else is typed: under it there is no row to spare in a window 24 rows tall) */}
+            <Wrapped segs={why ? [[why, DASH.warn]] : said.length ? said : [[api.words.file, DASH.muted]]} />
           </box>
         </box>
       ) : null}
@@ -198,6 +209,7 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
                 setPath(v)
                 setBad(false)
                 setWhy("")
+                setRead(plain(api.said))
               }}
               onSubmit={(typed) => withFile(typed)}
             />

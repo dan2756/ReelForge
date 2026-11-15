@@ -542,6 +542,27 @@ describe("without the extension", () => {
     expect(frame(h)).toContain("▐ Start 4 posts ▌")
   })
 
+  test("Show the extension folder says what it did in the dialog, where no pop-up covers Connect a browser", async () => {
+    // Step 3 of the set-up, and Connect a browser is step 4. The fifteen-second pop-up sat on both, and on Close.
+    const h = await kit({}, [120, 30])
+    await clickText(h, "▐ Set it up ▌", 3)
+    await until(h, () => frame(h).includes("BROWSER EXTENSION"))
+    await clickText(h, "▐ Show the extension folder ▌", 3)
+    await until(h, () => dialog(h).includes("The extension's folder:"))
+    expect(dialog(h)).toMatch(/The extension's folder: (It is showing in .* and its path is copied\. On your browser's extensions page, switch on Developer mode, press Load unpacked and pick it\.|This ReelForge has no extension folder yet)/)
+    expect(popups()).toEqual([])
+    for (const [w, rows] of [[120, 30], [100, 30], [80, 24]] as const) {
+      h.t.resize(w, rows)
+      await h.settle(400)
+      for (const button of ["▐ Connect a browser ▌", "▐ Show the extension folder ▌", "▐ Close ▌"]) expect(frame(h)).toContain(button)
+    }
+    // Connect a browser is one click away: the first click is the button's, not a pop-up's.
+    await clickText(h, "▐ Connect a browser ▌", 3)
+    await until(h, () => listed("opened.txt").some((l) => l.includes("/pair?k=")))
+    expect(dialog(h)).toContain("● Waiting for your browser")
+    expect(dialog(h)).not.toContain("The extension's folder:")
+  })
+
   test("one line says the extension exists, and Hide puts it away for good", async () => {
     const h = await kit({}, [120, 30])
     // What it does comes with how far that has been tested, in this window too, which only has room for the middle
