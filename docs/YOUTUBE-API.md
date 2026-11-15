@@ -122,7 +122,8 @@ One video uploads at a time for a channel. A second one waits its turn.
 "Made for kids" is a declaration you make to YouTube, so ReelForge never makes it for you. Until you have
 answered in ReelForge, a post carries no answer and the audience setting of your channel in YouTube Studio applies.
 The row then says that no answer was sent and what YouTube made of the video, and asks you to look if YouTube has
-it as made for kids. What YouTube does with an upload that carries no answer is known only from its documentation.
+it as made for kids. What YouTube does with an upload that carries no answer has not been seen on a real upload,
+which is why ReelForge reads its answer back.
 
 ReelForge does not set the altered-content answer, tags, a thumbnail, a playlist or a schedule. Set those in
 YouTube Studio. It leaves telling your subscribers to YouTube, which does it for a public video unless told
@@ -210,7 +211,8 @@ One file for each channel:
 - a channel you added: `profiles/<its folder>/dashboard/data/youtube_api.json`
 
 It holds the client's id and secret from the file you gave, your choices (who can see a post, and the
-made-for-kids answer once you have given one), the channel the last upload went to, and the address of an upload while one is under way.
+made-for-kids answer once you have given one), the channel the last upload went to, and the address of an upload
+while one is under way.
 
 **The sign-in is not in it, or in any file.** What Google gives ReelForge when you say yes (a refresh token) stays
 in the memory of the window that connected and is gone when that window closes. The client's id and secret alone
