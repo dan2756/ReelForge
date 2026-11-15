@@ -684,13 +684,25 @@ class YouTubeApiTab:
         if not worker.is_cancelled:
             self.loop.call_soon(self._api_done, job)
 
+    def _row_says(self, job: dict) -> bool:
+        """Whether the Publish tab is open on a row that says how this job ended: the picked video's YouTube row,
+        while it is this job's. After a post again that ended without a post it isn't: the post that is up has
+        the row again (posting.standing, and the job that was set aside stands again), and it says "posted". Nor
+        does a row that shows an earlier post's numbers say what a new post has to add (api_rows)."""
+        video = self.selected_file
+        if self.tab != "publish" or video is None or str(video) != job["video_path"]:
+            return False
+        current = self._safe(lambda: posting.for_files([video]).get(video, {}).get("youtube"), None)
+        post = self.spotted_posts(video).get("youtube")
+        if current is None or current["id"] != job["id"] or posting.standing(current, post) != job["state"]:
+            return False
+        return job["state"] != "posted" or not (post and post["views"] is not None)
+
     def _api_done(self, job: dict | None) -> None:
         """On the loop, when this window's upload is over: say how it ended. Not in a pop-up while the Publish tab
-        is open on that video: its row says the same there, with the buttons for it, and the pop-up sat on them
-        for twenty seconds."""
-        on_show = bool(job) and self.tab == "publish" and self.selected_file is not None \
-            and str(self.selected_file) == job["video_path"]
-        if on_show:
+        is open on that video and its row says the same, with the buttons for it: the pop-up sat on them for
+        twenty seconds."""
+        if job and self._row_says(job):
             pass
         elif job and job["state"] == "posted":
             said, act_on = to_look_at(job)

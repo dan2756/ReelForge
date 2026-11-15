@@ -437,6 +437,24 @@ describe("a post through the API", () => {
     expect((await google(h)).videos).toEqual(["vid00000001", "vid00000002"])
   })
 
+  test("a Post it again that YouTube refuses is said in a pop-up, because the row still says posted", async () => {
+    const h = await kit({ api: { client: "on", kids: false } })
+    await ask(h)
+    await clickText(h, "Post to YouTube", 2)
+    await until(h, () => youtube(h).state === "posted")
+    expect(popups()).toEqual([]) // the row said that one
+    await google(h, "tell", { start_script: [[403, "quotaExceeded"]] })
+    await ask(h, "Again with API…")
+    await clickText(h, "Post it again", 2)
+    await until(h, () => popups().length > 0)
+    expect(popups()).toEqual(["YouTube: not posted: Your Google Cloud project has used up today's YouTube API allowance. It starts again at midnight Pacific time. Nothing was posted."])
+    // The first one is still up, so its row says posted again, and nothing of the try that failed.
+    expect(youtube(h).state).toBe("posted")
+    expect(row(h)).toContain("✓ posted")
+    expect(row(h)).not.toContain("failed")
+    expect([jobsMade(), (await google(h)).videos]).toEqual([2, ["vid00000001"]])
+  })
+
   test("that YouTube stored another way than you chose is posted, with an amber note on its row", async () => {
     const h = await kit({ api: { client: "on", kids: false, google: { stores_as: "private" } } })
     await ask(h)

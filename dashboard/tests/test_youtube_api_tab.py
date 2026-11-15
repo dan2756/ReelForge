@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from dashboard import db, posting, posting_tab, youtube_api_tab
-from dashboard.platforms import youtube_api
+from dashboard.platforms import Account, Post, youtube_api
 from dashboard.platforms.youtube_api import AGAIN, UNPROVEN
 from dashboard.tests.google import CHANNEL
 from dashboard.tests.test_posting import approve
@@ -638,6 +638,52 @@ class Posting(ApiPosting):
         w.call("pick_file", str(self.video))
         self.google.hold.set()
         self.assertTrue(w.until(lambda: [t["title"] for t in w.sent("toast")] == ["Posted to YouTube"], 15))
+
+    def test_a_post_again_whose_row_does_not_say_how_it_ended_is_said_in_a_pop_up(self):
+        """On the Publish tab the video's row says how an upload ended, so no pop-up does. Not after a post again
+        that failed: the post that is up has the row again, and the row says "posted" and nothing of the try."""
+        w = self.window()
+        w.call("tab_opened", "publish")
+        w.call("pick_file", str(self.video))
+        first = self.posted(w)
+        w.forget()
+        self.google.start_script = [(403, "quotaExceeded")]
+        again = self.over(w, self.api_post(w, force=True)["jobs"][0]["id"])
+        row = self.rows(w)["youtube"]
+        self.assertEqual((again["state"], row["state"], row["job"]), ("failed", "posted", first["id"]))
+        self.assertNotIn("failed", plain(row["line"]))
+        (toast,) = w.sent("toast")
+        self.assertEqual((toast["title"], toast["severity"], toast["body"]),
+                         ("YouTube: not posted", "warning", again["error_message"]))
+        self.assertIn("used up today's YouTube API allowance", toast["body"])
+        # One that goes up, while the row shows the first post's numbers from a stats read: the row has no room
+        # for what the new post has to add (how YouTube stored it), so the pop-up says it, with the new link.
+        db.record_snapshot("youtube", Account("@me", 1_000), [Post("vid00000001", CAPTION, LINK, db.now_iso(),
+                                                                   views=12)])
+        w.svc.reload()
+        w.forget()
+        self.google.stores_as = "private"
+        second = self.over(w, self.api_post(w, "public", force=True)["jobs"][0]["id"])
+        row = self.rows(w)["youtube"]
+        self.assertEqual((second["state"], second["step"], row["state"]), ("posted", "confirm", "posted"))
+        self.assertIn("12 views", plain(row["line"]))
+        self.assertNotIn("YouTube stored it", plain(row["line"]))
+        (toast,) = w.sent("toast")
+        self.assertEqual((toast["title"], toast["severity"]), ("Posted to YouTube", "warning"))
+        self.assertIn("YouTube stored it as private, not public as you chose.", toast["body"])
+        self.assertIn("https://youtube.com/shorts/vid00000002", toast["body"])
+        # A video a stats read found, posted again without success: its row stays "posted" too.
+        other = self.root / "videos" / "ep02.mp4"
+        other.write_bytes(BYTES[::-1])
+        db.add_post("youtube", "abcdefghijk", db.create_episode("The second video", str(other)), "The second video",
+                    "https://youtu.be/abcdefghijk")
+        w.svc.reload()
+        w.call("pick_file", str(other))
+        w.forget()
+        self.google.start_script = [(403, "quotaExceeded")]
+        again = self.over(w, self.api_post(w, force=True)["jobs"][0]["id"])
+        self.assertEqual((again["state"], self.rows(w)["youtube"]["state"]), ("failed", "spotted"))
+        self.assertEqual([t["title"] for t in w.sent("toast") if "YouTube" in t["title"]], ["YouTube: not posted"])
 
     def test_the_rows_own_button_posts_with_the_form_as_it_is_and_never_again(self):
         w = self.window()
