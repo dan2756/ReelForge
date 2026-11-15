@@ -148,8 +148,10 @@ checks too, so the bell tells you). **Update and restart** downloads it, puts it
 - a git copy: `git pull` (only when you haven't changed files yourself).
 
 Your channel (`my-studio/`), videos (`episodes/`, `completed videos/`), stats, logins, settings and downloaded tools
-are never touched, and your `CLAUDE.md` / `AGENTS.md` are rewritten from your channel's answers with the new
-version's instructions. If anything goes wrong, the version you have keeps working. From a terminal:
+are never touched, and your `CLAUDE.md` / `AGENTS.md` are written again from your settings as they are, with the new
+version's instructions. If the download or its check fails, nothing has changed and the version you have keeps
+working. If the update stops later (a file another program has open, say), the message says what to do: usually
+**Update and restart** again, which carries on from where it stopped. From a terminal:
 `.venv\Scripts\python -m studio.update` (add `--apply` to install).
 
 ## How ReelForge reads your stats
@@ -232,7 +234,7 @@ upload it).
 | Instagram "wants to check it's you" | Press **Log in again** and follow Instagram's steps in the window that opens. |
 | A finished video isn't in the Publish list | Run `reelforge publish-check episodes/<id>` in the ReelForge folder: it says what's missing. |
 | A post is grouped with the wrong video | Videos tab: highlight it and press **Fix episode**. ReelForge keeps your choice. |
-| An update didn't finish | The message on the Updates tab says why; the version you have keeps working. Try again. |
+| An update didn't finish | The message on the Updates tab says why and what to do: usually **Update and restart** again, which carries on from where it stopped. |
 | `config.toml has a typo` | Fix the line it names, or delete `dashboard/config.toml` and run `reelforge channel`. |
 
 ## Files
