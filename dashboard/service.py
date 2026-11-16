@@ -1853,7 +1853,9 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
             p = self.platforms.get(u["platform"])
             q = found.get((episodes.get((u["video"] or "").lower()), u["platform"]))
             job = jobs.get((u["platform"], (u["video"] or "").lower(), u["ts"]))
-            if job and (not q or job["state"] in (*posting.IN_FLIGHT, "unknown")):  # its job knows more than the stats
+            # Its job knows more than the stats: while it is under way or not sure, and for as long as the stats
+            # have the post without a number (the job filed it; no read has seen it yet, so "live" isn't known).
+            if job and (not q or q["views"] is None or job["state"] in (*posting.IN_FLIGHT, "unknown")):
                 mark, note = upload_note(job, p.name if p else u["platform"])
             elif q:
                 mark, note = Text("✓", GOOD), Text(f"live · {fmt_num(q['views'])} views · {q['url'] or ''}")

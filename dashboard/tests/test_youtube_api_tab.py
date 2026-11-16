@@ -561,6 +561,13 @@ class Posting(ApiPosting):
         self.assertTrue(toast["body"].startswith("ep01.mp4: It is private, as you chose."), toast["body"])
         self.assertIn(LINK, toast["body"])
         self.assertIn(f"posted with its API · {LINK}", plain(w.view("uploads")["rows"][0]["cells"][4]))
+        # The same once the window has read the stats store again. The stats have the post from this job, with no
+        # number yet: "live · — views" would say more than anyone knows. (Which of the two the row said used to
+        # depend on whether that read had happened yet.)
+        w.svc.reload()
+        self.assertEqual([(q["platform"], q["views"]) for q in w.svc.posts if q["episode_id"]], [("youtube", None)])
+        w.call("update_uploads")
+        self.assertIn(f"posted with its API · {LINK}", plain(w.view("uploads")["rows"][0]["cells"][4]))
         # The channel it went to is known from now on, and the upload's session is off the file.
         self.assertEqual(w.view("youtube_api")["channel"], CHANNEL)
         self.assertIn("last upload went to Night Physics", plain(w.view("youtube_api")["line"]))
