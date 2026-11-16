@@ -35,6 +35,19 @@ export async function headless(
   const bridge = opened.bridge
   sides.adopt(bridge)
   const t = await createTestRenderer({ ...RENDERER, width, height }) // as the real window's: Ctrl+C is a key, not the end
+  // A frame read while the renderer is writing one out is refused (OutputBusy, once in many runs on GitHub's machines):
+  // it is read again a moment later. Anything else it throws is the test's to see.
+  const capture = t.captureCharFrame
+  t.captureCharFrame = () => {
+    for (let i = 0; ; i++) {
+      try {
+        return capture()
+      } catch (e) {
+        if (i >= 200 || !String((e as Error)?.message ?? e).includes("OutputBusy")) throw e
+        Bun.sleepSync(1)
+      }
+    }
+  }
   const exits: { code: number; result?: object }[] = []
   const quit = (code = 0, result?: object) => void exits.push({ code, result })
   const root = createRoot(t.renderer)
