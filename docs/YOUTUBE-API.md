@@ -363,6 +363,7 @@ Not verified:
   this was built. That page could not be opened then.
 - The steps in Google Cloud, on a real screen.
 - The limits marked "excerpt".
-- Windows and macOS. The tests ran on Linux.
+- Windows and macOS with a real browser. The tests run on GitHub's Windows, macOS and Linux machines on every
+  push, against the stand-in, with the browser's part played by the tests.
 - The window in a terminal, with a real browser and Google's own page. Its tests draw it without a terminal and
   answer for the browser.
