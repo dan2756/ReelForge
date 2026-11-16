@@ -451,7 +451,10 @@ class YouTubeApiTab:
         for row in rows:
             job, post = jobs.get(row["key"]), posts.get(row["key"])
             if job is not None and job["via"] == "api" and row["job"] == job["id"]:
-                row["actions"] = [a for a in row["actions"] if a != "retry"]
+                # (Post again… stands in for Try again where the video may be up by your hand. On this row that is
+                # a post through the API too, Again with API… below: the extension's would ask about the browser.)
+                row["actions"] = [a for a in row["actions"]
+                                  if a != "retry" and not (a == "post_again" and row["state"] in posting.FREE)]
                 if row["state"] == "posting":
                     row["actions"] = []
                 elif row["state"] == "queued" and self._safe(lambda: another_uploading(job["id"]), False):

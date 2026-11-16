@@ -970,6 +970,26 @@ class Posting(ApiPosting):
         self.assertEqual((again["state"], again["via"]), ("posted", "api"))
         self.assertEqual((self.pages, len(self.google.videos)), ([], 1))  # no page for the extension was opened
 
+    def test_a_failed_try_whose_upload_page_was_then_opened_by_hand_is_posted_again_only_with_the_api(self):
+        # The try through the API failed, and BY HAND's YouTube button opened the upload page since. A new post is a
+        # post again (the video may be up by your hand), and on this row that is Again with API…: the extension's
+        # Post again… would open the extension's question, which with no browser connected only says to connect one.
+        self.google.start_script = [(403, "quotaExceeded")]
+        w = self.window(connect=False)
+        job = self.posted(w)
+        self.assertEqual(job["state"], "failed")
+        w.call("open_upload", "youtube", CAPTION, TAGS)
+        row = self.rows(w)["youtube"]
+        self.assertEqual((row["state"], row["via"], row["by_hand"], row["actions"], row["api"]),
+                         ("failed", "api", True, [], {"force": True}))
+        # In a window that has just opened (not connected in it yet): the row offers to connect, and nothing that
+        # goes through the extension.
+        self.reopen()
+        w.svc.follow_youtube_api(changed=True)
+        w.svc.update_posting()
+        row = self.rows(w)["youtube"]
+        self.assertEqual((row["actions"], row.get("api")), (["connect_api"], None))
+
     def test_a_try_that_ended_without_a_post_is_never_sent_again_as_it_was(self):
         """Try again on one of the extension's posts hands the same text to the extension, which stops at the
         platform's own Post button. Through the API the same press would upload at once, with the old try's caption,
