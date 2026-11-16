@@ -262,6 +262,30 @@ describe("connecting", () => {
     expect(dialog(h)).toContain("CLIENT FILE Type or paste where the client file is")
   })
 
+  test("a second no on Google's page, after something was typed and the file tried again, is said again", async () => {
+    // Its words are the first no's, which something typed had put away: the dialog took it for the same one and
+    // said it nowhere (and no pop-up says it while the dialog is open).
+    const h = await kit({ api: { consent: "later" } })
+    await openApi(h)
+    await h.t.mockInput.typeText(join(tmp, "client_secret_test.json"))
+    await clickText(h, "Connect with this file", 2)
+    await until(h, () => api(h).state === "connecting")
+    toasts.clear()
+    await google(h, "answer", "no") // (and no again on the page that opens next)
+    await until(h, () => dialog(h).includes("You said no"))
+    await clickText(h, tmp.slice(0, 20), 2)
+    await h.t.mockInput.typeText("x")
+    await h.settle(300)
+    h.t.mockInput.pressBackspace()
+    await h.settle(300)
+    expect(dialog(h)).not.toContain("You said no")
+    h.t.mockInput.pressKey("RETURN") // the same file again
+    await until(h, () => dialog(h).includes("You said no"))
+    expect((await google(h)).consents).toBe(2)
+    expect(dialog(h)).toContain("CLIENT FILE You said no on Google's page, so nothing was connected.")
+    expect(popups()).toEqual([])
+  })
+
   test("with a client on file, a window that has just opened says it is not connected, and Connect is one press", async () => {
     const h = await kit({ api: { client: true } })
     expect(flat(h)).toContain("○ YouTube API: not connected in this window")

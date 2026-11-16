@@ -310,6 +310,7 @@ export interface YouTubeApiView {
   state: "off" | "connecting" | "on" | "again"
   line: Segs
   said: Segs // how the last thing its dialog asked for went, while the dialog is open ([]: nothing to say)
+  said_id: number // which time that was said: one more each time, when the words are the same as the last too
   lines: Segs[] // what it is, or why this window has to connect, and how far this way of posting is tested
   client: boolean // a client is on file: Connect needs no file
   wants_file: boolean // connecting takes a client file: none is on file, or Google no longer knows the one that is
