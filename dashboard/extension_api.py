@@ -1014,8 +1014,6 @@ class Handler(BaseHTTPRequestHandler):
             raise Refusal(409, "ended", "This post is over.")
         changed = Refusal(409, "changed", f"{job['video']} was replaced or removed after this post was started. "
                                           "Nothing was posted: start it again from ReelForge.")
-        if not posting.unchanged(job):
-            raise changed
         try:
             f = open(job["video_path"], "rb")
         except OSError:
@@ -1025,6 +1023,13 @@ class Handler(BaseHTTPRequestHandler):
             if size != job["video_size"]:
                 raise changed
             span = byte_range(self.headers.get("Range"), size)
+            # The hand-over starts at the first byte, and that piece is checked against the file's bytes read
+            # afresh: one written over with others of the same size and time keeps its remembered fingerprint
+            # (posting.digest). The pieces after it go by the fingerprint just remembered, so a large video is
+            # read in full once per hand-over, not once per piece. (The extension also checks the whole video it
+            # was given before any page gets it.)
+            if not posting.unchanged(job, fresh=span is not None and span[0] == 0):
+                raise changed
             if span is None:
                 self.reply(416, {"error": "range", "message": "That part of the video doesn't exist."},
                            {"Content-Range": f"bytes */{size}"})

@@ -543,9 +543,10 @@ class PostingTab:
         if sha256 is not None:
             # ... nor another file under the same name (a new render, a copy written over it). You do see the video
             # in the tab before you press Post there, but not when Press Post for me is on: a yes is to the file
-            # the question was about, as it is for a post through YouTube's API.
+            # the question was about, as it is for a post through YouTube's API. Read afresh: a copy written over
+            # it with the same size and time would keep the remembered fingerprint.
             try:
-                same = sha256 == posting.digest(self.selected_file)
+                same = sha256 == posting.digest(self.selected_file, fresh=True)
             except OSError:
                 same = False
             if not same:

@@ -318,9 +318,13 @@ also end as `failed`, `cancelled` or `expired` (a queued one nobody took in ten 
 new job may be made. `unknown` is the state that matters most: Post was pressed, or may have been, and no
 confirmation came. Nothing ever retries such a job. Only the person's answer or a stats read that finds the post
 settles it. A video is the SHA-256 of its bytes, not its file name, and has at most one live job for each platform
-(a unique index holds that between windows too). Everything in `posting.py` is a plain function on the open
-database, so the window, the local server and the tests drive the same code. The words the window shows for a job,
-and its buttons, are written in `posting_tab.py`, a mixin of the window's service.
+(a unique index holds that between windows too). The SHA-256 is remembered by path, size and time, so the window's
+looks don't read a large video again; a copy written over a video with its size and time kept (`cp -p`, `rsync -t`,
+a sync client) looks unchanged to that, so what a post goes by is read afresh: at the yes (`post_with_extension`,
+`post_with_api`) and when the local server starts handing a job's video to the extension. Everything in
+`posting.py` is a plain function on the open database, so the window, the local server and the tests drive the same
+code. The words the window shows for a job, and its buttons, are written in `posting_tab.py`, a mixin of the
+window's service.
 
 **The local server** (`extension_api.py`). Each open window listens on `127.0.0.1`, on the first free port from
 47821 to 47830, for the extension and for the two local pages in `web/` (`/pair` and `/post/<batch>`). Its opening

@@ -701,8 +701,8 @@ class YouTubeApiTab:
                             "video now. Press Post with API… again to post this one.",
                             title="Nothing was started", severity="warning", timeout=12)
                 return None
-            try:
-                same = shown.get("sha256") == posting.digest(self.selected_file)
+            try:  # (read afresh: a copy written over it with the same size and time keeps the remembered one)
+                same = shown.get("sha256") == posting.digest(self.selected_file, fresh=True)
             except OSError:
                 same = False
             if not same:  # (nobody sees the video again before it is up)

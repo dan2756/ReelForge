@@ -5,7 +5,9 @@ page that hands it a batch is a stand-in (the server opens the real one)."""
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import textwrap
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -333,6 +335,26 @@ class Posting(PostingTest):
         self.assertEqual((posting.recent(), self.pages, db.uploads()), ([], [], []))
         # Asked again, the yes is to the file as it is now.
         asked = w.call("post_info", CAPTION, TAGS)["video"]
+        made = w.call("post_with_extension", ["tiktok"], CAPTION, TAGS, True, None, asked["path"], asked["sha256"])
+        self.assertEqual([posting.get(j["id"])["video_sha256"] for j in made["jobs"]], [asked["sha256"]])
+
+    def test_a_yes_to_a_file_written_over_with_the_same_size_and_time_starts_nothing(self):
+        """A copy made with cp -p, rsync -t or a sync client keeps the size and time of the file it replaced, so
+        the fingerprint ReelForge remembers still fits it. The yes reads the file afresh."""
+        w = self.window()
+        asked = w.call("post_info", CAPTION, TAGS)["video"]
+        st = self.video.stat()
+        other = bytes(reversed(self.video.read_bytes()))
+        self.video.write_bytes(other)
+        os.utime(self.video, ns=(st.st_atime_ns, st.st_mtime_ns))
+        self.assertEqual(posting.digest(self.video), asked["sha256"])  # (as remembered)
+        made = w.call("post_with_extension", ["tiktok"], CAPTION, TAGS, False, None, asked["path"], asked["sha256"])
+        self.assertIsNone(made)
+        self.assertEqual(w.sent("toast")[-1]["title"], "Nothing was started")
+        self.assertEqual((posting.recent(), self.pages), ([], []))
+        # The question asked again shows the file as it is now, and its yes goes ahead with it.
+        asked = w.call("post_info", CAPTION, TAGS)["video"]
+        self.assertEqual(asked["sha256"], hashlib.sha256(other).hexdigest())
         made = w.call("post_with_extension", ["tiktok"], CAPTION, TAGS, True, None, asked["path"], asked["sha256"])
         self.assertEqual([posting.get(j["id"])["video_sha256"] for j in made["jobs"]], [asked["sha256"]])
 

@@ -12,6 +12,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
@@ -626,6 +627,24 @@ class Posting(ApiPosting):
         made = w.call("post_with_api", CAPTION, TAGS, "private", False, self.yes_to(info))
         job = self.over(w, made["jobs"][0]["id"])
         self.assertEqual((job["state"], bytes(self.google.videos[0]["data"])), ("posted", BYTES[::-1] + b"another cut"))
+
+    def test_a_yes_to_a_file_written_over_with_the_same_size_and_time_starts_nothing(self):
+        """A copy made with cp -p, rsync -t or a sync client keeps the size and time of the file it replaced, so
+        the fingerprint ReelForge remembers still fits it. The yes reads the file afresh."""
+        w = self.window()
+        info = w.call("youtube_api_info", CAPTION, TAGS)
+        st = self.video.stat()
+        self.video.write_bytes(BYTES[::-1])
+        os.utime(self.video, ns=(st.st_atime_ns, st.st_mtime_ns))
+        self.assertEqual(posting.digest(self.video), info["video"]["sha256"])  # (as remembered)
+        self.assertIsNone(w.call("post_with_api", CAPTION, TAGS, "private", False, self.yes_to(info)))
+        self.assertEqual(w.sent("toast")[-1]["title"], "Nothing was started")
+        self.assertEqual((posting.recent(), self.google.starts), ([], []))
+        info = w.call("youtube_api_info", CAPTION, TAGS)
+        self.assertEqual(info["video"]["sha256"], hashlib.sha256(BYTES[::-1]).hexdigest())
+        made = w.call("post_with_api", CAPTION, TAGS, "private", False, self.yes_to(info))
+        job = self.over(w, made["jobs"][0]["id"])
+        self.assertEqual((job["state"], bytes(self.google.videos[0]["data"])), ("posted", BYTES[::-1]))
 
     def test_a_made_for_kids_answer_changed_since_the_question_starts_nothing(self):
         """The question shows the made-for-kids answer a post will carry, or that none will be sent. When that is

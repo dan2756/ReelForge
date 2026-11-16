@@ -1347,6 +1347,18 @@ class Digest(LedgerTest):
             self.assertEqual(posting.digest(self.video), hashlib.sha256(b"and a longer third cut").hexdigest())
             self.assertEqual(reads(), 3)
 
+    def test_read_afresh_it_sees_a_copy_written_over_with_the_same_size_and_time(self):
+        # cp -p, rsync -t or a sync client: other bytes, and the size and time of the file they replaced. Only a
+        # fresh read sees it, and from then on the new bytes are what is remembered.
+        posting.digest(self.video)
+        st = self.video.stat()
+        self.video.write_bytes(b"THE FIRST CUT")
+        os.utime(self.video, ns=(st.st_atime_ns, st.st_mtime_ns))
+        new = hashlib.sha256(b"THE FIRST CUT").hexdigest()
+        self.assertEqual(posting.digest(self.video), hashlib.sha256(b"the first cut").hexdigest())  # remembered
+        self.assertEqual(posting.digest(self.video, fresh=True), new)
+        self.assertEqual(posting.digest(self.video), new)
+
     def test_it_is_kept_in_the_database_by_path_size_and_time(self):
         posting.digest(self.video)
         st = self.video.stat()
