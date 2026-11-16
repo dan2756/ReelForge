@@ -326,7 +326,9 @@ export const tests = {
     const film = await ready(t)
     const { jobs } = await post(t, film, ["tiktok"])
     await becomes(t.app, jobs.tiktok, ["ready"])
-    await t.app.ask("busy", { count: 2 })
+    // (three: the news that Post was pressed, the news that it posted, and one more try at them when the
+    // extension's page is opened to look at its record)
+    await t.app.ask("busy", { count: 3 })
     await (await t.browser.tab(HOST.tiktok)).locator("[data-e2e=post_video_button]").click()
     await until("the browser to have it as posted", async () => (await t.browser.jobRecord(jobs.tiktok)).state === "posted")
     equal(await t.app.state(jobs.tiktok), "ready", "what ReelForge knows while its database is busy")

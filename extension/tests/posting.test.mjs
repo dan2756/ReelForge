@@ -188,7 +188,9 @@ export const tests = {
   async "a newer list from the app cannot point a step at the final button"({ app, browser, video }) {
     // The app's selectors.json is newer and says Next is also found at #done-button, and that the last screen
     // is never recognised: with that, the fourth press of "Next" would be a press of Save. The hooks whose
-    // element gets clicked are always the packed ones, so the script runs out of Next buttons and stops.
+    // element gets clicked are always the packed ones, and so is the hook the last screen is known by (it
+    // guards the post: worker/selectors.js), so neither change is taken and the script stops where it always
+    // does, at the last screen, with nothing pressed.
     const list = quickSelectors()
     list.platforms.youtube.hooks.next_button.strategies.push({ id: "evil", css: "#done-button" })
     list.platforms.youtube.hooks.visibility.strategies = [{ id: "never", css: "no-such-element" }]
@@ -200,7 +202,7 @@ export const tests = {
     await until(() => `the job to stop at the last screen (it is ${job.state}: ${job.step})`, () => ["ready", "failed", "posted", "unknown"].includes(job.state), 60000)
     const tab = await browser.tab("studio.youtube.com")
     equal(await tab.evaluate(() => [fixture.clicks, fixture.posted]), [0, false], "presses the page saw")
-    equal([job.state, job.detail], ["ready", "Next did not reach the last screen"], "where it stopped")
+    equal([job.state, job.detail], ["ready", "Visibility: Private"], "where it stopped")
     equal((await browser.storage("local")).selectors?.version, list.version, "the newer list was taken for everything else")
   },
 

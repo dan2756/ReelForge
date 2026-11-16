@@ -78,10 +78,13 @@ export const tests = {
 
   async "a report ReelForge could not take just then (its database was busy) is sent again"(t) {
     const { job, tab } = await toReady(t, "tiktok", t.video())
-    t.app.busy = 2
+    // Two reports follow the click: that Post was pressed (the step "press" of ready), then that it posted. Busy
+    // for both, and for one look in between.
+    t.app.busy = 3
     await tab.locator(FINAL).click()
     await until("the first try", () => t.app.requests("POST", /\/event$/).some(entry => entry.status === 503))
-    equal([job.state, (await t.browser.jobRecord(job.id)).outbox.map(report => report.state)], ["ready", ["posted"]], "the app's state, and what the browser still has to say")
+    await until("the news that it posted to be waiting too", async () => (await t.browser.jobRecord(job.id)).outbox.some(report => report.state === "posted"))
+    equal([job.state, (await t.browser.jobRecord(job.id)).outbox.map(report => [report.state, report.step])], ["ready", [["ready", "press"], ["posted", "confirm"]]], "the app's state, and what the browser still has to say")
     // Nobody asks twice: the popup opening (or the half-minute check) brings it.
     const popup = await t.browser.popup()
     await until(() => `the app to hear (it is ${job.state})`, () => job.state === "posted", 45000)
