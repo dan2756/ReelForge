@@ -129,9 +129,20 @@ function LogStats({ data, close }: { data: LogData; close: () => void }) {
         }}
       />
       <box marginTop={1} marginBottom={1} flexShrink={0}>
-        <text fg={DASH.muted} wrapMode="word">
-          Copy the numbers from the app. Blank fields are skipped; 1.2K and 3,400 both work. Enter saves.
-        </text>
+        {problem ? (
+          // What's wrong with what was typed, where the hint was: under the list it took a row from the list, and in
+          // a window 24 rows tall the box with the wrong number went out of sight. (It is red everywhere: here,
+          // under an @handle, in first-time setup. A number lower than the one saved is not wrong, it is asked
+          // about: amber, and Save again is the answer.)
+          <text fg={problem.includes("Press Save again") ? DASH.warn : DASH.bad} wrapMode="word">
+            {problem}
+          </text>
+        ) : (
+          // (3400 and 12K, not 3,400 and 1.2K: the word wrap broke an example in two at its comma, or its point)
+          <text fg={DASH.muted} wrapMode="word">
+            Copy the numbers from the app. Blank fields are skipped; 3400 and 12K both work. Enter saves.
+          </text>
+        )}
       </box>
       <box flexDirection="row" height={3} flexShrink={0}>
         <box flexGrow={1} justifyContent="center">
@@ -174,13 +185,6 @@ function LogStats({ data, close }: { data: LogData; close: () => void }) {
           </box>
         ))}
       </Scroll>
-      {problem ? (
-        // (what's wrong with what was typed is red everywhere: here, under an @handle, in first-time setup. A number
-        // lower than the one saved is not wrong, it is asked about: amber, and Save again is the answer)
-        <text fg={problem.includes("Press Save again") ? DASH.warn : DASH.bad} marginTop={1} wrapMode="word" flexShrink={0}>
-          {problem}
-        </text>
-      ) : null}
       <DialogButtons>
         <Button id="ls-cancel" label="Cancel" onPress={close} />
         <Button id="ls-save" label="Save" variant="primary" onPress={() => void save()} />

@@ -132,6 +132,32 @@ describe("logging ReelForge's browser out", () => {
 })
 
 describe("typing in stats", () => {
+  test("in a window 80 columns by 24 rows a number that isn't one is said without pushing its box out of sight", async () => {
+    // Said under the list, the sentence took a row from the list: with one video its box was gone, and the wrong
+    // number with it. It is said where the hint was. And the hint's own example is no longer cut at its comma.
+    const h = await kit({ needs_login: ["x"], spotted: { tiktok: 2100 } }) // (one video: a post of it was found)
+    await clickText(h, "Type in stats", 2)
+    await until(h, () => frame(h).includes("TYPE IN STATS"))
+    h.t.resize(80, 24)
+    await h.settle(500)
+    expect(flat(h).replace(/[│┃▀█▄]/g, "").replace(/ +/g, " ")).toContain("Blank fields are skipped; 3400 and 12K both work. Enter saves.")
+    const rows = () => frame(h).split("\n")
+    const list = rows().findIndex((r) => r.includes("VIEWS PER VIDEO"))
+    expect(list).toBeGreaterThan(0)
+    const boxed = (text: string) => rows().slice(list).some((r) => r.includes(text))
+    h.t.mockInput.pressKey("TAB") // to the video's box
+    await h.settle(200)
+    await h.t.mockInput.typeText("abc")
+    await h.settle(200)
+    expect(boxed("abc")).toBe(true)
+    h.t.mockInput.pressKey("RETURN")
+    await until(h, () => frame(h).includes("Whole numbers only"))
+    expect(flat(h)).toContain("Whole numbers only, please (like 1234, 3,400 or 1.2K).")
+    expect(frame(h)).not.toContain("Blank fields are skipped") // in the hint's place, not as one more row
+    expect(boxed("abc")).toBe(true) // the box it is about is still there to correct
+    expect(frame(h)).toMatch(/▐ Cancel ▌ ▐ Save ▌ +│/)
+  })
+
   test("numbers ReelForge can't take are said in red under the boxes, as under an @handle; good ones are saved", async () => {
     const h = await kit({ needs_login: ["x"] })
     await clickText(h, "Type in stats", 2)
