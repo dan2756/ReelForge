@@ -195,13 +195,33 @@ class FactoryReset(ResetScratch):
         self.assertTrue((self.root / "dashboard/data/stats.db").is_file())
         self.assertFalse((self.root / "backups").exists())
 
-    def test_backups_being_a_file_is_an_answer_and_puts_the_hourly_read_back(self):
+    def test_backups_being_a_file_is_said_as_it_is_before_anything_changes(self):
+        """It was found item by item, after ten seconds of trying, and said to be the first item "in use", with
+        closing the other windows as what to do (and the hourly read was taken off and put back meanwhile)."""
         (self.root / "backups").write_text("not a folder", encoding="utf-8")
-        asked, done = self.with_the_hourly_read(move=lambda src, dst, wait=10: REAL_MOVE(src, dst, wait=0))
-        self.assertEqual([what for what, _ in asked], ["off", "wait", "on"])
-        self.assertEqual((len(done.problems), done.unchanged), (1, True))
-        self.assertIn("is in use (", done.problems[0])
-        self.assertTrue((self.root / "dashboard/data/stats.db").is_file())
+        before = sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob("*"))
+        tries = []
+        asked, done = self.with_the_hourly_read(move=lambda src, dst, wait=10: tries.append(src) or "in use")
+        self.assertEqual((asked, tries), ([], []))
+        self.assertEqual((done.problems, done.unchanged, done.in_use),
+                         (['"backups" in the ReelForge folder is a file, not a folder, and the reset keeps what it '
+                           "moves in a folder by that name. Rename that file or move it somewhere else, then try "
+                           "again."], True, False))
+        self.assertEqual(sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob("*")), before)
+        out = io.StringIO()
+        with mock.patch.object(reset, "_interactive", lambda: False), redirect_stdout(out):
+            self.assertEqual(reset.reset_main(["--yes"]), 1)
+        self.assertIn("The factory reset didn't happen, and nothing was changed:\n  \"backups\" in the ReelForge "
+                      "folder is a file", out.getvalue())
+        self.assertNotIn("Close every other ReelForge window (and wait", out.getvalue())
+
+    def test_a_file_where_a_folder_goes_isnt_waited_for(self):
+        (self.root / "dashboard" / "data2").write_text("a file", encoding="utf-8")
+        started = time.monotonic()
+        self.assertEqual(REAL_MOVE(self.root / "research", self.root / "dashboard/data2/research"), "File exists")
+        self.assertEqual(REAL_MOVE(self.root / "research", self.root / "dashboard/data2/x/research"), "Not a directory")
+        self.assertLess(time.monotonic() - started, 5)   # (it waits ten seconds for a file in use)
+        self.assertTrue((self.root / "research" / "ideas.md").is_file())
 
     def test_from_the_command_line_a_wait_for_a_stats_read_is_said(self):
         def waits(say):

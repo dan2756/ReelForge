@@ -125,6 +125,8 @@ def _move(src: Path, dst: Path, wait: float = 10) -> str | None:
             dst.parent.mkdir(parents=True, exist_ok=True)
             os.rename(src, dst)
             return None
+        except (FileExistsError, NotADirectoryError) as e:   # a file where a folder goes: no wait changes that
+            return e.strerror or str(e)
         except OSError as e:
             if time.monotonic() >= end:
                 return e.strerror or str(e)
@@ -309,6 +311,7 @@ class Done:
     problems: list[str] = field(default_factory=list)
     where: Path | None = None   # the backup (reset) or the kept videos (uninstall)
     unchanged: bool = False     # it stopped before changing anything (or put back what it had moved)
+    in_use: bool = True         # what stopped it is a file in use: closing the other windows is what to do
 
 
 def factory_reset(say=print) -> Done:
@@ -318,6 +321,21 @@ def factory_reset(say=print) -> Done:
     items = reset_items()
     browsers = browsers_connected()   # counted now: the file that lists them is about to go into the backup
     dest = _free(BACKUPS, f"factory-reset-{_stamp()}")
+    # Where the backup goes, made (or found) before anything changes, the hourly read included. "backups" being a
+    # file was found item by item, after ten seconds of trying, and said to be the first item "in use", with
+    # closing the other windows as what to do.
+    try:
+        if items:
+            BACKUPS.mkdir(exist_ok=True)
+    except FileExistsError:
+        done.problems = [f'"backups" in the {KIT_NAME} folder is a file, not a folder, and the reset keeps what it '
+                         "moves in a folder by that name. Rename that file or move it somewhere else, then try again."]
+    except OSError as e:
+        done.problems = ['The folder "backups", where the reset keeps what it moves, couldn\'t be made in the '
+                         f"{KIT_NAME} folder ({e.strerror or e})."]
+    if done.problems:
+        done.unchanged, done.in_use = True, False
+        return done
     for path, what in items:
         say(f"  {P.rel(path)}: {what}")
     # The hourly stats read goes off before anything moves, and a read it has just started is stopped with it: one
@@ -339,6 +357,10 @@ def factory_reset(say=print) -> Done:
         # reset didn't happen, so the hourly read is not left off with nothing said.
         if job_was_on:
             _stats_on_again()
+        try:
+            BACKUPS.rmdir()   # when this made it for the backup, and it's empty again
+        except OSError:
+            pass
         raise
     if done.problems:
         try:
@@ -763,7 +785,7 @@ def _report(done: Done, title: str) -> None:
         print(f"\n{title} didn't finish:")
     for p in done.problems:
         print(f"  {p}")
-    if done.unchanged:
+    if done.unchanged and done.in_use:
         print(f"Close every other {KIT_NAME} window (and wait for a stats read to finish), then try again.")
 
 
