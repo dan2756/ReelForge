@@ -321,7 +321,8 @@ settles it. A video is the SHA-256 of its bytes, not its file name, and has at m
 (a unique index holds that between windows too). The SHA-256 is remembered by path, size and time, so the window's
 looks don't read a large video again; a copy written over a video with its size and time kept (`cp -p`, `rsync -t`,
 a sync client) looks unchanged to that, so what a post goes by is read afresh: at the yes (`post_with_extension`,
-`post_with_api`) and when the local server starts handing a job's video to the extension. Everything in
+`post_with_api`), when the local server starts handing a job's video to the extension, and when an upload through
+YouTube's API starts (`youtube_api_tab`: the job may have waited its turn behind another upload). Everything in
 `posting.py` is a plain function on the open database, so the window, the local server and the tests drive the same
 code. The words the window shows for a job, and its buttons, are written in `posting_tab.py`, a mixin of the
 window's service.

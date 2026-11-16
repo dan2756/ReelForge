@@ -114,8 +114,8 @@ def digest(path: Path, fresh: bool = False) -> str:
     """A video's identity: the SHA-256 of its bytes, in lowercase hex. Remembered by path, size and time, so the
     file is read again only when it has changed. fresh: read the bytes all the same (and remember them anew). A file
     written over with others of the same size, its time kept (cp -p, rsync -t, a sync client), looks unchanged to
-    the remembered one: what a post goes by is read afresh, at your yes and when the extension is handed the file,
-    once each, and every look in between may go by what is remembered."""
+    the remembered one: what a post goes by is read afresh, at your yes, when the extension is handed the file and
+    when an upload through YouTube's API starts, once each, and every look in between may go by what is remembered."""
     st = path.stat()
     key = str(path)
     known = _digests()

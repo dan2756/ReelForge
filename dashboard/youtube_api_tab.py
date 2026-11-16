@@ -178,7 +178,10 @@ def _upload(job: dict, stop: Callable[[], bool]) -> None:
         if privacy not in PRIVACY:  # never guessed: left out, YouTube would make the video public
             raise ApiError("odd", "This post doesn't say who may see the video, so it wasn't sent. Post it again.")
         move("uploading", step="upload", progress=0.0, detail=f"to YouTube, as {privacy}")
-        if not posting.unchanged(job):
+        # Read afresh: the job may have waited its turn behind another upload for minutes, and a copy written over
+        # the file meanwhile with its size and time kept looks unchanged to the remembered fingerprint. The upload
+        # reads the whole file anyway.
+        if not posting.unchanged(job, fresh=True):
             raise ApiError("changed", "The video file changed after you pressed Post. Check it, then post again.")
         made = youtube_api.upload(Path(job["video_path"]), text.get("title", ""), text.get("description", ""),
                                   privacy, kids_answer(options), started=started, progress=progress, last=last,

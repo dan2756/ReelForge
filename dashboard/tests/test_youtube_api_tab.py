@@ -1192,6 +1192,22 @@ class Posting(ApiPosting):
         w.svc.jobs_changed()
         self.assertEqual(self.rows(w)["youtube"]["state"], "none")  # the file there now is another video
 
+    def test_a_file_written_over_with_the_same_size_and_time_while_its_upload_waits_is_not_sent(self):
+        """A post can wait its turn behind another upload for minutes. A copy made meanwhile with cp -p, rsync -t or a
+        sync client keeps the size and time of the file it replaced, so the fingerprint ReelForge remembers still
+        fits it. The upload reads the file afresh before any of it goes."""
+        w = self.window()
+        job = self.job()
+        st = self.video.stat()
+        self.video.write_bytes(BYTES[::-1])
+        os.utime(self.video, ns=(st.st_atime_ns, st.st_mtime_ns))
+        self.assertEqual(posting.digest(self.video), job["video_sha256"])  # (as remembered)
+        done = youtube_api_tab.run(job["id"])
+        self.assertEqual((done["state"], done["error_code"]), ("failed", "changed"))
+        self.assertEqual((self.google.starts, self.google.puts, self.google.videos), ([], [], []))
+        w.svc.jobs_changed()
+        self.assertEqual(self.rows(w)["youtube"]["state"], "none")  # nothing is under way for the file there now
+
     def test_a_job_that_does_not_say_who_may_see_it_is_never_sent(self):
         made = posting.create_batch(self.video, ["youtube"], CAPTION, TAGS, self.cfg, via={"youtube": "api"})
         self.connect_api()
