@@ -293,7 +293,11 @@ class WindowTest(unittest.TestCase):
             self.assertEqual(self.panel(w, "x")["state"], "login")
             self.assertNotIn("x", w.svc.platforms)
             # Disconnect TikTok: hidden everywhere, its stats kept.
-            self.assertEqual(w.call("disconnect_info", "tiktok")["title"], "DISCONNECT TIKTOK?")
+            asked = w.call("disconnect_info", "tiktok")
+            self.assertEqual(asked["title"], "DISCONNECT TIKTOK?")
+            said = "".join(seg[0] for seg in asked["note"])
+            self.assertIn("so connecting it again, on this tab with the same @handle, brings it all back.", said)
+            self.assertNotIn("(", said)  # the window's word wrap ends a row right after an opening bracket
             w.call("disconnect", "tiktok")
             self.assertTrue(w.until(lambda: "tiktok" not in w.svc.platforms))
             self.assertEqual(config.load_config()["tiktok"]["handle"], "")

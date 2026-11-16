@@ -653,7 +653,9 @@ class Posting(PostingTest):
         w.svc.mind_the_jobs()  # every half minute (tick), and at start
         row = self.rows(w)["tiktok"]
         self.assertEqual((row["state"], row["actions"]), ("expired", ["retry"]))
-        self.assertIn("the extension didn't pick it up", plain(row["line"]))
+        # Once, and without brackets: "(not picked up in time)" after it said the same again, and the window's
+        # word wrap ended a row right after the opening bracket.
+        self.assertRegex(plain(row["line"]), r"^○ the extension didn't pick it up in time  \S+ ago$")
 
 
 def job_text(job: dict) -> str:

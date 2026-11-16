@@ -172,6 +172,9 @@ def state_line(job: dict | None, post: dict | None, name: str, opened: str | Non
         out = Text("× failed", f"bold {BAD}")
         return out.append((f" at {step}" if step else "") + (f": {why}" if why else "") + f"  {when}", MUTED)
     if state in ("cancelled", "expired"):
+        if state == "expired" and job["detail"] == "not picked up in time":
+            # (in the row's own words: in brackets it said the same thing twice, and the wrap ended a row at "(")
+            return Text(f"○ {words} in time  {when}", MUTED)
         return Text(f"○ {words}" + (f" ({job['detail']})" if job["detail"] else "") + f"  {when}", MUTED)
     if state == "unknown":
         return Text(f"? {words}", f"bold {AMBER}")

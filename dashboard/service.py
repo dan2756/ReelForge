@@ -2175,8 +2175,9 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
         note.append(f"{p.name}  ", f"bold {p.color}")
         note.append(p.handle, "bold")
         note.append(f"\n\nReelForge stops reading {p.name}, and its cards, charts, columns, filters, upload buttons and "
-                    "notifications leave every tab. Everything it has read so far stays saved, so connecting it again "
-                    "(on this tab, with the same @handle) brings it all back.", MUTED)
+                    "notifications leave every tab. Everything it has read so far stays saved, so connecting it "
+                    # (no brackets: the window's word wrap ends a row right after an opening one)
+                    "again, on this tab with the same @handle, brings it all back.", MUTED)
         logged_in = p.browser_stats and p.logged_in
         if logged_in:
             note.append(f"\nReelForge's own browser stays logged in to {p.name}: that log-in is kept on this computer, "

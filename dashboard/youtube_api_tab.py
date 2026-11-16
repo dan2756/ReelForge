@@ -4,7 +4,8 @@ dashboard/posting.py; docs/YOUTUBE-API.md is the page for the person.
 
 A post here is a job like the extension's, with via "api": made by posting.create_batch, so the same things stop
 it (a video that isn't approved, a post of it already under way, up, or found by a stats read), with the same text
-(the title is what Copy YouTube caption copies, the description what Copy YouTube hashtags copies). It then moves
+(the title is what Copy caption on YouTube's row copies, the description what Copy YouTube hashtags copies). It
+then moves
 
   queued → uploading (with its percent) → posting (the last piece is on its way) → posted, with the video's id
 
@@ -234,7 +235,8 @@ def read_back(privacy: str, made_for_kids: bool | None, made: dict) -> str:
     elif made["privacy"] != privacy:
         said.append(f"YouTube stored it as {made['privacy']}, not {privacy} as you chose. Change who can see it in "
                     "YouTube Studio. YouTube has been known to keep uploads private when they come from a Google "
-                    f"Cloud project it hasn't verified: {DOCS} says more.")
+                    # (the guide by what it is, not its path: the wrap ended a row inside docs/YOUTUBE-API.md)
+                    "Cloud project it hasn't verified: the YouTube API guide in ReelForge's docs folder says more.")
     if made_for_kids is None:
         if made["for_kids"]:
             said.append("YouTube has it as made for kids. ReelForge sent no answer to that, because you haven't "

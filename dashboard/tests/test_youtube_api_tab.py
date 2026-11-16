@@ -878,7 +878,9 @@ class Posting(ApiPosting):
         self.assertEqual((job["state"], job["post_id"]), ("posted", "vid00000001"))
         self.assertIn("YouTube stored it as private, not public as you chose. Change who can see it in YouTube Studio.",
                       job["detail"])
-        self.assertIn("docs/YOUTUBE-API.md", job["detail"])
+        # (the guide by what it is: its path, docs/YOUTUBE-API.md, was cut in two where the row wrapped)
+        self.assertIn("the YouTube API guide in ReelForge's docs folder says more.", job["detail"])
+        self.assertNotIn("(", job["detail"])
         self.assertEqual(job["step"], "confirm")  # something for you to look at
         said = self.rows(w)["youtube"]["line"][-1]
         self.assertTrue(said[0].startswith("  YouTube stored it as private, not public"))
