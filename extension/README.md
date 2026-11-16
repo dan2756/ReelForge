@@ -79,7 +79,9 @@ If you still want it, it takes all of these:
   the post in its window, or **Yes, press Post for me** on the page ReelForge opens when you start it there. The
   extension listens for that click itself, and a click made by a script does not count. A post page that was only
   opened presses nothing;
-- ReelForge grants the press, once per post.
+- ReelForge grants the press, once per post;
+- you have not pressed the button yourself already. Your own press, even one made while the video is still going
+  up, is the post's press: the extension then asks for no other, and ReelForge would refuse one.
 
 It is never offered for X. X's rules name scripting its website and suspend accounts for it.
 

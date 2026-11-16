@@ -502,6 +502,9 @@ export async function tabEvent(tabId, message) {
 export async function tabPress(tabId) {
   const job = await jobOfTab(tabId)
   const no = (error, message) => ({ ok: false, error, message })
+  // The person pressed the platform's button themselves, maybe while the video was still going up, and the page
+  // may not show it yet. A second press would post the video twice: the app is not even asked.
+  if (job?.pressedByPerson) return no("already_pressed", "you pressed it yourself already.")
   if (!job || job.state !== "ready") return no("not_ready", "This post is not ready to be pressed.")
   if (!job.press || !(await pressSwitch(job.platform))) return no("press_not_allowed", "Press Post for me is off for this post.")
   if (!(await pressSaid(job.batch))) return no("press_not_allowed", "nobody said yes to it for this post in this browser.")

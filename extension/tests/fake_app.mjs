@@ -461,7 +461,10 @@ export class FakeApp {
     const no = (error, message) => send(409, { ok: false, error, message })
     if (job.claimed_by !== browser.install) return no("not_yours", "Another browser took this post.")
     if (!job.press || !this.unlocked(job.platform, job)) return no("press_not_allowed", "Press Post yourself: ReelForge isn't allowed to for this post.")
-    if (job.state !== "ready") return job.pressed ? no("already_pressed", "Post was already pressed for this one.") : no("not_ready", "This post isn't ready yet.")
+    if (job.pressed) return no("already_pressed", "Post was already pressed for this one.")
+    // The step "press" under any other state is the extension's word that the person pressed Post in the tab.
+    if (job.events.some(event => event.step === "press")) return no("already_pressed", "You pressed Post for this one yourself already.")
+    if (job.state !== "ready") return no("not_ready", "This post isn't ready yet.")
     Object.assign(job, { pressed: true, state: "posting", step: "press", progress: null, detail: null, updated_at: now() })
     job.events.push({ state: "posting", step: "press", detail: null, error_code: null })
     return send(200, { ok: true })

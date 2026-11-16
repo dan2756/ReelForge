@@ -674,8 +674,8 @@ def claim(job_id: str, install: str) -> dict:
 def grant_press(job_id: str, install: str | None = None) -> dict:
     """Let the extension press the platform's Post button, once: the job goes from ready to posting and whoever
     asks again is refused. Refused "press_not_allowed" unless you switched "stop before posting" off for this job,
-    the platform isn't X, and an earlier post made with the extension is confirmed up there; "not_ready" before
-    everything is filled in; "already_pressed" after."""
+    the platform isn't X, and an earlier post made with the extension is confirmed up there; "already_pressed" once
+    Post was pressed, for you or by you in the tab; "not_ready" before everything is filled in."""
     with db.connect() as c:
         c.execute("BEGIN IMMEDIATE")
         old = _locked(c, job_id)
@@ -683,10 +683,14 @@ def grant_press(job_id: str, install: str | None = None) -> dict:
             raise Refused("not_yours", "Another browser took this post.", old)
         if not old["press"] or old["platform"] == "x" or not _assisted_before(c, old["platform"], old["id"]):
             raise Refused("press_not_allowed", "Press Post yourself: ReelForge isn't allowed to for this post.", old)
+        if c.execute("SELECT 1 FROM post_events WHERE job = ? AND state = 'posting'", (job_id,)).fetchone():
+            raise Refused("already_pressed", "Post was already pressed for this one.", old)
+        if _pressed(c, old["id"]):
+            # You pressed it yourself in the tab, maybe while the video was still going up, and the page may not
+            # show it yet. A second press would post the video twice: what happens now is the platform's to show.
+            raise Refused("already_pressed", "You pressed Post for this one yourself already.", old)
         if old["state"] != "ready":
-            pressed = c.execute("SELECT 1 FROM post_events WHERE job = ? AND state = 'posting'", (job_id,)).fetchone()
-            raise Refused("already_pressed" if pressed else "not_ready",
-                          "Post was already pressed for this one." if pressed else "This post isn't ready yet.", old)
+            raise Refused("not_ready", "This post isn't ready yet.", old)
         new = _write(c, old, "posting", "app", step="press")
     return _settled(old, new, "app")
 

@@ -141,6 +141,42 @@ export const tests = {
     ok((await note(tab)).more.includes("Post was already pressed for this one"), `the note (${(await note(tab)).more})`)
   },
 
+  async "the person's own press while the video is going up is the only press, whatever was asked for"({ app, site, browser, video }) {
+    // Press Post for me is on, the post's own setting says press and the person said yes. They press Save
+    // themselves while YouTube is still taking the video in, and the page shows nothing yet ("slow_mute": it
+    // takes no click). When everything is filled in, the form is still there: a second press would post twice.
+    site.mode.youtube = "slow_mute"
+    await switchOn(browser, app, "youtube")
+    const made = app.createBatch(video(), ["youtube"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("studio.youtube.com")
+    const job = made.jobs[0]
+    await until(() => `the wait for the upload (it is ${job.state} ${job.step})`, () => job.step === "upload" && job.events.some(event => event.step === "visibility"), 30000)
+    await tab.locator("#done-button").click()
+    await until("the press to be noticed", async () => (await browser.jobRecord(job.id)).pressedByPerson === true)
+    await until(() => `ready (it is ${job.state} ${job.step})`, () => job.state === "ready", 40000)
+    await sleep(2500)
+    equal([presses(app).length, job.state], [0, "ready"], "press requests, and the job meanwhile")
+    equal(await tab.evaluate(() => [fixture.clicks, fixture.trustedClicks]), [1, 1], "presses the page saw")
+    // The page's script did not even ask: nothing says "not pressed" as if the person had not.
+    ok(!job.events.some(event => String(event.detail).startsWith("Not pressed")), `what the app was told (${job.events.map(event => event.detail)})`)
+    equal((await note(tab)).line, "You pressed Publish or Save", "the note")
+    // Nor would the worker have asked the app, had the page's script asked it.
+    const extension = await browser.popup()
+    const asked = await extension.evaluate(async tabId => (await import("/worker/jobs.js")).tabPress(tabId), (await browser.jobRecord(job.id)).tabId)
+    equal([asked.ok, asked.error, presses(app).length], [false, "already_pressed", 0], "a press asked for all the same")
+    // YouTube takes it in the end: the person's press is the post.
+    await tab.evaluate(() => {
+      const root = document.querySelector("ytcp-app").shadowRoot
+      root.querySelector("ytcp-uploads-dialog").remove()
+      const share = document.createElement("ytcp-video-share-dialog")
+      share.innerHTML = '<h2>Video published</h2><a href="https://youtu.be/FIXTUREvid1">https://youtu.be/FIXTUREvid1</a>'
+      root.append(share)
+    })
+    await until(() => `posted (it is ${job.state})`, () => job.state === "posted")
+    equal([job.post_id, await tab.evaluate(() => fixture.clicks), presses(app).length], ["FIXTUREvid1", 1, 0], "the video's id, presses and press requests")
+  },
+
   async "X is never pressed, even with everything forced on"({ app, browser, video }) {
     await forceOn(browser, app, "x")
     app.pressUnlocked.add("x")

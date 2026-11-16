@@ -125,6 +125,10 @@ void (async () => {
   // ends as posted (the platform's own sign) or as "not sure", never as failed: a page that shows nothing for
   // a few seconds may still have taken the click, and a post called failed would be offered again.
   async function press(button, cannot) {
+    // The person pressed it already, maybe while the video was still going up, and the page has not shown the
+    // outcome yet. Nothing is asked and nothing is pressed: a second press would post the video twice. What the
+    // page shows next decides, and watch() is there for it.
+    if (pressed) return false
     const stay = async why => {
       rf.say("Check it, then press Post", "ready", `ReelForge did not press for you: ${why}`)
       // (A sentence of its own: ReelForge's page and the popup show it as it is.)
@@ -214,12 +218,14 @@ void (async () => {
       throw new rf.Stop("unknown_outcome", `${P}'s upload form closed before ReelForge had finished, and it saw no press of ${flow.button}. Check your profile before you post again.`, { state: "unknown" })
     }
     const button = end.hold ? rf.probe(end.hold) : await rf.find(flow.final)
-    if (button) rf.outline(button)
+    if (button && !pressed) rf.outline(button)
     if (!pressed && rf.sign("success")) signBroken = true
     let hint = end.more || (flow.button === "Post" ? "Nothing is posted until you do." : `On ${P} the button says ${flow.button}.`)
     // Where the page does not show which account it is on, nothing was checked: the person has to look.
     if (!rf.sel.hooks.account && job.handle) hint += ` ReelForge has ${job.handle} for this channel, and could not check the account here: look at which one this tab is on.`
-    rf.say("Check it, then press Post", "ready", hint)
+    // A person who pressed already is not asked to press again: the platform has the next word.
+    if (pressed) rf.say(`You pressed ${flow.button}`, "work", `Waiting for ${P} to say it is up.`)
+    else rf.say("Check it, then press Post", "ready", hint)
     await rf.report({ state: "ready", step: "ready", detail: end.detail || (rf.fallback ? `${P}'s page has changed a little; still working` : undefined), ...postInfo() })
     rf.guard()
     clearInterval(alive)

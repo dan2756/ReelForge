@@ -858,6 +858,21 @@ class Pressing(LedgerTest):
                 self.assertEqual(posting.resolve(job["id"], False)["state"], "cancelled")
                 self.assertEqual(posting.advance(job["id"], "posted", install=CHROME)["state"], "unknown")
 
+    def test_after_your_own_press_nothing_is_pressed_for_you(self):
+        # You pressed the platform's button yourself while the video was still going up, on a post you had asked
+        # ReelForge to press for you. The page then still shows its form, and the extension calls the post ready:
+        # a second press would post the video twice.
+        self.earlier_post("youtube")
+        job = self.walk(self.job("youtube", press=True), *STEPS[:3])
+        posting.advance(job["id"], "filling", install=CHROME, step="press")
+        posting.advance(job["id"], "ready", install=CHROME, step="ready")
+        said = self.refused("already_pressed", posting.grant_press, job["id"], CHROME)
+        self.assertEqual(said.message, "You pressed Post for this one yourself already.")
+        self.assertEqual(self.state(job), "ready")
+        self.assertNotIn("posting", [state for state, _, _ in self.events(job)])
+        # It ends as your press decides: posted when the page shows it.
+        self.assertEqual(posting.advance(job["id"], "posted", install=CHROME)["state"], "posted")
+
     def test_an_upload_through_an_api_cannot_be_called_off_once_its_last_piece_is_on_its_way(self):
         job = self.job("youtube", via={"youtube": "api"}, options={"youtube": {"privacy": "private"}})
         posting.advance(job["id"], "uploading", by="app")

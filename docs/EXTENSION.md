@@ -88,6 +88,11 @@ ReelForge allows the press once for each post. From the press on, a post ends as
 never as failed: a page that shows nothing after the press may still have taken it. ReelForge never tries such a
 post again by itself. You check your profile and say what happened.
 
+If you press Post yourself first, on a post where you asked for Press Post for me (say while YouTube is still taking
+the video in), your press is the one. The extension asks for no other and presses nothing, even when the page still
+shows its form, and ReelForge would refuse it anyway. The post ends as your press decides: posted when the platform
+shows it, else "not sure it posted".
+
 ## What is automatic, and what never is
 
 Automatic, once you have started a post, with **Start** in ReelForge or **Post** in the popup:
