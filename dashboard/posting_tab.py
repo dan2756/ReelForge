@@ -434,14 +434,15 @@ class PostingTab:
 
     def jobs_changed(self, everywhere: bool = False) -> None:
         """A job changed: in this window, in another one, or through the local server (which calls this on the
-        loop for a quicker redraw than the once-a-second look). everywhere: this window made the change itself, so
-        the list, POSTED and RECENT UPLOADS follow at once instead of at the reload a change of state brings."""
-        if not everywhere:
-            self.update_posting()
-            return
-        self.episodes = self._safe(db.episodes, self.episodes)
+        loop for a quicker redraw than the once-a-second look). The rows, BY HAND's ticks and RECENT UPLOADS follow
+        at once, together: left to the reload a change of state brings, a row said "✓ posted" beside a BY HAND
+        button that still said "→", for as long as that reload took. everywhere: this window made the change
+        itself, so the list of videos follows too."""
         self.update_uploads()
         self.update_posted()  # the posting view goes with it
+        if not everywhere:
+            return
+        self.episodes = self._safe(db.episodes, self.episodes)
         if self.tab == "publish":
             self.scan_files()
 

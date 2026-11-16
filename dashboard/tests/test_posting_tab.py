@@ -708,6 +708,27 @@ class Spotted(PostingTest):
         self.assertEqual(self.rows(w)["instagram"]["state"], "queued")
         self.assertEqual(self.pages, [job["batch"]])
 
+    def test_a_job_that_changes_outside_this_window_brings_by_hands_tick_and_recent_uploads_with_its_row(self):
+        """The extension reports through the local server or another window, which this window learns of from the
+        ledger's signature (jobs_changed). The row, BY HAND's ✓ and RECENT UPLOADS move together: the ✓ and the
+        uploads used to wait for the next reload, so a row said "✓ posted" beside a BY HAND button still at "→"."""
+        episode = db.create_episode(CAPTION, str(self.video))
+        db.add_post("instagram", "3500000000000000001", episode, CAPTION, "https://www.instagram.com/reel/abc/")
+        w = self.window()
+        w.svc.reload()
+        w.call("form_changed", CAPTION, TAGS)
+        self.assertTrue(w.view("posted")["done"]["instagram"])
+        w.call("post_action", "instagram", "post_again")  # a new try is on its way: no ✓ while it is
+        (job,) = [j for j in posting.recent() if j["platform"] == "instagram"]
+        self.assertFalse(w.view("posted")["done"]["instagram"])
+        w.forget()
+        self.work(job["id"], "opening", "failed")  # as the extension would, from outside this window
+        w.svc.jobs_changed()  # what the once-a-second look does when the ledger's signature has moved
+        self.assertEqual(self.rows(w)["instagram"]["state"], "spotted")
+        self.assertTrue(w.view("posted")["done"]["instagram"])
+        uploads = [plain(r["cells"][4]) for r in w.view("uploads")["rows"]]
+        self.assertTrue(uploads and not uploads[0].startswith("waiting"), uploads)
+
     def test_post_again_through_the_question_sets_the_old_job_aside(self):
         w = self.window()
         (first,) = self.post(w)["jobs"]
