@@ -127,7 +127,7 @@ first is up.
 
 | | |
 |---|---|
-| Title | what **Copy YouTube caption** copies: your caption, then `#shorts` |
+| Title | what **Copy caption** on YouTube's row copies: your caption, then `#shorts` |
 | Description | what **Copy YouTube hashtags** copies |
 | Who can see it | private, unlisted or public: your choice, always sent |
 | Made for kids | your answer, once you have given ReelForge one. Until then nothing is sent |
