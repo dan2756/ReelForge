@@ -2278,7 +2278,7 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
         """Connect a platform with its handle, or disconnect it (""): your settings change (config.save_handle), then
         it shows up everywhere, or leaves, straight away."""
         try:
-            config.save_handle(p.key, handle)
+            undone = config.save_handle(p.key, handle)
         except Exception as e:
             sync.log([f"error: saving {p.name}'s handle: {detail(e)}"])
             # The handle goes into several files in turn, config.toml among the last (studio.generate.set_account),
@@ -2300,6 +2300,9 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
                 "ReelForge couldn't write your settings; data/refresh.log says what stopped it."
             self.loop.call_soon(self.notify, f"{not_done}. {why}", "", "error", 12)
             return
+        if undone:  # a settings file with a mistake in it, left as it was: said, never passed over
+            done = f"{p.name}'s handle is saved" if handle else f"{p.name} is disconnected"
+            self.loop.call_soon(self.notify, f"{done}. " + " ".join(undone), "", "warning", 20)
         self.loop.call_soon(self.account_saved, p, handle)
 
     def account_saved(self, p: Platform, handle: str) -> None:

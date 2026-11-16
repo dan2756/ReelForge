@@ -160,6 +160,20 @@ def _per_run(per_day: int, per_week: int) -> int:
     return per_day or (1 if per_week else 0)
 
 
+def typo_line(e: S.SettingsError, name: str, what: str) -> str:
+    """What to say when a channel's studio.toml has a mistake in it and something went ahead without it: which file,
+    what's wrong in it, what was done instead (what) and how to put it right."""
+    return (f"{name}'s settings file, {e.path}, has a mistake in it ({e.reason}), so {what}. Fix it in a text editor, "
+            "or write it again from your answers with: reelforge channel --regenerate")
+
+
+def _say_once(say, lines: list[str]) -> None:
+    """Each line once (one file's mistake is come across once for every note that's written), through say."""
+    for line in dict.fromkeys(lines):
+        if say is not None:
+            say(line)
+
+
 def _other_channel(p) -> dict:
     """Another channel, for the first one's notes: its folder, how often it posts and how many videos a production
     run makes for it (ready: False while it isn't set up)."""
@@ -364,13 +378,15 @@ def _keep_yours(old: str, new: str, taken_out: list[str] | None = None) -> str:
     return new
 
 
-def write_all(answers: dict, profile=None, *, account_only: bool = False) -> list[Path]:
+def write_all(answers: dict, profile=None, *, account_only: bool = False, say=None) -> list[Path]:
     """Validate the answers and write every file, for a profile (the one this process works on, by default). Returns
     the paths written. Raises ValueError on bad answers, or when a file can't be made right (the message says which),
     before any file has changed. account_only: nothing but a platform's handle changed in the answers (set_account),
     so the settings on file stay as they are apart from the platforms: studio.toml invites edits by hand, and an
-    account connected on the Accounts tab must not put the first-time answers back over them."""
+    account connected on the Accounts tab must not put the first-time answers back over them. say: called with a
+    line for each file that was left as it was because it has a mistake in it, once everything else is written."""
     w = _where(profile)
+    notes: list[str] = []
     first = not w.settings.exists()                     # first-time setup: the channel isn't set up yet
     a, problems = validate(answers)
     if problems:
@@ -385,18 +401,29 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False) -> lis
     # The answers file is often the one being read (my-studio/answers.json), with no date yet: today, then.
     a["_created"] = a.get("_created") or dt.date.today().isoformat()
     s = settings_from(a)
+    keep_settings = False
     if account_only and w.settings.is_file():
-        saved = S.load(w.settings)   # (a typo in it is a SettingsError, a ValueError: nothing is written then)
-        s = {**saved, "platforms": {**saved["platforms"], "enabled": s["platforms"]["enabled"],
-                                    "handles": s["platforms"]["handles"]}}
+        try:
+            saved = S.load(w.settings)
+        except S.SettingsError as e:
+            # A typo in it: written again, what was edited by hand in it would be lost, so it stays as it is. The rest
+            # still gets the handle, the answers above all: "Change your answers" writes config.toml from them, so
+            # an account they didn't have would be disconnected then without a word.
+            keep_settings = True
+            notes.append(typo_line(e, a["channel_name"].strip(), "it couldn't be updated with this account (your "
+                                                                 "answers and your AI's notes were)"))
+        else:
+            s = {**saved, "platforms": {**saved["platforms"], "enabled": s["platforms"]["enabled"],
+                                        "handles": s["platforms"]["handles"]}}
     files: list[tuple[Path, str]] = []
 
     def out(path: Path, text: str):
         files.append((path, text))
 
     out(w.answers, json.dumps({k: v for k, v in a.items()}, indent=2, ensure_ascii=False) + "\n")
-    out(w.settings, "# Your studio's settings, from first-time setup. The pipeline and the dashboard read this file.\n" +
-        S.dump_toml(s, SETTINGS_COMMENTS))
+    if not keep_settings:
+        out(w.settings, "# Your studio's settings, from first-time setup. The pipeline and the dashboard read this "
+            "file.\n" + S.dump_toml(s, SETTINGS_COMMENTS))
     bible = render("channel-bible.md.j2", context(a, s, "claude", w.profile))
     old = w.bible.read_text(encoding="utf-8", errors="replace") if w.bible.exists() else None
     if old is not None:
@@ -432,6 +459,7 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False) -> lis
         written.append(config[0])
     if not w.profile.main:
         written += write_guides(profiles.main(), saved_settings=True)  # the first channel's notes list this one
+    _say_once(say, notes)
     return written
 
 
@@ -464,12 +492,13 @@ def write_guides(profile=None, *, saved_settings: bool = False) -> list[Path]:
     return written
 
 
-def set_account(platform: str, handle: str) -> list[Path]:
+def set_account(platform: str, handle: str, say=None) -> list[Path]:
     """Connect a platform ("@name") or disconnect it (""), as the ReelForge window's Accounts tab does. Its handle goes
     into the dashboard's settings and, once you've been through onboarding, into your answers too, and everything
     onboarding writes follows: your AI's notes and caption rules then cover the platforms you're connected to, and
     running onboarding again keeps them. Disconnecting keeps the platform in "Where will you post?" (your AI still
-    writes its captions) and only forgets the handle. Returns the paths written."""
+    writes its captions) and only forgets the handle. Returns the paths written. say: called with a line for a file
+    that was left as it was (a studio.toml with a mistake in it), for the window to show."""
     from . import dashboard_config
 
     if not P.ANSWERS.exists():
@@ -486,6 +515,6 @@ def set_account(platform: str, handle: str) -> list[Path]:
         else:
             a.pop(f"handle_{p}", None)
     try:
-        return write_all(a, account_only=True)
+        return write_all(a, account_only=True, say=say)
     except ValueError:                                        # answers onboarding would ask about again first
         return dashboard_config.set_handle(platform, handle)
