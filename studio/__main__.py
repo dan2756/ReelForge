@@ -109,10 +109,10 @@ def next_steps(profile=None, again: bool = False) -> str:
 def apply_background_stats() -> str:
     """Turn the hourly stats job on or off to match the profiles' settings (my-studio/studio.toml): one job reads every
     profile that wants it, so it's on while any of them does."""
-    from . import settings as S
-    from . import stats_schedule
+    from . import generate, stats_schedule
     try:
-        if any(S.load(p.settings)["platforms"].get("background_stats", True) for p in profiles.every()):
+        # (a channel's studio.toml with a typo in it goes by its answers: what was written has said so already)
+        if any(generate.background_stats(p) for p in profiles.every()):
             return stats_schedule.enable()
         if stats_schedule.status() == "on":
             return stats_schedule.disable()

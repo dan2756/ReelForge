@@ -504,8 +504,9 @@ class Setup(Service):
     def _apply_system(self) -> None:
         lines = [(False, line) for line in self.undone]   # a settings file with a mistake in it comes first
         try:
-            # One hourly job reads every profile that keeps its stats read in the background (most do).
-            if any(S.load(p.settings)["platforms"].get("background_stats", True) for p in profiles.every()):
+            # One hourly job reads every profile that keeps its stats read in the background (most do). A channel
+            # whose studio.toml has a typo in it goes by its answers: the line about the file is already above.
+            if any(generate.background_stats(p) for p in profiles.every()):
                 msg = stats_schedule.enable()
                 if msg.startswith(stats_schedule.TEST_COPY):       # a test copy leaves the job alone
                     lines.append((None, msg))

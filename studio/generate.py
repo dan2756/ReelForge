@@ -220,6 +220,20 @@ def _answered(p) -> dict | None:
     return None if problems else settings_from(a)
 
 
+def background_stats(p, say=None) -> bool:
+    """Whether a channel has its stats read every hour while ReelForge is closed: as its settings say, or, while its
+    studio.toml has a mistake in it, as its answers say (and say gets a line about the file). One job reads every
+    channel, so a typo in one channel's settings must not stop the read of the others, or the job's setting up."""
+    try:
+        return bool(S.load(p.settings)["platforms"].get("background_stats", True))
+    except S.SettingsError as e:
+        s = _answered(p)    # (its name too: the profile's own comes from the file that can't be read)
+        if say is not None:
+            say(typo_line(e, s["channel"]["name"] if s else p.name,
+                          "whether its stats are read every hour goes by its answers"))
+        return True if s is None else bool(s["platforms"].get("background_stats", True))
+
+
 def _other_channel(p, notes: list[str] | None = None) -> dict:
     """Another channel, for the first one's notes: its folder, how often it posts and how many videos a production
     run makes for it (ready: False while it isn't set up). notes: gets a line when its studio.toml has a mistake in

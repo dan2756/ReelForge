@@ -129,8 +129,7 @@ def refresh_profiles(demo: bool = False) -> int:
     """`reelforge refresh`: one stats read of every profile (or just the one asked for: reelforge -p NAME refresh).
     Each profile is read in a process of its own, one after the other, as though each had its own job; a profile whose
     settings turn background stats off is left out. With one profile it's read here, as it always was."""
-    from studio import profiles
-    from studio import settings as S
+    from studio import generate, profiles
 
     asked = profiles.get(os.environ.get(profiles.ENV))
     if demo or asked is not None or not profiles.several():
@@ -142,7 +141,8 @@ def refresh_profiles(demo: bool = False) -> int:
     end = time.monotonic() + JOB_BUDGET
     code = 0
     for p in profiles.every():
-        if p.onboarded and not S.load(p.settings)["platforms"].get("background_stats", True):
+        # (a channel's studio.toml with a typo in it: its answers say, and the other channels are read all the same)
+        if p.onboarded and not generate.background_stats(p, say=lambda line: print(line, flush=True)):
             continue
         left = int(end - time.monotonic())
         if left < 30:

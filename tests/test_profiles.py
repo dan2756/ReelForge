@@ -381,6 +381,55 @@ class Job(Scratch):
         self.assertTrue(all(0 < c[2] <= 600 for c in calls))
         self.assertIn("Cool Epic Facts:", out.getvalue())
 
+    def test_a_mistake_in_one_channels_settings_stops_the_read_of_none(self):
+        """The hourly read went through every channel's studio.toml first, and stopped at one with a typo in it: the
+        channels after it weren't read, and with the typo in the first channel's, none was."""
+        from dashboard import __main__ as dash
+
+        self.onboard_main()
+        a, b = profiles.create("Cool Epic Facts"), profiles.create("Quiet One")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**ANSWERS, "channel_name": "Cool Epic Facts"}, a)
+            generate.write_all({**ANSWERS, "channel_name": "Quiet One", "background_stats": False}, b)
+        mine = self.root / "my-studio" / "studio.toml"
+        for f in (mine, b.settings):
+            f.write_text(f.read_text(encoding="utf-8") + "\nthis is = = a typo\n", encoding="utf-8")
+        calls = []
+        with mock.patch.object(subprocess, "call", lambda cmd, cwd=None, env=None, timeout=None:
+                               calls.append(env[profiles.ENV]) or 0), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(dash.refresh_profiles(), 0)
+        self.assertEqual(calls, [".", a.key])       # Quiet One's answers still say no
+        said = out.getvalue()
+        self.assertEqual(said.count("has a mistake in it"), 2, said)
+        for name, f in (("Night Physics", mine), ("Quiet One", b.settings)):
+            self.assertIn(f"{name}'s settings file, {f}, has a mistake in it (", said)
+        self.assertIn("so whether its stats are read every hour goes by its answers.", said)
+
+    def test_a_mistake_in_the_first_channels_settings_still_sets_up_the_hourly_read_for_a_new_one(self):
+        """One hourly job reads every channel. With a typo in the first channel's studio.toml, setting it up for a
+        new channel that wants it stopped there: "Background stats couldn't be set up", and it wasn't."""
+        from studio.__main__ import main
+
+        self.onboard_main(background_stats=False)
+        mine = self.root / "my-studio" / "studio.toml"
+        mine.write_text(mine.read_text(encoding="utf-8") + "\nthis is = = a typo\n", encoding="utf-8")
+        answers = self.root / "tiny.json"
+        answers.write_text(json.dumps({**ANSWERS, "channel_name": "Tiny Worlds"}), encoding="utf-8")
+        with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(main(["channel", "--new", "--answers", str(answers)]), 0, out.getvalue())
+        self.assertNotIn("couldn't be set up", out.getvalue())
+        self.assertIn("(dry run) would run", out.getvalue())       # the job, for Tiny Worlds
+        svc = Setup(Loop(out=io.StringIO()))                      # and on setup's last screen in the window
+        svc.start({"start": "onboard", "new": True, "embedded": True})
+        sent = []
+        with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), \
+                mock.patch.object(svc.loop, "call_soon", lambda fn, *a: fn(*a)), \
+                mock.patch.object(svc, "emit", lambda name, data: sent.append((name, data))):
+            svc._apply_system()
+        rows = ["".join(seg[0] for seg in row) for row in sent[-1][1]["rows"]]
+        self.assertFalse([r for r in rows if "couldn't be set up" in r], rows)
+        self.assertTrue([r for r in rows if r.startswith(f"  {tui.CHECK}  Background stats: (dry run)")], rows)
+
     def test_one_profile_or_one_asked_for_is_read_here(self):
         from dashboard import __main__ as dash
 
