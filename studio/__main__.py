@@ -214,20 +214,25 @@ def regenerate(*, preserve_settings: bool = False) -> int:
     and refresh only instructions; an explicit channel regeneration can apply edited answers."""
     from . import generate
 
-    done = 0
+    done, said = 0, []
     for p in [*profiles.extra(), profiles.main()]:
         if not p.answers.exists():
             continue
         try:
             answers = json.loads(p.answers.read_text(encoding="utf-8-sig"))
-            written = (generate.write_guides(p, saved_settings=True, say=print) if preserve_settings
-                       else generate.write_all(answers, p, say=print))
+            written = (generate.write_guides(p, saved_settings=True, say=said.append) if preserve_settings
+                       else generate.write_all(answers, p, say=said.append))
         except (ValueError, OSError) as e:
             print(f"{p.name}: {e}")
             continue
         done += 1
         if p.main:
             _print_written(written)
+    # Said once at the end: each channel's files bring up the first one's notes again, and with them every settings
+    # file with a mistake in it. Without --preserve-settings each channel's studio.toml has been written again from
+    # its answers by now, which puts right a mistake come across before it was its turn: that one isn't said.
+    for line in generate.standing(said):
+        print(line)
     if not done:
         print(f"{P.ANSWERS} not found. Run first-time setup first: reelforge channel")
         return 1

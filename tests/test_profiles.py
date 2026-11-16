@@ -624,6 +624,35 @@ class Deleting(Scratch):
                       "`profiles/cool-epic-facts/CLAUDE.md`; 3 videos a week)",
                       (self.root / "CLAUDE.md").read_text(encoding="utf-8"))
 
+    def test_writing_every_channels_files_again_says_a_mistake_once_and_only_while_it_is_there(self):
+        """reelforge channel --regenerate, the way out the line itself gives, said it once for every other channel
+        (each brings up the first one's notes again), then wrote the file again from the answers, which put it right."""
+        from studio.__main__ import main
+
+        self.onboard_main()
+        extra = []
+        for name in ("Tiny Worlds", "Cool Epic Facts"):
+            p = profiles.create(name)
+            with redirect_stdout(io.StringIO()):
+                generate.write_all({**ANSWERS, "channel_name": name}, p)
+            extra.append(p)
+        mine, theirs = self.root / "my-studio" / "studio.toml", extra[1].settings
+        for f in (mine, theirs):
+            f.write_text(f.read_text(encoding="utf-8") + "\nthis is = = a typo\n", encoding="utf-8")
+        typos = {f: f.read_text(encoding="utf-8") for f in (mine, theirs)}
+        with redirect_stdout(io.StringIO()) as out:        # what an update runs: your settings stay as they are
+            self.assertEqual(main(["channel", "--regenerate", "--preserve-settings"]), 0)
+        said = out.getvalue()
+        self.assertEqual(said.count("has a mistake in it"), 2, said)
+        self.assertEqual(said.count(f"Night Physics's settings file, {mine}, has a mistake in it"), 1, said)
+        self.assertEqual(said.count(f", {theirs}, has a mistake in it"), 1, said)
+        self.assertEqual({f: f.read_text(encoding="utf-8") for f in typos}, typos)
+        with redirect_stdout(io.StringIO()) as out:        # every channel's files from its answers, studio.toml too
+            self.assertEqual(main(["channel", "--regenerate"]), 0)
+        self.assertNotIn("has a mistake in it", out.getvalue())
+        for f in typos:
+            S.load(f)                                       # written again: nothing left to say about it
+
     def test_the_commands_delete_and_restore_one(self):
         from studio.__main__ import main
 

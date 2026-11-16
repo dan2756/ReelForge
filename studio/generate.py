@@ -160,16 +160,53 @@ def _per_run(per_day: int, per_week: int) -> int:
     return per_day or (1 if per_week else 0)
 
 
-def typo_line(e: S.SettingsError, name: str, what: str) -> str:
+class Mistake(str):
+    """A line about a settings file with a mistake in it (typo_line), which knows the file: one file is come across
+    once for every note that's written, sometimes under two names, and a run that writes the file again (reelforge
+    channel --regenerate) puts right what it said about it earlier."""
+
+    path: Path
+
+    def __new__(cls, text: str, path: Path):
+        line = super().__new__(cls, text)
+        line.path = path
+        return line
+
+
+def typo_line(e: S.SettingsError, name: str, what: str) -> Mistake:
     """What to say when a channel's studio.toml has a mistake in it and something went ahead without it: which file,
     what's wrong in it, what was done instead (what) and how to put it right."""
-    return (f"{name}'s settings file, {e.path}, has a mistake in it ({e.reason}), so {what}. Fix it in a text editor, "
-            "or write it again from your answers with: reelforge channel --regenerate")
+    return Mistake(f"{name}'s settings file, {e.path}, has a mistake in it ({e.reason}), so {what}. Fix it in a text "
+                   "editor, or write it again from your answers with: reelforge channel --regenerate", Path(e.path))
+
+
+def once(lines: list[str]) -> list[str]:
+    """Each line once, and one line for each file with a mistake in it (the first said about it)."""
+    seen, out = set(), []
+    for line in lines:
+        key = ("file", line.path) if isinstance(line, Mistake) else line
+        if key not in seen:
+            seen.add(key)
+            out.append(line)
+    return out
+
+
+def standing(lines: list[str]) -> list[str]:
+    """once(lines), less those about a settings file that reads now: written again since they were said."""
+    def still(line) -> bool:
+        if not isinstance(line, Mistake):
+            return True
+        try:
+            S.load(line.path)
+        except (S.SettingsError, OSError):
+            return True
+        return False
+    return [line for line in once(lines) if still(line)]
 
 
 def _say_once(say, lines: list[str]) -> None:
     """Each line once (one file's mistake is come across once for every note that's written), through say."""
-    for line in dict.fromkeys(lines):
+    for line in once(lines):
         if say is not None:
             say(line)
 
