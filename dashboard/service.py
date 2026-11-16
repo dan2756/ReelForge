@@ -1985,8 +1985,9 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
                 (chip("Make a Gmail first", act("gmail")), 0),
                 (Text("  it's your YouTube login, and the others can sign up with the same email.", MUTED), 2)])
         elif missing:
-            hint = parts([(Text(f"Only connected platforms show up in ReelForge. Connect {_either(missing)} here any "
-                                "time.", MUTED), 0)])
+            # (in two parts: where the second doesn't fit it is left out whole, not cut off after "Instagram or")
+            hint = parts([(Text("Only connected platforms show up in ReelForge.", MUTED), 0),
+                          (Text(f" Connect {_either(missing)} here any time.", MUTED), 1)])
         self.emit("accounts", {"panels": panels, "hint": hint})
 
     def followers_chart(self, p: Platform, rows: list) -> dict | None:

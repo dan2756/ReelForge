@@ -207,7 +207,8 @@ function Connected({ panel: p }: { panel: AccountPanelView }) {
           // Stats read under another @handle before: keep them or forget them (the panel's amber line says they're there)
           <Button
             id={`was-${p.key}`}
-            label={`Stats from ${was[0]}${was.length > 1 ? ` +${was.length - 1}` : ""}…`}
+            // (a long old handle is cut inside the label, with its …: the button's own end was cut off by the panel)
+            label={`Stats from ${was[0]!.length > 18 ? `${was[0]!.slice(0, 17)}…` : was[0]}${was.length > 1 ? ` +${was.length - 1}` : ""}…`}
             marginRight={1}
             onPress={() => void s.openDialog("handle_change", s.bridge.call("handle_change_info", p.key))}
           />

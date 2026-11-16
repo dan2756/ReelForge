@@ -396,6 +396,11 @@ describe("accounts", () => {
     const h = await window("accounts", [180, 50], false, { unconnected: ["x"] })
     expect(frame(h)).toContain("○ not connected")
     expect(frame(h)).toContain("Only connected platforms show up in ReelForge. Connect X here any time.")
+    h.t.resize(60, 50) // too narrow for its second sentence: left out whole, not cut off in the middle
+    await h.settle(400)
+    expect(frame(h)).toMatch(/Only connected platforms show up in ReelForge\. *$/m)
+    h.t.resize(180, 50)
+    await h.settle(400)
     expect(frame(h)).toContain("Disconnect") // on the connected ones
     await clickText(h, "@yourname", 2)
     await h.t.mockInput.typeText("two words")
