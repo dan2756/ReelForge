@@ -324,22 +324,23 @@ def _backup_if_foreign(path: Path, backups: Path | None = None) -> Path | None:
 
 def _where(profile=None) -> SimpleNamespace:
     """The files onboarding writes for a profile: the one this process works on (studio.paths, which the tests point
-    at a scratch folder), or another one (a profile being made, say)."""
+    at a scratch folder), or another one (a profile being made, say). notes: what writing them comes across that is
+    to be said once they're written (a channel's studio.toml with a mistake in it, see typo_line)."""
     if profile is None or profile == P.PROFILE:
         here = P.PROFILE
         return SimpleNamespace(profile=here, root=P.ROOT if here.main else here.folder, my_studio=P.MY_STUDIO,
                                answers=P.ANSWERS, settings=P.SETTINGS, bible=P.BIBLE, backups=P.BACKUPS,
-                               completed=P.COMPLETED)
+                               completed=P.COMPLETED, notes=[])
     return SimpleNamespace(profile=profile, root=profile.folder, my_studio=profile.my_studio, answers=profile.answers,
                            settings=profile.settings, bible=profile.bible, backups=profile.backups,
-                           completed=profile.completed)
+                           completed=profile.completed, notes=[])
 
 
-def _guides(a: dict, s: dict, w: SimpleNamespace, out, notes: list[str] | None = None) -> None:
+def _guides(a: dict, s: dict, w: SimpleNamespace, out) -> None:
     for name, who in (("CLAUDE.md", "claude"), ("AGENTS.md", "codex")):
         target = w.root / name
         _backup_if_foreign(target, w.backups)
-        text = render("context.md.j2", context(a, s, who, w.profile, notes))
+        text = render("context.md.j2", context(a, s, who, w.profile, w.notes))
         if who == "codex" and len(text.encode("utf-8")) > 30_000:
             raise ValueError(f"AGENTS.md came out at {len(text.encode()) // 1024} KiB, and Codex reads only 32 KiB: "
                              "shorten your format's description or the look's notes in your answers")
@@ -405,7 +406,7 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, say=No
     account connected on the Accounts tab must not put the first-time answers back over them. say: called with a
     line for each file that was left as it was because it has a mistake in it, once everything else is written."""
     w = _where(profile)
-    notes: list[str] = []
+    notes = w.notes
     first = not w.settings.exists()                     # first-time setup: the channel isn't set up yet
     a, problems = validate(answers)
     if problems:
@@ -453,7 +454,7 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, say=No
         taken_out = [x for x in before if x not in s["format"]["subjects"]] if isinstance(before, list) else []
         bible = _keep_yours(old, bible, taken_out)
     out(w.bible, bible)
-    _guides(a, s, w, out, notes)
+    _guides(a, s, w, out)
     log = w.completed / "production-log.md"
     if not log.exists():
         out(log, render("production-log.md.j2", context(a, s, "claude", w.profile, notes)))
@@ -501,7 +502,7 @@ def write_guides(profile=None, *, saved_settings: bool = False, say=None) -> lis
         P.write_atomic(path, text)
         written.append(path)
 
-    notes: list[str] = []
+    notes = w.notes
     s = settings_from(a)
     if saved_settings and w.settings.is_file():
         try:
@@ -517,7 +518,7 @@ def write_guides(profile=None, *, saved_settings: bool = False, say=None) -> lis
         handles = dashboard_config.handles(w.profile)
         if handles is not None:
             s["platforms"]["handles"] = handles
-    _guides(a, s, w, out, notes)
+    _guides(a, s, w, out)
     _say_once(say, notes)
     return written
 
