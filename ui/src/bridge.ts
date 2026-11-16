@@ -151,9 +151,15 @@ export class Bridge {
     }
   }
 
-  /** Say that a call failed: never a silent nothing. */
+  /** Say that a call failed: never a silent nothing. A Python exception (the Python side sends its kind and its
+   * words, "RuntimeError: boom") is a fault of ReelForge's own, which only a bug reaches: said in a sentence that
+   * says what it means for what was asked and what to do next, with the exception's own words after it for whoever
+   * reports it. Anything else (the Python side isn't running) says so itself. */
   failed(e: unknown) {
-    this.emit("toast", { title: "Something went wrong", body: String((e as Error)?.message ?? e), severity: "error", timeout: 8 })
+    const said = String((e as Error)?.message ?? e)
+    const own = /^[A-Z]\w*(Error|Exception|Exit|Interrupt|Warning)\b/.test(said)
+    const body = own ? `ReelForge ran into a problem of its own, so what you asked for may not have been done. Try again, and if it happens again run reelforge doctor. What it said: ${said}` : said
+    this.emit("toast", { title: "Something went wrong", body, severity: "error", timeout: own ? 12 : 8 })
   }
 
   on(event: string, fn: Handler): () => void {

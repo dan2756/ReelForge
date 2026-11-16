@@ -23,6 +23,8 @@ let tmp = ""
 const CAPTION = "What if hail doubled every 2 seconds?"
 const TAGS = "#fyp #whatif #weather"
 const LINK = "https://youtube.com/shorts/vid00000001"
+// A call that raised: what it means and what to do next, then the exception's own words for whoever reports it.
+const WRONG = "Something went wrong: ReelForge ran into a problem of its own, so what you asked for may not have been done. Try again, and if it happens again run reelforge doctor. What it said: RuntimeError: boom"
 const UNPROVEN = "This way of posting is tested against a stand-in for Google, never against Google itself. Post as private first and check the video in YouTube Studio."
 const NOT_HERE = "ReelForge keeps YouTube's sign-in only while it is open, in its memory and never in a file. Connect before you post through the API: it is one press, then Google's page."
 
@@ -826,12 +828,12 @@ describe("when something goes wrong, or the window is small", () => {
     await openApi(h)
     await clickText(h, "▐ Connect ▌", 3)
     await until(h, () => popups().length > 0)
-    expect(popups()).toEqual(["Something went wrong: RuntimeError: boom"])
+    expect(popups()).toEqual([WRONG])
     expect(dialog(h)).toContain("▐ Connect ▌") // still there, to press again
     toasts.clear()
     await clickText(h, "○ Public", 2)
     await until(h, () => popups().length > 0)
-    expect(popups()).toEqual(["Something went wrong: RuntimeError: boom"])
+    expect(popups()).toEqual([WRONG])
     expect(dialog(h)).toContain("▐ ● Private ▌ ○ Unlisted ○ Public") // nothing was changed, and nothing says it was
     toasts.clear()
     await clickText(h, "▐ Close ▌", 3)
@@ -839,7 +841,7 @@ describe("when something goes wrong, or the window is small", () => {
     await h.settle(300)
     await clickText(h, "Post with API…", 3)
     await until(h, () => popups().length > 0)
-    expect(popups()).toEqual(["Something went wrong: RuntimeError: boom"])
+    expect(popups()).toEqual([WRONG])
     expect(frame(h)).not.toContain("POST TO YOUTUBE THROUGH ITS API")
     expect(frame(h)).toContain("▐ Post… ▌")
   })
