@@ -229,6 +229,32 @@ export const tests = {
     equal(await tab.evaluate(() => fixture.clicks), 1, "presses the page saw in the end")
   },
 
+  async "the person's press while ReelForge is asked to press is refused as theirs, and the page does not ask them for another"({ app, site, browser, video }) {
+    // This time ReelForge hears of the person's press before it looks at the request, and refuses it: Post was
+    // pressed already. That refusal is not "ReelForge did not press for you, press Post": they just did.
+    site.mode.tiktok = "mute"
+    await switchOn(browser, app, "tiktok")
+    const held = holdPress(app, { decided: false })
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("www.tiktok.com")
+    const job = made.jobs[0]
+    await until(() => `the press request (it is ${job.state} ${job.step})`, () => held.arrived, 30000)
+    await tab.locator("[data-e2e=post_video_button]").click()
+    await until("ReelForge to hear of the press", () => job.events.some(event => event.step === "press"))
+    held.release()
+    await until("the refusal", () => presses(app).some(entry => entry.status === 409))
+    await until("the note to say who pressed", async () => (await note(tab)).line === "You pressed Post", 10000)
+    await sleep(1500)
+    equal([(await note(tab)).line, (await note(tab)).more], ["You pressed Post", "Waiting for TikTok to say it is up."], "the note")
+    equal(await tab.evaluate(() => document.querySelector("[data-e2e=post_video_button]").style.getPropertyValue("outline")), "", "the ring round Post")
+    ok(!job.events.some(event => String(event.detail).startsWith("Not pressed")), `what the app was told (${job.events.map(event => event.detail)})`)
+    equal([await tab.evaluate(() => [fixture.clicks, fixture.trustedClicks]), job.state], [[1, 1], "ready"], "presses the page saw, and the job meanwhile")
+    await tab.evaluate(() => done())
+    await until(() => `posted (it is ${job.state})`, () => job.state === "posted")
+    equal(await tab.evaluate(() => fixture.clicks), 1, "presses the page saw in the end")
+  },
+
   async "a newer list that moves YouTube's error hook does not get a press past YouTube's own error"({ app, site, browser, video }) {
     // The app's newer list points the hook for YouTube's error message at nothing. The packed one is used all
     // the same: the engine stops a job at that message before anything is pressed.

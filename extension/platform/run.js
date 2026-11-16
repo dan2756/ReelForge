@@ -148,14 +148,15 @@ void (async () => {
     }
     if (cannot) return stay(cannot)
     const grant = await rf.send({ t: "job.press" })
-    if (!grant?.ok) return stay(grant?.message || "the extension did not answer.")
-    // The person pressed it while ReelForge was being asked, and the yes was decided before ReelForge heard of
-    // that press. Their press is the post's only one: a click now would post the video twice. Nothing is
-    // clicked, and what the page shows next decides.
+    // The person pressed it while ReelForge was being asked. The answer was decided before ReelForge heard of
+    // that press (a yes), or because of it (already pressed): either way their press is the post's only one. A
+    // click now would post the video twice, and "not pressed" would ask them for a press they made. So nothing
+    // is clicked or reported, and what the page shows next decides.
     if (pressed) {
       sayPressed()
       return false
     }
+    if (!grant?.ok) return stay(grant?.message || "the extension did not answer.")
     // From here on nothing is ever pressed again, whatever happens.
     rf.phase = "watch"
     rf.unoutline()

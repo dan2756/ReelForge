@@ -95,7 +95,9 @@ shows it, else "not sure it posted".
 
 The same goes for a press you make while the extension is asking ReelForge for its own. The note on the page says
 **Pressing Post for you** then, and the button is not ringed in red. If you press it all the same, yours is the one:
-the extension clicks nothing, whatever ReelForge answers.
+the extension clicks nothing, whatever ReelForge answers, and the note says **You pressed Post** (or the button's
+own name) while it waits for the platform. It does not ask you to press again, and ReelForge is not told "not
+pressed".
 
 ## What is automatic, and what never is
 
