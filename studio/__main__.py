@@ -166,7 +166,7 @@ def onboard(argv: list[str], *, preserve_settings: bool = False) -> int:
             target = profiles.create(a["channel_name"])
             answers = {**answers, "_created": ""}
         try:
-            written = generate.write_all(answers, target)
+            written = generate.write_all(answers, target, say=print)
         except Exception as e:
             # A new profile that never got its files: its folder goes again, so the same command works once the
             # answers are fixed (left there, the folder had the channel's name taken).
@@ -200,7 +200,7 @@ def onboard(argv: list[str], *, preserve_settings: bool = False) -> int:
             prior = None        # answers that can't be read: the questions start from their defaults
         again = S.onboarded()
         answers = onboard_cli.ask(prior)
-        written = generate.write_all(answers)
+        written = generate.write_all(answers, say=print)
         _print_written(written)
         print("\n" + apply_background_stats())
         print(next_steps(again=again))
@@ -220,8 +220,8 @@ def regenerate(*, preserve_settings: bool = False) -> int:
             continue
         try:
             answers = json.loads(p.answers.read_text(encoding="utf-8-sig"))
-            written = (generate.write_guides(p, saved_settings=True) if preserve_settings
-                       else generate.write_all(answers, p))
+            written = (generate.write_guides(p, saved_settings=True, say=print) if preserve_settings
+                       else generate.write_all(answers, p, say=print))
         except (ValueError, OSError) as e:
             print(f"{p.name}: {e}")
             continue
@@ -333,7 +333,8 @@ def delete_profile(argv: list[str]) -> int:
         return 1
     from . import generate
 
-    generate.write_guides(profiles.main(), saved_settings=True)   # your AI's notes no longer list it
+    # your AI's notes no longer list it (a mistake in the first channel's settings is said, and stops nothing)
+    generate.write_guides(profiles.main(), saved_settings=True, say=print)
     print(f"{p.name} is deleted. It's kept whole in {gone.where}: reelforge profiles restore "
           f"\"{p.name}\" brings it back.")
     return 0
@@ -364,7 +365,7 @@ def restore_profile(argv: list[str]) -> int:
         return 1
     from . import generate
 
-    generate.write_guides(profiles.main(), saved_settings=True)   # your AI's notes list it again
+    generate.write_guides(profiles.main(), saved_settings=True, say=print)   # your AI's notes list it again
     print(f"{p.name} is back ({p.describe()}), as it was. Open it with: reelforge -p {p.slug}")
     return 0
 

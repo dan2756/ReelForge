@@ -174,21 +174,40 @@ def _say_once(say, lines: list[str]) -> None:
             say(line)
 
 
-def _other_channel(p) -> dict:
+def _answered(p) -> dict | None:
+    """A channel's settings as its saved answers make them, or None when they can't be used either."""
+    try:
+        a, problems = validate(json.loads(p.answers.read_text(encoding="utf-8-sig")))
+    except (OSError, ValueError):
+        return None
+    return None if problems else settings_from(a)
+
+
+def _other_channel(p, notes: list[str] | None = None) -> dict:
     """Another channel, for the first one's notes: its folder, how often it posts and how many videos a production
-    run makes for it (ready: False while it isn't set up)."""
+    run makes for it (ready: False while it isn't set up). notes: gets a line when its studio.toml has a mistake in
+    it, and its answers are gone by instead."""
     c = {"name": p.name, "folder": f"profiles/{p.folder.name}/", "ready": p.onboarded, "cadence": "", "per_day": 0,
          "per_week": 0, "per_run": 0}
     if p.onboarded:
-        s = S.load(p.settings)
-        per_day, per_week = s["schedule"]["per_day"], s["schedule"]["per_week"]
-        c.update(cadence=_cadence(s), per_day=per_day, per_week=per_week, per_run=_per_run(per_day, per_week))
+        try:
+            s = S.load(p.settings)
+        except S.SettingsError as e:
+            # A typo in one channel's settings never stops what's done for another, such as the first one's notes
+            # written again when a channel is added: how often this one posts comes from its answers meanwhile.
+            s = _answered(p)
+            if notes is not None:
+                notes.append(typo_line(e, p.name, "your AI's notes go by its answers instead"))
+        if s is not None:
+            per_day, per_week = s["schedule"]["per_day"], s["schedule"]["per_week"]
+            c.update(cadence=_cadence(s), per_day=per_day, per_week=per_week, per_run=_per_run(per_day, per_week))
     return c
 
 
-def context(a: dict, s: dict, assistant: str, profile=None) -> dict:
+def context(a: dict, s: dict, assistant: str, profile=None, notes: list[str] | None = None) -> dict:
     """What the templates see. profile: the one the notes are for (the first one, by default): another channel's
-    paths start at its folder (here), and the first one's notes list the other channels."""
+    paths start at its folder (here), and the first one's notes list the other channels. notes: gets a line for each
+    other channel whose settings have a mistake in them (_other_channel)."""
     profile = profile or profiles.main()
     fmt = dict(FORMATS[s["format"]["template"]])
     creator = s["channel"]["creator"]
@@ -225,7 +244,7 @@ def context(a: dict, s: dict, assistant: str, profile=None) -> dict:
     stills = sorted({1, *(round(typical * k / 9) for k in range(1, 9)), int(typical) - 1})
     preview = [2, round(typical * 0.3), round(typical * 0.7), int(typical) - 3]
     here = "" if profile.main else f"profiles/{profile.folder.name}/"
-    channels = [] if not profile.main else [_other_channel(p) for p in profiles.extra()]
+    channels = [] if not profile.main else [_other_channel(p, notes) for p in profiles.extra()]
     return {
         "kit": KIT_NAME, "version": KIT_VERSION, "date": dt.date.today().isoformat(),
         "mark": GENERATED_MARK,
@@ -316,11 +335,11 @@ def _where(profile=None) -> SimpleNamespace:
                            completed=profile.completed)
 
 
-def _guides(a: dict, s: dict, w: SimpleNamespace, out) -> None:
+def _guides(a: dict, s: dict, w: SimpleNamespace, out, notes: list[str] | None = None) -> None:
     for name, who in (("CLAUDE.md", "claude"), ("AGENTS.md", "codex")):
         target = w.root / name
         _backup_if_foreign(target, w.backups)
-        text = render("context.md.j2", context(a, s, who, w.profile))
+        text = render("context.md.j2", context(a, s, who, w.profile, notes))
         if who == "codex" and len(text.encode("utf-8")) > 30_000:
             raise ValueError(f"AGENTS.md came out at {len(text.encode()) // 1024} KiB, and Codex reads only 32 KiB: "
                              "shorten your format's description or the look's notes in your answers")
@@ -424,7 +443,7 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, say=No
     if not keep_settings:
         out(w.settings, "# Your studio's settings, from first-time setup. The pipeline and the dashboard read this "
             "file.\n" + S.dump_toml(s, SETTINGS_COMMENTS))
-    bible = render("channel-bible.md.j2", context(a, s, "claude", w.profile))
+    bible = render("channel-bible.md.j2", context(a, s, "claude", w.profile, notes))
     old = w.bible.read_text(encoding="utf-8", errors="replace") if w.bible.exists() else None
     if old is not None:
         try:    # studio.toml isn't written again yet, so it still lists the ideas of the answers before these
@@ -434,10 +453,10 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, say=No
         taken_out = [x for x in before if x not in s["format"]["subjects"]] if isinstance(before, list) else []
         bible = _keep_yours(old, bible, taken_out)
     out(w.bible, bible)
-    _guides(a, s, w, out)
+    _guides(a, s, w, out, notes)
     log = w.completed / "production-log.md"
     if not log.exists():
-        out(log, render("production-log.md.j2", context(a, s, "claude", w.profile)))
+        out(log, render("production-log.md.j2", context(a, s, "claude", w.profile, notes)))
     from . import dashboard_config
     config = dashboard_config.rendered(s, w.profile)
     # Every file is rendered and checked by now, so whatever stops this (answers to fix, a typo in the dashboard's
@@ -458,15 +477,17 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, say=No
         P.write_atomic(*config)
         written.append(config[0])
     if not w.profile.main:
-        written += write_guides(profiles.main(), saved_settings=True)  # the first channel's notes list this one
+        # the first channel's notes list this one
+        written += write_guides(profiles.main(), saved_settings=True, say=notes.append)
     _say_once(say, notes)
     return written
 
 
-def write_guides(profile=None, *, saved_settings: bool = False) -> list[Path]:
+def write_guides(profile=None, *, saved_settings: bool = False, say=None) -> list[Path]:
     """A profile's CLAUDE.md and AGENTS.md again from its saved answers, nothing else: the first profile's list the
     other channels, so they follow when a channel is added or removed. Updates use saved_settings to honor manual
-    settings and account edits. Nothing for a profile not set up yet."""
+    settings and account edits. Nothing for a profile not set up yet. say: called once with a line for each
+    studio.toml that has a mistake in it, whose channel's answers were gone by instead."""
     w = _where(profile)
     try:
         a, problems = validate(json.loads(w.answers.read_text(encoding="utf-8-sig")))
@@ -480,7 +501,15 @@ def write_guides(profile=None, *, saved_settings: bool = False) -> list[Path]:
         P.write_atomic(path, text)
         written.append(path)
 
-    s = S.load(w.settings) if saved_settings and w.settings.is_file() else settings_from(a)
+    notes: list[str] = []
+    s = settings_from(a)
+    if saved_settings and w.settings.is_file():
+        try:
+            s = S.load(w.settings)
+        except S.SettingsError as e:
+            # A channel added, deleted or restored writes the first one's notes again (they list every channel): a
+            # typo in its settings must not stop, or seem to stop, what was done to the other channel.
+            notes.append(typo_line(e, a["channel_name"].strip(), "your AI's notes go by its answers instead"))
     if saved_settings:
         # Settings are documented as editable. An update refreshes instructions
         # from the effective settings without rewriting them from older answers.
@@ -488,7 +517,8 @@ def write_guides(profile=None, *, saved_settings: bool = False) -> list[Path]:
         handles = dashboard_config.handles(w.profile)
         if handles is not None:
             s["platforms"]["handles"] = handles
-    _guides(a, s, w, out)
+    _guides(a, s, w, out, notes)
+    _say_once(say, notes)
     return written
 
 

@@ -541,11 +541,13 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
         if problem:
             self.loop.call_soon(lambda: self.notify(problem, title="Not deleted", severity="error", timeout=12))
             return
-        self.write_guides()  # your AI's notes no longer list it
+        undone = self.write_guides()  # your AI's notes no longer list it
 
         def done() -> None:
             self.notify(f"{name} is kept whole in {gone.where}. Restore on the Settings tab brings it back.",
                         title="Profile deleted", timeout=12)
+            for line in undone:
+                self.notify(line, severity="warning", timeout=20)
             self.update_profile()
             if self.tab == "settings":
                 self.update_settings()
@@ -553,15 +555,18 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
         self.loop.call_soon(done)
 
     @staticmethod
-    def write_guides() -> None:
-        """The first channel's notes for your AI list every channel: write them again once one goes or comes back."""
+    def write_guides() -> list[str]:
+        """The first channel's notes for your AI list every channel: write them again once one goes or comes back.
+        Returns a line for each channel's settings that have a mistake in them, for the window to say."""
+        said: list[str] = []
         try:
             from studio import generate
 
             # (from the settings as they are on file: studio.toml is yours to edit by hand)
-            generate.write_guides(profiles.main(), saved_settings=True)
+            generate.write_guides(profiles.main(), saved_settings=True, say=said.append)
         except Exception:
             pass  # notes for your AI, which `reelforge channel --regenerate` writes again too
+        return said
 
     @rpc
     def restore_profile(self, backup: str) -> bool:
@@ -578,9 +583,11 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
             self.notify(str(e), title="Not restored", severity="error", timeout=12)
             self.update_settings()
             return False
-        self.write_guides()
+        undone = self.write_guides()
         self.notify(f"{p.name} is back, as it was. Switch to it with the button at the top left (p).",
                     title="Profile restored", timeout=10)
+        for line in undone:
+            self.notify(line, severity="warning", timeout=20)
         self.update_profile()
         self.update_settings()
         return True

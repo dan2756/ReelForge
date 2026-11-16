@@ -78,6 +78,7 @@ class Setup(Service):
         self.steps = STEPS + [REVIEW]
         self.preview = False
         self.written: list = []
+        self.undone: list[str] = []        # a channel's settings file left as it was, for the last screen to say
         self.profile = profiles.current()  # the profile onboarding is for, or (new) the one it was opened from
         self.new = False                   # making a new profile: it's made when you press Create
         self.made: profiles.Profile | None = None
@@ -419,7 +420,8 @@ class Setup(Service):
                 if problems:  # said below, before a folder is made
                     raise ValueError("some answers need fixing:\n  " + "\n  ".join(problems))
                 self.made = profiles.create(a["channel_name"])
-            self.written = generate.write_all(self.answers, self.target())
+            self.undone = []
+            self.written = generate.write_all(self.answers, self.target(), say=self.undone.append)
         except ValueError as e:
             return {"ok": False, "status": str(e).splitlines()[0],
                     "review": self.summary() + "\n\n```\n" + str(e) + "\n```"}
@@ -500,7 +502,7 @@ class Setup(Service):
                 "back": f"Back to {self.profile.name}" if self.embedded and self.new else ""}
 
     def _apply_system(self) -> None:
-        lines = []
+        lines = [(False, line) for line in self.undone]   # a settings file with a mistake in it comes first
         try:
             # One hourly job reads every profile that keeps its stats read in the background (most do).
             if any(S.load(p.settings)["platforms"].get("background_stats", True) for p in profiles.every()):
