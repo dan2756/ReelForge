@@ -71,3 +71,8 @@ any of yours from the copy, under a name of its own. (Where that copy can't be m
 instead.) The one exception is the update away from ReelForge 2.2.1, which 2.2.1's own updater does: it puts the new
 list over yours. Your sound files stay where they are, so add their entries again after that update, or keep a copy
 of your `manifest.json` before it.
+
+A `manifest.json` that can't be read (a comma after the last entry you added, say: every mix stops on it) is copied to
+`backups/sounds-before-update-<date>.json` too, and the new list takes its place; the update says so and names the
+copy, so you can bring your own entries over from it. Where that copy can't be made, yours stays as it was, without
+the new version's sounds until the next update, and the update says that instead.

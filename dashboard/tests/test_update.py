@@ -133,18 +133,20 @@ class InstallTest(unittest.TestCase):
         (self.root / update.SOUNDS).write_text(json.dumps({"sounds": {"pop": kit["sounds"]["pop"]}}), encoding="utf-8")
         update._copy_tree(src, self.root, lambda *a: None)
         self.assertEqual((self.root / update.SOUNDS).read_bytes(), (src / update.SOUNDS).read_bytes())
-        (self.root / update.SOUNDS).write_text("{not json", encoding="utf-8")  # a broken one is simply replaced
-        update._copy_tree(src, self.root, lambda *a: None)
+        (self.root / update.SOUNDS).write_text("{not json", encoding="utf-8")  # a broken one is replaced, after a
+        update._copy_tree(src, self.root, lambda *a: None)                     # copy of it is kept
         self.assertEqual((self.root / update.SOUNDS).read_bytes(), (src / update.SOUNDS).read_bytes())
+        kept = [p.read_text(encoding="utf-8") for p in (self.root / "backups").iterdir()]
+        self.assertEqual([text for text in kept if text == "{not json"], ["{not json"])
 
-    def sounds_update(self, yours: dict, kit: dict, record: dict | None = None) -> tuple[dict, str]:
+    def sounds_update(self, yours: dict | str, kit: dict, record: dict | None = None) -> tuple[dict, str]:
         """An update from 1.0.0 to 1.1.0 (the install line's, so that its summary and the note for the restarted
-        window are there too) of a copy whose list of sounds is yours, beside the kit's as the last update put it in
-        place (record: None for a copy with none yet). Returns the list after it, and the summary."""
+        window are there too) of a copy whose list of sounds is yours (or its text), beside the kit's as the last
+        update put it in place (record: None for a copy with none yet). Returns the list after it, and the summary."""
         import json
 
         files = {"studio/__init__.py": 'KIT_VERSION = "1.0.0"\n', "requirements.txt": "rich\n",
-                 update.SOUNDS: json.dumps(yours, indent=2)}
+                 update.SOUNDS: yours if isinstance(yours, str) else json.dumps(yours, indent=2)}
         if record is not None:
             files[update.KIT_SOUNDS] = json.dumps(record, indent=2)
         for rel, text in files.items():
@@ -208,6 +210,46 @@ class InstallTest(unittest.TestCase):
                                'had for sounds "pop" and "whoosh", and licence note "kenney", though the new version '
                                "has its own by those names: ReelForge couldn't keep a copy of your list in backups/ "
                                "before replacing any.")
+
+    def test_a_list_of_yours_that_cant_be_read_is_kept_in_backups_before_the_new_one_takes_its_place(self):
+        """A comma after the last entry you added (your mixes already stop on it): the new list went over yours with
+        no copy and no word, and the sounds you had added were gone from it."""
+        yours = {**self.OLD_KIT, "sounds": {**self.OLD_KIT["sounds"], "hail": {"file": "pixabay/hail.ogg"}}}
+        broken = json.dumps(yours, indent=2).replace('"pixabay/hail.ogg"\n    }', '"pixabay/hail.ogg"\n    },')
+        self.assertNotEqual(broken, json.dumps(yours, indent=2))
+        now, said = self.sounds_update(broken, self.NEW_KIT, record=self.OLD_KIT)
+        self.assertEqual(now, self.NEW_KIT)
+        copies = list((self.root / "backups").glob("sounds-before-update-*.json"))
+        self.assertEqual([c.read_text(encoding="utf-8") for c in copies], [broken])
+        self.assertEqual(said, "Updated ReelForge from 1.0.0 to 1.1.0. Your assets/sfx/manifest.json couldn't be read "
+                               "(Expecting property name enclosed in double quotes at line 15, column 3), so the new "
+                               "version's list took its place. Your list as it was is in "
+                               f"backups/{copies[0].name}: copy your own entries from there into the new one.")
+        self.assertEqual(update.take_marker(self.root)["notes"], [said.split(" ", 6)[6]])  # the restarted window's
+
+    def test_a_list_of_yours_that_cant_be_read_with_nowhere_to_keep_a_copy_stays_as_it_was(self):
+        (self.root / "backups").write_text("a file, not a folder", encoding="utf-8")
+        broken = '{"sounds": {"hail": {"file": "pixabay/hail.ogg"},}}'
+        files = {"studio/__init__.py": 'KIT_VERSION = "1.0.0"\n', "requirements.txt": "rich\n", update.SOUNDS: broken,
+                 update.KIT_SOUNDS: json.dumps(self.OLD_KIT)}
+        for rel, text in files.items():
+            (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / rel).write_text(text, encoding="utf-8")
+        new = self.dir / "ReelForge-1.1.0"
+        for rel, text in {"studio/__init__.py": 'KIT_VERSION = "1.1.0"\n', "requirements.txt": "rich\n",
+                          update.SOUNDS: json.dumps(self.NEW_KIT, indent=2)}.items():
+            (new / rel).parent.mkdir(parents=True, exist_ok=True)
+            (new / rel).write_text(text, encoding="utf-8")
+        with mock.patch.object(update, "ROOT", new), mock.patch.object(update, "_after"):
+            said = update.move_in(self.root)
+        self.assertEqual((self.root / update.SOUNDS).read_text(encoding="utf-8"), broken)
+        self.assertEqual((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8"), json.dumps(self.OLD_KIT))
+        self.assertEqual(update.read_version(self.root), "1.1.0")    # the rest of the update is in
+        self.assertEqual(said, "Updated ReelForge from 1.0.0 to 1.1.0. Your assets/sfx/manifest.json can't be read "
+                               "(Expecting property name enclosed in double quotes at line 1, column 50), and "
+                               "ReelForge couldn't keep a copy of it in backups/, so it's left as it was, and the new "
+                               "version's sounds aren't in it yet (the next update brings them). Put the mistake right "
+                               "in a text editor: every mix stops on it until then.")
 
     def test_first_time_setup_keeps_the_kits_list_for_the_first_update(self):
         from studio import settings, sounds
