@@ -52,8 +52,11 @@ KEEP = ("my-studio/", "episodes/", "completed videos/", "research/", "tools/", "
 # is asked for). An update puts one in place only where there is none.
 STARTERS = (".codex/config.toml",)
 # The list of sounds is the kit's and yours at once: docs/SOUND.md has you add an entry for every sound you bring. An
-# update puts the kit's new list in place with the entries of yours that it lacks (_with_your_sounds).
+# update puts the kit's new list in place with what you added to yours and changed in it (_with_your_sounds).
 SOUNDS = "assets/sfx/manifest.json"
+# The kit's own list as the last update (or first-time setup, studio/sounds.py) put it in place: an entry of yours that
+# is the same as the one there is still the kit's, so the kit's new one replaces it, and anything else is yours.
+KIT_SOUNDS = "assets/sfx/.kit-manifest.json"
 VERSION_FILE = "studio/__init__.py"  # names this copy's version (read_version): an update puts it in place last
 # There from the first new file an update puts in place until its last: this folder is part old and part new. What a
 # later attempt says goes by it, since that attempt may stop without replacing a file itself.
@@ -175,6 +178,7 @@ def apply(rel: Release, progress: Progress | None = None, log: Callable[[str], N
     kind = install_kind(root)
     before = _hash(root / "requirements.txt")
     old = KIT_VERSION
+    notes: list[str] = []
     if kind == "git":
         _git_pull(root, progress)
     else:
@@ -186,13 +190,13 @@ def apply(rel: Release, progress: Progress | None = None, log: Callable[[str], N
             url, size = rel.assets[name]
             path = _download(url, work / name, size, progress)
             _verify(rel, name, path, progress)
-            _copy_release(path, root, work, progress)
+            notes = _copy_release(path, root, work, progress)
         except UpdateError as e:   # whatever stopped this attempt, an earlier one's new files are still in the folder
             e.partial = e.partial or (root / PART_WAY).exists()
             raise
         finally:
             shutil.rmtree(work, ignore_errors=True)
-    return _finish(root, before, old, read_version(root) or rel.version, progress, log)
+    return _finish(root, before, old, read_version(root) or rel.version, progress, log, notes)
 
 
 def move_in(root: Path, progress: Progress | None = None, log: Callable[[str], None] = print) -> str:
@@ -204,25 +208,26 @@ def move_in(root: Path, progress: Progress | None = None, log: Callable[[str], N
         raise UpdateError(f"There's no ReelForge in {root}; nothing was changed.")
     before = _hash(root / "requirements.txt")
     old = read_version(root)
-    _copy_tree(ROOT, root, progress)
-    return _finish(root, before, old, read_version(root) or KIT_VERSION, progress, log)
+    notes = _copy_tree(ROOT, root, progress)
+    return _finish(root, before, old, read_version(root) or KIT_VERSION, progress, log, notes)
 
 
 def _finish(root: Path, requirements_before: str, old: str, new: str, progress: Progress,
-            log: Callable[[str], None]) -> str:
+            log: Callable[[str], None], notes: list[str] = ()) -> str:
     """Once the new files are in: the Python packages, the steps after them (_after), and the note the restarted
     window reads. Packages that didn't install are said last, when everything else is done. The window's packages
     are in then and your AI's notes are the new version's, so opening ReelForge again, which repairs the packages,
-    is all that's left. (It used to stop before the notes, and nothing wrote them again after the repair.)"""
+    is all that's left. (It used to stop before the notes, and nothing wrote them again after the repair.) notes:
+    what else the update has to say (your sounds), at the end of the summary and in the note the window reads."""
     installed = _packages(root, requirements_before, progress)
     _after(root, requirements_before, progress, log)
-    _write_marker(root, old, new)
+    _write_marker(root, old, new, notes)
     if not installed:
         how = ("Close ReelForge and open it again: setup starts and installs them." if _stamp(root).exists() else
                f"Install them with: {_venv_python(root)} -m pip install -r requirements.txt")   # no .venv to repair
         raise UpdateError("The new version's files are in place, but its Python packages didn't install (are you "
                           f"online?). {how}", partial=True)
-    return f"Updated ReelForge from {old} to {new}."
+    return " ".join([f"Updated ReelForge from {old} to {new}.", *notes])
 
 
 def read_version(root: Path = ROOT) -> str:
@@ -296,7 +301,7 @@ def runnable(z: zipfile.ZipFile, out: Path) -> None:
             os.chmod(target, 0o755)
 
 
-def _copy_release(archive: Path, root: Path, work: Path, progress: Progress) -> None:
+def _copy_release(archive: Path, root: Path, work: Path, progress: Progress) -> list[str]:
     progress("Unpacking", 0, 0)
     out = work / "unpacked"
     try:
@@ -309,52 +314,162 @@ def _copy_release(archive: Path, root: Path, work: Path, progress: Progress) -> 
     except (zipfile.BadZipFile, tarfile.TarError, OSError) as e:
         raise UpdateError(f"The download couldn't be unpacked ({e}); try again.") from e
     tops = [p for p in out.iterdir() if p.is_dir()]
-    _copy_tree(tops[0] if len(tops) == 1 and not any(p.is_file() for p in out.iterdir()) else out, root, progress)
+    return _copy_tree(tops[0] if len(tops) == 1 and not any(p.is_file() for p in out.iterdir()) else out, root,
+                      progress)
 
 
-def _with_your_sounds(new: Path, yours: Path) -> bytes | None:
-    """The kit's new list of sounds (new) with what you added to the one in place (yours): every sound, and every
-    licence note, that yours has and the new list lacks. None: there is nothing of yours to carry over, or one of the
-    two isn't such a list, so the new file goes in as it is."""
+def _json(path: Path):
     try:
-        theirs, mine = (json.loads(f.read_text(encoding="utf-8")) for f in (new, yours))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError, RecursionError):
         return None
+
+
+TABLES = {"sounds": ("sound", "sounds"), "_licenses": ("licence note", "licence notes")}
+
+
+def _and(words: list[str]) -> str:
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
+
+
+def _named(items: list[tuple[str, str]]) -> str:
+    """('sounds', 'whoosh'), ('sounds', 'pop'), ('_licenses', 'pixabay') -> sounds "whoosh" and "pop", and licence
+    note "pixabay"."""
+    groups = []
+    for kind, (one, many) in (*TABLES.items(), ("", ("entry", "entries"))):
+        names = [f'"{name}"' for k, name in items if k == kind]
+        if names:
+            groups.append(f"{one if len(names) == 1 else many} {_and(names)}")
+    return groups[0] if len(groups) == 1 else ", ".join(groups[:-1]) + ", and " + groups[-1]
+
+
+def _merge_sounds(theirs: dict, mine: dict, was: dict | None, keep_unknown: bool):
+    """The new list with what is yours in mine, and which of yours by a name the new list also has were kept and which
+    replaced. was: the kit's list as it was (None: no record of it), which tells your entries from the kit's own:
+    one that is the same as there is the kit's, and its new one goes in. With no record, keep_unknown says which
+    goes in."""
+    out, kept, replaced = dict(theirs), [], []
+    for key, value in mine.items():
+        if key in TABLES and not (isinstance(value, dict) and isinstance(out.get(key), dict)):
+            if value != out.get(key):
+                replaced.append(("", key))                   # not a list of entries, which every mix would stop on
+            continue
+        kind = key if key in TABLES else ""
+        table = dict(out[key]) if kind else out
+        before = (was.get(key) if kind else was) if was is not None else None
+        before = before if isinstance(before, dict) else ({} if was is not None else None)
+        for name, entry in (value.items() if kind else [(key, value)]):
+            if name not in table:
+                table[name] = entry                          # yours, or one the kit has taken out of its list since
+            elif table[name] == entry or (before is not None and name in before and before[name] == entry):
+                continue                                     # the kit's own, as it put it there: its new one goes in
+            elif before is not None or keep_unknown:
+                table[name] = entry                          # yours, by a name the new list has too: yours stays
+                kept.append((kind, name))
+            else:
+                replaced.append((kind, name))
+        if kind:
+            out[key] = table
+    return out, kept, replaced
+
+
+def _backup_sounds(yours: Path, root: Path) -> str:
+    """A copy of your list of sounds in backups/, before an update puts entries of the new one in its place: the
+    path to say, from the ReelForge folder."""
+    folder = root / "backups"
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y-%m-%d-%H%M%S")
+    dest, n = folder / f"sounds-before-update-{stamp}.json", 1
+    while dest.exists():
+        n += 1
+        dest = folder / f"sounds-before-update-{stamp}-{n}.json"
+    shutil.copy2(yours, dest)
+    return f"backups/{dest.name}"
+
+
+def _with_your_sounds(new: Path, yours: Path, root: Path) -> tuple[bytes | None, list[str]]:
+    """The kit's new list of sounds (new) with what is yours in the one in place (yours), and what to say about it.
+    Yours: a sound, a licence note or any other key the new list lacks, and one it has by the same name that you
+    added or changed, which the kit's list as it was (KIT_SOUNDS) tells from the kit's own. Yours stays and is
+    named: a cue sheet of yours that uses it goes on mixing your sound, and nothing is lost. With no record of the
+    kit's list as it was (the first update that keeps one), the new list's entry goes in, after a copy of your list
+    is kept in backups/, and the entries it replaced are named. None for the list: there is nothing of yours to carry
+    over, or one of the two isn't such a list, so the new file goes in as it is."""
+    theirs, mine, was = _json(new), _json(yours), _json(root / KIT_SOUNDS)
     if not isinstance(theirs, dict) or not isinstance(mine, dict):
-        return None
-    added = False
-    for part in ("_licenses", "sounds"):
-        had, has = mine.get(part), theirs.get(part)
-        if isinstance(had, dict) and isinstance(has, dict):
-            for name, entry in had.items():
-                if name not in has:
-                    has[name], added = entry, True
-    return json.dumps(theirs, indent=2, ensure_ascii=False).encode("utf-8") + b"\n" if added else None
+        return None, []
+    was = was if isinstance(was, dict) else None
+    out, kept, replaced = _merge_sounds(theirs, mine, was, keep_unknown=False)
+    notes, backup = [], ""
+    if replaced:
+        try:
+            backup = _backup_sounds(yours, root)
+        except OSError:  # nowhere to keep a copy: they stay as they are, which may be the kit's old ones
+            out, held, replaced = _merge_sounds(theirs, mine, was, keep_unknown=True)
+            unsure = [k for k in held if k not in kept]
+            if unsure:
+                one = len(unsure) == 1
+                notes.append(f"Your {SOUNDS} keeps what it had for {_named(unsure)}, though the new version has its "
+                             f"own by {'that name' if one else 'those names'}: ReelForge couldn't keep a copy of your "
+                             "list in backups/ before replacing any.")
+    if kept:
+        one = len(kept) == 1
+        notes.append(f"Your own {_named(kept)} in {SOUNDS} {'is' if one else 'are'} kept: the new version has "
+                     f"{'one' if one else 'some'} by {'that name' if one else 'those names'} too, which "
+                     f"{'is' if one else 'are'} left out. To have both, give yours another name, in your cue sheets "
+                     "too.")
+    if replaced:
+        one = len(replaced) == 1
+        notes.append(f"The new version's own {_named(replaced)} took the place of what your {SOUNDS} had by "
+                     f"{'that name' if one else 'those names'}. " +
+                     (f"If any of it was yours, your list as it was is in {backup}." if backup else
+                      "ReelForge couldn't keep a copy of your list in backups/ first."))
+    text = None if out == theirs else json.dumps(out, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+    return text, notes
 
 
-def _copy_tree(src: Path, root: Path, progress: Progress) -> None:
+def _note_kit_sounds(new: Path, root: Path) -> None:
+    """The kit's list as it is put in place, for the next update to tell your entries from the kit's own. Not kept
+    (a full disk): the next update keeps a copy of yours in backups/ before it replaces any."""
+    try:
+        data = new.read_bytes()
+        record = root / KIT_SOUNDS
+        if not record.exists() or record.read_bytes() != data:
+            record.parent.mkdir(parents=True, exist_ok=True)
+            tmp = record.with_name(record.name + ".rf-new")
+            tmp.write_bytes(data)
+            os.replace(tmp, record)
+    except OSError:
+        pass
+
+
+def _copy_tree(src: Path, root: Path, progress: Progress) -> list[str]:
     """Copy a new version's files (src) over the copy in root, leaving everything that's the person's own alone.
     The file that names the version goes last, and only when every other file is in: until then this copy still
     counts as the version it was, so the Updates tab offers the update again instead of calling a folder that is part
-    old and part new "the newest version"."""
+    old and part new "the newest version". Returns what the update's summary says besides (_with_your_sounds)."""
     if not (src / VERSION_FILE).exists():
         raise UpdateError("The download doesn't look like ReelForge; nothing was changed.")
     files = sorted((p for p in src.rglob("*") if p.is_file()), key=lambda p: p == src / VERSION_FILE)
-    busy, changed, part_way = [], 0, root / PART_WAY
+    busy, changed, part_way, notes = [], 0, root / PART_WAY, []
     for i, f in enumerate(files, 1):
         rel = f.relative_to(src).as_posix()
         progress("Copying the new files", i, len(files))
         dest = root / rel
-        if kept(rel) or (rel in STARTERS and dest.exists()) or (rel == VERSION_FILE and busy):
+        # (KIT_SOUNDS is written from the new list once that is in, never copied: a copy that has been set up has one)
+        if rel == KIT_SOUNDS or kept(rel) or (rel in STARTERS and dest.exists()) or (rel == VERSION_FILE and busy):
             continue
         tmp = dest.with_name(dest.name + ".rf-new")
         try:
-            merged = _with_your_sounds(f, dest) if rel == SOUNDS and dest.exists() else None
+            merged, said = _with_your_sounds(f, dest, root) if rel == SOUNDS and dest.exists() else (None, [])
             if dest.exists() and (dest.read_bytes() == merged if merged is not None else
                                   dest.stat().st_size == f.stat().st_size and dest.read_bytes() == f.read_bytes()):
                 if os.name != "nt" and os.access(f, os.X_OK) and not os.access(dest, os.X_OK):
                     os.chmod(dest, 0o755)   # an earlier update left it unrunnable
                 _drop(tmp)                  # what an earlier update that stopped at this file left beside it
+                if rel == SOUNDS:
+                    _note_kit_sounds(f, root)
+                    notes += said
                 continue  # unchanged (this also leaves a running launcher alone)
             dest.parent.mkdir(parents=True, exist_ok=True)
             if merged is not None:
@@ -366,6 +481,9 @@ def _copy_tree(src: Path, root: Path, progress: Progress) -> None:
             # Windows won't replace a file someone has open. Most let go within a moment, so wait for the first
             # one; once a file has stayed busy the update can't finish this time, and the rest aren't waited for.
             _replace(tmp, dest, wait=0 if busy else BUSY_WAIT)
+            if rel == SOUNDS:   # (only once the list is in: a record of the new one beside your old one would take
+                _note_kit_sounds(f, root)   # the old kit's entries in it for yours at the next attempt)
+                notes += said
             changed += 1
             if changed == 1:
                 _note_part_way(part_way)
@@ -383,6 +501,7 @@ def _copy_tree(src: Path, root: Path, progress: Progress) -> None:
                                 if partial else "Nothing was changed. ") +
             "Close other ReelForge windows, then update again to finish.", partial=partial)
     _drop(part_way)
+    return notes
 
 
 def _note_part_way(part_way: Path) -> None:
@@ -509,16 +628,17 @@ def _marker(root: Path) -> Path:
     return root / "dashboard" / "data" / "updated.json"
 
 
-def _write_marker(root: Path, old: str, new: str) -> None:
+def _write_marker(root: Path, old: str, new: str, notes: list[str] = ()) -> None:
     try:
         _marker(root).parent.mkdir(parents=True, exist_ok=True)
-        _marker(root).write_text(json.dumps({"from": old, "to": new, "ts": time.time()}), encoding="utf-8")
+        _marker(root).write_text(json.dumps({"from": old, "to": new, "ts": time.time(), "notes": list(notes)}),
+                                 encoding="utf-8")
     except OSError:
         pass
 
 
 def take_marker(root: Path = ROOT) -> dict | None:
-    """What the last update did ({from, to}), once: the restarted dashboard says "Updated to ..."."""
+    """What the last update did ({from, to, notes}), once: the restarted dashboard says "Updated to ..."."""
     try:
         data = json.loads(_marker(root).read_text(encoding="utf-8"))
         _marker(root).unlink()

@@ -2642,11 +2642,16 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
             return
         done = kit_update.take_marker()
         if done:
-            self.notify(f"You're on ReelForge {done.get('to')} now (from {done.get('from')}).", title="Updated",
-                        timeout=15)
+            # What else the update had to say (a sound of yours kept by a name the new version also uses): the
+            # summary that said it first was up for a moment before the restart.
+            notes = done.get("notes") if isinstance(done.get("notes"), list) else []
+            notes = " ".join(str(n) for n in notes if n)
+            said = f"You're on ReelForge {done.get('to')} now (from {done.get('from')})."
+            self.notify(f"{said} {notes}".strip(), title="Updated", severity="warning" if notes else "information",
+                        timeout=30 if notes else 15)
             self._safe(lambda: notify.add("update", f"Updated to ReelForge {done.get('to')}",
-                                          f"From {done.get('from')}. See what's new on the Updates tab.",
-                                          key=f"updated:{done.get('to')}", read=True), False)
+                                          f"From {done.get('from')}. {notes + ' ' if notes else ''}See what's new on "
+                                          "the Updates tab.", key=f"updated:{done.get('to')}", read=not notes), False)
         self.update_info = self._safe(lambda: db.get_meta("update_check"), None)
         self.show_update()
         info = self.update_info

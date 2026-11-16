@@ -26,6 +26,8 @@ research/*
 tools/
 assets/sfx/mixkit/
 assets/sfx/_cache/
+# The kit's list of sounds as it was put in place, which an update tells your own entries by (studio/update.py)
+assets/sfx/.kit-manifest.json
 
 # The dashboard's private data: stats database, login profile, tokens, its config (written by onboarding)
 dashboard/data/
