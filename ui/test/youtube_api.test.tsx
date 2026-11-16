@@ -77,6 +77,7 @@ const google = (h: Headless, what = "sent", ...args: unknown[]) => h.bridge.call
 function inStats<T>(use: (db: Database) => T): T {
   const db = new Database(join(tmp, "dashboard", "data", "stats.db"))
   try {
+    db.exec("PRAGMA busy_timeout = 10000") // the window may be writing at this moment: wait, as ReelForge does
     return use(db)
   } finally {
     db.close()
@@ -176,7 +177,8 @@ describe("a channel that never used YouTube's API", () => {
     await h.t.mockInput.typeText(join(tmp, "nothing.json"))
     h.t.mockInput.pressKey("RETURN")
     await until(h, () => dialog(h).includes("There is no file"))
-    expect(dialog(h)).toContain(`CLIENT FILE There is no file at ${join(tmp, "nothing.json")}. `)
+    // (Without its spaces: a temporary folder's long path wraps where the dialog's width puts the break.)
+    expect(dialog(h).replace(/\s+/g, "")).toContain(`CLIENTFILEThereisnofileat${join(tmp, "nothing.json")}.`.replace(/\s+/g, ""))
     expect(dialog(h)).not.toContain("Type or paste where the client file is")
     for (let i = 0; i < "nothing.json".length; i++) h.t.mockInput.pressKey("BACKSPACE")
     await h.settle(200)

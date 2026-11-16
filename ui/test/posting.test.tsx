@@ -62,6 +62,7 @@ const popups = () => toasts.get().map((t) => (t.title ? `${t.title}: ${t.body}` 
 function inStats<T>(use: (db: Database) => T): T {
   const db = new Database(join(tmp, "dashboard", "data", "stats.db"))
   try {
+    db.exec("PRAGMA busy_timeout = 10000") // the window may be writing at this moment: wait, as ReelForge does
     return use(db)
   } finally {
     db.close()

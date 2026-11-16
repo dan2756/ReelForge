@@ -311,13 +311,27 @@ class WindowTest(unittest.TestCase):
     def test_a_read_that_got_only_part_shows_on_its_panel(self):
         w = self.open(demo.platforms())
         said = "Only TikTok's totals were read this time, not its videos. TikTok's video list took too long to answer."
-        sync.last_warnings["tiktok"] = (db.now_iso(), said)
-        w.call("update_accounts")
+
+        def warned() -> bool:
+            # (As a read leaves it: in this ReelForge's mind and shared with the others. A window that has just
+            # opened may be taking the shared state as its own at this moment, which empties what is only in mind.)
+            sync.last_warnings["tiktok"] = (db.now_iso(), said)
+            sync._share(None)
+            w.call("update_accounts")
+            return said in plain(self.panel(w, "tiktok")["body"])
+
+        self.assertTrue(w.until(warned))
         self.assertIn(said, plain(self.panel(w, "tiktok")["body"]))
         self.assertNotIn("Only TikTok's", plain(self.panel(w, "youtube")["body"]))
         self.assertNotIn("TikTok", plain(w.view("header")["line"]))  # it was read: not a failed refresh at the foot
-        sync.last_errors["tiktok"] = (db.now_iso(), "TikTok couldn't be reached (is this computer online?).")
-        w.call("update_accounts")  # a read that failed outright says only that
+
+        def failed() -> bool:
+            sync.last_errors["tiktok"] = (db.now_iso(), "TikTok couldn't be reached (is this computer online?).")
+            sync._share(None)
+            w.call("update_accounts")  # a read that failed outright says only that
+            return "last read failed" in plain(self.panel(w, "tiktok")["body"])
+
+        self.assertTrue(w.until(failed))
         body = plain(self.panel(w, "tiktok")["body"])
         self.assertIn("last read failed: TikTok couldn't be reached", body)
         self.assertNotIn(said, body)

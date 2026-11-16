@@ -11,6 +11,7 @@ import json
 import re
 import secrets
 import socket
+import socketserver
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -74,7 +75,7 @@ class Google:
         self.sessions: dict[str, dict] = {}  # id -> {"size", "data", "body", "video"}
         self.videos: list[dict] = []
         self.lock = threading.Lock()
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+        self.httpd = _Server(("127.0.0.1", 0), _Handler)
         self.httpd.daemon_threads = True
         self.httpd.google = self
         self.base = f"http://127.0.0.1:{self.httpd.server_address[1]}"
@@ -118,6 +119,14 @@ def refusal(status: int, reason: str) -> tuple[int, dict]:
     return status, {"error": {"code": status, "message": f"The request was refused: {reason}.",
                               "errors": [{"message": f"Refused: {reason}.", "domain": "youtube.video",
                                           "reason": reason}]}}
+
+
+class _Server(ThreadingHTTPServer):
+    def server_bind(self) -> None:
+        # HTTPServer's own looks the computer's name up first, which nothing here uses. On a Mac that lookup can
+        # take half a minute, once in every process: each window test starts one (ui/test/youtube_api_preload.py).
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 class _Handler(BaseHTTPRequestHandler):

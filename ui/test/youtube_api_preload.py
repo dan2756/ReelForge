@@ -134,6 +134,9 @@ def test_google(self, what: str, *args):
     what it was sent and what it made."""
     if what == "answer":
         GOOGLE.consent = args[0] if args else "yes"
+        until = time.monotonic() + 15  # (the window says "connecting" a moment before Google's page is open)
+        while not PENDING and time.monotonic() < until:
+            time.sleep(0.02)
         answer(PENDING.pop())
     elif what == "hold":
         HOLD["after"] = args[0]
