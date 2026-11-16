@@ -605,6 +605,33 @@ class Posting(PostingTest):
         (again,) = self.post(w, "tiktok", force=["tiktok"])["jobs"]
         self.assertEqual(self.rows(w)["tiktok"]["job"], again["id"])
 
+    def test_a_new_cut_of_a_video_you_pressed_post_for_shows_that_press(self):
+        # You pressed Post in the tab for the first cut, and TikTok hasn't said yet that it's up. Then the file is
+        # rendered again under its name: the episode may be up there, as much as one nobody is sure of.
+        w = self.window()
+        (job,) = self.post(w)["jobs"]
+        self.work(job["id"], "opening", "uploading", "filling", "ready")
+        posting.advance(job["id"], "ready", install=CHROME, step="press")
+        self.video.write_bytes(b"the same video, rendered again")
+        w.svc.scan_files()
+        w.svc.update_posting(fresh=True)
+        row = self.rows(w)["tiktok"]
+        self.assertEqual((row["state"], row["job"], row["actions"]), ("ready", job["id"], ["mark_posted", "not_posted"]))
+        self.assertEqual(plain(row["line"]),
+                         "● you pressed Post there: waiting for TikTok to say it's up  for an earlier cut")
+        asked = w.call("post_info", CAPTION, TAGS)
+        tiktok = {q["key"]: q for q in asked["platforms"]}["tiktok"]
+        self.assertEqual((tiktok["blocked"]["reason"], tiktok["again"]), ("unknown", True))
+        made = self.post(w, "tiktok")
+        self.assertEqual((made["jobs"], [b["reason"] for b in made["blocked"]]), ([], ["unknown"]))
+        # Once TikTok says the first cut is up, the episode is there once, and the new cut goes only when you say again.
+        posting.advance(job["id"], "posted", install=CHROME, post_id="7300000000000000001", url=TIKTOK_URL)
+        self.assertEqual([j["state"] for j in posting.recent()], ["posted"])
+        w.svc.update_posting()
+        self.assertEqual(self.rows(w)["tiktok"]["state"], "posted")
+        (again,) = self.post(w, "tiktok", force=["tiktok"])["jobs"]
+        self.assertEqual(self.rows(w)["tiktok"]["job"], again["id"])
+
     def test_a_job_reelforge_lost_track_of_takes_your_word(self):
         w = self.window()
         made = self.post(w, "tiktok", "youtube")

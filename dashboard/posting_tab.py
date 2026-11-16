@@ -149,10 +149,12 @@ def state_line(job: dict | None, post: dict | None, name: str, opened: str | Non
     """A platform's row on the posting view: its state in words, with what the extension last said. opened: when
     its upload page was last opened by hand for this video, which is all ReelForge knows of a post made that way
     until a stats read finds it. pressed: the extension saw you press the platform's own Post button, and is
-    waiting for the platform's word."""
+    waiting for the platform's word. A job of an earlier cut (posting.for_files) says so: the file was rendered
+    again since."""
     state = standing(job, post)
+    cut = "  for an earlier cut" if job and job.get("earlier_cut") and state == job["state"] else ""
     if pressed and job and state == job["state"] and state in PRESSABLE:
-        return Text(f"● you pressed Post there: waiting for {name} to say it's up", f"bold {AMBER}")
+        return Text(f"● you pressed Post there: waiting for {name} to say it's up", f"bold {AMBER}").append(cut, MUTED)
     if state == "none":
         out = Text("○ not posted", FAINT)
         return out.append(f"  upload page opened {fmt_ago(opened)}, not spotted yet", MUTED) if opened else out
@@ -184,6 +186,7 @@ def state_line(job: dict | None, post: dict | None, name: str, opened: str | Non
         out.append(f": {step}")
     if job["progress"] is not None and state == "uploading":
         out.append(f" {max(0.0, min(float(job['progress']), 1.0)):.0%}")
+    out.append(cut, MUTED)
     if job["detail"]:
         out.append(f"  {job['detail']}", MUTED)
     if state in BUSY and analytics.now() - db.parse(job["updated_at"]) >= QUIET_AFTER:

@@ -236,10 +236,15 @@ def spotted(name: str) -> dict[str, dict]:
 def for_files(paths: list[Path]) -> dict[Path, dict[str, dict]]:
     """Where each of these video files stands on each platform (see current). A job is looked up by the file's name
     first, so only a file that has jobs is ever hashed, and then it's a file ReelForge has hashed before. A job of
-    an earlier cut of the same episode (the same name, other bytes) that is posted or unknown stands for the file
-    too, marked "earlier_cut", where the file has no live job of its own: the episode is up there, or may be."""
+    an earlier cut of the same episode (the same name, other bytes) that is posted or unknown, or still under way
+    after Post was pressed for it (for you, or by you in the tab), stands for the file too, marked "earlier_cut",
+    where the file has no live job of its own: the episode is up there, or may be."""
     with db.connect() as c:
         rows = [dict(r) for r in c.execute("SELECT * FROM post_jobs WHERE superseded = 0 ORDER BY rowid")]
+        marks = ",".join("?" * len(IN_FLIGHT))
+        pressed = {r[0] for r in c.execute(
+            f"SELECT DISTINCT e.job FROM post_events e JOIN post_jobs j ON j.id = e.job WHERE j.superseded = 0 "
+            f"AND j.state IN ({marks}) AND (e.state = 'posting' OR e.step = 'press')", IN_FLIGHT)}
     named: dict[str, list[dict]] = {}
     for j in rows:
         named.setdefault(j["video"].lower(), []).append(j)
@@ -252,7 +257,8 @@ def for_files(paths: list[Path]) -> dict[Path, dict[str, dict]]:
             except OSError:
                 continue
             out[path] = current([j for j in jobs if j["video_sha256"] == sha])
-            cuts = [j for j in jobs if j["video_sha256"] != sha and j["state"] in ("posted", "unknown")]
+            cuts = [j for j in jobs if j["video_sha256"] != sha and
+                    (j["state"] in ("posted", "unknown", "posting") or j["id"] in pressed)]
             episode = db.episode_for_video(path.name) if cuts else None
             for j in cuts:  # (oldest first: the newest such cut is the one that stays)
                 mine = out[path].get(j["platform"])
@@ -419,12 +425,17 @@ def _standing(c: sqlite3.Connection, sha: str, platform: str, episode: int | Non
         return {"platform": platform, "reason": "spotted", "url": spotted["url"],
                 "message": "Already posted: ReelForge found this video's post there."}, None
     if episode is not None and platform not in force:
-        # An earlier cut of this episode (the same file name, other bytes) that the extension posted there. Such a
-        # post often has no id, so it is in no stats yet, and by its bytes alone the new cut would look unposted.
-        # (A cut that is still under way is another video as far as the ledger goes: only what is up counts.)
-        cut = c.execute("SELECT * FROM post_jobs WHERE episode_id = ? AND platform = ? AND superseded = 0 "
-                        "AND video_sha256 != ? AND state IN ('posted', 'unknown') ORDER BY rowid DESC LIMIT 1",
-                        (episode, platform, sha)).fetchone()
+        # An earlier cut of this episode (the same file name, other bytes) that the extension posted there, or
+        # may have: Post was pressed for it, for you or by you in the tab, and the platform's word may still be on
+        # its way. Such a post often has no id, so it is in no stats yet, and by its bytes alone the new cut would
+        # look unposted. (A cut still under way that nobody pressed Post for is another video as far as the ledger
+        # goes: only what is up, or may be, counts.)
+        marks = ",".join("?" * len(IN_FLIGHT))
+        cut = c.execute(
+            f"""SELECT * FROM post_jobs j WHERE episode_id = ? AND platform = ? AND superseded = 0
+                AND video_sha256 != ? AND (state IN ('posted', 'unknown', 'posting') OR (state IN ({marks}) AND
+                EXISTS (SELECT 1 FROM post_events e WHERE e.job = j.id AND (e.state = 'posting' OR e.step = 'press'))))
+                ORDER BY rowid DESC LIMIT 1""", (episode, platform, sha, *IN_FLIGHT)).fetchone()
         if cut:
             return _in_the_way(dict(cut), earlier_cut=True), None
     if platform not in force and by_hand(c, sha, platform, name):
@@ -488,6 +499,9 @@ def _in_the_way(job: dict, earlier_cut: bool = False) -> dict:
     elif job["state"] == "unknown":
         reason, message = "unknown", ("ReelForge doesn't know whether the last try posted. Check your profile there, "
                                       "then say so on the Publish tab.")
+    elif earlier_cut:  # under way, with Post pressed for it: it may be up, like one nobody is sure of
+        reason, message = "unknown", ("Post was pressed there for an earlier cut of this video, and ReelForge hasn't "
+                                      "heard yet whether it's up.")
     else:
         reason, message = "in_progress", "A post of this video is already under way there. Cancel it first."
     return {"platform": job["platform"], "reason": reason, "message": message, "job": job["id"], "state": job["state"],
