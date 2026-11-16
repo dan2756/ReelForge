@@ -804,7 +804,10 @@ class ExtensionView(PostingTest):
         view = self.view(w)
         self.assertEqual((view["state"], view["installs"][0]["on"], view["installs"][0]["seen"]),
                          ("waiting", False, "30m ago"))
-        self.assertIn("it wakes up when you post", plain(view["line"]))
+        # In words, and in the first ones (all a narrow window shows): amber alone doesn't tell it from "connected".
+        self.assertEqual(plain(view["line"]), "● Browser extension asleep  it wakes up when you post · Chrome on this "
+                                              "PC · v0.1.0 · last seen 30m ago")
+        self.assertEqual(plain(view["line"][:1]), "● Browser extension asleep")
         self.assertTrue(w.view("posting")["can_post"])
 
     def test_an_extension_of_another_version_is_old_and_post_waits_for_the_update(self):

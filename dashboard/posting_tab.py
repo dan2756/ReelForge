@@ -284,8 +284,10 @@ class PostingTab:
             line = Text("● Browser extension connected", f"bold {GOOD}")
             return {"state": "on", "line": line.append(f"  {who} · seen {first['seen']}", MUTED),
                     "installs": installs}
-        line = Text("● Browser extension connected", AMBER)
-        line.append(f"  {who} · last seen {first['seen']} (it wakes up when you post)", MUTED)
+        # Its own first words, which are all a narrow window shows of the line: as "connected" in amber it read the
+        # same as one that is there, to anyone who doesn't see the colour.
+        line = Text("● Browser extension asleep", AMBER)
+        line.append(f"  it wakes up when you post · {who} · last seen {first['seen']}", MUTED)
         return {"state": "waiting", "line": line, "installs": installs}
 
     def update_extension(self) -> None:

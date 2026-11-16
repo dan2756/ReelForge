@@ -208,7 +208,8 @@ describe("where each post stands", () => {
       const rows = frame(h).split("\n")
       const post = rows.findIndex((r) => r.includes("▐ Post… ▌"))
       expect(rows[post]).toMatch(/▐ Post… ▌ +● Browser extension +Browsers…/)
-      expect(rows[post + 1]).toMatch(/┃ +connected +$/)
+      // (one that has gone quiet says so in its words, not only by being amber)
+      expect(rows[post + 1]).toMatch(how === "on" ? /┃ +connected +$/ : /┃ +asleep +$/)
       expect(rows.findIndex((r) => r.includes("BY HAND"))).toBe(post + 3) // the words' two rows, and the space under them
       for (const text of ["Chrome on this PC", "v0.1.0", "seen ", "wakes up"]) expect(frame(h)).not.toContain(text) // in its dialog
       for (const text of ["▐ Open all 4 → ▌", "Show file", "TikTok →", "YouTube →", "Instagram →", "Copy TikTok text", "Copy YouTube hashtags", "Copy Instagram text"])
