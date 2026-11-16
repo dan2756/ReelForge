@@ -231,8 +231,15 @@ def regenerate(*, preserve_settings: bool = False) -> int:
     # Said once at the end: each channel's files bring up the first one's notes again, and with them every settings
     # file with a mistake in it. Without --preserve-settings each channel's studio.toml has been written again from
     # its answers by now, which puts right a mistake come across before it was its turn: that one isn't said.
-    for line in generate.standing(said):
+    lines = generate.standing(said)
+    for line in lines:
         print(line)
+    from .update import SAID
+    if os.environ.get(SAID):    # an update runs this, and passes these on to you: what else is printed goes nowhere
+        try:
+            Path(os.environ[SAID]).write_text(json.dumps(lines, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
     if not done:
         print(f"{P.ANSWERS} not found. Run first-time setup first: reelforge channel")
         return 1

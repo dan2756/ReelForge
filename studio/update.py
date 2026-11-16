@@ -57,6 +57,10 @@ SOUNDS = "assets/sfx/manifest.json"
 # The kit's own list as the last update (or first-time setup, studio/sounds.py) put it in place: an entry of yours that
 # is the same as the one there is still the kit's, so the kit's new one replaces it, and anything else is yours.
 KIT_SOUNDS = "assets/sfx/.kit-manifest.json"
+# Where `channel --regenerate` puts what it has to say (a channel's settings file with a mistake in it) for the update
+# to pass on: the rest of what it prints is the list of files it wrote. An older version's updater runs the new
+# version's command with it, so the name stays as it is.
+SAID = "REELFORGE_SAID"
 VERSION_FILE = "studio/__init__.py"  # names this copy's version (read_version): an update puts it in place last
 # There from the first new file an update puts in place until its last: this folder is part old and part new. What a
 # later attempt says goes by it, since that attempt may stop without replacing a file itself.
@@ -218,9 +222,10 @@ def _finish(root: Path, requirements_before: str, old: str, new: str, progress: 
     window reads. Packages that didn't install are said last, when everything else is done. The window's packages
     are in then and your AI's notes are the new version's, so opening ReelForge again, which repairs the packages,
     is all that's left. (It used to stop before the notes, and nothing wrote them again after the repair.) notes:
-    what else the update has to say (your sounds), at the end of the summary and in the note the window reads."""
+    what else the update has to say (your sounds, and what _after says), at the end of the summary and in the note the
+    window reads."""
     installed = _packages(root, requirements_before, progress)
-    _after(root, requirements_before, progress, log)
+    notes = [*notes, *_after(root, requirements_before, progress, log)]
     _write_marker(root, old, new, notes)
     if not installed:
         how = ("Close ReelForge and open it again: setup starts and installs them." if _stamp(root).exists() else
@@ -604,10 +609,12 @@ def _packages(root: Path, requirements_before: str, progress: Progress) -> bool:
     return res.returncode == 0
 
 
-def _after(root: Path, requirements_before: str, progress: Progress, log: Callable[[str], None]) -> None:
+def _after(root: Path, requirements_before: str, progress: Progress, log: Callable[[str], None]) -> list[str]:
     """New Python packages if needed, the window's (Bun and OpenTUI), then agent instructions refreshed without
-    replacing settings or accounts from older onboarding answers."""
+    replacing settings or accounts from older onboarding answers. Returns what refreshing them had to say: a channel
+    whose studio.toml has a mistake in it gets notes that go by its answers instead, and you're told which file."""
     py = _venv_python(root)
+    said: list[str] = []
     # The Python packages are _packages' step now, which _finish runs just before this one and reports after it.
     progress("Getting the window's packages", 0, 0)
     res = subprocess.run([py, "-m", "studio.ui", "install"], capture_output=True, text=True, cwd=root,
@@ -617,11 +624,19 @@ def _after(root: Path, requirements_before: str, progress: Progress, log: Callab
     if (root / "my-studio" / "studio.toml").exists() or any((root / "profiles").glob("*/my-studio/studio.toml")):
         progress("Rewriting CLAUDE.md and AGENTS.md", 0, 0)
         env = {k: v for k, v in os.environ.items() if k != "REELFORGE_PROFILE"}  # every profile's, not just this one's
-        res = subprocess.run([py, "-m", "studio", "channel", "--regenerate", "--preserve-settings"], capture_output=True, text=True,
-                             cwd=root, env={**env, "PYTHONUTF8": "1"})
-        if res.returncode != 0:
-            log("Updated, but rewriting CLAUDE.md / AGENTS.md failed; run: "
-                "reelforge channel --regenerate --preserve-settings")
+        fd, out = tempfile.mkstemp(prefix="reelforge-said-", suffix=".json")
+        os.close(fd)
+        try:
+            res = subprocess.run([py, "-m", "studio", "channel", "--regenerate", "--preserve-settings"],
+                                 capture_output=True, text=True, cwd=root, env={**env, "PYTHONUTF8": "1", SAID: out})
+            if res.returncode != 0:
+                log("Updated, but rewriting CLAUDE.md / AGENTS.md failed; run: "
+                    "reelforge channel --regenerate --preserve-settings")
+            lines = _json(Path(out))    # nothing there (a version that doesn't write it): nothing to say
+            said = [line for line in lines if isinstance(line, str) and line] if isinstance(lines, list) else []
+        finally:
+            Path(out).unlink(missing_ok=True)
+    return said
 
 
 def _marker(root: Path) -> Path:

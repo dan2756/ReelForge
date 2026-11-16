@@ -296,6 +296,54 @@ class InstallTest(unittest.TestCase):
         self.assertEqual([p.name for p in self.root.iterdir()], ["notes.txt"])
 
 
+class AfterTest(unittest.TestCase):
+    """What an update does once the new files are in, in a ReelForge folder of its own (the kit's studio/ and the
+    dashboard's settings example), with only the window's packages left out."""
+
+    def test_a_mistake_in_a_channels_settings_is_said_when_the_update_is_done(self):
+        """The update writes every channel's notes again, and with a typo in a studio.toml they go by its answers
+        instead. What was said about that went nowhere: the update, and the window it restarted, said nothing."""
+        import sys
+
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name) / "ReelForge"
+        kit = Path(update.__file__).resolve().parent.parent
+        shutil.copytree(kit / "studio", root / "studio", ignore=shutil.ignore_patterns("__pycache__"))
+        (root / "dashboard").mkdir()
+        shutil.copy(kit / "dashboard" / "config.example.toml", root / "dashboard")
+        env = {k: v for k, v in os.environ.items() if k != "REELFORGE_PROFILE"}
+        answers = Path(tmp.name) / "answers.json"
+        answers.write_text(json.dumps({"channel_name": "Night Physics", "about": "What-ifs.", "assistant": "claude",
+                                       "background_stats": False}), encoding="utf-8")
+        made = subprocess.run([sys.executable, "-m", "studio", "channel", "--answers", str(answers)], cwd=root,
+                              env={**env, "STUDIO_DRY_SYSTEM": "1"}, capture_output=True, text=True)
+        self.assertEqual(made.returncode, 0, made.stdout + made.stderr)
+        mine = root / "my-studio" / "studio.toml"
+        typo = mine.read_text(encoding="utf-8") + "\nthis is = = a typo\n"
+        mine.write_text(typo, encoding="utf-8")
+        real, logged = subprocess.run, []
+
+        def run(cmd, *a, **k):
+            if "studio.ui" in cmd:      # the window's packages (Bun): not this test's
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            return real(cmd, *a, **k)
+
+        with mock.patch.object(update.subprocess, "run", run), \
+                mock.patch.object(update, "_venv_python", lambda r: sys.executable), \
+                mock.patch.object(update, "_packages", return_value=True), \
+                mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}):
+            summary = update._finish(root, "", "1.0.0", "1.1.0", lambda *a: None, logged.append)
+        notes = json.loads((root / "dashboard" / "data" / "updated.json").read_text(encoding="utf-8"))["notes"]
+        self.assertEqual(len(notes), 1, notes)
+        self.assertTrue(notes[0].startswith(f"Night Physics's settings file, {mine}, has a mistake in it ("), notes)
+        self.assertIn("so your AI's notes go by its answers instead", notes[0])
+        self.assertEqual(summary, f"Updated ReelForge from 1.0.0 to 1.1.0. {notes[0]}")
+        self.assertEqual(logged, [])
+        self.assertEqual(mine.read_text(encoding="utf-8"), typo)         # yours to fix: the update leaves it
+        self.assertFalse(list(Path(tempfile.gettempdir()).glob("reelforge-said-*")))
+
+
 @unittest.skipUnless(shutil.which("git"), "needs git")
 class GitPullTest(unittest.TestCase):
     """A git clone that onboarding has written its CLAUDE.md and AGENTS.md into still updates."""
