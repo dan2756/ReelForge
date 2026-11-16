@@ -347,6 +347,13 @@ developers", lists the view and the calls.
 button, and Post in the extension's popup (which needs the browser's token). No `reelforge` command and no
 pipeline step makes one: `test_extension_api.py` reads the sources to hold that.
 
+Some of what stands before a post is held by the window, not by these calls. The window always opens a question
+first and sends back what it showed: `video` and `sha256` with `post_with_extension`, `shown` with `post_with_api`.
+A caller that leaves them out is not asked whether the picked video is still the one it meant. And
+`post_action(job, "post_again")` and `post_action(job, "post_api")` start a post with the form's text as last typed
+and no question at all (`post_again` as a post again). The window never sends those two: its buttons for them open
+the questions. So the bridge is not a way to post that an AI may use: `CLAUDE.md` and `AGENTS.md` say so.
+
 **Tests.** With ReelForge's own (`dashboard/tests/`, the command above): `test_posting.py` (the ledger),
 `test_extension_api.py` (the server, the pairing and the two pages, against a real server on a free port with the
 test playing the extension), `test_posting_tab.py` (the window's side), and `test_youtube_api.py` and
