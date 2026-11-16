@@ -177,6 +177,26 @@ export const tests = {
     equal([job.post_id, await tab.evaluate(() => fixture.clicks), presses(app).length], ["FIXTUREvid1", 1, 0], "the video's id, presses and press requests")
   },
 
+  async "a newer list that moves YouTube's error hook does not get a press past YouTube's own error"({ app, site, browser, video }) {
+    // The app's newer list points the hook for YouTube's error message at nothing. The packed one is used all
+    // the same: the engine stops a job at that message before anything is pressed.
+    site.mode.youtube = "slow"
+    const list = quickSelectors()
+    list.platforms.youtube.hooks.error = { any: true, strategies: [{ id: "moved", css: "no-such-error-element" }] }
+    app.selectors = list
+    await switchOn(browser, app, "youtube")
+    const made = app.createBatch(video(), ["youtube"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("studio.youtube.com")
+    const job = made.jobs[0]
+    await until(() => `the wait for the upload (it is ${job.state} ${job.step})`, () => job.step === "upload" && job.events.some(event => event.step === "visibility"), 30000)
+    await tab.evaluate(() => { document.querySelector("ytcp-app").shadowRoot.querySelector(".error-area").textContent = "Daily upload limit reached" })
+    await until(() => `the job to end (it is ${job.state})`, () => ["failed", "posted", "unknown"].includes(job.state), 30000)
+    equal([job.state, job.error_code, job.error_message], ["failed", "platform_error", "YouTube says: Daily upload limit reached"], "state, code and message")
+    equal([await tab.evaluate(() => [fixture.clicks, fixture.posted]), presses(app).length], [[0, false], 0], "presses the page saw, and press requests")
+    equal((await browser.storage("local")).selectors?.version, list.version, "the newer list was taken for everything else")
+  },
+
   async "X is never pressed, even with everything forced on"({ app, browser, video }) {
     await forceOn(browser, app, "x")
     app.pressUnlocked.add("x")

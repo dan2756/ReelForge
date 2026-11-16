@@ -6,11 +6,12 @@
 // comes from the newer list. Where the code looks decides what it clicks and what it concludes, so these are
 // always the packed ones, and change only when the person reloads the extension: the hooks whose element is
 // clicked (Next, Create, OK and the final button itself); the platform's signs that a post went out, that it is
-// asking the person to prove something, and that nobody is signed in, with every hook those signs name; and the
-// hooks that guard a post (the captcha, the account, YouTube's audience and visibility answers). A newer list
-// can change how long they are waited for, and nothing else about them.
+// asking the person to prove something, and that nobody is signed in, with every hook those signs name; the
+// hooks that guard a post (the captcha, the platform's own error message, the account, YouTube's audience and
+// visibility answers: GUARD_HOOKS); and every hook one of these looks inside or near. A newer list can change how
+// long they are waited for, and nothing else about them.
 import * as app from "./app.js"
-import { PLATFORMS, PACKED_HOOKS, GUARD_HOOKS } from "../shared/consts.js"
+import { PLATFORMS, PACKED_HOOKS, GUARD_HOOKS, keptHooks } from "../shared/consts.js"
 
 const local = chrome.storage.local
 const LIMIT = 64 * 1024
@@ -59,13 +60,14 @@ export async function selectorsFor(platform) {
   for (const name of ["success", "challenge", "signed_out"]) signs[name] = own[name] ? { ...own[name], ...wait(theirs[name]) } : undefined
   const named = Object.values(signs).flatMap(sign => (sign ? [...(Array.isArray(sign.hooks) ? sign.hooks : []), sign.gone_after_press] : []))
   const clicked = PACKED_HOOKS[platform] || []
-  for (const name of new Set([...clicked, ...(GUARD_HOOKS[platform] || []), ...named.filter(Boolean)])) {
+  for (const name of keptHooks(own.hooks, [...clicked, ...(GUARD_HOOKS[platform] || []), ...named.filter(Boolean)])) {
     // (A clicked hook is taken whole, as it always was. The others keep the app's word on how long to wait.)
     if (own.hooks[name]) hooks[name] = clicked.includes(name) ? own.hooks[name] : { ...own.hooks[name], ...wait(theirs.hooks[name]) }
     else delete hooks[name]
   }
   return { version: all.version, ...theirs, hooks, ...signs }
 }
+
 
 // Called after a heartbeat, with the version the app says it has.
 export async function refresh(found, theirVersion) {

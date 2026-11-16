@@ -27,16 +27,35 @@ export const PACKED_HOOKS = {
   x: ["post_button"],
 }
 
-// The hooks that a newer list never replaces although nothing clicks them, because what the script concludes
-// from them decides whether a post goes on: the captcha a job stops at, the account the tab is compared with, and
-// on YouTube the audience and visibility answers and the end of the upload, which decide whether the last screen
-// is left for the person, and the link the new video's id is read from. The hooks that a platform's signs name (a post went out, a challenge, signed out) are
-// kept with the signs themselves (worker/selectors.js).
-export const GUARD_HOOKS = {
-  tiktok: ["captcha"],
-  youtube: ["captcha", "kids_no", "kids_yes", "visibility", "visibility_public", "visibility_unlisted", "visibility_private", "upload_done", "post_link"],
-  instagram: ["captcha", "account"],
-  x: ["captcha", "account"],
+// The hooks that platform/engine.js and platform/run.js read by name, on every platform: the captcha a job stops
+// at, the platform's own error message (rf.guard stops a job there), the account the tab is compared with, the link
+// a post's id is read from, and the question a platform may ask after the press. Where the packed list has no such
+// hook for a platform, a newer list cannot add one either (worker/selectors.js).
+const READ_BY_THE_ENGINE = ["captcha", "error", "account", "post_link", "post_confirm"]
+
+// The hooks that a newer list never replaces although nothing clicks them, because what the script concludes from
+// them decides whether a post goes on: everything the engine reads (above) and, on YouTube, the audience and
+// visibility answers and the upload's progress and end, which decide whether the last screen is left for the
+// person. The hooks that a platform's signs name (a post went out, a challenge, signed out) are kept with the
+// signs themselves, and so is every hook a kept one looks inside or near (worker/selectors.js).
+export const GUARD_HOOKS = Object.fromEntries(Object.entries({
+  tiktok: [],
+  youtube: ["kids_no", "kids_yes", "visibility", "visibility_public", "visibility_unlisted", "visibility_private", "progress", "upload_done"],
+  instagram: [],
+  x: [],
+}).map(([platform, own]) => [platform, [...READ_BY_THE_ENGINE, ...own]]))
+
+// These hooks, and every hook one of them looks inside or near, and so on, as a packed list (`hooks`) has them:
+// Instagram's Share button is looked for inside its dialog, and a newer list that moved the dialog would move
+// where Share is found.
+export function keptHooks(hooks, names) {
+  const out = new Set(names)
+  for (const name of out) {
+    for (const way of hooks[name]?.strategies || []) {
+      for (const other of [way.within, way.near]) if (typeof other === "string") out.add(other)
+    }
+  }
+  return out
 }
 
 // Where the upload page shows which account it is on, so the extension can compare it with the one ReelForge

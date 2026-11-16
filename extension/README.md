@@ -161,9 +161,13 @@ rules are written in code. A click on the way to the last screen is refused when
 final button, sits around or inside it, or carries its words (`rf.click` in `platform/engine.js`). And these are
 always taken from the copy packed with the extension: the hooks whose element gets clicked and the final button's
 hook (`PACKED_HOOKS` in `shared/consts.js`); the `success`, `challenge` and `signed_out` signs with every hook they
-name; and the hooks that guard a post (`GUARD_HOOKS`: the captcha, the account, YouTube's audience and visibility
-answers, the end of its upload and the link its video's id is read from). A newer list can only change how long
-those are waited for.
+name; the hooks that guard a post (`GUARD_HOOKS`: every hook `platform/engine.js` and `platform/run.js` read by
+name on every platform, which are the captcha, the platform's own error message, the account, the link a post's id
+is read from and the question after the press; and YouTube's audience and visibility answers, its upload's progress
+and end); and every hook one of those looks inside or near (Instagram's Share is found inside its dialog, so the
+dialog is kept too). A newer list can only change how long those are waited for, and it cannot add one of the
+engine's hooks where the packed list has none. `tests/manifest.test.mjs` reads the scripts and fails when a hook
+they read before the press is neither kept nor named there as a step a newer list may change.
 
 To fix a hook, edit the file and raise `"version"`. ReelForge serves its own copy to the extension, and for every
 other hook a newer one is used at once, without a Reload. A fix to one of the kept hooks or signs takes a Reload. The role and
