@@ -31,23 +31,25 @@ export const SHOTS: Record<string, Shot> = {
   "setup-format": { screen: "setup", options: { start: "onboard" }, size: [140, 46], folder: "docs/screenshots", then: toFormatStep },
   // Your accounts as a new channel sees it: the three recommended platforms, one handle typed in and two to sign up for
   "setup-accounts": { screen: "setup", options: { start: "onboard" }, size: [140, 46], folder: "docs/screenshots", then: toAccountsStep },
-  "first-run-ready": { screen: "setup", options: { start: "done" }, size: [130, 32], folder: "docs/screenshots" },
+  // tall enough for all of the last screen, and no taller: from 40 rows it draws the big logo, which takes rows too
+  "first-run-ready": { screen: "setup", options: { start: "done" }, size: [130, 36], folder: "docs/screenshots" },
   "app-overview": { screen: "dashboard", options: demo("overview"), size: APP, folder: "docs/screenshots" },
   "app-notifications": { screen: "dashboard", options: demo("overview", true), size: APP, folder: "docs/screenshots" },
   "app-videos": { screen: "dashboard", options: demo("videos"), size: APP, folder: "docs/screenshots" },
   "app-compare": { screen: "dashboard", options: demo("compare"), size: APP, folder: "docs/screenshots" },
-  // wide enough for every upload button in one view
-  "app-publish": { screen: "dashboard", options: demo("publish"), size: GUIDE, folder: "docs/screenshots", then: pickFirstVideo },
+  // wide enough for YouTube's line of the preview, its hashtags included, in one row
+  "app-publish": { screen: "dashboard", options: demo("publish"), size: [204, 56], folder: "docs/screenshots", then: pickFirstVideo },
   // X left unconnected, so Accounts shows its Connect box
   "app-accounts": { screen: "dashboard", options: { ...demo("accounts"), unconnected: ["x"] }, size: APP, folder: "docs/screenshots" },
   // the profile button's menu: the demo's two channels (Delete beside the other one), New profile and this one's settings
   "app-profiles": { screen: "dashboard", options: demo("overview"), size: APP, folder: "docs/screenshots", then: openProfiles },
   // the Settings tab: the channel's answers, the FAQ with its first answer open, this computer, the profiles (with the
   // demo's deleted one), and the danger zone (tall enough for all of it)
-  "app-settings": { screen: "dashboard", options: demo("settings"), size: [180, 82], folder: "docs/screenshots", then: openFirstAnswer },
+  "app-settings": { screen: "dashboard", options: demo("settings"), size: [180, 96], folder: "docs/screenshots", then: openFirstAnswer },
   // the Stats tab: views, followers and likes added up across the platforms, each with its breakdown
   "app-stats": { screen: "dashboard", options: demo("totals"), size: APP, folder: "docs/screenshots" },
-  "app-updates": { screen: "dashboard", options: demo("updates"), size: APP, folder: "docs/screenshots" },
+  // a little wider than the other tabs, so the line at the foot wraps between words (at 180 it wraps inside AGENTS.md)
+  "app-updates": { screen: "dashboard", options: demo("updates"), size: [184, 50], folder: "docs/screenshots" },
   "app-notification-click": { screen: "dashboard", options: demo("overview", true), size: APP, folder: "docs/screenshots", then: clickAVideoNote },
   overview: { screen: "dashboard", options: demo("overview", true), size: GUIDE, folder: "dashboard/docs" },
   "notification-click": { screen: "dashboard", options: demo("overview", true), size: GUIDE, folder: "dashboard/docs", then: clickAVideoNote },
