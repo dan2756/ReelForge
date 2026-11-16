@@ -401,9 +401,9 @@ itself. From a terminal: `reelforge profiles delete "Channel name"` and `reelfor
 <br>
 
 Make sure you opened the ReelForge folder itself, not the folder it's in: your AI reads `CLAUDE.md` (or `AGENTS.md`)
-from there. First-time setup only asks a few questions, so give it the full picture too: drag a file about your
-channel into the chat (or paste a description) and say "here's my channel". It keeps it as the channel's brief and
-plans every video from it. To change your answers, run `reelforge channel`.
+from there. First-time setup only asks a few questions, so give it the full picture too: describe your channel in
+the chat, or give it the path of a file about it (your notes, a doc, examples you like). It keeps your words as the
+channel's brief and plans every video from it. To change your answers, run `reelforge channel`.
 
 </details>
 
