@@ -150,6 +150,17 @@ export function Table(props: TableProps) {
     if (index < o) setOffset(index)
     else if (index >= o + s) setOffset(index - s + 1)
   }, [index, measured])
+  // ... and when the table gets shorter under it: a line of badges comes in below the table for the video a Page
+  // Down highlighted, or the window is made smaller. A highlighted row that was in view stays in view. (One the
+  // wheel had scrolled away from is left where it is.)
+  const before = useRef(shown)
+  useEffect(() => {
+    const was = before.current
+    before.current = shown
+    if (index < 0 || !measured || shown >= was) return
+    const o = view.current.offset
+    if (index >= o && index < o + was && index >= o + shown) setOffset(index - shown + 1)
+  }, [shown])
   useEffect(() => {
     const most = Math.max(rows.length - shown, 0)
     if (offset > most) setOffset(most)

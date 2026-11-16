@@ -162,6 +162,25 @@ describe("Page Up and Page Down", () => {
     expect(lit).not.toContain(drawn[0]!) // the highlight moved down a page of rows
     expect(drawn.some((d, i) => i > 2 && lit.includes(d))).toBe(true)
   })
+
+  test("a table that gets shorter keeps its highlighted row in view", async () => {
+    // The table gives up rows when a line of badges comes in under it for the video a Page Down highlighted (which
+    // video has badges follows the demo's hour), and when the window is made shorter, as here. The highlight was on
+    // the table's last row in view: it must not be left under the table's new foot, where nothing shows it.
+    const h = await window("videos", [140, 34])
+    h.t.mockInput.pressKey("TAB")
+    await h.settle(150)
+    h.t.mockInput.pressKey(PAGE_DOWN)
+    await h.settle(400)
+    const lit = () => frame(h).split("\n").find((r) => r.includes("▌●")) ?? ""
+    const row = lit().replace(/\s+/g, " ").slice(0, 30)
+    expect(row).toContain("▌●")
+    for (const rows of [30, 26, 24]) {
+      h.t.resize(140, rows)
+      await h.settle(400)
+      expect(lit().replace(/\s+/g, " ").slice(0, 30)).toBe(row)
+    }
+  })
 })
 
 describe("a control the Python side gives the keyboard to", () => {
