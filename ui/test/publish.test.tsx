@@ -123,6 +123,24 @@ describe("headings", () => {
   })
 })
 
+describe("the preview", () => {
+  test("has no empty row between two platforms' texts, whatever the window's width", async () => {
+    // A text that filled its row to the last column or two was given an empty row under it: YouTube's, in a window
+    // 200 or 201 columns wide. Which width that is follows the caption's length, so every width in a range is tried.
+    const h = await demo([188, 56])
+    for (let w = 188; w <= 212; w++) {
+      h.t.resize(w, 56)
+      await h.settle(200)
+      const rows = frame(h).split("\n")
+      const first = rows.findIndex((r) => /┃ {3}TikTok {6}\S/.test(r))
+      const last = rows.findIndex((r) => /┃ {3}X {11}\S/.test(r))
+      expect([w, first > 0, last > first]).toEqual([w, true, true])
+      // every row from TikTok's to X's has words where the texts are (a platform's name, or a wrapped line)
+      for (const row of rows.slice(first, last + 1)) expect([w, row.slice(row.lastIndexOf("┃") + 1).trim()]).not.toEqual([w, ""])
+    }
+  })
+})
+
 describe("posting by hand", () => {
   const CAPTION = "What if everyone on Earth jumped at the same time?"
   const TAGS = "#fyp #whatif #science #physics #earth"

@@ -5,11 +5,11 @@
 // needs and shows the file, so you drag it in and press Post. ReelForge spots the post by itself either way. Then the
 // exact text each platform gets, and the uploads so far. Under the list, the best time to post on each platform.
 
-import { TextAttributes } from "@opentui/core"
+import { TextAttributes, type Renderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/react"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useView } from "../bridge"
-import { cellLen, type Parts, type Segs } from "../lib/styled"
+import { cellLen, wrappedRows, type Parts, type Segs } from "../lib/styled"
 import { DASH, mix } from "../theme"
 import { Button } from "../ui/Button"
 import { TextField } from "../ui/Fields"
@@ -128,6 +128,34 @@ function Label({ segs, fallback, first }: { segs: Segs | undefined; fallback: st
   )
 }
 
+/** Each platform's text as it will be posted. A row is given the rows its text wraps to: left to work its height
+ * out, a text that filled its row to the last column or two got an empty row under it (YouTube's, in a window 200
+ * columns wide). */
+function PreviewRows({ rows }: { rows: PreviewView["rows"] }) {
+  const [width, setWidth] = useState(0)
+  return (
+    <box
+      flexDirection="column"
+      flexShrink={0}
+      onSizeChange={function (this: Renderable) {
+        setWidth(this.width)
+      }}
+    >
+      {rows.map((r) => (
+        <box key={r.name} flexDirection="row" flexShrink={0} height={width > NAME ? wrappedRows(r.text, width - NAME) : undefined}>
+          <text fg={r.color} attributes={TextAttributes.BOLD} width={NAME} flexShrink={0}>
+            {r.name}
+          </text>
+          <text fg={DASH.text} wrapMode="word" flexGrow={1}>
+            {r.text}
+          </text>
+        </box>
+      ))}
+    </box>
+  )
+}
+const NAME = 12 // the columns a platform's name takes in the preview
+
 /** The picked video's post: its caption and hashtags, POST, BY HAND, the preview and the uploads so far. Everything
  * that starts a post sits above the preview, so it shows in a window 30 rows tall. page: the whole tab scrolls (a
  * narrow window), so this doesn't scroll by itself. */
@@ -159,16 +187,7 @@ function Form({ page }: { page?: boolean }) {
         <text fg={DASH.text} attributes={TextAttributes.BOLD} flexShrink={0} marginBottom={1}>
           PREVIEW
         </text>
-        {(preview?.rows ?? []).map((r) => (
-          <box key={r.name} flexDirection="row" flexShrink={0}>
-            <text fg={r.color} attributes={TextAttributes.BOLD} width={12} flexShrink={0}>
-              {r.name}
-            </text>
-            <text fg={DASH.text} wrapMode="word" flexGrow={1}>
-              {r.text}
-            </text>
-          </box>
-        ))}
+        <PreviewRows rows={preview?.rows ?? []} />
       </box>
       <box marginTop={1} marginBottom={1} flexShrink={0}>
         <Line segs={uploads?.heading} />
