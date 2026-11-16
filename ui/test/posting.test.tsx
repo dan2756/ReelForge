@@ -750,6 +750,15 @@ describe("the extension's dialog", () => {
     expect(dialog(h)).toContain("The browser extension is older than this ReelForge. Press Reload on its card on your browser's extensions page.")
     expect(frame(h)).toContain("· needs an update")
     expect(frame(h)).not.toContain("POST THIS VIDEO")
+    // In a window 80 columns wide the browser's row keeps to whole pieces beside its button: its name, and that it
+    // needs an update. It was cut against the button, with no gap: "needs a▐ Disconnect ▌".
+    h.t.resize(80, 24)
+    await h.settle(500)
+    const line = () => frame(h).split("\n").find((r) => r.includes("● Chrome on this PC") && r.includes("▐ Disconnect ▌")) ?? ""
+    expect(line()).toMatch(/● Chrome on this PC( +v0\.1\.0 · seen \S+ ago)? · needs an update +▐ Disconnect ▌/)
+    await clickText(h, "▐ Disconnect ▌", 3) // with the red button and Keep it beside it there is less room still
+    await h.settle(300)
+    expect(line()).toMatch(/● Chrome on this PC( · needs an update)? +▐ Disconnect ▌ ▐  Keep it   ▌/)
   })
 })
 

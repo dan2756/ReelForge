@@ -420,14 +420,17 @@ export function ExtensionDialog({ from, close }: { from?: "post"; close: () => v
           {ext.installs.map((b, i) => (
             <box key={b.install} flexDirection="column" flexShrink={0}>
               <box flexDirection="row" height={1} flexShrink={0} gap={1}>
-                <text wrapMode="none" flexGrow={1} flexShrink={1}>
-                  <span fg={b.old ? DASH.bad : b.on ? DASH.good : DASH.warn}>{"● "}</span>
-                  <span fg={DASH.text} attributes={TextAttributes.BOLD}>
-                    {b.name}
-                  </span>
-                  <span fg={DASH.muted}>{`   ${b.version ? `v${b.version} · ` : ""}${b.seen === "never" ? "not heard from yet" : `seen ${b.seen}`}`}</span>
-                  {b.old ? <span fg={DASH.bad}>{" · needs an update"}</span> : null}
-                </text>
+                {/* In parts, so that what doesn't fit beside the buttons is left out whole: the name always, then
+                    that it needs an update, then its version and when it was seen. As one line it was cut against
+                    the button ("needs a▐ Disconnect ▌") in a window 80 columns wide. */}
+                <Fitted
+                  flexGrow={1}
+                  parts={[
+                    [[["● ", b.old ? DASH.bad : b.on ? DASH.good : DASH.warn], [b.name, `bold ${DASH.text}`]], 0],
+                    [[[`   ${b.version ? `v${b.version} · ` : ""}${b.seen === "never" ? "not heard from yet" : `seen ${b.seen}`}`, DASH.muted]], 2],
+                    ...(b.old ? ([[[[" · needs an update", DASH.bad]], 1]] as Parts) : []),
+                  ]}
+                />
                 {leaving === b.install ? (
                   // Keep it comes up where Disconnect was, as wide as it, and the red button beside it. In that place
                   // the red one took the second click of a double click on Disconnect, and the browser was
