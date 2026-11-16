@@ -164,7 +164,8 @@ def save_handle(platform: str, handle: str) -> list[str]:
     """Connect a platform ("@name") or disconnect it (""): its handle in config.toml, the rest of the file as it was.
     Your studio's settings follow (studio.generate.set_account), so your AI's notes cover the platforms you're
     connected to and running onboarding again keeps them. Returns what was left undone, in words for the window: a
-    studio.toml with a mistake in it stays as it was while the rest gets the handle."""
+    studio.toml with a mistake in it stays as it was while the rest gets the handle, and answers that need fixing
+    first keep your AI's notes as they were."""
     load_config()  # config.toml from the example, if there isn't one yet
     from studio import dashboard_config, generate
 

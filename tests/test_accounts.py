@@ -316,6 +316,39 @@ class SetAccount(Scratch):
         self.assertEqual(self.config.read_text(encoding="utf-8"),
                          before.replace('[x]\nhandle = ""', '[x]\nhandle = "@np_x"'))   # the handle, nothing else
 
+    def test_answers_that_need_fixing_first_still_get_the_handle_and_it_is_said(self):
+        """With an answer first-time setup would ask about again, Connect put the handle into config.toml alone and
+        said nothing: once the answer was fixed, Change your answers disconnected the account without a word."""
+        generate.write_all({"channel_name": "Night Physics", "about": "What-ifs.", "assistant": "claude",
+                            "platforms": ["tiktok"], "handle_tiktok": "@np"})
+        good = json.loads(P.ANSWERS.read_text(encoding="utf-8"))
+        P.ANSWERS.write_text(json.dumps({**good, "assistant": "gemini"}), encoding="utf-8")     # by hand
+        notes = (P.ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+        said = []
+        generate.set_account("x", "@np_x", say=said.append)      # Connect
+        self.assertEqual(said, ["Your AI's notes couldn't be updated: some answers need fixing: assistant: 'gemini' "
+                                "isn't one of: claude, codex. Your answers are, so the notes follow once that's put "
+                                "right (Change your answers on the Settings tab)."])
+        self.assertEqual(self.handles()["x"], "@np_x")
+        a = json.loads(P.ANSWERS.read_text(encoding="utf-8"))
+        self.assertEqual((a["handle_x"], a["platforms"], a["assistant"]), ("@np_x", ["tiktok", "x"], "gemini"))
+        self.assertEqual((P.ROOT / "CLAUDE.md").read_text(encoding="utf-8"), notes)
+        generate.write_all({**a, "assistant": "claude"})          # the answer fixed: Change your answers
+        self.assertEqual(self.handles()["x"], "@np_x")
+        self.assertIn("@np_x", (P.ROOT / "CLAUDE.md").read_text(encoding="utf-8"))
+
+    def test_answers_that_cant_be_read_stay_as_they_are_and_it_is_said(self):
+        generate.write_all({"channel_name": "Night Physics", "about": "What-ifs.", "assistant": "claude",
+                            "platforms": ["tiktok"], "handle_tiktok": "@np"})
+        P.ANSWERS.write_text('{"channel_name": "Night Physics",}', encoding="utf-8")
+        said = []
+        generate.set_account("x", "@np_x", say=said.append)
+        self.assertEqual(said, [f"Your answers file, {P.ANSWERS}, can't be read (Expecting property name enclosed in "
+                                "double quotes: line 1 column 34 (char 33)), so it and your AI's notes stay as they "
+                                "were. Fix it in a text editor, then do this here again."])
+        self.assertEqual(self.handles()["x"], "@np_x")
+        self.assertEqual(P.ANSWERS.read_text(encoding="utf-8"), '{"channel_name": "Night Physics",}')
+
     def test_a_handle_typed_into_the_dashboard_settings_counts(self):
         generate.write_all({"channel_name": "Night Physics", "about": "What-ifs.", "assistant": "claude",
                             "platforms": ["tiktok"],

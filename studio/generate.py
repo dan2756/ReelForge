@@ -581,16 +581,24 @@ def set_account(platform: str, handle: str, say=None) -> list[Path]:
     into the dashboard's settings and, once you've been through onboarding, into your answers too, and everything
     onboarding writes follows: your AI's notes and caption rules then cover the platforms you're connected to, and
     running onboarding again keeps them. Disconnecting keeps the platform in "Where will you post?" (your AI still
-    writes its captions) and only forgets the handle. Returns the paths written. say: called with a line for a file
-    that was left as it was (a studio.toml with a mistake in it), for the window to show."""
+    writes its captions) and only forgets the handle. Returns the paths written. say: called with a line for what
+    couldn't follow, and why (a studio.toml with a mistake in it, answers to fix first), for the window to show."""
     from . import dashboard_config
 
     if not P.ANSWERS.exists():
         return dashboard_config.set_handle(platform, handle)
     try:
         a = json.loads(P.ANSWERS.read_text(encoding="utf-8-sig"))
-    except ValueError:
-        return dashboard_config.set_handle(platform, handle)   # unreadable answers: leave them for onboarding
+        if not isinstance(a, dict):
+            raise ValueError("it isn't a list of answers")
+    except ValueError as e:
+        # Unreadable answers stay as they are, yours to fix: the handle goes into ReelForge's settings alone, and
+        # you're told, since "Change your answers" would otherwise drop it without a word.
+        written = dashboard_config.set_handle(platform, handle)
+        if say is not None:
+            say(f"Your answers file, {P.ANSWERS}, can't be read ({e}), so it and your AI's notes stay as they were. "
+                "Fix it in a text editor, then do this here again.")
+        return written
     # The handles connected in the dashboard are the ones that count (someone may have typed one into its settings).
     for p, h in {**(dashboard_config.handles() or {}), platform: handle}.items():
         if h:
@@ -600,5 +608,14 @@ def set_account(platform: str, handle: str, say=None) -> list[Path]:
             a.pop(f"handle_{p}", None)
     try:
         return write_all(a, account_only=True, say=say)
-    except ValueError:                                        # answers onboarding would ask about again first
-        return dashboard_config.set_handle(platform, handle)
+    except ValueError as e:
+        # Answers first-time setup would ask about again, or notes too long for Codex: nothing was written. The
+        # handle still goes into ReelForge's settings and your answers ("Change your answers" writes the settings
+        # from those, and would drop it), and you're told why your AI's notes don't follow yet.
+        written = dashboard_config.set_handle(platform, handle)
+        P.write_atomic(P.ANSWERS, json.dumps(a, indent=2, ensure_ascii=False) + "\n")
+        if say is not None:
+            why = str(e).replace(":\n  ", ": ").replace("\n  ", "; ")
+            say(f"Your AI's notes couldn't be updated: {why}. Your answers are, so the notes follow once that's put "
+                "right (Change your answers on the Settings tab).")
+        return [*written, P.ANSWERS]
