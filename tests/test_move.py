@@ -333,6 +333,29 @@ class AtOnce(MoveScratch):
         self.assertFalse((self.root / move.STATE).exists())   # no note of a move left in a folder that didn't move
         self.assertFalse(self.home.exists())
 
+    def test_a_move_stopped_just_as_the_folder_was_renamed_is_finished_from_the_new_place_next_time(self):
+        """Ctrl+C a moment after the rename: the folder had moved, and the note of the move went from it and the
+        hourly read was put back on, from the folder that had gone."""
+        done = []
+
+        def renamed_then_stopped(plan, wait=10):
+            os.rename(plan.source, plan.target)
+            raise KeyboardInterrupt
+
+        p = move.plan()
+        p.system["stats"] = True
+        with mock.patch.object(P, "WINDOWS", False), mock.patch.object(P, "dry_system", lambda: False), \
+                mock.patch.object(move.os, "chdir"), mock.patch.object(reset, "_wait_for_reads", lambda say: None), \
+                mock.patch.object(move, "rename", renamed_then_stopped), \
+                mock.patch("studio.stats_schedule.disable", lambda: done.append("off") or "off"), \
+                mock.patch("studio.stats_schedule.enable", lambda: done.append("on") or "on"), \
+                mock.patch("studio.stats_schedule.status", return_value="on"), \
+                self.assertRaises(KeyboardInterrupt):
+            self.quiet(move.go, p)
+        self.assertEqual(done, ["off"])   # on again only from the new place, by the step that finishes the move
+        self.assertFalse(self.root.exists())
+        self.assertTrue((self.home / move.STATE).is_file())   # what the next start finishes it by
+
     def test_a_folder_without_the_hourly_read_leaves_the_scheduler_alone(self):
         with mock.patch("studio.stats_schedule.disable") as off, mock.patch("studio.stats_schedule.enable") as on:
             code, moved, _ = self.go()

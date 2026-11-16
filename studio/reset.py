@@ -142,22 +142,43 @@ def _prune(folder: Path) -> None:
             pass
 
 
-def _move_all(moves: list[tuple[Path, Path]], made: Path) -> tuple[list[str], bool]:
+def _put_back(moved: list[tuple[Path, Path]], made: Path) -> list[str]:
+    """Move back each (from, to) that was moved, the last first, taking it out of moved once it's back, and remove the
+    empty folders made for them under `made`. Returns what couldn't be put back."""
+    problems = []
+    for back, now in reversed(list(moved)):
+        if _move(now, back, wait=30):
+            problems.append(f"{P.rel(back)} couldn't be put back: it's in {now}")
+        else:
+            moved.remove((back, now))
+    _prune(made)
+    return problems
+
+
+def _move_all(moves: list[tuple[Path, Path]], made: Path,
+              moved: list[tuple[Path, Path]] | None = None) -> tuple[list[str], bool]:
     """Rename each (from, to) in turn, all or nothing: when one can't be done, the ones already done go back where
     they were and the empty folders made for them under `made` are removed. Returns (what went wrong, whether
-    everything is where it was before)."""
-    done: list[tuple[Path, Path]] = []
-    for src, dst in moves:
-        err = _move(src, dst)
-        if err is None:
-            done.append((src, dst))
-            continue
-        problems = [f"{P.rel(src)} is in use ({err})"]
-        for back, now in reversed(done):
-            if _move(now, back, wait=30):
-                problems.append(f"{P.rel(back)} couldn't be put back: it's in {now}")
-        _prune(made)
-        return problems, len(problems) == 1
+    everything is where it was before). moved: kept up to date with what is moved now. Stopped part way (Ctrl+C
+    while it waits for a file in use, or a fault of its own), it puts back what it had moved before it lets the
+    stop go on, and moved then holds what couldn't be put back, for the caller to go by."""
+    done = moved if moved is not None else []
+    current: tuple[Path, Path] | None = None
+    try:
+        for src, dst in moves:
+            current = (src, dst)
+            err = _move(src, dst)
+            current = None
+            if err is None:
+                done.append((src, dst))
+                continue
+            problems = [f"{P.rel(src)} is in use ({err})", *_put_back(done, made)]
+            return problems, len(problems) == 1
+    except BaseException:
+        if current and not os.path.lexists(current[0]) and os.path.lexists(current[1]):
+            done.append(current)   # stopped just as that one moved
+        _put_back(done, made)
+        raise
     return [], True
 
 
@@ -340,7 +361,7 @@ def factory_reset(say=print) -> Done:
         say(f"  {P.rel(path)}: {what}")
     # The hourly stats read goes off before anything moves, and a read it has just started is stopped with it: one
     # starting up as the stats go into the backup would make a new, empty store where they were.
-    job_was_on, unchecked = False, ""
+    job_was_on, unchecked, moved = False, "", []
     try:
         try:
             from . import stats_schedule
@@ -351,12 +372,16 @@ def factory_reset(say=print) -> Done:
         except Exception as e:  # the scheduler isn't there: nothing to turn off
             unchecked = f"The hourly stats read couldn't be checked ({e})."
         _wait_for_reads(say)
-        done.problems, done.unchanged = _move_all([(p, dest / p.relative_to(ROOT)) for p, _ in items], dest)
+        done.problems, done.unchanged = _move_all([(p, dest / p.relative_to(ROOT)) for p, _ in items], dest, moved)
     except BaseException:
-        # Stopped in between (Ctrl+C while it waited for a stats read to finish, or a fault of its own): the
-        # reset didn't happen, so the hourly read is not left off with nothing said.
-        if job_was_on:
+        # Stopped in between (Ctrl+C while it waited for a stats read to finish or for a file in use, or a fault of
+        # its own): _move_all has put back what it had moved. With all of it back, the reset didn't happen, and the
+        # hourly read is not left off with nothing said. With some of it still in the backup, the read stays off: run
+        # over a folder half reset, it could make a new, empty stats store. The backup's README says what is there.
+        if job_was_on and not moved:
             _stats_on_again()
+        if moved:
+            _readme(dest, [(src, what) for src, what in items if any(src == m for m, _ in moved)], stopped=True)
         try:
             BACKUPS.rmdir()   # when this made it for the backup, and it's empty again
         except OSError:
@@ -367,7 +392,12 @@ def factory_reset(say=print) -> Done:
             BACKUPS.rmdir()   # when this made it for the backup, and it's empty again
         except OSError:
             pass
-        if job_was_on and not _stats_on_again():   # nothing was reset, so the hourly read goes on as it did
+        if moved:   # some of it couldn't be put back: the read stays off, as above
+            _readme(dest, [(src, what) for src, what in items if any(src == m for m, _ in moved)], stopped=True)
+            if job_was_on:
+                done.problems.append("the hourly stats read stays off until those are back: reelforge stats on turns "
+                                     "it on again")
+        elif job_was_on and not _stats_on_again():   # nothing was reset, so the hourly read goes on as it did
             done.problems.append("the hourly stats read is off now, and couldn't be turned on again: reelforge stats "
                                  "on does it")
             done.unchanged = False
@@ -378,19 +408,32 @@ def factory_reset(say=print) -> Done:
         for name in ("CLAUDE.md", "AGENTS.md"):
             if not (ROOT / name).exists():
                 (ROOT / name).write_text(note, encoding="utf-8", newline="\n")
-    if dest.is_dir():
-        (dest / "README.txt").write_text(
-            f"{KIT_NAME}'s factory reset moved these here on {datetime.now():%d %B %Y at %H:%M}:\n\n"
-            + "".join(f"  {p.relative_to(ROOT)}  ({what})\n" for p, what in items)
-            + f"\nTo undo it, close {KIT_NAME} and move them back into the {KIT_NAME} folder, to the same places.\n"
-              "The log-ins in dashboard/data/browser are your own: delete this folder once you're sure you don't "
-              "need it.\n", encoding="utf-8")
+    _readme(dest, items)
     if unchecked:
         done.lines.append(unchecked)
     done.lines.append(f"Everything it cleared is in {P.rel(dest)}." if items else "There was nothing to clear.")
     if browsers:
         done.lines.append(EXTENSION_RESET[1])
     return done
+
+
+def _readme(dest: Path, items: list[tuple[Path, str]], stopped: bool = False) -> None:
+    """The backup's README.txt: what is in it, and how to undo the reset. stopped: the reset was stopped part way,
+    and these are what couldn't be put back."""
+    if not dest.is_dir():
+        return
+    head = (f"{KIT_NAME}'s factory reset was stopped part way on {datetime.now():%d %B %Y at %H:%M}, and couldn't "
+            "put these back:" if stopped else
+            f"{KIT_NAME}'s factory reset moved these here on {datetime.now():%d %B %Y at %H:%M}:")
+    try:
+        (dest / "README.txt").write_text(
+            head + "\n\n" + "".join(f"  {p.relative_to(ROOT)}  ({what})\n" for p, what in items)
+            + f"\nTo undo it, close {KIT_NAME} and move them back into the {KIT_NAME} folder, to the same places.\n"
+            + ("Then turn the hourly stats read on again with: reelforge stats on\n" if stopped else
+               "The log-ins in dashboard/data/browser are your own: delete this folder once you're sure you don't "
+               "need it.\n"), encoding="utf-8")
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------- uninstall: what goes, and what's kept

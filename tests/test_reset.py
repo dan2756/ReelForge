@@ -8,6 +8,7 @@ import io
 import json
 import os
 import re
+import shutil
 import time
 from contextlib import redirect_stdout
 from unittest import mock
@@ -194,6 +195,75 @@ class FactoryReset(ResetScratch):
         self.assertEqual(asked, ["off", "wait", "on"])
         self.assertTrue((self.root / "dashboard/data/stats.db").is_file())
         self.assertFalse((self.root / "backups").exists())
+
+    def test_one_stopped_while_it_waited_for_a_file_in_use_puts_back_what_moved_then_the_hourly_read(self):
+        """Ctrl+C in the seconds the reset waits for a file another program has open, with the first items moved
+        already: they stayed in the backup, without its README, and the hourly read went on again over a folder half
+        reset (a read then could make a new, empty stats store)."""
+        before = sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob("*"))
+        asked, renames, real_rename = [], [], os.rename
+
+        def rename(src, dst):
+            renames.append(src)
+            if len(renames) == 2:   # the second item is open in another program...
+                raise PermissionError(13, "in use")
+            return real_rename(src, dst)
+
+        def sleep(seconds):         # ... and Ctrl+C comes as the reset waits for it
+            raise KeyboardInterrupt
+
+        with mock.patch("studio.stats_schedule.status", return_value="on"), \
+                mock.patch("studio.stats_schedule.disable", lambda: asked.append("off") or "off"), \
+                mock.patch("studio.stats_schedule.enable", lambda: asked.append("on") or "on"), \
+                mock.patch.object(reset, "_wait_for_reads", lambda say: asked.append("wait")), \
+                mock.patch.object(reset.os, "rename", rename), mock.patch.object(reset.time, "sleep", sleep), \
+                self.assertRaises(KeyboardInterrupt):
+            self.quiet(reset.factory_reset)
+        self.assertEqual(len(renames), 3)   # the first item, the second, and the first back
+        self.assertEqual(sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob("*")), before)
+        self.assertEqual(asked, ["off", "wait", "on"])   # nothing was reset: the read is back on
+
+    def test_one_stopped_part_way_that_cant_put_everything_back_leaves_the_hourly_read_off_and_says_why(self):
+        asked, tries = [], []
+        first = reset.reset_items()[0][0]
+
+        def move(src, dst, wait=10):
+            tries.append(src)
+            if len(tries) == 1:
+                return REAL_MOVE(src, dst, wait=0)
+            if len(tries) == 2:
+                raise KeyboardInterrupt
+            return "in use"   # the first item, on its way back
+
+        with mock.patch("studio.stats_schedule.status", return_value="on"), \
+                mock.patch("studio.stats_schedule.disable", lambda: asked.append("off") or "off"), \
+                mock.patch("studio.stats_schedule.enable", lambda: asked.append("on") or "on"), \
+                mock.patch.object(reset, "_wait_for_reads", lambda say: asked.append("wait")), \
+                mock.patch.object(reset, "_move", move), self.assertRaises(KeyboardInterrupt):
+            self.quiet(reset.factory_reset)
+        self.assertEqual(asked, ["off", "wait"])   # it stays off
+        [backup] = (self.root / "backups").iterdir()
+        readme = (backup / "README.txt").read_text(encoding="utf-8")
+        self.assertIn("factory reset was stopped part way on ", readme)
+        self.assertIn(f"  {first.relative_to(self.root)}  (", readme)
+        self.assertIn("reelforge stats on", readme)
+        # Said the same way when the reset stops on a file in use and one it moved can't go back.
+        shutil.move(str(backup / first.relative_to(self.root)), str(first))
+        shutil.rmtree(self.root / "backups")
+        tries.clear()
+
+        def stuck(src, dst, wait=10):
+            tries.append(src)
+            return REAL_MOVE(src, dst, wait=0) if len(tries) == 1 else "in use"
+
+        asked, done = self.with_the_hourly_read(move=stuck)
+        self.assertEqual([what for what, _ in asked], ["off", "wait"])
+        self.assertFalse(done.unchanged)
+        self.assertIn(f"{P.rel(first)} couldn't be put back", done.problems[1])
+        self.assertEqual(done.problems[-1], "the hourly stats read stays off until those are back: reelforge stats "
+                                            "on turns it on again")
+        [backup] = (self.root / "backups").iterdir()
+        self.assertIn("stopped part way", (backup / "README.txt").read_text(encoding="utf-8"))
 
     def test_backups_being_a_file_is_said_as_it_is_before_anything_changes(self):
         """It was found item by item, after ten seconds of trying, and said to be the first item "in use", with
