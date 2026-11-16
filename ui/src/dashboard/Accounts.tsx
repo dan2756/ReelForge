@@ -9,7 +9,8 @@ import { useCallback, useState } from "react"
 import { useView } from "../bridge"
 import { clockLabels, lines as drawLines, MARK, type Drawn } from "../lib/chart"
 import { fmtNum } from "../lib/format"
-import { lines, segsLen, truncate, type Segs } from "../lib/styled"
+import { whole } from "../lib/fit"
+import { lines, segsLen, truncate, type Parts, type Segs } from "../lib/styled"
 import { DASH } from "../theme"
 import { Button } from "../ui/Button"
 import { Chart } from "../ui/Chart"
@@ -160,17 +161,18 @@ function Connected({ panel: p }: { panel: AccountPanelView }) {
       drawLines(chart!.series, chart!.n, w, h, (pw) => clockLabels(chart!.slots, pw, chart!.step_h), [], hover, false, true, true, { grow, fade: true }),
     [chart],
   )
-  const title = (hover: number | null): Segs => {
+  // (In whole parts: a number cut at the panel's edge reads as another number.)
+  const title = (hover: number | null): Parts | Segs => {
     if (!chart) return []
-    if (hover === null || hover < 0 || hover >= chart.n) return chart.heading
+    if (hover === null || hover < 0 || hover >= chart.n) return whole(chart.heading)
     const value = chart.values[hover]
     const guess = chart.guessed?.[hover] ?? false
-    return [
+    return whole([
       ["FOLLOWERS  ", "bold"],
       [chart.slots[hover]!.label + "  ", `bold ${MARK}`],
       value !== null && value !== undefined ? [(guess ? "≈" : "") + fmtNum(value), "bold"] : ["no reading yet", DASH.muted],
       ...(guess && value !== null && value !== undefined ? ([["  estimated", DASH.muted]] as Segs) : []),
-    ]
+    ])
   }
   const was = p.old_handles ?? []
   return (

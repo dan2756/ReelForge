@@ -22,6 +22,13 @@ export function fitRows(parts: Parts, width: number): Segs[] {
   return rows.map((row) => truncate(row, Math.max(width, 1)))
 }
 
+/** A one-row heading's segments as parts that show whole or not at all, the last of them going first. For a heading
+ * that ends in numbers: cut at the panel's edge, "+7.94K" read "+7." (the Accounts tab's followers chart in a window
+ * 80 columns wide). */
+export function whole(segs: Segs): Parts {
+  return segs.map((seg, i): [Segs, number] => [[seg], i])
+}
+
 /** Join the parts, leaving out the least important (highest number, the last of those first) until they fit `width`.
  * If even the ones that always show don't fit, the last of them go too, so nothing is cut off halfway (a number, a
  * button); only a first part wider than everything is cut. */

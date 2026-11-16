@@ -399,6 +399,13 @@ describe("accounts", () => {
     h.t.resize(60, 50) // too narrow for its second sentence: left out whole, not cut off in the middle
     await h.settle(400)
     expect(frame(h)).toMatch(/Only connected platforms show up in ReelForge\. *$/m)
+    // The followers chart's heading ends in numbers. Where the panel is too narrow for all of it, it loses whole
+    // pieces from its end: cut at the panel's edge, "+7.94K" read "+7.".
+    h.t.resize(80, 50)
+    await h.settle(400)
+    const headings = frame(h).split("\n").flatMap((r) => r.split("┃")).filter((cell) => cell.includes("FOLLOWERS  "))
+    expect(headings.length).toBeGreaterThan(0)
+    for (const cell of headings) expect(cell.trim()).toMatch(/^FOLLOWERS {2}(since \w+ \d+|last 30 days)( {2}\d[\d,]*(\.\d+)?[KM]?( {2}[+−-]\d[\d,]*(\.\d+)?[KM]?)?)?$/)
     h.t.resize(180, 50)
     await h.settle(400)
     expect(frame(h)).toContain("Disconnect") // on the connected ones

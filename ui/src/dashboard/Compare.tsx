@@ -7,6 +7,7 @@ import { useTerminalDimensions } from "@opentui/react"
 import { useCallback } from "react"
 import { useView } from "../bridge"
 import { ageLabels, lines as drawLines, type Drawn } from "../lib/chart"
+import { whole } from "../lib/fit"
 import type { Segs } from "../lib/styled"
 import { DASH, mix } from "../theme"
 import { Chart } from "../ui/Chart"
@@ -117,7 +118,7 @@ function PlatformChart({ chart, animate }: { chart: CompareChart; animate: unkno
   )
   return (
     <Chart
-      title={(hover) => (hover === null || !series ? chart.heading : hoursTitle([], series, hover, false))}
+      title={(hover) => (hover === null || !series ? whole(chart.heading) : hoursTitle([], series, hover, false))}
       draw={series && !chart.empty ? draw : null}
       empty={chart.empty}
       animate={animate}

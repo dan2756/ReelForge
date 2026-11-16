@@ -8,7 +8,7 @@ import { wrap } from "../src/dashboard/Drawer"
 import { cardLines, wrapLines } from "../src/dashboard/cards"
 import { metricTitle, pickVariant } from "../src/dashboard/titles"
 import type { MetricView, Variant } from "../src/dashboard/types"
-import { fit, fitRows } from "../src/lib/fit"
+import { fit, fitRows, whole } from "../src/lib/fit"
 import { fmtNum, shortNum } from "../src/lib/format"
 import { cellLen, plain, segsLen, wrappedRows, type Parts } from "../src/lib/styled"
 import { PLATFORM, restyle, tone } from "../src/theme"
@@ -62,6 +62,13 @@ describe("cards", () => {
     ]
     expect(plain(fit(parts, 30))).toBe("LIKES  198.6K total   ")
     expect(plain(fit(parts, 12))).toBe("LIKES  ") // not "LIKES  198.6"
+  })
+
+  test("a heading that came as one line of segments drops whole ones from its end, never half a number", () => {
+    const heading = whole([["FOLLOWERS  ", "bold"], ["since Nov 5  ", ""], ["11.7K", "bold"], ["  ", ""], ["+7.94K", ""]])
+    expect(plain(fit(heading, 40))).toBe("FOLLOWERS  since Nov 5  11.7K  +7.94K")
+    expect(plain(fit(heading, 34)).trimEnd()).toBe("FOLLOWERS  since Nov 5  11.7K") // not "…  11.7K  +7."
+    expect(plain(fit(heading, 26))).toBe("FOLLOWERS  since Nov 5  ")
   })
 })
 
