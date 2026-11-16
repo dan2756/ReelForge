@@ -196,6 +196,8 @@ What each platform gets follows your channel's caption rules from first-time set
 (**Copy caption** under YouTube's button) with the hashtags as its description, and the caption alone on X unless you
 allowed hashtags there.
 
+![The Publish tab, in the demo: a video's caption and hashtags, POST with a row for each platform and Post…, BY HAND with each platform's button, the preview and the best time to post](../docs/screenshots/app-publish.png)
+
 Under the caption and hashtags, **POST** has the picked video's review line and a row for each connected platform
 that says where its post stands, in words: not posted, the upload page opened by hand, each step of a post under
 way, posted, failed and why, or "did it post?" when ReelForge lost track. A row has the buttons that fit its state:

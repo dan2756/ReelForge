@@ -76,27 +76,19 @@ First-time setup turns your answers into instructions for your AI, `CLAUDE.md` f
 and saves them in the ReelForge folder (`C:\Users\<you>\ReelForge` on Windows and `~/ReelForge` on a Mac or Linux,
 unless you picked another). Its last screen tells you what to do next.
 
-![First-time setup's last screen: open this folder in Claude Code or Codex, tell it about your channel, say "make my first video", then post it from Publish](docs/screenshots/first-run-ready.png)
+![First-time setup's last screen: copy the prompt for your AI, paste it into Claude Code or any other AI that can work with files on your computer, and your first video waits in Publish when it's done](docs/screenshots/first-run-ready.png)
 
-1. **Open the ReelForge folder in your AI.** In the Claude desktop app, go to **Code**, click **Open folder…** and
-   pick the ReelForge folder (or run `claude` in a terminal inside it). For Codex, run `codex` in a terminal inside
-   it.
-2. **Tell it about your channel.** Drag a file about it into the chat (your notes, a doc, videos you like: whatever
-   you have) or paste a description, and say:
-
-   ```
-   here's my channel
-   ```
-
-   First-time setup only asks a few questions, so this is where your AI gets the full picture. It keeps your words
-   as the channel's brief (`my-studio/brief.md`), reads it every time and plans every video from it, and it asks
-   before changing your answers to match. Skip this and it asks for one before your first video.
-3. **Ask for your first video** in the words that screen gives you:
-
-   ```
-   make my first video
-   ```
-
+1. **Copy the prompt for your AI.** Click **Copy prompt** on that screen. The prompt has your ReelForge folder's
+   path in it, so there's nothing to drag in or open first, and it asks your AI for your first video. **Copy prompt
+   for your AI** on ReelForge's Settings tab copies it again any time.
+2. **Paste it into your AI.** Claude Code is the **Code** tab in the Claude desktop app, or `claude` in a terminal;
+   Codex is `codex` in a terminal; any other AI that can work with files on your computer will do. It reads its
+   instructions in the ReelForge folder first.
+3. **Tell it about your channel when it asks.** First-time setup only asks a few questions, so before your first
+   video your AI asks for the full picture: describe your channel in the chat, or give it a file about it (your
+   notes, a doc, videos you like: whatever you have). It keeps your words as the channel's brief
+   (`my-studio/brief.md`), reads it every time and plans every video from it, and it asks before changing your
+   answers to match.
 4. **Let it work.** Your AI picks a subject, writes the script, checks the facts, builds the scene in Blender and
    renders it, adds the text and the sound, then watches the finished video and fixes anything that's off. Rendering
    takes from about 15 minutes to an hour on a fast graphics card.
@@ -187,7 +179,7 @@ Under **POST**, a row for each platform says where the video's post stands there
 Under the list, Best time to post shows the part of the day your videos have done best in on each platform, by
 their views in their first day, and when it next comes round, once there are enough videos to tell.
 
-![The Publish tab](docs/screenshots/app-publish.png)
+![The Publish tab, in the demo: a video's caption and hashtags, POST with a row for each platform and Post…, BY HAND with each platform's button, the preview of what each platform gets, and the best time to post under the list](docs/screenshots/app-publish.png)
 
 ### Stats
 
@@ -251,16 +243,17 @@ folder itself.
 
 ### Settings
 
-This channel's answers from first-time setup (**Change your answers** asks the questions again), an FAQ beside them
-(click a question and its answer opens under it), and what ReelForge set up on your computer: **Background refresh**,
-the hourly stats read that keeps your stats updating while ReelForge is closed, with a switch to turn it on or off,
-then the `reelforge` command and the icon, each with a button. **Restart** under them closes ReelForge and opens it
-again straight away. Then **Profiles** lists your channels, with **Delete…** beside each one you can delete and
-**New profile**, then the ones you've deleted, each with **Restore** and **Move to the Recycle Bin** (to free its space
-for good). Across the bottom, the danger zone: **Factory reset** puts every channel's settings, logins and stats in a
-backup and starts first-time setup again, and **Uninstall** removes ReelForge. Both ask you to type your channel's
-name first, and neither deletes anything: what they clear goes to a backup or the Recycle Bin (the Trash on a Mac).
-Neither stops half-way either: if something can't be moved (another ReelForge window has it open, say), nothing
+This channel's answers from first-time setup (**Change your answers** asks the questions again, and **Copy prompt for
+your AI** copies the prompt that starts your AI on this channel), an FAQ beside them (click a question and its answer
+opens under it), and what ReelForge set up on your computer: **Background refresh**, the hourly stats read that keeps
+your stats updating while ReelForge is closed, with a switch to turn it on or off, then the `reelforge` command and the
+icon, each with a button, and ReelForge's folder, with a button that opens it. **Restart** under them closes ReelForge
+and opens it again straight away. Then **Profiles** lists your channels, with **Delete…** beside each one you can
+delete and **New profile**, then the ones you've deleted, each with **Restore** and **Move to the Recycle Bin** (to
+free its space for good). Across the bottom, the danger zone: **Factory reset** puts every channel's settings, logins
+and stats in a backup and starts first-time setup again, and **Uninstall** removes ReelForge. Both ask you to type your
+channel's name first, and neither deletes anything: what they clear goes to a backup or the Recycle Bin (the Trash on a
+Mac). Neither stops half-way either: if something can't be moved (another ReelForge window has it open, say), nothing
 changes.
 
 **Tab order**, under the FAQ, puts the tabs along the top in the order you like: drag a tab where you want it, or
