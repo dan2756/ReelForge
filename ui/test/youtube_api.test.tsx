@@ -460,6 +460,10 @@ describe("a post through the API", () => {
     // One piece of three is up (the video is nine bytes, a piece four), and the second waits for this test.
     expect(row(h)).toMatch(/^YouTube ● uploading 44% to YouTube, as private ▐ Cancel ▌$/)
     expect([youtube(h).via, youtube(h).busy]).toEqual(["api", true])
+    // The keyboard is on the row's own button now. After the yes it was on nothing (the button that opened the
+    // question has gone from the row), and the next Tab started again at the Caption box.
+    await until(h, () => focused(h) === "Cancel")
+    expect(focused(h)).toBe("Cancel")
     await google(h, "hold", 2) // let the second through: the third is the last
     await until(h, () => youtube(h).state === "posting")
     expect(row(h)).toBe("YouTube ● the last piece is on its way: waiting for YouTube to say it's up") // no button: only YouTube's word ends it

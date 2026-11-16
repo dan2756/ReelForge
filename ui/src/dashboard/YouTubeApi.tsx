@@ -13,7 +13,7 @@ import { TextAttributes } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/react"
 import { useEffect, useRef, useState } from "react"
 import { useView } from "../bridge"
-import { useFocusManager } from "../lib/focus"
+import { useFocusManager, type FocusManager } from "../lib/focus"
 import { cellLen, plain, wrappedRows, type Action, type Parts, type Seg } from "../lib/styled"
 import { DASH } from "../theme"
 import { Button } from "../ui/Button"
@@ -55,6 +55,18 @@ export function ApiLine({ rows }: { rows: PostingRow[] }) {
       {button}
     </box>
   )
+}
+
+/** After the yes to a question before a post, once it has closed: the keyboard goes to the first button of the first
+ * of these platforms' rows (its Cancel, while the post is under way), else to Post…. It went to nothing: the button
+ * that opened the question had gone from the row, and the next Tab started again at the Caption box, ten stops away
+ * from the row's new Cancel. */
+export function focusRow(fm: FocusManager, rows: PostingRow[] | undefined, keys: string[]) {
+  setTimeout(() => {
+    const ids = keys.flatMap((key) => (rows ?? []).filter((r) => r.key === key).flatMap((r) => r.actions.map((a) => `post-${key}-${a}`)))
+    const first = ids.find((id) => fm.has(id)) ?? (fm.has("post-go") ? "post-go" : null)
+    if (first && fm.scope === "app") fm.focus(first)
+  }, 120) // (after the dialog has handed the keyboard back, and the rows have drawn their new buttons)
 }
 
 // ---------------------------------------------------------------- the connection
@@ -285,6 +297,7 @@ const STAYS_UP = 400 // ms the question stays after its yes was answered: longer
  * when that is no longer so. */
 export function ApiPostDialog({ data, close }: { data: ApiPostData; close: () => void }) {
   const s = useDash()
+  const fm = useFocusManager()
   const { info } = data
   const [privacy, setPrivacy] = useState(info.send?.privacy ?? info.privacy)
   const [busy, setBusy] = useState(false)
@@ -302,7 +315,9 @@ export function ApiPostDialog({ data, close }: { data: ApiPostData; close: () =>
     // stays up for it: closed straight away, that click went to whatever is under the button on the Publish tab (Open
     // all 4 →, in a window 120 columns by 30 rows).
     await new Promise((done) => setTimeout(done, STAYS_UP))
-    if (s.dialog === asked) close() // (Esc may have closed it meanwhile)
+    if (s.dialog !== asked) return // (Esc closed it meanwhile)
+    close()
+    focusRow(fm, s.bridge.view<PostingView>("posting")?.rows, ["youtube"]) // the keyboard, to the row's new button
   }
   // Who can see it, in words: while the yes is on its way the choice can't be changed any more, and reads as it went.
   const who = info.privacies.find((p) => p.key === privacy)?.label

@@ -363,6 +363,13 @@ describe("Post…", () => {
     expect(jobsMade()).toBe(4)
     expect(listed("opened.txt").length).toBe(1) // one batch, one page
     expect(popups()).toEqual([]) // and no "not started: a post is already under way" about the posts it just started
+    // The keyboard is on the first post's own button now. It was on nothing: the next Tab started again at the Caption
+    // box, ten stops from the rows' new Cancel.
+    expect(focused(h)).toBe("Cancel")
+    expect(frame(h).split("\n").find((r) => /┃ TikTok +●/.test(r)) ?? "").toContain("▐ Cancel ▌")
+    h.t.mockInput.pressKey("RETURN") // ... and it is TikTok's
+    await until(h, () => state(h, "tiktok") === "cancelled")
+    expect(posting(h).rows.map((r) => r.state)).toEqual(["cancelled", "queued", "queued", "queued"])
   })
 
   test("a yes is to the file the question was about: one written over under its name since starts nothing", async () => {

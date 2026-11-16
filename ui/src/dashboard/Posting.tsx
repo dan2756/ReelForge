@@ -16,7 +16,7 @@ import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/react"
 import { useEffect, useRef, useState } from "react"
 import { useView } from "../bridge"
-import { useFocus } from "../lib/focus"
+import { useFocus, useFocusManager } from "../lib/focus"
 import { cellLen, plain, segsLen, wrappedRows, type Parts, type Segs } from "../lib/styled"
 import { DASH } from "../theme"
 import { Button } from "../ui/Button"
@@ -25,7 +25,7 @@ import { Fitted } from "../ui/Line"
 import { DialogButtons, Modal, modalRoom, Panel, Scroll, toasts, useWidth, Wrapped } from "../ui/Panels"
 import { useDash, type PostData } from "./state"
 import type { ExtensionInstall, ExtensionView, FilesView, PlatformInfo, PostInfoPlatform, PostingRow, PostingView } from "./types"
-import { ApiLine } from "./YouTubeApi"
+import { ApiLine, focusRow } from "./YouTubeApi"
 
 /** A line from the Python side as parts for a narrow place: its first piece always, the rest while there's room. Every
  * piece opens the extension's dialog when clicked. */
@@ -170,6 +170,7 @@ export function PostDialog({ data, close }: { data: PostData; close: () => void 
   const [ticked, setTicked] = useState<string[]>(() =>
     info.platforms.filter((p) => (only ? only.includes(p.key) && tickable(p) : !p.blocked)).map((p) => p.key),
   )
+  const fm = useFocusManager()
   const [stop, setStop] = useState(true)
   const [busy, setBusy] = useState(false)
   const list = useRef<ScrollBoxRenderable | null>(null)
@@ -186,7 +187,9 @@ export function PostDialog({ data, close }: { data: PostData; close: () => void 
     // What it started and what it refused come back as the rows on the tab and as pop-ups. The video goes with the
     // yes: the Python side starts nothing when another one is picked by now.
     await s.bridge.ask("post_with_extension", chosen.map((p) => p.key), data.caption, data.tags, stop || !mayPress, chosen.filter((p) => p.again).map((p) => p.key), info.video.path, info.video.sha256)
-    if (s.dialog?.kind === "post") close() // (Esc may have closed it while the browser was opening)
+    if (s.dialog?.kind !== "post") return // (Esc closed it while the browser was opening)
+    close()
+    focusRow(fm, s.bridge.view<PostingView>("posting")?.rows, chosen.map((p) => p.key))
   }
   // The question is about one video. The Python side picks another by itself when this one leaves the list (hidden or
   // removed in another window, or its file is gone): the question then goes, since nothing it shows would be what
