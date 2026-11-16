@@ -447,7 +447,9 @@ class Buttons(ApiPosting):
         self.assertEqual(w.view("youtube_api")["said"], [])
         w.forget()
         w.call("youtube_api_disconnect")
-        self.assertTrue(w.until(lambda: w.view("youtube_api")["state"] == "off" and w.view("youtube_api")["said"]))
+        # (No view until the disconnect is done: telling Google takes a moment, longer on Windows than the first look.)
+        self.assertTrue(w.until(lambda: (w.view("youtube_api") or {}).get("state") == "off"
+                                and (w.view("youtube_api") or {}).get("said")))
         self.assertEqual(plain(w.view("youtube_api")["said"]),
                          "Disconnected. ReelForge has forgotten the connection, and Google has ended it.")
         self.assertEqual(w.sent("toast"), [])
