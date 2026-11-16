@@ -211,6 +211,19 @@ class InstallTest(unittest.TestCase):
                                "has its own by those names: ReelForge couldn't keep a copy of your list in backups/ "
                                "before replacing any.")
 
+    def test_a_sound_the_new_version_takes_out_of_its_list_goes_unless_you_changed_it(self):
+        """The kit's own entries follow the kit, but one it took out of its list stayed in yours for good: setup went
+        on trying to download a sound the kit had withdrawn."""
+        zap = {"file": "mixkit/mixkit_7.wav", "source": "mixkit", "id": 7}
+        ding = {"file": "mixkit/mixkit_8.wav", "source": "mixkit", "id": 8}
+        old_kit = {**self.OLD_KIT, "_licenses": {"kenney": "CC0", "mixkit": "Mixkit"},
+                   "sounds": {**self.OLD_KIT["sounds"], "zap": zap, "ding": ding}}
+        yours = {**old_kit, "sounds": {**old_kit["sounds"], "ding": {**ding, "title": "the one in my outros"}}}
+        now, said = self.sounds_update(yours, self.NEW_KIT, record=old_kit)
+        self.assertEqual(now["sounds"], {**self.NEW_KIT["sounds"], "ding": yours["sounds"]["ding"]})  # zap: gone
+        self.assertEqual(now["_licenses"], self.NEW_KIT["_licenses"])
+        self.assertEqual(said, "Updated ReelForge from 1.0.0 to 1.1.0.")
+
     def test_a_list_of_yours_that_cant_be_read_is_kept_in_backups_before_the_new_one_takes_its_place(self):
         """A comma after the last entry you added (your mixes already stop on it): the new list went over yours with
         no copy and no word, and the sounds you had added were gone from it."""

@@ -351,8 +351,8 @@ def _named(items: list[tuple[str, str]]) -> str:
 def _merge_sounds(theirs: dict, mine: dict, was: dict | None, keep_unknown: bool):
     """The new list with what is yours in mine, and which of yours by a name the new list also has were kept and which
     replaced. was: the kit's list as it was (None: no record of it), which tells your entries from the kit's own:
-    one that is the same as there is the kit's, and its new one goes in. With no record, keep_unknown says which
-    goes in."""
+    one that is the same as there is the kit's, and its new one goes in, or none, where the new list no longer has
+    it. With no record, keep_unknown says which goes in."""
     out, kept, replaced = dict(theirs), [], []
     for key, value in mine.items():
         if key in TABLES and not (isinstance(value, dict) and isinstance(out.get(key), dict)):
@@ -365,7 +365,10 @@ def _merge_sounds(theirs: dict, mine: dict, was: dict | None, keep_unknown: bool
         before = before if isinstance(before, dict) else ({} if was is not None else None)
         for name, entry in (value.items() if kind else [(key, value)]):
             if name not in table:
-                table[name] = entry                          # yours, or one the kit has taken out of its list since
+                if before is not None and name in before and before[name] == entry:
+                    continue        # the kit's own, which it has taken out of its list since (a sound withdrawn
+                                    # from Mixkit, say, that setup would go on trying to download): it goes
+                table[name] = entry                          # yours, or one the kit took out that you had changed
             elif table[name] == entry or (before is not None and name in before and before[name] == entry):
                 continue                                     # the kit's own, as it put it there: its new one goes in
             elif before is not None or keep_unknown:
