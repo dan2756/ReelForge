@@ -26,6 +26,7 @@ you said yes to it for that post in the browser, on ReelForge's own page, which 
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 import threading
@@ -109,10 +110,12 @@ HOW_PRESS = ("The extension presses Post only where Press Post for me is on in i
              "Post.")
 
 
-def numbers(post: dict) -> str:
-    """A post's views and age. One the extension reported has no numbers until the next stats read brings them."""
+def numbers(post: dict, hidden: bool = False) -> str:
+    """A post's views and age. One the extension reported has no numbers until the next stats read brings them.
+    hidden: it went up through YouTube's API as private or unlisted, and a stats read only sees what everyone can."""
     if post["views"] is None:
-        return f"{fmt_ago(post['published_at'])}, its numbers come with the next refresh"
+        return f"{fmt_ago(post['published_at'])}, its numbers come " + (
+            "once everyone can see it" if hidden else "with the next refresh")
     return f"{fmt_num(post['views'])} views, {fmt_ago(post['published_at'])}"
 
 
@@ -153,13 +156,17 @@ def state_line(job: dict | None, post: dict | None, name: str, opened: str | Non
     if state == "none":
         out = Text("○ not posted", FAINT)
         return out.append(f"  upload page opened {fmt_ago(opened)}, not spotted yet", MUTED) if opened else out
+    # (A post that went up through YouTube's API as private or unlisted: a stats read only sees what everyone can.)
+    hidden = bool(job and state == "posted" and job["via"] == "api"
+                  and json.loads(job["options"] or "{}").get("privacy") != "public")
     if state == "spotted" or (state == "posted" and post):
-        return Text("✓ posted", f"bold {GOOD}").append("  " + numbers(post), MUTED)
+        return Text("✓ posted", f"bold {GOOD}").append("  " + numbers(post, hidden), MUTED)
     words = {**WORDS, **(API_WORDS if job["via"] == "api" else {})}[state]
     when = fmt_ago(job["updated_at"])
     if state == "posted":
         cut = " as an earlier cut" if job.get("earlier_cut") else ""  # (the file was rendered again since)
-        return Text("✓ posted", f"bold {GOOD}").append(f"  {when}{cut}, not in your stats yet", MUTED)
+        stats = "its numbers come once everyone can see it" if hidden else "not in your stats yet"
+        return Text("✓ posted", f"bold {GOOD}").append(f"  {when}{cut}, {stats}", MUTED)
     if state == "failed":
         why, step = failure(job, name), STEPS.get(job["step"] or "", "")
         out = Text("× failed", f"bold {BAD}")

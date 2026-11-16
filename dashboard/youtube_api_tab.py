@@ -765,17 +765,19 @@ class YouTubeApiTab:
         """On the loop, when this window's upload is over: say how it ended. Not in a pop-up while the Publish tab
         is open on that video and its row says the same, with the buttons for it: the pop-up sat on them for
         twenty seconds."""
+        # (Each names its video first: it is said because another video, or another tab, is on show by now.)
         if job and self._row_says(job):
             pass
         elif job and job["state"] == "posted":
             said, act_on = to_look_at(job)
-            self.notify((said or "It is up.") + (f" {job['url']}" if job["url"] else ""), title="Posted to YouTube",
-                        severity="warning" if act_on else "information", timeout=20)
+            self.notify(f"{job['video']}: " + (said or "It is up.") + (f" {job['url']}" if job["url"] else ""),
+                        title="Posted to YouTube", severity="warning" if act_on else "information", timeout=20)
         elif job and job["state"] == "failed":
-            self.notify(job["error_message"] or "The upload failed.", title="YouTube: not posted", severity="warning",
-                        timeout=20)
+            self.notify(f"{job['video']}: " + (job["error_message"] or "The upload failed."),
+                        title="YouTube: not posted", severity="warning", timeout=20)
         elif job and job["state"] == "unknown":
-            self.notify(job["detail"] or STUDIO, title="YouTube: not sure it posted", severity="warning", timeout=25)
+            self.notify(f"{job['video']}: " + (job["detail"] or STUDIO), title="YouTube: not sure it posted",
+                        severity="warning", timeout=25)
         elif job and job["state"] == "expired":  # (its turn never came: the row of another video is on show)
             self.notify(f"{job['video']} waited ten minutes for another upload and never started. Nothing was "
                         "posted.", title="YouTube: not posted", severity="warning", timeout=20)

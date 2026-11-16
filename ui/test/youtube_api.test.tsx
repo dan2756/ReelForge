@@ -540,7 +540,7 @@ describe("a post through the API", () => {
     await ask(h, "Again with API…")
     await yes(h, "Post it again")
     await until(h, () => popups().length > 0)
-    expect(popups()).toEqual(["YouTube: not posted: Your Google Cloud project has used up today's YouTube API allowance. It starts again at midnight Pacific time. Nothing was posted."])
+    expect(popups()).toEqual(["YouTube: not posted: ep03_hail.mp4: Your Google Cloud project has used up today's YouTube API allowance. It starts again at midnight Pacific time. Nothing was posted."])
     // The first one is still up, so its row says posted again, and nothing of the try that failed.
     expect(youtube(h).state).toBe("posted")
     expect(row(h)).toContain("✓ posted")

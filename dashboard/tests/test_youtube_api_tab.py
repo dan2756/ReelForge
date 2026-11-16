@@ -554,9 +554,11 @@ class Posting(ApiPosting):
         said = plain(row["line"])
         self.assertTrue(said.startswith("✓ posted"), said)
         self.assertIn("It is private, as you chose. Change it in YouTube Studio.", said)
+        # A stats read only sees what everyone can: a private video's numbers don't "come with the next refresh".
+        self.assertRegex(said, r"^✓ posted  \S+ ago, its numbers come once everyone can see it  It is private")
         toast = w.sent("toast")[-1]
         self.assertEqual((toast["title"], toast["severity"]), ("Posted to YouTube", "information"))
-        self.assertIn("It is private, as you chose.", toast["body"])
+        self.assertTrue(toast["body"].startswith("ep01.mp4: It is private, as you chose."), toast["body"])
         self.assertIn(LINK, toast["body"])
         self.assertIn(f"posted with its API · {LINK}", plain(w.view("uploads")["rows"][0]["cells"][4]))
         # The channel it went to is known from now on, and the upload's session is off the file.
@@ -787,7 +789,7 @@ class Posting(ApiPosting):
         self.assertNotIn("failed", plain(row["line"]))
         (toast,) = w.sent("toast")
         self.assertEqual((toast["title"], toast["severity"], toast["body"]),
-                         ("YouTube: not posted", "warning", again["error_message"]))
+                         ("YouTube: not posted", "warning", f"ep01.mp4: {again['error_message']}"))  # which video
         self.assertIn("used up today's YouTube API allowance", toast["body"])
         # One that goes up, while the row shows the first post's numbers from a stats read: the row has no room
         # for what the new post has to add (how YouTube stored it), so the pop-up says it, with the new link.
@@ -895,7 +897,7 @@ class Posting(ApiPosting):
         job = self.posted(w, "public")
         self.assertEqual((job["state"], job["detail"], json.loads(job["options"])["privacy"]),
                          ("posted", None, "public"))
-        self.assertEqual(w.sent("toast")[-1]["body"], f"It is up. {LINK}")
+        self.assertEqual(w.sent("toast")[-1]["body"], f"ep01.mp4: It is up. {LINK}")
 
     def test_what_the_read_back_says(self):
         made = {"privacy": "private", "made_for_kids": False, "for_kids": False}
