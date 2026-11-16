@@ -278,6 +278,17 @@ describe("the header in a narrow window", () => {
     expect(last).not.toBe(ALL)
   })
 
+  test("a notification's line that exactly fills the drawer keeps its last letter", async () => {
+    // The words were wrapped to one column more than is drawn (the list's scrollbar column): "…doubled in size ever"
+    // for "every".
+    const h = await window("overview", [120, 30], true)
+    const notes = h.bridge.view<{ items: { body: string }[] }>("notes")!.items.filter((n) => n.body)
+    expect(notes.length).toBeGreaterThan(0)
+    const drawn = frame(h).split("\n").map((r) => [...r].slice(120 - DRAWER_WIDTH).join("")).join(" ").replace(/[┃│▌]/g, " ").replace(/\s+/g, " ")
+    // (the start of each body: as far as its first two rows go, whatever the numbers after it are today)
+    for (const n of notes.slice(0, 4)) expect(drawn).toContain(n.body.replace(/\s+/g, " ").slice(0, 44))
+  })
+
   test("n opens and closes the notifications, as the bell does", async () => {
     const h = await window("overview", [122, 30])
     expect(frame(h)).not.toContain("NOTIFICATIONS")

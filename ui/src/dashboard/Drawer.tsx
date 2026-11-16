@@ -75,7 +75,9 @@ function Notes() {
   const [width, setWidth] = useState(DRAWER_WIDTH - 4)
   const bg = DASH.surface
   const markW = 4
-  const textW = Math.max(width - 2 - markW - X, 8) // 2: the highlighted one's edge
+  // 3: the highlighted one's edge, and the list's scrollbar column. (With that column counted as room, a line that
+  // exactly filled it lost its last letter: "…doubled in size ever" for "every".)
+  const textW = Math.max(width - 3 - markW - X, 8)
   const items: Option[] = (notes?.items ?? []).map((n) => {
     const title = wrap(n.title.map((t) => t[0]).join(""), textW)
     const body = n.body ? wrap(n.body, textW).slice(0, BODY_LINES) : []
