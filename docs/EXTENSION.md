@@ -93,6 +93,10 @@ the video in), your press is the one. The extension asks for no other and presse
 shows its form, and ReelForge would refuse it anyway. The post ends as your press decides: posted when the platform
 shows it, else "not sure it posted".
 
+The same goes for a press you make while the extension is asking ReelForge for its own. The note on the page says
+**Pressing Post for you** then, and the button is not ringed in red. If you press it all the same, yours is the one:
+the extension clicks nothing, whatever ReelForge answers.
+
 ## What is automatic, and what never is
 
 Automatic, once you have started a post, with **Start** in ReelForge or **Post** in the popup:

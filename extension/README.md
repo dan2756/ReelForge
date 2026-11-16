@@ -45,7 +45,8 @@ For each platform the extension then:
    their size and SHA-256 match what you confirmed;
 4. fills in the text, in one go, and reads it back;
 5. scrolls the platform's final button into view, rings it in red and leaves a note in the corner: **Check it, then
-   press Post**.
+   press Post**. With Press Post for me (below) the note says **Pressing Post for you** instead, and the button is
+   ringed only if the extension does not press it after all.
 
 Then it waits. When the platform shows its own sign that the post went out, ReelForge is told. The tab is left
 open.
@@ -81,7 +82,8 @@ If you still want it, it takes all of these:
   opened presses nothing;
 - ReelForge grants the press, once per post;
 - you have not pressed the button yourself already. Your own press, even one made while the video is still going
-  up, is the post's press: the extension then asks for no other, and ReelForge would refuse one.
+  up or while ReelForge is being asked for the press, is the post's press: the extension then clicks nothing, and
+  ReelForge would refuse another.
 
 It is never offered for X. X's rules name scripting its website and suspend accounts for it.
 
