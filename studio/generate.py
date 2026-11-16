@@ -510,7 +510,9 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, say=No
     if not log.exists():
         out(log, render("production-log.md.j2", context(a, s, "claude", w.profile, notes)))
     from . import dashboard_config
-    config = dashboard_config.rendered(s, w.profile)
+    # With studio.toml left as it is, the settings here are the answers': the handles are all that changed, and
+    # anything else they'd put in config.toml (the hashtags for new videos, say) could undo an edit made by hand.
+    config = dashboard_config.rendered(s, w.profile, only=S.PLATFORMS if keep_settings else None)
     # Every file is rendered and checked by now, so whatever stops this (answers to fix, a typo in the dashboard's
     # config.toml, notes too long for Codex) has stopped it above, with every file still as it was.
 

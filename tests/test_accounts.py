@@ -295,6 +295,27 @@ class SetAccount(Scratch):
         self.assertEqual(self.handles()["x"], "@np_x")
         self.assertEqual(settings.load(P.SETTINGS)["platforms"]["handles"]["x"], "@np_x")
 
+    def test_a_settings_file_with_a_mistake_in_it_leaves_the_rest_of_the_dashboard_settings_as_they_are(self):
+        """While studio.toml couldn't be read, Connect wrote all of config.toml from the answers: the hashtags for
+        new videos on Publish went back to the answers' over the ones edited into studio.toml by hand."""
+        generate.write_all({"channel_name": "Night Physics", "about": "What-ifs.", "assistant": "claude",
+                            "platforms": ["tiktok", "youtube"], "handle_tiktok": "@np", "default_tags": "#fyp #physics"})
+        text = P.SETTINGS.read_text(encoding="utf-8")
+        self.assertIn('default_tags = ["fyp", "physics"]', text)
+        P.SETTINGS.write_text(text.replace('default_tags = ["fyp", "physics"]',
+                                           'default_tags = ["fyp", "mine", "nightphysics"]'), encoding="utf-8")
+        generate.set_account("youtube", "@np_yt")           # config.toml follows studio.toml
+        tags = tomllib.loads(self.config.read_text(encoding="utf-8"))["default_tags"]
+        self.assertEqual(tags, "#fyp #mine #nightphysics")
+        P.SETTINGS.write_text(P.SETTINGS.read_text(encoding="utf-8") + "\nthis is = = a typo\n", encoding="utf-8")
+        before = self.config.read_text(encoding="utf-8")
+        said = []
+        generate.set_account("x", "@np_x", say=said.append)  # Connect, with the typo there
+        self.assertEqual(len(said), 1, said)
+        self.assertEqual(self.handles(), {"tiktok": "@np", "youtube": "@np_yt", "instagram": "", "x": "@np_x"})
+        self.assertEqual(self.config.read_text(encoding="utf-8"),
+                         before.replace('[x]\nhandle = ""', '[x]\nhandle = "@np_x"'))   # the handle, nothing else
+
     def test_a_handle_typed_into_the_dashboard_settings_counts(self):
         generate.write_all({"channel_name": "Night Physics", "about": "What-ifs.", "assistant": "claude",
                             "platforms": ["tiktok"],
