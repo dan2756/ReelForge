@@ -1461,8 +1461,9 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
         for p in ps:
             xs, ys = curves[p.key]
             series = [{"key": p.key, "name": p.name, "color": p.color, "xs": xs, "ys": ys, "style": "area"}]
-            heading = Text.assemble((p.name + "  ", f"bold {p.color}"),
-                                    (f"typical video, first {fmt_age(horizon)}", MUTED))
+            # Each piece with the separator before it: where the chart is too narrow for all of them, the window
+            # leaves out whole pieces from the end (whole() in ui/src/lib/fit.ts), never leaving a "·" at the end.
+            heading = Text.assemble((p.name, f"bold {p.color}"), (f"  typical video, first {fmt_age(horizon)}", MUTED))
             if ys:
                 heading.append(f" · {fmt_num(ys[-1])} views by {fmt_age(xs[-1])}", MUTED)
             charts.append(self.compare_chart(p, heading, series, horizon, "Needs a few videos with some history."))
@@ -1508,10 +1509,11 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
             txs, tys = analytics.typical_curve(self.posts, self.parsed, p.key, span, exclude=q)
             series = [{"key": p.key, "name": "this", "color": p.color, "xs": xs, "ys": ys, "style": "area"},
                       {"key": "typical", "name": "typical", "color": TYPICAL, "xs": txs, "ys": tys, "style": "line"}]
-            heading = Text.assemble((p.name + "  ", f"bold {p.color}"), (f"{fmt_num(q['views'])} views", "bold"),
-                                    (f" · {fmt_num(q['likes'])} likes · ", MUTED))
-            heading.append_text(score_text(q["score"]))
-            heading.append(" typical", MUTED)
+            # (In whole pieces, each with the separator before it, as the typical video's above: " · 249 likes ·"
+            # was one piece, and the window, short of room, kept it without the score it led to.)
+            score = score_text(q["score"]).json()[0]
+            heading = Text.assemble((p.name, f"bold {p.color}"), (f"  {fmt_num(q['views'])} views", "bold"),
+                                    (f" · {fmt_num(q['likes'])} likes", MUTED), (f" · {score[0]} typical", score[1]))
             charts.append(self.compare_chart(p, heading, series, span, "No snapshots for this post yet."))
         rows = []
         for p in ps:
@@ -2023,11 +2025,12 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
             elif guess:
                 est.append([i, i + 1])
         first = pts[0][0].astimezone()  # the first reading, not the start of its hour, so the date matches the panel
-        heading = Text.assemble(("FOLLOWERS  ", "bold"),
-                                (f"since {first:%b} {first.day}  " if days < 30 else "last 30 days  ", MUTED),
-                                (fmt_num(pts[-1][1]), "bold"))
-        heading.append("  ")
-        heading.append_text(change_text(pts[-1][1] - (ys[0] if len(ys) > 1 else pts[0][1])))
+        # Each piece with the space before it, so that where the panel is too narrow for all of them the window
+        # leaves out whole pieces from the end (whole() in ui/src/lib/fit.ts), and no space stands in for one.
+        change = change_text(pts[-1][1] - (ys[0] if len(ys) > 1 else pts[0][1])).json()
+        heading = Text.assemble(("FOLLOWERS", "bold"),
+                                (f"  since {first:%b} {first.day}" if days < 30 else "  last 30 days", MUTED),
+                                (f"  {fmt_num(pts[-1][1])}", "bold"), *[(f"  {s[0]}", s[1]) for s in change])
         return {"heading": heading.json(), "n": fr.n, "step_h": fr.step.total_seconds() / 3600,
                 "slots": slot_info(fr), "values": b.totals, "guessed": guessed,
                 "series": [{"key": p.key, "name": p.name, "color": p.color, "xs": xs, "ys": ys, "style": "area",

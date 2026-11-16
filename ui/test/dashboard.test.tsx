@@ -529,6 +529,38 @@ describe("tables and charts", () => {
     expect(listed()).toBe(newest.join())
   })
 
+  test("a platform chart's heading on Compare loses whole pieces where it doesn't fit, and never ends in a loose ·", async () => {
+    // " · 249 likes · " was one piece: in a window 120 columns wide X's heading read "X  12.9K views · 249 likes ·",
+    // and at 80 "… · 249 likes · 0.7×", without the "typical" that says what the 0.7× is of.
+    const h = await window("compare", [180, 50])
+    const headings = () =>
+      frame(h)
+        .split("\n")
+        .flatMap((r) => r.split("┃"))
+        .map((cell) => cell.replace(/[█▀▄\s]+$/, "").trim())
+        .filter((cell) => /^(TikTok|YouTube|Instagram|X) {2}\S/.test(cell))
+    const looked: string[] = []
+    const check = async (size: [number, number]) => {
+      h.t.resize(...size)
+      await h.settle(600)
+      expect(headings().length).toBeGreaterThan(1) // (the second row of charts may be further down)
+      for (const cell of headings()) {
+        looked.push(cell)
+        expect(cell).not.toMatch(/·$/)
+        if (cell.includes("×")) expect(cell).toMatch(/ · (\d+(\.\d+)?|—)× typical$/)
+      }
+    }
+    for (const size of [[180, 50], [120, 50], [80, 50]] as [number, number][]) await check(size) // the typical video's
+    expect(looked.some((c) => /typical video, first \w+ · \S+ views by/.test(c))).toBe(true)
+    const episode = h.bridge.view<{ items: { id: string }[] }>("episodes")!.items.find((i) => String(i.id).startsWith("ep-"))!
+    await h.bridge.call("show_episode", Number(String(episode.id).slice(3))) // as a click on it in the list does
+    await until(h, "EPISODE  ")
+    looked.length = 0
+    for (const size of [[180, 50], [120, 50], [80, 50]] as [number, number][]) await check(size)
+    expect(looked.some((c) => /\d× typical$/.test(c))).toBe(true) // where there is room, the score shows, whole
+    expect(looked.some((c) => /^X {2}\S+ views · \S+ likes$/.test(c))).toBe(true) // and where there isn't, it goes
+  })
+
   test("the range chips and a platform's key change the charts", async () => {
     const h = await window()
     expect(frame(h)).toContain("in 24h")

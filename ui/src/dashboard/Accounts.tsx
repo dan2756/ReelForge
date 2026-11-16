@@ -167,10 +167,11 @@ function Connected({ panel: p }: { panel: AccountPanelView }) {
     if (hover === null || hover < 0 || hover >= chart.n) return whole(chart.heading)
     const value = chart.values[hover]
     const guess = chart.guessed?.[hover] ?? false
+    // (each piece with the space before it, as the heading's own: one left out leaves no space behind)
     return whole([
-      ["FOLLOWERS  ", "bold"],
-      [chart.slots[hover]!.label + "  ", `bold ${MARK}`],
-      value !== null && value !== undefined ? [(guess ? "≈" : "") + fmtNum(value), "bold"] : ["no reading yet", DASH.muted],
+      ["FOLLOWERS", "bold"],
+      ["  " + chart.slots[hover]!.label, `bold ${MARK}`],
+      value !== null && value !== undefined ? ["  " + (guess ? "≈" : "") + fmtNum(value), "bold"] : ["  no reading yet", DASH.muted],
       ...(guess && value !== null && value !== undefined ? ([["  estimated", DASH.muted]] as Segs) : []),
     ])
   }
