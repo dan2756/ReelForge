@@ -59,7 +59,13 @@ export function Compare() {
         <box height={1} marginBottom={1} flexShrink={0}>
           <Line segs={compare?.heading} base={DASH.faint} />
         </box>
-        <HBars sections={compare?.bars ?? []} muted={DASH.faint} grow={grow} />
+        {compare?.empty ? (
+          <text fg={DASH.muted} wrapMode="word" flexShrink={0}>
+            {compare.empty}
+          </text>
+        ) : (
+          <HBars sections={compare?.bars ?? []} muted={DASH.faint} grow={grow} />
+        )}
       </Panel>
       <box flexDirection="column" height={27} flexShrink={0} marginTop={1} gap={1}>
         {rows.map((row, i) => (

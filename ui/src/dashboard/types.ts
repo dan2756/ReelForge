@@ -189,6 +189,7 @@ export interface CompareChart {
 
 export interface CompareView {
   heading: Segs
+  empty?: string // why the scoreboard has nothing to show (no platform is connected): said in place of its bars
   bars: [string, [string, number, string, string][]][]
   charts: CompareChart[]
   table: TableData

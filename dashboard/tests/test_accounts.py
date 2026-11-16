@@ -172,6 +172,8 @@ class WindowTest(unittest.TestCase):
         # ... and a table with nothing in it says where to go, in place of a row of headings over nothing.
         self.assertEqual(w.view("top")["empty"], NOTHING_CONNECTED)
         self.assertEqual((w.view("videos")["rows"], w.view("videos")["empty"]), ([], NOTHING_CONNECTED))
+        # The Compare tab's scoreboard too: its three bars were headings with nothing under them, and no words.
+        self.assertEqual(w.view("compare")["empty"], NOTHING_CONNECTED)
 
     def test_a_table_with_nothing_in_it_says_what_goes_there_and_what_to_do(self):
         """Connected, and nothing read yet (a new channel before its first video): each empty table says what to do

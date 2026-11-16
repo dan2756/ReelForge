@@ -1472,6 +1472,9 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
                    ("median", "Median", 8), ("likes", "Likes", 6), ("share", "Share", 6), ("title", "Best video", 34)]
         self.emit("compare", {"heading": Text.assemble(("PLATFORM SCOREBOARD  ", "bold"),
                                                        ("which platform is working", MUTED)).json(),
+                              # With no platform connected the three bars are headings with nothing under them:
+                              # the tab says what the other tabs say there.
+                              "empty": "" if self.platforms else NOTHING_CONNECTED,
                               "bars": bars, "charts": charts, "table": table(columns, rows)})
 
     def compare_episode(self, episode_id: int) -> None:

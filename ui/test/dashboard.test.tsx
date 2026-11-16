@@ -448,6 +448,14 @@ describe("accounts", () => {
     expect(frame(h)).toContain("MAKE A GMAIL FOR YOUR CHANNEL")
     expect(frame(h)).not.toContain("Your @handle")
   })
+
+  test("with nothing connected, the Compare tab says so in words, as the other tabs do", async () => {
+    // Its scoreboard was three headings with nothing under them.
+    const h = await window("compare", [120, 30], false, { unconnected: ["tiktok", "youtube", "instagram", "x"] })
+    await until(h, "PLATFORM SCOREBOARD")
+    expect(frame(h)).toContain("Connect an account on the Accounts tab to see your stats here.")
+    for (const heading of ["MEDIAN VIEWS PER VIDEO", "LIKE RATE", "FOLLOWERS GAINED"]) expect(frame(h)).not.toContain(heading)
+  })
 })
 
 describe("tables and charts", () => {
