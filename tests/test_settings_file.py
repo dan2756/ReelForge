@@ -519,6 +519,66 @@ class Loading(Scratch):
         run(["channel", "--answers", str(given)])
         self.assertIs(settings.load()["platforms"]["background_stats"], True)
 
+    def test_writing_the_files_again_over_a_yes_in_the_file_against_the_answers_no_says_so(self):
+        """Writing a channel's files again from its answers keeps a no to the hourly read in its studio.toml, in the
+        answers too. A yes written in the file after that, against the answers' no, which turned the read on, was put
+        back to the no by the next channel --regenerate without a word: the read was off again, and the yes was only
+        in the copy of the file in backups. The no stays (the read uses your log-ins, so the file never turns it on
+        against the answers' no), but it's said now, with where the file's yes is and how to say yes."""
+        from studio import generate
+
+        def run(argv: list[str]) -> str:
+            with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(main(argv), 0, out.getvalue())
+            return " ".join(out.getvalue().split())
+
+        def edit(who, old: str, new: str) -> None:
+            who.settings.write_text(who.settings.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+
+        def copies(who) -> set:
+            return set(who.backups.glob("studio.*.toml"))
+
+        def said_about(who, flag: str, before: set) -> str:
+            copy = (copies(who) - before).pop()
+            self.assertIn("background_stats = true", copy.read_text(encoding="utf-8"))      # the file's yes
+            return (f"{who.name}'s stats aren't read every hour while ReelForge is closed: its answers say no to that, "
+                    f"and its settings file, {who.settings}, was written again from them, so the yes in it is only in "
+                    f"the copy of it as it was, {copy}. To have them read, say yes to it in its questions: "
+                    f"reelforge -p {flag} channel")
+
+        self.onboard_main()                     # the answers say yes
+        first = profiles.main()
+        edit(first, "background_stats = true", "background_stats = false")
+        run(["channel", "--regenerate"])        # the file's no is kept, in the answers too
+        self.assertIs(json.loads(P.ANSWERS.read_text(encoding="utf-8"))["background_stats"], False)
+        # a yes written in the file (one that reads, then one with a mistake in it) against the answers' no
+        for what, typo in (("in a file that reads", ""), ("in a file with a mistake in it", '\nx = "a typo\n')):
+            with self.subTest(what):
+                edit(first, "background_stats = false", "background_stats = true")
+                P.SETTINGS.write_text(P.SETTINGS.read_text(encoding="utf-8") + typo, encoding="utf-8")
+                self.assertIs(generate.background_stats(first), True)
+                before = copies(first)
+                printed = run(["channel", "--regenerate"])
+                self.assertIs(settings.load()["platforms"]["background_stats"], False)    # the no stays
+                self.assertIs(generate.background_stats(first), False)
+                self.assertIs(json.loads(P.ANSWERS.read_text(encoding="utf-8"))["background_stats"], False)
+                self.assertIn(said_about(first, "1", before), printed)
+                self.assertEqual(printed.count("stats aren't read every hour"), 1)
+        # another channel's alone, by its folder
+        b = profiles.create("Bee Facts")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**ANSWERS, "channel_name": "Bee Facts", "background_stats": False}, b)
+        edit(b, "background_stats = false", "background_stats = true")
+        before = copies(b)
+        printed = run(["-p", b.kept_flag, "channel", "--regenerate"])
+        self.assertIs(settings.load(b.settings)["platforms"]["background_stats"], False)
+        self.assertIn(said_about(b, b.flag, before), printed)
+        # the file and the answers agreeing, either way: nothing to say
+        for stats in (False, True):
+            with self.subTest(agreeing=stats):
+                self.onboard_main(background_stats=stats)
+                self.assertNotIn("every hour", run(["channel", "--regenerate"]))
+
 
 class Commands(Scratch):
     def setUp(self):

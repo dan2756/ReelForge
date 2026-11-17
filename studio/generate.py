@@ -297,15 +297,21 @@ def _own_background_stats(path: Path) -> bool | None:
     return None if not said else all(S.yes_no(v) is True for v in said)
 
 
-def _says_no(path: Path) -> bool:
-    """Whether a channel's studio.toml says no to the hourly read of its stats, which the hourly job goes by
-    (background_stats): under [platforms] in one that reads, else in its own background_stats lines."""
+def _says(path: Path) -> bool | None:
+    """What a channel's studio.toml says to the hourly read of its stats, which the hourly job goes by
+    (background_stats): under [platforms] in one that reads, else in its own background_stats lines (None: it has
+    none, or can't be read at all)."""
     try:
-        return S.load(path)["platforms"]["background_stats"] is False
+        return S.load(path)["platforms"]["background_stats"]
     except S.SettingsError:
-        return _own_background_stats(path) is False
+        return _own_background_stats(path)
     except OSError:
-        return False
+        return None
+
+
+def _says_no(path: Path) -> bool:
+    """Whether a channel's studio.toml says no to the hourly read of its stats (_says)."""
+    return _says(path) is False
 
 
 def as_read(answers: dict | None, profile) -> dict | None:
@@ -592,10 +598,11 @@ def write_all(answers: dict, profile=None, *, account: str = "", again: bool = F
     in once it's fixed. again: the answers are the saved ones, written out again (reelforge channel --regenerate), not
     answers given now: a no to the hourly read of your stats in the studio.toml they're written over, which the
     hourly job goes by (background_stats: under [platforms], or in the file's own background_stats lines while it
-    has a mistake in it), is kept, in the answers too, since nobody has said yes since. say: called with a line for
-    each file that was left as it was because it has a mistake in it, or written again with one in it, or whole in
-    place of a line at a time (and where its copy is), and for a no to the hourly read kept, once everything else is
-    written."""
+    has a mistake in it), is kept, in the answers too, since nobody has said yes since; a yes there against the
+    answers' no isn't (the read uses your log-ins), and that's said. say: called with a line for each file that was
+    left as it was because it has a mistake in it, or written again with one in it, or whole in place of a line at a
+    time (and where its copy is), and for a no to the hourly read kept, or a yes in the file not, once everything
+    else is written."""
     w = _where(profile)
     notes = w.notes
     first = not w.settings.exists()                     # first-time setup: the channel isn't set up yet
@@ -614,11 +621,15 @@ def write_all(answers: dict, profile=None, *, account: str = "", again: bool = F
     # The hourly read uses your log-ins, and goes by studio.toml, which invites edits by hand: a no written there stays
     # a no when the saved answers are written out again (after a brief, an edit of the answers, or as the way out of a
     # mistake in the file, S.fix_it), or that would turn the read on again without a word. Answers given now have the
-    # say.
-    kept_no = False
-    if again and not account and w.settings.is_file() and a.get("background_stats", True) \
-            and _says_no(w.settings):
-        a["background_stats"], kept_no = False, True
+    # say. A yes written there against the answers' no (given, or kept from the file before) doesn't turn the read on
+    # either, but it doesn't go without a word: it's said, with where it is, the file's copy.
+    kept_no = kept_off = False
+    if again and not account and w.settings.is_file():
+        said = _says(w.settings)
+        if said is False and a.get("background_stats", True):
+            a["background_stats"], kept_no = False, True
+        elif said is True and not a.get("background_stats", True):
+            kept_off = True     # said below, with where the file's yes is: its copy
     s = settings_from(a)
     cfg = s                     # what ReelForge's settings (config.toml) are written from
     connecting = account if a.get(f"handle_{account}") else ""
@@ -701,6 +712,11 @@ def write_all(answers: dict, profile=None, *, account: str = "", again: bool = F
                 notes.append(f"{a['channel_name'].strip()}'s settings file, {w.settings}, had a mistake in it "
                              f"({mistake.reason}), so it was written again from your answers{kept}. A copy of it as it "
                              f"was is in {copy}.")
+            if kept_off:
+                notes.append(f"{a['channel_name'].strip()}'s stats aren't read every hour while ReelForge is closed: "
+                             f"its answers say no to that, and its settings file, {w.settings}, was written again from "
+                             f"them, so the yes in it is only in the copy of it as it was, {copy}. To have them read, "
+                             f"say yes to it in its questions: reelforge -p {w.profile.flag} channel")
             if edit is not None and edit.waited:
                 notes.append(_brought_in(edit.waited, a["channel_name"].strip(), w.settings, copy))
             if edit is not None and edit.text is None:      # its own layout is in the copy alone
