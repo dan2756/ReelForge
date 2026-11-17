@@ -1031,7 +1031,8 @@ class Deleting(Scratch):
                     with self.subTest(folder=p.folder.name, notes=notes):
                         # no reelforge command names it: Python straight, as the rest of its notes
                         self.assertEqual(re.findall(r"reelforge -p \S+", text), [])
-                        for pattern in (r"`(\S+ -m studio -p .+? publish)`", r"\((\S+ -m studio -p .+? channel), or "):
+                        for pattern in (r"`(\S+ -m studio -p .+? publish)`",
+                                        r"\((\S+ -m studio -p .+? channel) from the ReelForge folder, or "):
                             cmd = re.search(pattern, text).group(1)
                             self.assertTrue(cmd.startswith(r".venv\Scripts\python -m studio -p "), cmd)
                             argv = shlex.split(cmd.replace("\\", "/"))
@@ -1052,6 +1053,69 @@ class Deleting(Scratch):
             shown = subprocess.run(["bash", "--norc", "--noprofile", "-i"], capture_output=True, text=True,
                                    input=f"printf '<%s>\\n' {cmd}\nexit\n", timeout=30).stdout
             self.assertIn("<-p>\n<profiles/wow!>\n<publish>", shown)
+
+    def test_a_channels_notes_reach_it_with_a_cmd_character_in_its_folders_name_on_windows(self):
+        """PowerShell and Git Bash hand bin/reelforge.cmd an argument with no space in it without its quotes, and cmd
+        then ends the command at an &, |, < or > and takes a ^ for the character after it: for a folder renamed by hand
+        to a&b, say, the notes' `reelforge -p "profiles/a&b" publish` opened another channel's Publish tab (profiles/a),
+        or none, and ran the rest as a command of its own. Those commands now run ReelForge's Python straight, from the
+        ReelForge folder (which the line at the top of the notes says too), and a command printed to run there and
+        then names such a channel by its number."""
+        import re
+        import shlex
+
+        def made(name: str, folder: str) -> profiles.Profile:
+            p = profiles.create(name)
+            with redirect_stdout(io.StringIO()):
+                generate.write_all({**ANSWERS, "channel_name": name}, p)
+            return profiles.Profile(p.folder.rename(p.folder.with_name(folder)))
+
+        def through_powershell_and_reelforge_cmd(line: str) -> list[str]:
+            """What `reelforge ...` typed in PowerShell reaches ReelForge as: each word without its quotes when it has
+            no space in it, then cmd's reading of them, up to an &, |, < or > outside quotes, a ^ dropped there."""
+            words = [w if w and " " not in w else f'"{w}"' for w in shlex.split(line)]
+            kept, quoted, chars = [], False, iter(" ".join(words))
+            for ch in chars:
+                if ch == '"':
+                    quoted = not quoted
+                elif not quoted and ch in "&|<>":
+                    break
+                elif not quoted and ch == "^":
+                    ch = next(chars, "")
+                kept.append(ch)
+            return shlex.split("".join(kept), posix=False)
+
+        self.onboard_main()
+        a = made("Ay", "a")
+        folders = ["a&b", "a^b"] + ([] if os.name == "nt" else ["a|b", "a<b>"])     # (Windows has no | < > in names)
+        odd = [made(f"Odd {i}", folder) for i, folder in enumerate(folders)]
+        windows = '"$`“”„'
+        with mock.patch.object(P, "WINDOWS", True), mock.patch.object(profiles, "_NOT_IN_DOUBLE_QUOTES", windows):
+            for p in odd:
+                self.assertEqual(p.kept_flag, f'"profiles/{p.folder.name}"')
+                # what reelforge.cmd would have made of it: another channel, or none
+                self.assertNotEqual(profiles.find(through_powershell_and_reelforge_cmd(
+                    f"reelforge -p {p.kept_flag} publish")[2].strip('"')), p)
+                with redirect_stdout(io.StringIO()):
+                    generate.write_guides(p, saved_settings=True)
+                for notes in ("CLAUDE.md", "AGENTS.md"):
+                    text = (p.folder / notes).read_text(encoding="utf-8")
+                    with self.subTest(folder=p.folder.name, notes=notes):
+                        self.assertEqual(re.findall(r"reelforge -p \S+", text), [])
+                        for pattern in (r"`(\S+ -m studio -p .+? publish)`",
+                                        r"\((\S+ -m studio -p .+? channel) from the ReelForge folder, or its Settings"):
+                            cmd = re.search(pattern, text).group(1)
+                            self.assertTrue(cmd.startswith(r".venv\Scripts\python -m studio -p "), cmd)
+                            self.assertEqual(profiles.find(shlex.split(cmd.replace("\\", "/"))[4]), p)
+                # printed to run there and then: its number, which finds it
+                self.assertEqual(profiles.find(p.flag), p)
+                self.assertTrue(p.flag.isdigit(), p.flag)
+            # a folder with none of them goes through reelforge as before, its first line too
+            with redirect_stdout(io.StringIO()):
+                generate.write_guides(a, saved_settings=True)
+            text = (a.folder / "CLAUDE.md").read_text(encoding="utf-8")
+            self.assertIn("(reelforge -p profiles/a channel, or its Settings in ReelForge's profile menu)", text)
+            self.assertIn("`reelforge -p profiles/a publish`", text)
 
     def test_the_episode_commands_in_a_channels_notes_keep_its_folder_one_word(self):
         """make_episode, compose and publish-check in another channel's notes had its folder with no quotes at all:

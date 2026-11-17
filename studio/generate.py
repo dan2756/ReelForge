@@ -411,11 +411,13 @@ def context(a: dict, s: dict, assistant: str, profile=None, notes: list[str] | N
     stills = sorted({1, *(round(typical * k / 9) for k in range(1, 9)), int(typical) - 1})
     preview = [2, round(typical * 0.3), round(typical * 0.7), int(typical) - 3]
     here = "" if profile.main else f"profiles/{profile.folder.name}/"
-    # On Windows every terminal runs reelforge through bin/reelforge.cmd, which changes a ! or a %NAME% in a folder's
-    # name whatever its quotes: a command naming such a channel runs ReelForge's Python straight, as the rest of its
-    # notes do
+    # On Windows every terminal runs reelforge through bin/reelforge.cmd, which changes a !, a %NAME% or (handed them
+    # without their quotes) & | < > ^ in a folder's name whatever its quotes: a command naming such a channel runs
+    # ReelForge's Python straight, as the rest of its notes do, from the ReelForge folder (which the line at the top
+    # of its notes, read on its own, says too)
     app = f"{P.venv_python()} -m studio" if win and not profile.main and any(
         c in profile.key for c in profiles.NOT_THROUGH_REELFORGE_CMD) else "reelforge"
+    run_from = "" if app == "reelforge" else " from the ReelForge folder"
     channels = [] if not profile.main else [_other_channel(p, notes) for p in profiles.extra()]
     return {
         "kit": KIT_NAME, "version": KIT_VERSION, "date": dt.date.today().isoformat(),
@@ -454,7 +456,7 @@ def context(a: dict, s: dict, assistant: str, profile=None, notes: list[str] | N
         "py": P.venv_python(), "sep": sep, "win": win,
         "app_cmd": "reelforge",
         "onboard_cmd": ("reelforge channel, or " + ("channel.bat" if win else "./channel.sh")) if profile.main else
-                       f"{app} -p {profile.kept_flag} channel, or its Settings in ReelForge's profile menu",
+                       f"{app} -p {profile.kept_flag} channel{run_from}, or its Settings in ReelForge's profile menu",
         "dims": "1080×1920",
         # another channel's notes: its files are in its folder (here), and every command runs from the ReelForge folder,
         # with -p naming it by profiles/<folder> (Profile.kept_flag): its folder's name alone can find another channel,
