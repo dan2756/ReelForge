@@ -656,19 +656,30 @@ def _after(root: Path, requirements_before: str, progress: Progress, log: Callab
         log("Updated, but the window's packages didn't install; ReelForge tries again when it opens.")
     if (root / "my-studio" / "studio.toml").exists() or any((root / "profiles").glob("*/my-studio/studio.toml")):
         progress("Rewriting CLAUDE.md and AGENTS.md", 0, 0)
-        env = {k: v for k, v in os.environ.items() if k != "REELFORGE_PROFILE"}  # every profile's, not just this one's
-        fd, out = tempfile.mkstemp(prefix="reelforge-said-", suffix=".json")
-        os.close(fd)
+        # every profile's, not just this one's
+        env = {k: v for k, v in os.environ.items() if k not in ("REELFORGE_PROFILE", SAID)}
+        # Where it says what it has to say. Every new file is in place by now, so a temporary folder that can't be
+        # written to, or a file there that can't be removed again (a scanner holding it on Windows), must not fail
+        # the update: the notes are still written, and only what they had to say goes unsaid.
+        out: Path | None = None
+        try:
+            fd, name = tempfile.mkstemp(prefix="reelforge-said-", suffix=".json")
+            out = Path(name)
+            os.close(fd)
+        except OSError:
+            pass
         try:
             res = subprocess.run([py, "-m", "studio", "channel", "--regenerate", "--preserve-settings"],
-                                 capture_output=True, text=True, cwd=root, env={**env, "PYTHONUTF8": "1", SAID: out})
+                                 capture_output=True, text=True, cwd=root,
+                                 env={**env, "PYTHONUTF8": "1", **({SAID: str(out)} if out else {})})
             if res.returncode != 0:
                 log("Updated, but rewriting CLAUDE.md / AGENTS.md failed; run: "
                     "reelforge channel --regenerate --preserve-settings")
-            lines = _json(Path(out))    # nothing there (a version that doesn't write it): nothing to say
+            lines = _json(out) if out else None    # nothing there (a version that doesn't write it): nothing to say
             said = [line for line in lines if isinstance(line, str) and line] if isinstance(lines, list) else []
         finally:
-            Path(out).unlink(missing_ok=True)
+            if out:
+                _drop(out)
     return said
 
 

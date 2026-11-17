@@ -355,9 +355,8 @@ class AfterTest(unittest.TestCase):
     """What an update does once the new files are in, in a ReelForge folder of its own (the kit's studio/ and the
     dashboard's settings example), with only the window's packages left out."""
 
-    def test_a_mistake_in_a_channels_settings_is_said_when_the_update_is_done(self):
-        """The update writes every channel's notes again, and with a typo in a studio.toml they go by its answers
-        instead. What was said about that went nowhere: the update, and the window it restarted, said nothing."""
+    def folder(self, *channels: str) -> Path:
+        """A ReelForge folder with a channel set up for each name (the first is the first channel)."""
         import sys
 
         tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
@@ -368,27 +367,45 @@ class AfterTest(unittest.TestCase):
         (root / "dashboard").mkdir()
         shutil.copy(kit / "dashboard" / "config.example.toml", root / "dashboard")
         env = {k: v for k, v in os.environ.items() if k != "REELFORGE_PROFILE"}
-        answers = Path(tmp.name) / "answers.json"
-        answers.write_text(json.dumps({"channel_name": "Night Physics", "about": "What-ifs.", "assistant": "claude",
-                                       "background_stats": False}), encoding="utf-8")
-        made = subprocess.run([sys.executable, "-m", "studio", "channel", "--answers", str(answers)], cwd=root,
-                              env={**env, "STUDIO_DRY_SYSTEM": "1"}, capture_output=True, text=True)
-        self.assertEqual(made.returncode, 0, made.stdout + made.stderr)
-        mine = root / "my-studio" / "studio.toml"
-        typo = mine.read_text(encoding="utf-8") + "\nthis is = = a typo\n"
-        mine.write_text(typo, encoding="utf-8")
-        real, logged = subprocess.run, []
+        for i, name in enumerate(channels or ("Night Physics",)):
+            answers = Path(tmp.name) / "answers.json"
+            answers.write_text(json.dumps({"channel_name": name, "about": "What-ifs.", "assistant": "claude",
+                                           "background_stats": False}), encoding="utf-8")
+            made = subprocess.run([sys.executable, "-m", "studio", "channel", *(["--new"] if i else []), "--answers",
+                                   str(answers)], cwd=root, env={**env, "STUDIO_DRY_SYSTEM": "1"},
+                                  capture_output=True, text=True)
+            self.assertEqual(made.returncode, 0, made.stdout + made.stderr)
+        return root
+
+    def finish(self, root: Path, logged: list[str], *more) -> str:
+        """The update's last steps in root, with this Python as its own and the window's packages left out (more:
+        other patches); returns what it says."""
+        import sys
+
+        real = subprocess.run
 
         def run(cmd, *a, **k):
             if "studio.ui" in cmd:      # the window's packages (Bun): not this test's
                 return subprocess.CompletedProcess(cmd, 0, "", "")
             return real(cmd, *a, **k)
 
-        with mock.patch.object(update.subprocess, "run", run), \
-                mock.patch.object(update, "_venv_python", lambda r: sys.executable), \
-                mock.patch.object(update, "_packages", return_value=True), \
-                mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}):
-            summary = update._finish(root, "", "1.0.0", "1.1.0", lambda *a: None, logged.append)
+        with contextlib.ExitStack() as stack:
+            for patch in (mock.patch.object(update.subprocess, "run", run),
+                          mock.patch.object(update, "_venv_python", lambda r: sys.executable),
+                          mock.patch.object(update, "_packages", return_value=True),
+                          mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), *more):
+                stack.enter_context(patch)
+            return update._finish(root, "", "1.0.0", "1.1.0", lambda *a: None, logged.append)
+
+    def test_a_mistake_in_a_channels_settings_is_said_when_the_update_is_done(self):
+        """The update writes every channel's notes again, and with a typo in a studio.toml they go by its answers
+        instead. What was said about that went nowhere: the update, and the window it restarted, said nothing."""
+        root = self.folder()
+        mine = root / "my-studio" / "studio.toml"
+        typo = mine.read_text(encoding="utf-8") + "\nthis is = = a typo\n"
+        mine.write_text(typo, encoding="utf-8")
+        logged = []
+        summary = self.finish(root, logged)
         notes = json.loads((root / "dashboard" / "data" / "updated.json").read_text(encoding="utf-8"))["notes"]
         self.assertEqual(len(notes), 1, notes)
         # (The file as the update found it: on macOS the temporary folder is /private/var/..., not /var/....)
@@ -399,6 +416,36 @@ class AfterTest(unittest.TestCase):
         self.assertEqual(logged, [])
         self.assertEqual(mine.read_text(encoding="utf-8"), typo)         # yours to fix: the update leaves it
         self.assertFalse(list(Path(tempfile.gettempdir()).glob("reelforge-said-*")))
+
+    def test_a_temporary_file_that_cant_be_made_or_removed_never_fails_an_update_that_has_finished(self):
+        """Where the notes' run says what it has to say is a temporary file. With no temporary folder to write to, or
+        the file held open by a scanner on Windows when it's removed again, the update failed after every new file
+        was in place: "Update again to finish it", with no newer version to offer, and the note the restarted window
+        reads was never written."""
+        root = self.folder()
+        claude = root / "CLAUDE.md"
+        real_unlink = Path.unlink
+        held: list[Path] = []
+
+        def unlink(path, missing_ok=False):
+            if path.name.startswith("reelforge-said-"):
+                held.append(path)
+                raise PermissionError(13, "held by another program", str(path))
+            return real_unlink(path, missing_ok=missing_ok)
+
+        for what, patch in (("no temporary folder", mock.patch.object(
+                                update.tempfile, "mkstemp", side_effect=PermissionError(13, "can't write there"))),
+                            ("a file held open", mock.patch.object(Path, "unlink", unlink))):
+            with self.subTest(what=what):
+                claude.write_text("the old version's notes\n", encoding="utf-8")
+                logged = []
+                self.assertEqual(self.finish(root, logged, patch), "Updated ReelForge from 1.0.0 to 1.1.0.")
+                self.assertEqual(logged, [])
+                marker = update.take_marker(root)       # the restarted window says "Updated to 1.1.0"
+                self.assertEqual((marker["from"], marker["to"]), ("1.0.0", "1.1.0"))
+                self.assertIn("generated by ReelForge", claude.read_text(encoding="utf-8"))   # written all the same
+        self.assertEqual(len(held), 1, held)
+        real_unlink(held[0], missing_ok=True)
 
 
 @unittest.skipUnless(shutil.which("git"), "needs git")
