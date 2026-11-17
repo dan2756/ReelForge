@@ -80,7 +80,10 @@ If you still want it, it takes all of these:
   the post in its window, or **Yes, press Post for me** on the page ReelForge opens when you start it there. The
   extension listens for that click itself, and a click made by a script does not count. A post page that was only
   opened presses nothing;
-- ReelForge grants the press, once per post;
+- ReelForge grants the press, once per post. The extension asks once and never again, even when the answer gets
+  lost on the way: then it presses only if ReelForge's record of the post says the press was given, and otherwise
+  clicks nothing and says so in its note;
+- you have not pressed **Stop** in the popup while ReelForge was being asked. A Stop then wins: nothing is clicked;
 - you have not pressed the button yourself already. Your own press, even one made while the video is still going
   up or while ReelForge is being asked for the press, is the post's press: the extension then clicks nothing, and
   ReelForge would refuse another.

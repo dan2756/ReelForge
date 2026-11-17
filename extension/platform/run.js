@@ -139,12 +139,15 @@ void (async () => {
       sayPressed()
       return false
     }
-    const stay = async why => {
+    const stay = async (why, code) => {
       // A post that was stopped is over: nothing is ringed, and nobody is asked to press.
       if (rf.stopped) return true
       // Until now the note said Post was about to be pressed for them, and the button was left alone.
       if (button) rf.outline(button)
-      rf.say("Check it, then press Post", "ready", `ReelForge did not press for you: ${why}`)
+      // ReelForge has Post as pressed already, though nothing was clicked here (an answer that never came back):
+      // the person looks first, and is not simply asked to press.
+      if (code === "already_pressed") rf.say("Look at your profile first", "warn", why)
+      else rf.say("Check it, then press Post", "ready", `ReelForge did not press for you: ${why}`)
       // (A sentence of its own: ReelForge's page and the popup show it as it is.)
       await rf.report({ step: "ready", detail: `Not pressed: ${why}` })
     }
@@ -169,7 +172,7 @@ void (async () => {
       sayPressed()
       return false
     }
-    if (!grant?.ok) return stay(grant?.message || "the extension did not answer.")
+    if (!grant?.ok) return stay(grant?.message || "the extension did not answer.", grant?.error)
     // From here on nothing is ever pressed again, whatever happens.
     rf.phase = "watch"
     rf.unoutline()

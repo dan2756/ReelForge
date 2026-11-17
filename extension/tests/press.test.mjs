@@ -41,6 +41,33 @@ function holdPress(app, { decided }) {
   return held
 }
 
+// ReelForge takes the press request and decides it, and its answer is cut off on the way back: the browser gets the
+// start of it, then the connection goes dead. (Cut before anything of the answer went, the browser itself would send
+// the request again, on its own.) `batch`: from the press on, ReelForge can't be asked about the batch either.
+function loseAnswers(app, { batch = false } = {}) {
+  const handle = app.handle.bind(app)
+  const lose = { lost: 0, batch }
+  let pressed = false
+  app.handle = async (request, response) => {
+    if (request.method === "POST" && /\/press$/.test(request.url)) {
+      pressed = true
+      response.end = body => {
+        lose.lost++
+        response.write(String(body).slice(0, 3))
+        setTimeout(() => request.socket.destroy(), 50)
+        return response
+      }
+    } else if (pressed && lose.batch && request.method === "GET" && /^\/v1\/batch\//.test(request.url)) {
+      response.end = () => {
+        request.socket.destroy()
+        return response
+      }
+    }
+    return handle(request, response)
+  }
+  return lose
+}
+
 // The same switch set straight in the extension's storage, for the cases the options page refuses.
 async function forceOn(browser, app, platform) {
   equal(await browser.pair(app), "ok", "pairing")
@@ -161,7 +188,68 @@ export const tests = {
     equal(presses(app).map(entry => [entry.status, entry.body.install.length > 0]), [[409, true]], "press requests")
     const tab = await browser.tab("www.tiktok.com")
     equal(await tab.evaluate(() => fixture.clicks), 0, "presses the page saw")
-    ok((await note(tab)).more.includes("Post was already pressed for this one"), `the note (${(await note(tab)).more})`)
+    // Not "press Post" as if nothing had been pressed: ReelForge has it as pressed, so the person looks first.
+    const said = await note(tab)
+    equal([said.line, said.more], ["Look at your profile first", "ReelForge has Post as pressed for this one already, though nothing was clicked here. Look at your TikTok profile before you press it."], "the note")
+  },
+
+  async "ReelForge slow to answer the press (its database busy for six seconds) is waited for, and asked once"({ app, site, browser, video }) {
+    await switchOn(browser, app, "tiktok")
+    const held = holdPress(app, { decided: false })
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const job = made.jobs[0]
+    await until(() => `the press request (it is ${job.state} ${job.step})`, () => held.arrived, 30000)
+    await sleep(6000)
+    held.release()
+    await until(() => `posted (it is ${job.state})`, () => job.state === "posted", 20000)
+    equal(presses(app).map(entry => entry.status), [200], "press requests")
+    equal(await (await browser.tab("www.tiktok.com")).evaluate(() => fixture.clicks), 1, "presses the page saw")
+  },
+
+  async "a press answer that comes after the extension stopped waiting is not asked for again: ReelForge's own record says yes, and Post is pressed once"({ app, browser, video }) {
+    // ReelForge says yes at once, and its answer takes longer than the extension waits (20 seconds).
+    await switchOn(browser, app, "tiktok")
+    const held = holdPress(app, { decided: true })
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const job = made.jobs[0]
+    await until(() => `the press request (it is ${job.state} ${job.step})`, () => held.arrived, 30000)
+    await until(() => `posted (it is ${job.state})`, () => job.state === "posted", 40000)
+    held.release()
+    equal(presses(app).length, 1, "press requests")
+    equal(await (await browser.tab("www.tiktok.com")).evaluate(() => fixture.clicks), 1, "presses the page saw")
+  },
+
+  async "a press answer cut off on its way back is not asked for again: ReelForge's own record says yes, and Post is pressed once"({ app, browser, video }) {
+    await switchOn(browser, app, "tiktok")
+    const lose = loseAnswers(app)
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const job = made.jobs[0]
+    await until(() => `posted (it is ${job.state})`, () => job.state === "posted", 30000)
+    equal([lose.lost, presses(app).length], [1, 1], "press answers cut off, and press requests")
+    equal(await (await browser.tab("www.tiktok.com")).evaluate(() => fixture.clicks), 1, "presses the page saw")
+  },
+
+  async "a press answer that is lost while ReelForge can't be asked either: nothing is clicked, and the page says to check, then press Post"({ app, browser, video }) {
+    await switchOn(browser, app, "tiktok")
+    const lose = loseAnswers(app, { batch: true })
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("www.tiktok.com")
+    const job = made.jobs[0]
+    await until("the note to say why", async () => (await note(tab))?.line === "Check it, then press Post", 30000)
+    await sleep(1000)
+    equal((await note(tab)).more, "ReelForge did not press for you: its answer did not come back in time, so nothing was clicked.", "what the note says")
+    equal([presses(app).length, await tab.evaluate(() => fixture.clicks)], [1, 0], "press requests, and presses the page saw")
+    const kept = await browser.jobRecord(job.id)
+    equal([kept.state, kept.pressAnswer, job.state], ["ready", "lost", "posting"], "the job here, and in ReelForge (which said yes)")
+    // ReelForge answers again, and the person presses Post themselves: that press is the post.
+    lose.batch = false
+    await tab.locator("[data-e2e=post_video_button]").click()
+    await until(() => `posted (it is ${job.state})`, () => job.state === "posted", 20000)
+    equal([presses(app).length, await tab.evaluate(() => [fixture.clicks, fixture.trustedClicks])], [1, [1, 1]], "press requests, and presses the page saw")
   },
 
   async "the person's own press while the video is going up is the only press, whatever was asked for"({ app, site, browser, video }) {

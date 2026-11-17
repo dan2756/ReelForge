@@ -105,6 +105,13 @@ posted. When ReelForge had already said yes to the press, it has the post as "no
 and the popup say so, and that Post was not pressed: look at your profile, then answer on its row. Once the
 extension has pressed Post, there is no Stop any more.
 
+The extension asks ReelForge for the press once, and waits up to 20 seconds for the answer (ReelForge may wait up
+to 10 for its database first). It never asks a second time, even when the answer gets lost on the way: then it
+reads what ReelForge has for the post, and presses only when that says the press was given. When ReelForge can't
+be asked either, nothing is clicked, and the note says **Check it, then press Post**: its answer did not come back
+in time. If ReelForge has Post as pressed already while nothing was clicked in the tab, the note says **Look at
+your profile first** instead of asking you to press.
+
 ## What is automatic, and what never is
 
 Automatic, once you have started a post, with **Start** in ReelForge or **Post** in the popup:
@@ -298,7 +305,7 @@ Calls are JSON under `/v1`. `hello` and `pair/claim` need no token; the rest nee
 | `POST /v1/jobs/<id>/claim` | take a job. The first browser to ask has it |
 | `GET /v1/jobs/<id>/file` | the job's video, whole or a `Range` of it |
 | `POST /v1/jobs/<id>/event` | report a step, a failure or the post |
-| `POST /v1/jobs/<id>/press` | ask to press Post. Granted once, where it is allowed |
+| `POST /v1/jobs/<id>/press` | ask to press Post. Granted once, where it is allowed. The extension sends it once: an answer that never came back is read from the batch |
 | `GET /v1/selectors` | `extension/selectors.json`, the list of what to look for on each upload page |
 | `POST /v1/unpair` | disconnect this browser |
 | `GET /pair`, `GET /post/<batch>` | the two local pages (they need their key) |

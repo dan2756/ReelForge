@@ -48,7 +48,11 @@ async function request(port, path, { method = "GET", token, body, range, timeout
       cache: "no-store", credentials: "omit", redirect: "error", signal: AbortSignal.timeout(timeout),
     })
   } catch (error) {
-    throw new AppDown(String(error?.message || error))
+    // No answer. The request may have reached ReelForge all the same (its answer was cut off, or came too late),
+    // and `sent` says so to a caller that must never send it twice (the press).
+    const down = new AppDown(String(error?.message || error))
+    down.sent = true
+    throw down
   }
 }
 
