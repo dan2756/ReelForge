@@ -48,7 +48,12 @@ async function request(port, path, { method = "GET", token, body, range, timeout
       cache: "no-store", credentials: "omit", redirect: "error", signal: AbortSignal.timeout(timeout),
     })
   } catch (error) {
-    throw new AppDown(String(error?.message || error))
+    // No answer. The request may have reached ReelForge all the same (its answer was cut off, or came too late),
+    // and `sent` says so to a caller that must never send it twice (the press). (A refused connection looks the same
+    // here, which is why that caller has the port answer a hello first.)
+    const down = new AppDown(String(error?.message || error))
+    down.sent = true
+    throw down
   }
 }
 
@@ -156,15 +161,19 @@ export async function select(port) {
 }
 
 // The token for a call, once the port has proven itself. Otherwise AppDown: to this extension a port that
-// cannot prove it is ReelForge is a port with no ReelForge on it.
-async function tokenTo(app) {
+// cannot prove it is ReelForge is a port with no ReelForge on it. `fresh`: proven by a hello made now, whatever an
+// earlier one said a moment ago.
+async function tokenTo(app, fresh = false) {
+  if (fresh) proven.delete(app.port)
   if (!(await trusted(app.port, app.app_id))) throw new AppDown("nothing on this port proved to be the connected ReelForge")
   return tokenFor(app.app_id)
 }
 
-// A call that needs the token. Returns { ok, status, data }. Throws AppDown when nothing answers.
-export async function api(app, path, { method = "GET", body, timeout } = {}) {
-  const token = await tokenTo(app)
+// A call that needs the token. Returns { ok, status, data }. Throws AppDown when nothing answers. `fresh`: for a call
+// that is never made twice (the press). A failure to reach ReelForge is then found by the hello, before the call
+// goes: such an AppDown carries no `sent`, so the caller may look for ReelForge on another port, or say it is closed.
+export async function api(app, path, { method = "GET", body, timeout, fresh = false } = {}) {
+  const token = await tokenTo(app, fresh)
   const response = await request(app.port, path, { method, token, body, timeout })
   return { ok: response.ok, status: response.status, data: await json(response) }
 }

@@ -107,13 +107,18 @@ export const tests = {
       instagram: { heading: "which screen of the dialog is showing, to see that Next took", caption: "that the caption's screen is there" },
       x: { attached: "that the video is in before the text is typed (X is never pressed)" },
     }
-    const reads = text => new Set([...text.matchAll(/rf\.(?:probe|read)\("(\w+)"/g), ...text.matchAll(/rf\.sel\.hooks\.(\w+)/g)].map(match => match[1]))
-    // engine.js and run.js run on every platform. Each hook they read by name is kept on every one of them.
+    // The same, for engine.js and run.js, which run on every platform.
+    const engineSteps = { file_input: "where the video is handed to the page, before anything is pressed" }
+    const reads = text => new Set([...text.matchAll(/rf\.(?:find|probe|read)\("(\w+)"/g), ...text.matchAll(/rf\.sel\.hooks\.(\w+)/g)].map(match => match[1]))
+    // Each hook engine.js and run.js read by name is kept on every platform, or one of their steps.
     const engine = reads(source("platform/engine.js") + source("platform/run.js"))
     ok(engine.has("error") && engine.has("account"), `the engine's own reads are found (${[...engine]})`)
     for (const platform of Object.keys(PLATFORMS)) {
-      for (const hook of engine) ok(GUARD_HOOKS[platform].includes(hook), `${platform}: ${hook}, read by the engine, is kept`)
+      for (const hook of engine) ok(GUARD_HOOKS[platform].includes(hook) || engineSteps[hook], `${platform}: ${hook}, read by the engine, is kept`)
+      for (const hook of Object.keys(engineSteps)) ok(engine.has(hook) && !keptFor(platform).has(hook), `${platform}'s ${hook} is still a step the engine reads`)
     }
+    // The captcha is kept although no script reads it by name: the challenge sign names it, on every platform.
+    for (const platform of Object.keys(PLATFORMS)) ok(selectors.platforms[platform].challenge?.hooks?.includes("captcha"), `${platform}'s challenge sign names the captcha`)
     // rf.guard() runs on every look before the press: every sign it reads is one of the packed signs.
     const guard = /rf\.guard = \(\) => \{([\s\S]*?)\n  \}/.exec(source("platform/engine.js"))[1]
     ok(reads(guard).has("error"), "rf.guard reads the platform's error message")

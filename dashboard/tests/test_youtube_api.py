@@ -38,6 +38,7 @@ CLIENT_ID = "1234567890-abcdefghijklmnop.apps.googleusercontent.com"
 CLIENT_SECRET = "GOCSPX-client-secret-of-the-test"
 BYTES = bytes(range(256)) * 14  # 3,584 bytes: four pieces of a thousand
 SIZE = len(BYTES)
+SHA = hashlib.sha256(BYTES).hexdigest()  # the video as you said yes to it
 STORE_PATH = youtube_api.store_path  # the real one: every test here keeps its file in a scratch folder instead
 PIECE = youtube_api.CHUNK            # the real size of a piece (the tests send pieces of a thousand bytes)
 
@@ -118,7 +119,7 @@ class ApiTest(unittest.TestCase):
             self.video, title, "#whatif #physics", privacy, kw.pop("made_for_kids", False),
             started=lambda uri: self.events.append(("started", len(self.google.puts))),
             progress=lambda sent, size: self.events.append(("progress", sent)),
-            last=lambda: self.events.append(("last", len(self.google.puts))), **kw)
+            last=lambda: self.events.append(("last", len(self.google.puts))), **{"sha256": SHA, **kw})
 
     def ranges(self) -> list[str]:
         return [p["range"] for p in self.google.puts]
@@ -421,7 +422,7 @@ class OnlyInItsReelForge(ApiTest):
                   "youtube_api.store_path = lambda: Path(sys.argv[1])\n"
                   "youtube_api.TOKEN_URL, youtube_api.UPLOAD_URL = sys.argv[2] + '/token', sys.argv[2] + '/upload'\n"
                   "said = youtube_api.status()\n"
-                  "try:\n    youtube_api.upload(Path(sys.argv[3]), 't', 'd', 'public', False, started=print)\n"
+                  "try:\n    youtube_api.upload(Path(sys.argv[3]), 't', 'd', 'public', False, started=print, sha256=None)\n"
                   "except youtube_api.ApiError as e:\n    said['error'] = e.code\n"
                   "print(json.dumps(said))\n")
         ran = subprocess.run([sys.executable, "-c", script, str(self.store), self.google.base, str(self.video)],
@@ -781,11 +782,53 @@ class Uploading(ApiTest):
             self.video.write_bytes(BYTES[:1500])
 
         with self.assertRaises(ApiError) as caught:
-            youtube_api.upload(self.video, "t", "d", "private", False, started=lambda uri: None, progress=shorten)
+            youtube_api.upload(self.video, "t", "d", "private", False, started=lambda uri: None, progress=shorten,
+                               sha256=None)  # (without the check: the file getting shorter is seen by itself)
         self.assertEqual(caught.exception.code, "changed")
         self.assertEqual(self.google.videos, [])
         self.video.write_bytes(b"")
         self.refused("empty", self.upload)
+
+    def written_over(self, data: bytes) -> None:
+        """Another cut written over the video, its time kept (cp -p, rsync -t, a sync client)."""
+        st = self.video.stat()
+        self.video.write_bytes(data)
+        os.utime(self.video, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+    def test_a_new_cut_written_over_the_file_while_it_goes_up_is_never_finished(self):
+        # Each piece is read as the file is when it goes. A new cut written over it after the first piece, of the same
+        # size or longer, would go up spliced into the old one. The piece that ends the upload doesn't go.
+        for other in (BYTES[::-1], BYTES[::-1] + b"more of the new cut"):
+            with self.subTest(size=len(other)):
+                self.video.write_bytes(BYTES)
+                self.google.puts.clear()
+                self.google.on_put = lambda n: n == 0 and self.written_over(other)  # once the first piece has gone
+                e = self.refused("changed", self.upload)
+                self.assertEqual(e.message, "ep01.mp4 changed while it was being uploaded.")
+                self.assertEqual(self.ranges(), [f"bytes 0-999/{SIZE}", f"bytes 1000-1999/{SIZE}",
+                                                 f"bytes 2000-2999/{SIZE}"])
+                self.assertEqual(self.google.videos, [])
+                self.assertNotIn("last", [e[0] for e in self.events])  # the ledger never heard of a last piece
+
+    def test_a_piece_sent_again_must_be_the_bytes_that_went_the_first_time(self):
+        # The second piece is lost on the way and sent again once YouTube says it has only the first. Meanwhile the
+        # file was written over in just that piece's part: everything else adds up to the video, so only the piece
+        # sent again shows it.
+        other = bytearray(BYTES)
+        other[1000:2000] = bytes(1000)
+        self.google.script = [None, "drop"]
+        self.google.on_put = lambda n: n == 2 and self.written_over(bytes(other))
+        e = self.refused("changed", self.upload)
+        self.assertEqual(self.ranges(), [f"bytes 0-999/{SIZE}", f"bytes 1000-1999/{SIZE}", f"bytes */{SIZE}"])
+        self.assertEqual(self.google.videos, [])
+        self.assertIn("changed while it was being uploaded", e.message)
+
+    def test_a_piece_sent_again_unchanged_goes_and_the_video_is_whole(self):
+        self.google.script = [None, "503-kept", None, None, "drop"]  # one kept although its answer was an error,
+        made = self.upload()                                           # and the last one sent twice
+        self.assertEqual((made["id"], bytes(self.one_video()["data"])), ("vid00000001", BYTES))
+        self.assertEqual(self.ranges()[-3:], [f"bytes 3000-{SIZE - 1}/{SIZE}", f"bytes */{SIZE}",
+                                              f"bytes 3000-{SIZE - 1}/{SIZE}"])
 
     def test_a_read_that_gives_less_than_was_asked_for_is_not_a_changed_file(self):
         class Short(io.FileIO):
@@ -802,13 +845,14 @@ class Uploading(ApiTest):
         uris = []
         self.google.script, self.google.then = [None, None, None, "lost"], "drop"
         with self.assertRaises(Unknown):
-            youtube_api.upload(self.video, "t", "d", "private", False, started=uris.append)
+            youtube_api.upload(self.video, "t", "d", "private", False, started=uris.append, sha256=SHA)
         self.assertIn("couldn't be reached", self.refused("offline", youtube_api.ask, uris[0], SIZE).message)
         self.google.then = None
         self.assertEqual(youtube_api.ask(uris[0], SIZE)["id"], "vid00000001")  # it had finished
         self.google.script = [None, "drop"]
         self.google.then = "drop"
-        self.refused("offline", youtube_api.upload, self.video, "t", "d", "private", False, started=uris.append)
+        self.refused("offline", youtube_api.upload, self.video, "t", "d", "private", False, started=uris.append,
+                     sha256=SHA)
         self.google.then = None
         self.assertIsNone(youtube_api.ask(uris[1], SIZE))  # it never got the whole file
         before = len(self.google.puts)

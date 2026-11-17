@@ -5,7 +5,7 @@
 // worker restart, gone when the browser closes), and the app's ledger is the lasting copy.
 import * as app from "./app.js"
 import { selectorsFor, refresh } from "./selectors.js"
-import { PLATFORMS, PRESS_PLATFORMS, rank, isFinal, isLive, platformName } from "../shared/consts.js"
+import { PLATFORMS, PRESS_PLATFORMS, rank, isFinal, isLive, platformName, advice } from "../shared/consts.js"
 
 const session = chrome.storage.session
 const local = chrome.storage.local
@@ -39,6 +39,12 @@ export async function allJobs() {
 
 async function jobOfTab(tabId) {
   return (await allJobs()).find(job => job.tabId === tabId && isLive(job)) || null
+}
+
+// The job a tab was opened for, live or over (each job has a tab of its own). Null when it is no longer kept here.
+async function jobOfTabEver(tabId) {
+  const all = (await allJobs()).filter(job => job.tabId === tabId)
+  return all.find(isLive) || all.sort((a, b) => b.created - a.created)[0] || null
 }
 
 const save = job => session.set({ [key(job.id)]: job })
@@ -80,7 +86,7 @@ function ledger(change) {
 function remember(job) {
   return ledger(all => {
     if (isLive(job)) {
-      all[job.id] = { port: job.port, app_id: job.app_id, profile_key: job.profile_key, platform: job.platform, state: job.state, step: job.step, pressed: job.pressedByPerson === true, at: Date.now() }
+      all[job.id] = { port: job.port, app_id: job.app_id, profile_key: job.profile_key, platform: job.platform, state: job.state, step: job.step, pressed: job.pressedByPerson === true, asked: pressOpen(job), at: Date.now() }
     } else {
       delete all[job.id]
     }
@@ -96,9 +102,13 @@ export async function orphans() {
     if (await getJob(id)) continue
     const p = platformName(entry.platform)
     const pressed = entry.state === "posting" || entry.pressed
+    // Closed while ReelForge was being asked for the press: it may have said yes, which makes this "not sure"
+    // there, so the words don't say nothing was posted. (Nothing was pressed: the tab was told no answer yet.)
+    const why = entry.asked ? `The browser was closed, or the extension reloaded, while ReelForge was being asked to press Post on ${p}. Post was not pressed.`
+      : `The browser was closed, or the extension reloaded, ${entry.state === "ready" ? "before Post was pressed" : "before the post was ready"}. Nothing was posted.`
     const body = pressed
       ? { install, state: "unknown", error_code: "unknown_outcome", error_message: `The browser was closed after Post was pressed on ${p}, before any confirmation. Check your profile before you post again.` }
-      : { install, state: "failed", error_code: "tab_closed", error_message: `The browser was closed, or the extension reloaded, ${entry.state === "ready" ? "before Post was pressed" : "before the post was ready"}. Nothing was posted.` }
+      : { install, state: "failed", error_code: "tab_closed", error_message: why }
     // The step the job had reached when this was last written down (it is kept at each change of state).
     if (entry.step) body.step = entry.step
     try {
@@ -203,15 +213,22 @@ const wasPressed = job => job.state === "posting" || job.pressedByPerson === tru
 // The job's tab is showing something the script cannot run on.
 function leftPage(job, code, message) {
   if (wasPressed(job)) return unsure(job)
+  if (pressOpen(job)) return finish(job.id, "failed", "tab_closed", `The upload page was left${askingWords(job)}`)
   if (job.state === "ready") return finish(job.id, "failed", "tab_closed", "The upload page was left before Post was pressed. Nothing was posted.")
   return finish(job.id, "failed", code, message)
 }
 
 function tabGone(job) {
   if (wasPressed(job)) return unsure(job)
+  if (pressOpen(job)) return finish(job.id, "failed", "tab_closed", `The tab was closed${askingWords(job)}`)
   const when = job.state === "ready" ? "before Post was pressed" : "before the post was ready"
   return finish(job.id, "failed", "tab_closed", `The tab was closed ${when}. Nothing was posted.`)
 }
+
+// The end of the words for a job whose page went while ReelForge was being asked for the press. ReelForge may have
+// said yes, and then it takes the ending as "not sure" and keeps these words on its row: so they say only what is
+// true either way, that Post was not pressed.
+const askingWords = job => ` while ReelForge was being asked to press Post on ${platformName(job.platform)}. Post was not pressed.`
 
 // Post was pressed and the page never said it worked. This is never tried again: only the person can tell.
 const unsureWords = job => `Post was pressed on ${platformName(job.platform)} and no confirmation was seen. Check your profile before you post again.`
@@ -233,14 +250,16 @@ async function stopTab(job, message, posted = false) {
 // ---- reporting ---------------------------------------------------------------------------------------------
 
 // Reaches the job's ReelForge window. It may have been closed and opened again on another port since the job
-// started, so a failed call looks for it once more. Changes job.port in place; the caller saves.
-async function withApp(job, call) {
+// started, so a failed call looks for it once more. Changes job.port in place; the caller saves. `once`: a call
+// that went out and got no answer is not made again (it may have been done), only one that never left, or that
+// a port turned away unread (401, 404, 421).
+async function withApp(job, call, { once = false } = {}) {
   try {
     const res = await call({ port: job.port, app_id: job.app_id })
     // 401, 404 or 421 from that port: it may be another program there now, or a ReelForge that forgot us.
     if (![401, 404, 421].includes(res.status)) return res
   } catch (error) {
-    if (!(error instanceof app.AppDown)) throw error
+    if (!(error instanceof app.AppDown) || (once && error.sent)) throw error
   }
   const again = await app.find(job.app_id, job.profile_key, true)
   if (!again || !again.paired) throw new app.AppDown("ReelForge is not answering")
@@ -248,67 +267,103 @@ async function withApp(job, call) {
   return call(again)
 }
 
-// Sends what is waiting, oldest first. What cannot be sent stays in the outbox for the next tick.
-async function flush(job) {
+// Sends what is waiting, oldest first. What cannot be sent stays in the outbox for the next tick. Returns the
+// app's answer to `mine` (one of the reports waiting) when that one was sent, else null.
+async function flush(job, mine = null) {
   const install = await app.install()
+  let heard = null
   while (job.outbox.length) {
+    const wire = job.outbox[0]
     let res
     try {
-      res = await withApp(job, found => app.api(found, `/v1/jobs/${job.id}/event`, { method: "POST", body: { install, ...job.outbox[0] } }))
+      res = await withApp(job, found => app.api(found, `/v1/jobs/${job.id}/event`, { method: "POST", body: { install, ...wire } }))
     } catch {
       job.offline = true
-      return
+      return heard
     }
     job.offline = false
     // ReelForge is there but could not take it just now (its database was busy, or something went wrong
     // inside): the report waits here for the next tick, like one that found nobody.
-    if (res.status >= 500) return
+    if (res.status >= 500) return heard
     // A refusal is not sent again: the app sees this job differently (cancelled in the window, say), and the
     // next tick takes its word for it.
+    if (wire === mine) heard = res
     job.outbox.shift()
   }
+  return heard
 }
+
+// The tab asked ReelForge for the press, and no answer here says it was refused: ReelForge may have said yes.
+const pressOpen = job => job.pressAsked === true && job.pressAnswer !== "refused" && job.state !== "posting"
 
 // One step forward for a job: kept here first, then sent to the app. A report that would move a job backwards
 // or out of a finished state is dropped, as the app would drop it.
 export function report(id, event) {
-  return locked(id, async () => {
-    const job = await getJob(id)
-    if (!job || isFinal(job.state)) return { ok: false, stop: true }
-    // A job is "claimed" only for the moment before its tab opens; the app hears of it as "opening" from then on.
-    let state = event.state || (job.state === "claimed" ? "opening" : job.state)
-    if (!isFinal(state) && rank(state) < rank(job.state)) return { ok: true }
-    // Post was pressed, so whatever stopped the job afterwards, nobody here can say that nothing was posted.
-    // It ends as "not sure", here and in ReelForge alike: never as a job that is free to be tried again.
-    if (wasPressed(job) && (state === "failed" || state === "cancelled")) {
-      state = "unknown"
-      event = { ...event, error_code: "unknown_outcome", error_message: unsureWords(job) }
-    }
-    const wire = { state }
-    for (const field of ["step", "progress", "detail", "error_code", "error_message", "post_id", "url", "strategy"]) {
-      if (event[field] !== undefined && event[field] !== null) wire[field] = event[field]
-    }
-    const next = { ...job, ...wire, touched: Date.now(), outbox: [...job.outbox] }
-    if (state !== job.state && event.progress === undefined) next.progress = null
-    if (state === "ready" && job.state !== "ready") next.readyAt = Date.now()
-    if (isFinal(state)) next.done = Date.now()
-    // Once the app has granted the press the job is "posting" there, a state only the app sets: steps on the
-    // way to the ending stay here, and only the ending is sent.
-    if (!(state === "posting")) {
-      // A newer report of the same step replaces the one still waiting (upload percentages).
-      const last = next.outbox[next.outbox.length - 1]
-      if (last && last.state === wire.state && last.step === wire.step && !isFinal(wire.state)) next.outbox.pop()
-      next.outbox.push(wire)
-    }
-    await save(next)
-    if (next.state !== job.state) await remember(next)
-    await flush(next)
-    await save(next)
-    return { ok: true }
-  }).then(async result => {
+  return locked(id, () => record(id, event)).then(async result => {
     if (isFinal(event.state || "")) await settle()
-    return result
+    return result.ok ? { ok: true } : { ok: false, stop: true }
   })
+}
+
+// The words for a job that ended while ReelForge may have said yes to the press, with nothing pressed here:
+// `granted` when ReelForge answered the ending with "not sure" (it had said yes), `unheard` when it could not say.
+function pressWords(job) {
+  const p = platformName(job.platform)
+  return {
+    granted: `ReelForge had said yes to pressing Post on ${p} before this ended, and Post was not pressed here.`,
+    unheard: `This ended while ReelForge was being asked to press Post on ${p}, and Post was not pressed here. ReelForge may have said yes to it meanwhile.`,
+  }
+}
+
+// report(), inside the job's lock. Returns { ok, job, heard }: the job as it is kept now, and the app's answer to
+// this report (null when it could not be sent yet). `words`: pressWords, for a caller that says it its own way.
+async function record(id, event, words = null) {
+  const job = await getJob(id)
+  if (!job || isFinal(job.state)) return { ok: false }
+  // A job is "claimed" only for the moment before its tab opens; the app hears of it as "opening" from then on.
+  let state = event.state || (job.state === "claimed" ? "opening" : job.state)
+  if (!isFinal(state) && rank(state) < rank(job.state)) return { ok: true, job }
+  // Post was pressed, so whatever stopped the job afterwards, nobody here can say that nothing was posted.
+  // It ends as "not sure", here and in ReelForge alike: never as a job that is free to be tried again.
+  if (wasPressed(job) && (state === "failed" || state === "cancelled")) {
+    state = "unknown"
+    event = { ...event, error_code: "unknown_outcome", error_message: unsureWords(job) }
+  }
+  const wire = { state }
+  for (const field of ["step", "progress", "detail", "error_code", "error_message", "post_id", "url", "strategy"]) {
+    if (event[field] !== undefined && event[field] !== null) wire[field] = event[field]
+  }
+  const next = { ...job, ...wire, touched: Date.now(), outbox: [...job.outbox] }
+  if (state !== job.state && event.progress === undefined) next.progress = null
+  if (state === "ready" && job.state !== "ready") next.readyAt = Date.now()
+  if (isFinal(state)) next.done = Date.now()
+  // Once the app has granted the press the job is "posting" there, a state only the app sets: steps on the
+  // way to the ending stay here, and only the ending is sent.
+  if (!(state === "posting")) {
+    // A newer report of the same step replaces the one still waiting (upload percentages).
+    const last = next.outbox[next.outbox.length - 1]
+    if (last && last.state === wire.state && last.step === wire.step && !isFinal(wire.state)) next.outbox.pop()
+    next.outbox.push(wire)
+  }
+  await save(next)
+  if (next.state !== job.state) await remember(next)
+  const heard = await flush(next, wire)
+  // The job ends while the tab's request for the press may have been granted. Nothing is pressed here: tabPress
+  // answers the tab no once the job is over, under this same lock. But "nothing was posted" is not this side's
+  // to say then. ReelForge, which had said yes, takes the ending as "not sure", and its word stands here too
+  // (its row says why); while it has not answered, the job is "not sure" here until it does (sync).
+  // (ReelForge answers with the job as it has it now. A plain yes is taken as the ending it was told.)
+  const answered = heard?.status === 200 ? heard.data?.state || state : null
+  if ((state === "failed" || state === "cancelled") && pressOpen(job) && (answered === "unknown" || !heard)) {
+    const why = (words || pressWords(job))[heard ? "granted" : "unheard"]
+    Object.assign(next, { state: "unknown", error_code: "unknown_outcome", error_message: why })
+    if (heard) {
+      next.outbox.push({ state: "unknown", error_code: "unknown_outcome", error_message: why })
+      await flush(next)
+    }
+  }
+  await save(next)
+  return { ok: true, job: next, heard }
 }
 
 // An ending the worker itself decides (a closed tab, a page that went quiet). Every failure carries its step:
@@ -439,7 +494,16 @@ async function pressSwitch(platform) {
 export async function tabHello(tabId, url) {
   const held = await jobOfTab(tabId)
   if (!held || !allowedPage(held.platform, url)) return { ok: false }
-  const job = await patchLive(tabId, { touched: Date.now() })
+  const job = await locked(held.id, async () => {
+    const fresh = await getJob(held.id)
+    if (!fresh || !isLive(fresh)) return null
+    const next = { ...fresh, touched: Date.now() }
+    // A page says hello once, when it starts. One that does while the press is being asked for is a new page (the
+    // old one was reloaded, or left): the page that asked is gone, and nothing will click whatever ReelForge says.
+    if (pressOpen(fresh) && !fresh.pressAnswer) next.pressPageGone = true
+    await save(next)
+    return next
+  })
   if (!job) return { ok: false }
   return {
     ok: true,
@@ -497,34 +561,137 @@ export async function tabEvent(tabId, message) {
   })
 }
 
+// How long the press is waited for. ReelForge may wait up to 10 seconds for its database before it answers, and a
+// request that ran out of time is never sent again: it may have been granted.
+const PRESS_WAIT = 20000
+
+// The press requests this worker is waiting on, by job: a tab that asks again meanwhile gets the same answer.
+const pressing = new Map()
+
 // The exactly-once press. The app's ledger decides; this side makes sure it is asked at most once per job,
 // even if the worker is restarted between asking and hearing back.
 export async function tabPress(tabId) {
-  const job = await jobOfTab(tabId)
-  const no = (error, message) => ({ ok: false, error, message })
-  // The person pressed the platform's button themselves, maybe while the video was still going up, and the page
-  // may not show it yet. A second press would post the video twice: the app is not even asked.
-  if (job?.pressedByPerson) return no("already_pressed", "you pressed it yourself already.")
-  if (!job || job.state !== "ready") return no("not_ready", "This post is not ready to be pressed.")
-  if (!job.press || !(await pressSwitch(job.platform))) return no("press_not_allowed", "Press Post for me is off for this post.")
-  if (!(await pressSaid(job.batch))) return no("press_not_allowed", "nobody said yes to it for this post in this browser.")
+  const no = (error, message, more = {}) => ({ ok: false, error, message, ...more })
+  const stopped = () => no("stopped", "This post was stopped.", { stopped: true })
+  // Only a job's own page asks, after its hello said whose it is. A job that is over by now, or no longer kept here,
+  // was ended meanwhile: stopped in the popup (maybe while this page's "ready" was on its way, the stop then waiting
+  // on ReelForge's answer before the page hears of it), ended in ReelForge, or by the worker. Nothing is clicked for
+  // it, and its page does not ask the person to press Post: that post would go up with ReelForge calling it over.
+  const job = await jobOfTabEver(tabId)
+  if (!job || !isLive(job)) return stopped()
+  // Everything is looked at under the job's lock, after any change on its way: a Stop that comes first ends the job.
   const first = await locked(job.id, async () => {
     const fresh = await getJob(job.id)
-    if (!fresh || fresh.pressAsked) return false
-    await save({ ...fresh, pressAsked: true })
-    return true
+    if (!fresh || !isLive(fresh)) return "over"
+    // The person pressed the platform's button themselves, maybe while the video was still going up, and the page
+    // may not show it yet. A second press would post the video twice: the app is not even asked.
+    if (fresh.pressedByPerson) return "theirs"
+    if (fresh.state !== "ready") return "not_ready"
+    if (!fresh.press || !(await pressSwitch(fresh.platform))) return "off"
+    if (!(await pressSaid(fresh.batch))) return "unsaid"
+    // Asked once: what is kept here says so before the request goes.
+    if (fresh.pressAsked) return fresh.pressAnswer || "asked"
+    const asked = { ...fresh, pressAsked: true }
+    await save(asked)
+    await remember(asked)
+    return "first"
   })
-  if (!first) return no("already_pressed", "Post was already pressed for this job.")
-  let res
+  if (first === "over") return stopped()
+  if (first === "theirs") return no("already_pressed", "you pressed it yourself already.")
+  if (first === "not_ready") return no("not_ready", "This post is not ready to be pressed.")
+  if (first === "off") return no("press_not_allowed", "Press Post for me is off for this post.")
+  if (first === "unsaid") return no("press_not_allowed", "nobody said yes to it for this post in this browser.")
+  if (first === "refused") return no("press_not_allowed", "ReelForge did not allow the press.")
+  if (first === "lost") return no("press_lost", LOST)
+  if (first === "asked" && pressing.has(job.id)) return pressing.get(job.id)
+  // "asked", and nobody here is waiting for it: this worker was stopped after it asked, and the answer is lost.
+  const work = askPress(job, first === "asked")
+  pressing.set(job.id, work)
   try {
-    res = await withApp(job, async found => app.api(found, `/v1/jobs/${job.id}/press`, { method: "POST", body: { install: await app.install() } }))
-  } catch {
-    return no("app_unreachable", "ReelForge is not running, so it could not allow the press.")
+    return await work
+  } finally {
+    pressing.delete(job.id)
   }
-  if (!res.ok || res.data?.ok !== true) return no(String(res.data?.error || "press_not_allowed"), String(res.data?.message || "ReelForge did not allow the press."))
-  const now = await patch(job.id, { state: "posting", step: "press", progress: null, pressedAt: Date.now(), touched: Date.now(), port: job.port })
-  if (now) await remember(now)
-  return { ok: true }
+}
+
+// (ReelForge was asked, and can't be reached now: its answer may be late, cut off, or it may have been closed.)
+const LOST = "its answer did not come back, and it is not answering now (it may have been closed), so nothing was clicked."
+
+async function askPress(job, asked) {
+  const no = (error, message, more = {}) => ({ ok: false, error, message, ...more })
+  let res = null
+  let lost = asked
+  if (!asked) {
+    try {
+      // The port says hello first, so a ReelForge that was closed, or opened again on another port, is found out
+      // before the request goes: it is then asked on its new port, or reported as not running.
+      res = await withApp(job, async found => app.api(found, `/v1/jobs/${job.id}/press`, { method: "POST", body: { install: await app.install() }, timeout: PRESS_WAIT, fresh: true }), { once: true })
+    } catch (error) {
+      // Nothing answered. Sent, it may have been granted; never sent (nothing proved to be ReelForge), it was not.
+      lost = error?.sent === true
+    }
+  }
+  // A yes whose words were cut off on the way is an answer that never arrived, not a no.
+  if (res?.status === 200 && typeof res.data?.ok !== "boolean") {
+    res = null
+    lost = true
+  }
+  let granted = res?.ok === true && res.data?.ok === true
+  // ReelForge's own record of the post, read when its answer is anything but a yes.
+  const theirs = lost || (res && !granted) ? await theirJob(job) : null
+  if (lost) {
+    // The request is never sent again. ReelForge's own record of the post says whether it said yes: "posting" is
+    // the press it granted, and nothing else puts a post there.
+    if (theirs) {
+      lost = false
+      granted = theirs.state === "posting"
+      if (!granted) res = { ok: false, data: { error: "press_not_allowed", message: "ReelForge's answer did not come back, and it has not allowed the press." } }
+    }
+  }
+  // The answer is taken under the job's lock. A Stop from the popup while it was on its way has ended the job by
+  // now (cancel() holds the same lock), and it wins whatever ReelForge said: the tab is told no, and clicks
+  // nothing. A job that is over is never made "posting" again.
+  return locked(job.id, async () => {
+    const fresh = await getJob(job.id)
+    const answer = granted ? "granted" : lost ? "lost" : "refused"
+    if (!fresh || fresh.state !== "ready" || fresh.pressAnswer) {
+      if (fresh && !fresh.pressAnswer) await save({ ...fresh, pressAnswer: answer })
+      return no("stopped", "This post was stopped.", { stopped: true })
+    }
+    if (granted) {
+      const now = { ...fresh, state: "posting", step: "press", progress: null, pressedAt: Date.now(), touched: Date.now(), port: job.port, pressAnswer: answer }
+      await save(now)
+      await remember(now)
+      if (!fresh.pressPageGone) return { ok: true }
+      // The page that asked is gone (reloaded, or left) and nothing will click for this yes: the post ends now as
+      // "not sure", the one way out ReelForge has for a press it granted, with words that say Post was not pressed.
+      // The page there now hears of it, instead of waiting for a sign that can't come.
+      const why = `ReelForge said yes to pressing Post on ${platformName(job.platform)} after its upload page was left, so Post was not pressed.`
+      const { job: ended } = await record(job.id, { state: "unknown", error_code: "unknown_outcome", error_message: why })
+      await stopTab(ended || now, `${why} ${advice("unknown_outcome", job.platform)}`)
+      await settle()
+      return no("stopped", "This post was stopped.", { stopped: true })
+    }
+    // Ended in ReelForge meanwhile (cancelled in its window, say), which is why it said no. Its ending is taken here
+    // now, not at the next look up to half a minute away, and the page hears of it before this answer: it must not
+    // ask for a press, or the post would go up with ReelForge calling it over, free to be posted again.
+    if (theirs && isFinal(theirs.state)) {
+      Object.assign(fresh, { port: job.port, pressAnswer: answer })
+      await adopt(fresh, theirs)
+      return no("stopped", "This post was ended in ReelForge.", { stopped: true })
+    }
+    const now = { ...fresh, port: job.port, pressAnswer: answer }
+    await save(now)
+    await remember(now)
+    if (lost) return no("press_lost", LOST)
+    if (!res) return no("app_unreachable", "ReelForge is not running, so it could not allow the press.")
+    // ReelForge has Post as pressed for this one, and nothing was clicked here (the person's own press is seen
+    // above): a request this side never heard back from. The person is not asked for a press as if none was made.
+    if (res.data?.error === "already_pressed" && !fresh.pressedByPerson) {
+      return no("already_pressed", `ReelForge has Post as pressed for this one already, though nothing was clicked here. Look at your ${platformName(job.platform)} profile before you press it.`)
+    }
+    return no(String(res.data?.error || "press_not_allowed"), String(res.data?.message || "ReelForge did not allow the press."))
+  })
 }
 
 function base64(bytes) {
@@ -663,28 +830,37 @@ async function sync(job) {
     const fresh = await getJob(job.id)
     if (!fresh || (isFinal(fresh.state) && fresh.state !== "unknown")) return
     await flush(fresh)
-    let theirs = null
-    try {
-      const res = await withApp(fresh, found => app.api(found, `/v1/batch/${fresh.batch}`))
-      theirs = res.ok ? res.data?.jobs?.find(other => other.id === fresh.id) : null
-    } catch {
-      fresh.offline = true
-    }
-    if (theirs && isFinal(theirs.state) && theirs.state !== fresh.state) {
-      Object.assign(fresh, {
-        state: theirs.state, detail: theirs.detail ?? fresh.detail, error_code: theirs.error_code ?? null,
-        error_message: theirs.error_message ?? null, post_id: theirs.post_id ?? fresh.post_id, url: theirs.url ?? fresh.url,
-        done: Date.now(), outbox: [],
-      })
-      await save(fresh)
-      await remember(fresh)
-      // Ended there can also mean it is up: the person said so in ReelForge, or a stats read found the post.
-      const up = theirs.state === "posted"
-      await stopTab(fresh, up ? "ReelForge has this post as posted." : "This post was ended in ReelForge.", up)
-      return
-    }
+    const theirs = await theirJob(fresh)
+    if (theirs && isFinal(theirs.state) && theirs.state !== fresh.state) return adopt(fresh, theirs)
     await save(fresh)
   })
+}
+
+// The job as the app has it now, or null when it can't be asked. Changes job.port and job.offline in place.
+async function theirJob(job) {
+  try {
+    const res = await withApp(job, found => app.api(found, `/v1/batch/${job.batch}`))
+    return (res.ok ? res.data?.jobs?.find(other => other.id === job.id) : null) || null
+  } catch {
+    job.offline = true
+    return null
+  }
+}
+
+// Takes the app's ending for a job, and tells its tab. Returns the words the tab was given.
+async function adopt(fresh, theirs) {
+  Object.assign(fresh, {
+    state: theirs.state, detail: theirs.detail ?? fresh.detail, error_code: theirs.error_code ?? null,
+    error_message: theirs.error_message ?? null, post_id: theirs.post_id ?? fresh.post_id, url: theirs.url ?? fresh.url,
+    done: Date.now(), outbox: [],
+  })
+  await save(fresh)
+  await remember(fresh)
+  // Ended there can also mean it is up: the person said so in ReelForge, or a stats read found the post.
+  const up = theirs.state === "posted"
+  const words = up ? "ReelForge has this post as posted." : "This post was ended in ReelForge."
+  await stopTab(fresh, words, up)
+  return words
 }
 
 // ---- what the popup asks for -------------------------------------------------------------------------------
@@ -718,14 +894,61 @@ export async function focus(id) {
   }
 }
 
-// Stop a job from the popup. Not offered once Post has been pressed, for the person or by the person: that one
-// has to be looked at, and "nothing was posted" would no longer be true.
+// Stop a job from the popup. Not once Post has been pressed, for the person or by the person: that one has to be
+// looked at, and "nothing was posted" would no longer be true.
+//
+// A Stop while the tab is asking ReelForge for the press wins: tabPress answers the tab after this, under the same
+// lock, and a job that is over gets no. What the person is told goes by ReelForge's answer to the stop, because
+// ReelForge may have said yes to the press already: then it has the post as "not sure", and so does this side.
 export async function cancel(id) {
+  const done = await locked(id, async () => {
+    const said = await stopping(id)
+    // The tab hears of it before this lock lets tabPress answer it, so its note says why it was stopped.
+    if (said.job) await stopTab(said.job, said.words)
+    return said
+  })
+  await settle()
+  return done.ok ? { ok: true } : { ok: false, ...(done.message ? { message: done.message } : {}) }
+}
+
+// The stop itself, inside the job's lock: what is kept, what ReelForge is told, and the words for the tab.
+async function stopping(id) {
   const job = await getJob(id)
-  if (!job || isFinal(job.state) || wasPressed(job)) return { ok: false }
-  await report(id, { state: "cancelled", detail: "stopped in the extension" })
-  await stopTab(job, "You stopped this post. Nothing was posted by ReelForge.")
-  return { ok: true }
+  if (!job || isFinal(job.state)) return { ok: false }
+  if (wasPressed(job)) return { ok: false, message: "Post was already pressed for this one, so it can't be stopped. Look at its tab." }
+  // The job is over here from now on, whatever ReelForge answers. Its page hears so at once, not after ReelForge's
+  // answer, which can take seconds: until then it would go on saying Post is about to be pressed, or ringing it.
+  await stopTab(job, "You stopped this post.")
+  const p = platformName(job.platform)
+  const check = advice("unknown_outcome", job.platform)
+  const words = {
+    granted: `You stopped this just as ReelForge said yes to pressing Post on ${p}, and Post was not pressed.`,
+    unheard: `You stopped this while ReelForge was being asked to press Post on ${p}, and Post was not pressed. ReelForge may have said yes to it meanwhile.`,
+  }
+  const asking = pressOpen(job)
+  const { job: now, heard } = await record(id, { state: "cancelled", detail: "stopped in the extension" }, words)
+  if (now.state === "unknown") return { ok: true, job: now, words: `${now.error_message} ${check}` }
+  // ReelForge did not take the stop as a plain stop: it has the post otherwise. When it had said yes to the press
+  // (the job is "posting" there), the post is "not sure" on both sides. When it ended the post itself, its
+  // ending stands.
+  const theirs = heard?.status === 200 ? { ...heard.data, state: heard.data?.state || "cancelled" } : heard ? await theirJob(now) : null
+  if (theirs && theirs.state !== "cancelled") {
+    if (theirs.state === "posting" && asking) {
+      Object.assign(now, { state: "unknown", error_code: "unknown_outcome", error_message: words.granted })
+      now.outbox.push({ state: "unknown", error_code: "unknown_outcome", error_message: words.granted })
+      await flush(now)
+      await save(now)
+      return { ok: true, job: now, words: `${words.granted} ${check}` }
+    }
+    if (isFinal(theirs.state)) return { ok: true, told: await adopt(now, theirs) }
+  }
+  // Refused, and ReelForge could not be asked how it has the post: a press it may have allowed stays possible.
+  if (asking && theirs?.state !== "cancelled") {
+    Object.assign(now, { state: "unknown", error_code: "unknown_outcome", error_message: words.unheard })
+    await save(now)
+    return { ok: true, job: now, words: `${words.unheard} ${check}` }
+  }
+  return { ok: true, job: now, words: "You stopped this post. Nothing was posted by ReelForge." }
 }
 
 export async function dismiss(id) {

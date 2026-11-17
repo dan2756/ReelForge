@@ -36,6 +36,12 @@ void (async () => {
 
   const handle = text => String(text || "").trim().replace(/^@/, "").toLowerCase()
 
+  // Where the page does not show which account it is on, nothing was checked: the person has to look. Every note
+  // that leads up to Post says so, whoever is to press it.
+  const unchecked = () => (!rf.sel.hooks.account && job.handle
+    ? ` ReelForge has ${job.handle} for this channel, and could not check the account here: look at which one this tab is on.`
+    : "")
+
   // The post's address and id, where the page shows them. YouTube shows the link before the video is published
   // and takes it away with the dialog, so what was seen once is kept.
   const known = {}
@@ -139,15 +145,31 @@ void (async () => {
       sayPressed()
       return false
     }
-    const stay = async why => {
+    const stay = async (why, code) => {
+      // A post that was stopped is over: nothing is ringed, and nobody is asked to press.
+      if (rf.stopped) return true
       // Until now the note said Post was about to be pressed for them, and the button was left alone.
       if (button) rf.outline(button)
-      rf.say("Check it, then press Post", "ready", `ReelForge did not press for you: ${why}`)
+      // ReelForge has Post as pressed already, though nothing was clicked here (an answer that never came back):
+      // the person looks first, and is not simply asked to press.
+      if (code === "already_pressed") rf.say("Look at your profile first", "warn", why + unchecked())
+      else rf.say("Check it, then press Post", "ready", `ReelForge did not press for you: ${why}${unchecked()}`)
       // (A sentence of its own: ReelForge's page and the popup show it as it is.)
       await rf.report({ step: "ready", detail: `Not pressed: ${why}` })
     }
     if (cannot) return stay(cannot)
     const grant = await rf.send({ t: "job.press" })
+    // Stopped while ReelForge was being asked: with the popup's Stop, or ended in ReelForge. Whatever the answer
+    // says, nothing is clicked and nobody is asked to press. The worker answers no to a stopped job, and its
+    // word on why comes with the stop (if the stop has not reached this page yet, the note says Stopped meanwhile).
+    if (rf.stopped || grant?.stopped) {
+      if (!rf.stopped) {
+        rf.stopped = true
+        rf.unoutline()
+        rf.say("Stopped", "bad", "")
+      }
+      return true
+    }
     // The person pressed it while ReelForge was being asked. The answer was decided before ReelForge heard of
     // that press (a yes), or because of it (already pressed): either way their press is the post's only one. A
     // click now would post the video twice, and "not pressed" would ask them for a press they made. So nothing
@@ -156,7 +178,7 @@ void (async () => {
       sayPressed()
       return false
     }
-    if (!grant?.ok) return stay(grant?.message || "the extension did not answer.")
+    if (!grant?.ok) return stay(grant?.message || "the extension did not answer.", grant?.error)
     // From here on nothing is ever pressed again, whatever happens.
     rf.phase = "watch"
     rf.unoutline()
@@ -240,17 +262,19 @@ void (async () => {
     const button = end.hold ? rf.probe(end.hold) : await rf.find(flow.final)
     const cannot = end.hold ? "something on the page is still yours to answer." : end.noPress
     // Press Post for me is about to be asked for. The note does not invite a press of the person's own meanwhile,
-    // and the button is not ringed: if the press is refused, press() says so and rings it then.
+    // and the button is not ringed: if the press is refused, press() says so and rings it then. It is brought
+    // into view all the same, where the person can see it pressed, or press it themselves.
     const asking = job.press && !flow.neverPress && !cannot && !pressed
-    if (button && !pressed && !asking) rf.outline(button)
+    if (button && !pressed) {
+      if (asking) rf.show(button)
+      else rf.outline(button)
+    }
     if (!pressed && rf.sign("success")) signBroken = true
-    let hint = end.more || (flow.button === "Post" ? "Nothing is posted until you do." : `On ${P} the button says ${flow.button}.`)
-    // Where the page does not show which account it is on, nothing was checked: the person has to look.
-    if (!rf.sel.hooks.account && job.handle) hint += ` ReelForge has ${job.handle} for this channel, and could not check the account here: look at which one this tab is on.`
+    const hint = end.more || (flow.button === "Post" ? "Nothing is posted until you do." : `On ${P} the button says ${flow.button}.`)
     // A person who pressed already is not asked to press again: the platform has the next word.
     if (pressed) sayPressed()
-    else if (asking) rf.say("Pressing Post for you", "work", "Checking with ReelForge first.")
-    else rf.say("Check it, then press Post", "ready", hint)
+    else if (asking) rf.say("Pressing Post for you", "work", "Checking with ReelForge first." + unchecked())
+    else rf.say("Check it, then press Post", "ready", hint + unchecked())
     await rf.report({ state: "ready", step: "ready", detail: end.detail || (rf.fallback ? `${P}'s page has changed a little; still working` : undefined), ...postInfo() })
     rf.guard()
     clearInterval(alive)
@@ -271,6 +295,9 @@ void (async () => {
       if (pressed) {
         throw new rf.Stop("unknown_outcome", `Post was pressed on ${P} and no confirmation was seen. Check your profile before you post again.`, { state: "unknown" })
       }
+      // The page before this one was asking ReelForge for the press, and this one can't know the answer: ReelForge
+      // may have said yes, and then it has the post as "not sure". (Nothing clicked for it: the page that asked is gone.)
+      if (job.pressAsked) throw new rf.Stop("tab_closed", `${P}'s upload page was left while ReelForge was being asked to press Post. Post was not pressed.`)
       throw new rf.Stop("tab_closed", `${P}'s upload page was left ${job.state === "ready" ? "before Post was pressed" : "before the post was ready"}. Nothing was posted.`)
     }
     await signSeen()

@@ -99,6 +99,25 @@ the extension clicks nothing, whatever ReelForge answers, and the note says **Yo
 own name) while it waits for the platform. It does not ask you to press again, and ReelForge is not told "not
 pressed".
 
+**Stop** in the extension's popup while it is asking ReelForge for the press wins too, and so does one pressed
+just before it asks: the extension clicks nothing, whatever ReelForge answers, and the page does not ask you to
+press Post. The note on the page says **Stopped** at once, even when ReelForge is slow to take the stop. When the
+stop reached ReelForge first, the post is cancelled and nothing was posted. When ReelForge had already said yes to
+the press, it has the post as "not sure it posted", and the note and the popup say so, and that Post was not
+pressed: look at your profile, then answer on its row. Once the extension has pressed Post, there is no Stop any
+more. **Cancel** on the post's row in ReelForge while the extension is asking works the same way: ReelForge says no,
+the extension clicks nothing, and the note on the page says the post was ended in ReelForge, without asking you to
+press Post. Nothing is clicked either when the page is reloaded, or left, while the extension is asking: if ReelForge
+said yes, the post is "not sure it posted" at once, and its row says Post was not pressed.
+
+The extension asks ReelForge for the press once, and waits up to 20 seconds for the answer (ReelForge may wait up
+to 10 for its database first). Just before, it checks that ReelForge answers: one closed meanwhile is reported as not
+running, and one opened again on another port is asked there. It never asks a second time, even when the answer
+gets lost on the way: then it reads what ReelForge has for the post, and presses only when that says the press was
+given. When ReelForge can't be asked either, nothing is clicked, and the note says **Check it, then press Post**:
+its answer did not come back, and it is not answering now. If ReelForge has Post as pressed already while nothing
+was clicked in the tab, the note says **Look at your profile first** instead of asking you to press.
+
 ## What is automatic, and what never is
 
 Automatic, once you have started a post, with **Start** in ReelForge or **Post** in the popup:
@@ -244,7 +263,7 @@ button whatever the first try was to do, and nothing is ever tried again by itse
 | `challenge` | The platform is asking you to prove it's you | Do what it asks in the tab. Then post again, or finish by hand there |
 | `platform_error` | The platform showed an error of its own | Read it in the tab. You can finish by hand there |
 | `timeout` | Nothing happened in time | The tab is still open. Finish by hand there |
-| `tab_closed` | The tab was closed, or left the platform, before Post was pressed | Post again when you are ready |
+| `tab_closed` | The tab was closed, or left the platform, before Post was pressed | Post again when you are ready. If it happened while the extension was asking ReelForge for the press, and ReelForge had said yes, the post is "not sure it posted" instead: check your profile, then answer on its row |
 | `press_rejected` | The extension pressed Post, and saw no reaction and no sign that it posted. The post is "not sure it posted", not failed | Check your profile on the platform. Then press **It's posted** or **It didn't post** on its row |
 | `changed` | The video file was replaced after you pressed Post in ReelForge | Check the video in ReelForge, then post again |
 | `unknown_outcome` | ReelForge cannot tell whether it posted | Check your profile on the platform. Then press **It's posted** or **It didn't post** on its row |
@@ -292,7 +311,7 @@ Calls are JSON under `/v1`. `hello` and `pair/claim` need no token; the rest nee
 | `POST /v1/jobs/<id>/claim` | take a job. The first browser to ask has it |
 | `GET /v1/jobs/<id>/file` | the job's video, whole or a `Range` of it |
 | `POST /v1/jobs/<id>/event` | report a step, a failure or the post |
-| `POST /v1/jobs/<id>/press` | ask to press Post. Granted once, where it is allowed |
+| `POST /v1/jobs/<id>/press` | ask to press Post. Granted once, where it is allowed. The extension sends it once: an answer that never came back is read from the batch |
 | `GET /v1/selectors` | `extension/selectors.json`, the list of what to look for on each upload page |
 | `POST /v1/unpair` | disconnect this browser |
 | `GET /pair`, `GET /post/<batch>` | the two local pages (they need their key) |

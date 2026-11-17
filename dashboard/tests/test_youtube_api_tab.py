@@ -16,6 +16,7 @@ import os
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest import mock
 
 from dashboard import db, posting, posting_tab, youtube_api_tab
@@ -116,6 +117,13 @@ class ApiPosting(PostingTest):
 
 
 class View(ApiPosting):
+    def test_the_guide_names_everything_the_window_gets_in_the_view(self):
+        # docs/YOUTUBE-API.md's "What the window gets and calls" is where someone changing the window looks.
+        guide = (Path(__file__).resolve().parents[2] / "docs" / "YOUTUBE-API.md").read_text("utf-8")
+        (row,) = [line for line in guide.splitlines() if line.startswith("| view `youtube_api` |")]
+        view = self.window().view("youtube_api")
+        self.assertEqual([key for key in view if f"`{key}`" not in row], [])
+
     def test_not_connected_it_says_what_this_is_and_offers_nothing_on_the_row(self):
         w = self.window(api=False)
         view = w.view("youtube_api")
@@ -1192,10 +1200,11 @@ class Posting(ApiPosting):
         w.svc.jobs_changed()
         self.assertEqual(self.rows(w)["youtube"]["state"], "none")  # the file there now is another video
 
-    def test_a_file_written_over_with_the_same_size_and_time_while_its_upload_waits_is_not_sent(self):
+    def test_a_file_written_over_with_the_same_size_and_time_while_its_upload_waits_is_not_posted(self):
         """A post can wait its turn behind another upload for minutes. A copy made meanwhile with cp -p, rsync -t or a
         sync client keeps the size and time of the file it replaced, so the fingerprint ReelForge remembers still
-        fits it. The upload reads the file afresh before any of it goes."""
+        fits it. The upload adds up the bytes as they go, and the piece that would end it never goes. (Until this
+        was checked as the file goes up, the whole file was read once more before any of it went, for every post.)"""
         w = self.window()
         job = self.job()
         st = self.video.stat()
@@ -1204,9 +1213,24 @@ class Posting(ApiPosting):
         self.assertEqual(posting.digest(self.video), job["video_sha256"])  # (as remembered)
         done = youtube_api_tab.run(job["id"])
         self.assertEqual((done["state"], done["error_code"]), ("failed", "changed"))
-        self.assertEqual((self.google.starts, self.google.puts, self.google.videos), ([], [], []))
+        self.assertEqual(done["error_message"], f"{self.video.name} changed while it was being uploaded. Nothing was posted.")
+        self.assertEqual([p["range"] for p in self.google.puts],
+                         [f"bytes 0-999/{SIZE}", f"bytes 1000-1999/{SIZE}", f"bytes 2000-2999/{SIZE}"])
+        self.assertEqual(self.google.videos, [])
+        self.assertFalse(posting.pressed(job["id"]))  # the ledger never heard of a last piece on its way
         w.svc.jobs_changed()
         self.assertEqual(self.rows(w)["youtube"]["state"], "none")  # nothing is under way for the file there now
+
+    def test_an_upload_reads_the_file_as_it_goes_up_and_not_once_more_before(self):
+        self.window()
+        job = self.job()
+        reads = []
+        digest = posting.digest
+        with mock.patch.object(posting, "digest", lambda path, fresh=False: reads.append(fresh) or digest(path, fresh)):
+            done = youtube_api_tab.run(job["id"])
+        self.assertEqual(done["state"], "posted")
+        self.assertNotIn(True, reads)  # (the remembered fingerprint, read again only for a file whose time moved)
+        self.assertEqual(bytes(self.google.videos[0]["data"]), BYTES)
 
     def test_a_job_that_does_not_say_who_may_see_it_is_never_sent(self):
         made = posting.create_batch(self.video, ["youtube"], CAPTION, TAGS, self.cfg, via={"youtube": "api"})

@@ -178,19 +178,23 @@ def _upload(job: dict, stop: Callable[[], bool]) -> None:
         if privacy not in PRIVACY:  # never guessed: left out, YouTube would make the video public
             raise ApiError("odd", "This post doesn't say who may see the video, so it wasn't sent. Post it again.")
         move("uploading", step="upload", progress=0.0, detail=f"to YouTube, as {privacy}")
-        # Read afresh: the job may have waited its turn behind another upload for minutes, and a copy written over
-        # the file meanwhile with its size and time kept looks unchanged to the remembered fingerprint. The upload
-        # reads the whole file anyway.
-        if not posting.unchanged(job, fresh=True):
+        # The job may have waited its turn behind another upload for minutes. A file changed meanwhile is caught
+        # here by its remembered fingerprint (read again only when its size or time moved); one written over with
+        # its size and time kept looks unchanged to that, and the upload catches it: it adds up the bytes as they
+        # go, and the piece that ends it goes only when they are this video. So the file is read once more here
+        # only when it changed, and once as it goes up.
+        if not posting.unchanged(job):
             raise ApiError("changed", "The video file changed after you pressed Post. Check it, then post again.")
         made = youtube_api.upload(Path(job["video_path"]), text.get("title", ""), text.get("description", ""),
                                   privacy, kids_answer(options), started=started, progress=progress, last=last,
-                                  stop=stop)
+                                  stop=stop, sha256=job["video_sha256"])
     except youtube_api.Stopped:
         pass  # called off (the job says so), or ReelForge is closing (the next start settles it)
     except youtube_api.Unknown:
         _end(job, "unknown", detail="The last piece went out, but YouTube didn't say whether it arrived. " + STUDIO)
     except ApiError as e:
+        if e.code == "changed":
+            _known_again(job)
         _end(job, "failed", error_code=e.code, error_message=f"{e.message} Nothing was posted.")
     except Exception as e:  # a fault of ReelForge's own: said by its kind only, since its words may carry a token
         print(f"youtube api: the upload stopped on a {type(e).__name__}\n"
@@ -201,6 +205,15 @@ def _upload(job: dict, stop: Callable[[], bool]) -> None:
             finish(job, made)
         except sqlite3.Error:
             pass  # the database is busy: the job waits as it is, and settle_orphans asks its session and finishes it
+
+
+def _known_again(job: dict) -> None:
+    """The file is another video now, though its size and time may say otherwise: what ReelForge remembers of it is
+    read again, so its row shows the video that is there now."""
+    try:
+        posting.digest(Path(job["video_path"]), fresh=True)
+    except (OSError, sqlite3.Error):
+        pass  # gone, or the database is busy: the next look that can, reads it
 
 
 def _end(job: dict, state: str, **fields) -> None:

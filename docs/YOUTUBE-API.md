@@ -212,6 +212,7 @@ then, not as they were. These are the sentences you are most likely to meet.
 | YouTube didn't take the title | Shorten the caption, and take out any `<` or `>` |
 | YouTube couldn't be reached | Check your connection, then press Post with API… again |
 | The video file changed after you pressed Post | Check the video, then post again |
+| (the video's name) changed while it was being uploaded | Another cut was written over the file while it went up. ReelForge checks every piece against the video you said yes to, and the last piece never went: nothing was posted. Check the video, then post again |
 | ReelForge was closed during the upload | Nothing was posted. Press Post with API… again |
 | YouTube took the upload and rejected it | Look at the video in YouTube Studio. The reason is in brackets: "duplicate" is a video YouTube already has |
 | YouTube refused the upload (some word) | The word in brackets is Google's own, for a refusal ReelForge has no sentence for. Post this one by hand. If it came in answer to the last piece, the post is "not sure it posted" instead, because such a word proves nothing |
@@ -286,11 +287,11 @@ What the window gets and calls:
 
 | | |
 |---|---|
-| view `youtube_api` | `state` (`off`: no client on file, `connecting`, `on`, `again`: a client is on file and this window has no sign-in), `line`, `said`, `lines`, `client`, `wants_file` (connecting takes a client file), `channel`, `privacy`, `made_for_kids` (`true`, `false`, or `null` until the person has answered), `privacies`, `note`, `docs`, `words` (the sentences beside the dialog's controls) |
+| view `youtube_api` | `state` (`off`: no client on file, `connecting`, `on`, `again`: a client is on file and this window has no sign-in), `line`, `said`, `said_id` (one more each time something is said, the same words again included: the dialog compares it with the one that something typed since put away), `lines`, `client`, `wants_file` (connecting takes a client file), `channel`, `privacy`, `made_for_kids` (`true`, `false`, or `null` until the person has answered), `privacies`, `note`, `docs`, `words` (the sentences beside the dialog's controls) |
 | `youtube_api_info(caption, tags)` | the view, and for the picked video `video` (with `sha256`: the file as it is now), `send`, `fields`, `left`, `can_post`, `why`, `force`, `blocked`, `review`, `how`, `again` |
 | `youtube_api_connect(path, quiet)` | reads the client file and opens Google's page: `true` when it is opening. `""` connects again with the client on file. `quiet`: the dialog asked, which says itself how it goes. Then no pop-up says it, and when connecting can't start the answer is the sentence that says why |
 | `youtube_api_disconnect()` | forgets the connection and tells Google |
-| `youtube_api_dialog(shown)` | the window's dialog for the connection opened or closed. While it is open, how connecting and disconnecting went is in the view's `said` and the dialog shows it. No pop-up says it over the dialog's buttons |
+| `youtube_api_dialog(shown)` | the window's dialog for the connection opened or closed. While it is open, how connecting and disconnecting went is in the view's `said`, and the dialog shows it until something is typed in it: then it shows nothing more until `said_id` moves on (words said again count too). No pop-up says it over the dialog's buttons |
 | `youtube_api_defaults(privacy, made_for_kids)` | your choices for the posts to come. `made_for_kids` is the person's answer: `true` or `false`. Until it is given, `send.made_for_kids` is `null` and nothing is declared |
 | `post_with_api(caption, tags, privacy, force, shown)` | your press: makes the job and starts the upload. `shown`: what the question showed (`{"video": its path, "sha256": the file's, "made_for_kids": ...}`), which the window sends back. When any of them is another one by now, nothing starts |
 | view `posting` | while the API is connected and a post could start, the YouTube row has `api: {"force": ...}` (`force`: it would be a post again). Unless it would be one, `post_api` is among its `actions`. While the state is `again`, `connect_api` is there instead. Each row's `via` says how its job goes (`"extension"` or `"api"`), and `labels` has the words for every button |
@@ -326,10 +327,11 @@ Tested here, by automated tests that run with ReelForge's own (`dashboard/tests/
 - that the sign-in is in no file: a ReelForge opened later, and another program started with the same file, are
   not connected and send nothing, and a sign-in put into the file by hand is never used
 - the upload: in pieces, a 503 in the middle and carrying on, a piece that arrived although its answer was an
-  error, the last answer lost and found, the last answer lost for good (not sure it posted, and one upload only),
-  a sign-in that ends in the middle, every refusal ReelForge has a sentence for, and a refusal of the last piece
-  that proves nothing (a word ReelForge doesn't know, or a "no" to the piece sent a second time): not sure it
-  posted, and no button that posts it again
+  error, another cut written over the file as it goes up (the same size or longer, and only in a piece sent again):
+  the last piece never goes, the last answer lost and found, the last answer lost for good (not sure it posted,
+  and one upload only), a sign-in that ends in the middle, every refusal ReelForge has a sentence for, and a
+  refusal of the last piece that proves nothing (a word ReelForge doesn't know, or a "no" to the piece sent a
+  second time): not sure it posted, and no button that posts it again
 - the read-back: a video YouTube stored as private when public was asked for
 - that who can see the video is in every request, and that the made-for-kids answer is in it once you have given
   one and never before
