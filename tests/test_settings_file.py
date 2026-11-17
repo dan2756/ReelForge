@@ -366,6 +366,39 @@ class Loading(Scratch):
         P.SETTINGS.write_bytes(b"\xef\xbb\xbf" + b'[captions]\r\nmax_hashtags = 2\r\n')
         self.assertEqual(settings.load()["captions"]["max_hashtags"], 2)
 
+    def test_a_no_to_the_hourly_read_in_a_file_notepad_saved_as_unicode_is_a_no(self):
+        """Notepad's "Unicode" (UTF-16, with a byte order mark) is a mistake to TOML, so the hourly read of your stats
+        goes by the file's own background_stats lines meanwhile. Those were looked for in the file read as UTF-8, where
+        every other byte is a NUL, so a no in it was never found, the answers' yes kept the read, with your log-ins,
+        on, and writing the file again from your answers put that yes over the no."""
+        from studio import generate
+
+        self.onboard_main()                     # the answers say yes
+        text = P.SETTINGS.read_text(encoding="utf-8").replace("background_stats = true", "background_stats = false")
+        for what, code in (("little-endian", "utf-16-le"), ("big-endian", "utf-16-be")):
+            def saved(t: str, code=code) -> bytes:
+                return t.encode(code)
+
+            for ending in ("\n", "\r\n"):
+                with self.subTest(what, ending=ending):
+                    bom = "﻿"
+                    P.SETTINGS.write_bytes(saved(bom + text.replace("\n", ending)))
+                    self.assertTrue(P.SETTINGS.read_bytes()[:2] in (b"\xff\xfe", b"\xfe\xff"))
+                    with self.assertRaises(settings.SettingsError):
+                        settings.load()                         # still a mistake to TOML
+                    said: list[str] = []
+                    self.assertIs(generate.background_stats(profiles.main(), say=said.append), False)
+                    self.assertIn("goes by its background_stats line", said[0])
+                    P.SETTINGS.write_bytes(saved(bom + text.replace("background_stats = false",
+                                                                    "background_stats = true").replace("\n", ending)))
+                    self.assertIs(generate.background_stats(profiles.main()), True)
+        # and the way out keeps the no
+        P.SETTINGS.write_bytes(text.encode("utf-16"))
+        with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(main(["-p", "1", "channel", "--regenerate"]), 0, out.getvalue())
+        self.assertIs(settings.load()["platforms"]["background_stats"], False)
+        self.assertIs(json.loads(P.ANSWERS.read_text(encoding="utf-8"))["background_stats"], False)
+
     def test_writing_it_again_from_the_answers_is_the_way_out_the_error_gives(self):
         self.onboard_main()
         P.SETTINGS.write_text(BROKEN["an unfinished string"][0], encoding="utf-8")

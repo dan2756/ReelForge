@@ -68,12 +68,12 @@ its questions, in its Settings in the profile menu or `reelforge -p <profile> ch
 question for a new profile made from it (**New profile** while it's open): a yes is yours to give there. A
 `background_stats = true` written in that file against its answers' no doesn't turn the read on either: writing its
 files again puts the no back, says so, and leaves the yes in the copy of the file it keeps in `my-studio/backups/`).
-While that `studio.toml` has a mistake in it, the job goes by the file's own `background_stats` lines, wherever they are
-and however they're written (`Background-Stats`, `background stats`, `background_stat`, with `=` or a colon, as
-`answers.json` has it), and only a yes there is a yes; words in a text setting or a comment are never taken for one. A
-text is one whose quotes are closed, on its own line or, for one of several lines (`"""` or `'''`), on any line below; a
-quote left open, often the very mistake, hides nothing, so a `background_stats` line after it, on its line or below,
-still counts.
+While that `studio.toml` has a mistake in it (saved in Notepad as Unicode is one: save it as UTF-8), the job goes by the
+file's own `background_stats` lines, wherever they are and however they're written (`Background-Stats`,
+`background stats`, `background_stat`, with `=` or a colon, as `answers.json` has it), and only a yes there is a yes;
+words in a text setting or a comment are never taken for one. A text is one whose quotes are closed, on its own line or,
+for one of several lines (`"""` or `'''`), on any line below; a quote left open, often the very mistake, hides nothing,
+so a `background_stats` line after it, on its line or below, still counts.
 
 ## Several windows
 

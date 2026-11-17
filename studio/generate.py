@@ -288,9 +288,13 @@ def _own_background_stats(path: Path) -> bool | None:
     no, off) is often the very mistake in the file, and must not leave the answers' yes to decide. Two lines that
     disagree (one added below the other, or a no in the wrong place: itself a mistake, see S.load) are no yes."""
     try:
-        text = path.read_text(encoding="utf-8-sig", errors="replace")
+        raw = path.read_bytes()
     except OSError:
         return None
+    # As UTF-8 (a byte order mark of its own, Notepad's on older Windows, set aside), or as UTF-16, Notepad's
+    # "Unicode", by its byte order mark: TOML can't read that, but its own lines are its own lines all the same
+    code = "utf-16" if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8-sig"
+    text = raw.decode(code, errors="replace").replace("\r\n", "\n").replace("\r", "\n")
     texts = _texts(text)
     said = [m["value"] for m in _STATS_LINE.finditer(text)
             if S.stats_key(m["quoted"] if m["q"] else m["bare"]) and not any(a < m.start() < b for a, b in texts)]

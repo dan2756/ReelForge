@@ -69,7 +69,7 @@ def _toml(path: Path) -> dict:
     try:
         with path.open("rb") as f:
             data = tomllib.load(f)
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):     # (one saved as UTF-16: Notepad's "Unicode")
         return {}
     return data if isinstance(data, dict) else {}
 
