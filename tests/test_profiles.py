@@ -813,6 +813,47 @@ class Deleting(Scratch):
                 self.assertEqual(cmd, [f"profiles/{p.folder.name}"])
                 self.assertEqual(profiles.find(cmd[0]), p)
 
+    def test_a_channel_whose_folder_was_renamed_by_hand_is_named_so_the_command_reaches_it_where_pasted(self):
+        """The commands ReelForge writes out put -p profiles/<folder> bare, so a channel's folder renamed by hand with
+        a space in it (the copy Explorer makes, "night-physics - Copy") split where the command was pasted, which
+        then did nothing for it."""
+        import shlex
+
+        from studio.__main__ import main
+
+        self.onboard_main()
+        a = profiles.create("Night Physics 🌙")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**ANSWERS, "channel_name": "Night Physics 🌙"}, a)
+        self.assertEqual(a.flag, "profiles/night-physics")              # a folder ReelForge named: as it was
+        copy = a.folder.with_name("night-physics - Copy")
+        shutil.copytree(a.folder, copy)
+        (copy / "profile.toml").write_text('name = "Moon Copy"\ncreated = "2099-01-01T00:00:00"\n', encoding="utf-8")
+        c = profiles.Profile(copy)
+        for f in (c.settings, c.answers):
+            f.write_text(f.read_text(encoding="utf-8").replace("Night Physics 🌙", "Moon Copy"), encoding="utf-8")
+        self.assertEqual(c.flag, '"profiles/night-physics - Copy"')     # double quotes: bash, PowerShell and cmd
+        good = c.settings.read_text(encoding="utf-8")
+        c.settings.write_text(good + "\nthis is = = a typo\n", encoding="utf-8")
+        with self.assertRaises(S.SettingsError) as raised:
+            S.load(c.settings)
+        argv = shlex.split(str(raised.exception).split("with: ", 1)[1])    # as a shell splits it where it's pasted
+        self.assertEqual(argv, ["reelforge", "-p", "profiles/night-physics - Copy", "channel", "--regenerate"])
+        before = a.settings.read_bytes()
+        with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(main(argv[1:]), 0, out.getvalue())
+        self.assertEqual(S.load(c.settings)["channel"]["name"], "Moon Copy")   # put right, and only it
+        self.assertEqual(a.settings.read_bytes(), before)
+        # A folder with a character double quotes don't keep as it is in all three shells ($ or %, say) is named by
+        # its number in the list, which finds it; one that isn't in the list keeps its folder
+        dollar = copy.rename(copy.with_name("night $physics 100%"))
+        d = profiles.Profile(dollar)
+        self.assertEqual([p.folder.name for p in profiles.every()][2], dollar.name)
+        self.assertEqual(d.flag, "3")
+        self.assertEqual(profiles.find(d.flag), d)
+        self.assertEqual(profiles.Profile(self.root / "profiles" / "not $listed").flag, '"profiles/not $listed"')
+        self.assertEqual(profiles.main().flag, "1")
+
     def test_connect_with_a_mistake_in_the_settings_leaves_your_ais_notes_and_the_way_out_brings_them_back(self):
         """Connect with a typo in studio.toml wrote your AI's notes and the channel bible from the first-time answers,
         so what was edited by hand in studio.toml (the length here) went back in them, and nothing brought it back

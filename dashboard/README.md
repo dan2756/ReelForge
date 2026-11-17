@@ -15,7 +15,7 @@ optional browser extension, or for YouTube through its own API (see [Publish](#p
 | `reelforge 1` … `reelforge 7` | straight to the tab in that place along the top, 1 at the far left: by default 1 Overview, 2 Videos, 3 Compare, 4 Stats, 5 Accounts, 6 Settings, 7 Updates (the Settings tab's **Tab order** changes it) |
 | `reelforge videos`, `reelforge publish`, … | the same, by the tab's name (`post` and `upload` work for Publish, which is the green button at the top right and has no number, `login` for Accounts, `totals` for Stats: `reelforge stats` is the hourly job) |
 | `reelforge notifications` | the Overview with the notifications drawer open |
-| `reelforge -p "Channel name"` | ReelForge on one of your profiles (its number in the list, the start of its name, or its folder, like `profiles/cool-epic-facts`, works too; the commands ReelForge writes out for you name it by its folder) |
+| `reelforge -p "Channel name"` | ReelForge on one of your profiles (its number in the list, the start of its name, or its folder, like `profiles/cool-epic-facts`, works too; the commands ReelForge writes out for you name it by its folder, in double quotes when you've renamed the folder with a space in it, say, or by its number when the folder's name has a character quotes don't keep as it is, like `$` or `%`) |
 | `reelforge --demo` | a tour on made-up numbers: nothing is read or saved |
 
 ReelForge shows only the platforms you've connected: first-time setup connects the ones you give it a handle for, and

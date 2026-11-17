@@ -91,8 +91,23 @@ class Profile:
         first in the list), another's key, profiles/<folder>. Its folder's name alone can find another profile (find):
         all digits it is a number in the list (-p 3 is the third, whatever its folder), and "Night Physics 🌙"'s
         folder, night-physics, is the short name of a first channel called "Night Physics", which comes first; the
-        first one can be renamed so after its notes are written, too. A word with a / in it is only ever a folder."""
-        return "1" if self.main else self.key
+        first one can be renamed so after its notes are written, too. A word with a / in it is only ever a folder.
+        A folder ReelForge named (slug_for) goes as it is. One renamed by hand with any other character in it (a space:
+        "night-physics - Copy", the copy Explorer makes) goes in double quotes, which keep it one word where the
+        command is pasted, in bash, PowerShell and cmd alike. One with a character in it that double quotes don't keep
+        as it is in all three (" $ ` % !, and the curly quotes PowerShell takes for straight ones) goes by its number
+        in the list while that finds it, else by its folder in quotes all the same."""
+        if self.main:
+            return "1"
+        key = self.key
+        if re.fullmatch(r"[A-Za-z0-9._/-]+", key):
+            return key
+        if any(c in key for c in '"$`%!“”„'):
+            n = next((i for i, p in enumerate(every(), 1) if _same(p.folder, self.folder)), 0)
+            found = find(str(n)) if n else None
+            if found is not None and _same(found.folder, self.folder):
+                return str(n)
+        return f'"{key}"'
 
     @property
     def name(self) -> str:
