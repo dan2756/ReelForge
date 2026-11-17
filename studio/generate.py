@@ -236,25 +236,48 @@ _STATS_LINE = re.compile(r"""(?:^|(?<=[.{,]))[ \t]*"""
 
 
 def _texts(text: str) -> list[tuple[int, int]]:
-    """Where a studio.toml's text has a string on one line ("...", '...') or a comment: (where it starts, where it
-    ends). One left open ends at the end of its line, as TOML has it, so a typo leaves the lines below as they are; a
-    string of several lines (\"\"\"...\"\"\") isn't one here, so a line in it is looked at as any other."""
+    """Where a studio.toml's text has a string or a comment: (where it starts, where it ends). Only a string whose
+    quotes are closed is one: one on one line ("...", '...') closed on that line, or one of several lines
+    (\"\"\"...\"\"\", '''...''') closed by its own three quotes on any line below (with up to two quotes of its own just
+    inside them); in double quotes a backslash keeps the character after it in the string. A quote left open, which
+    is a typo, starts no string at all, so it hides neither what follows it on its line nor the lines below. A
+    comment runs from its # to the end of its line."""
     spans, i, n = [], 0, len(text)
+    left_open: dict[str, int] = {}  # a quote of this kind was left open: so is every other one before this point
     while i < n:
         c = text[i]
-        if c not in "#\"'":
+        if c == "#":
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            spans.append((i, j))
+            i = j
+            continue
+        if c not in "\"'":
             i += 1
             continue
-        j = i + 1
-        while j < n and text[j] != "\n":
-            if c == '"' and text[j] == "\\" and text[j + 1:j + 2] not in ("", "\n"):
+        q = c * 3 if text.startswith(c * 3, i) else c
+        if i < left_open.get(q, -1):
+            i += len(q)
+            continue
+        j, end = i + len(q), None
+        while j < n:
+            if len(q) == 1 and text[j] == "\n":
+                break
+            if c == '"' and text[j] == "\\" and (len(q) == 3 or text[j + 1:j + 2] not in ("", "\n")):
                 j += 2
                 continue
-            j += 1
-            if c != "#" and text[j - 1] == c:
+            if text.startswith(q, j):
+                end = j + len(q)
+                while len(q) == 3 and end < min(n, j + 5) and text[end] == c:
+                    end += 1
                 break
-        spans.append((i, j))
-        i = j
+            j += 1
+        if end is None:     # left open: as is any other of its kind up to the end of its line (or of the file)
+            left_open[q] = j if len(q) == 1 else n
+            i += len(q)
+            continue
+        spans.append((i, end))
+        i = end
     return spans
 
 

@@ -253,6 +253,79 @@ class Loading(Scratch):
         self.assertIs(settings.load()["platforms"]["background_stats"], True)
         self.assertNotIn("left off", out.getvalue())
 
+    def test_only_a_text_whose_quotes_are_closed_hides_the_words_in_it(self):
+        """With a mistake in studio.toml, words in a text are never taken for the hourly read's background_stats line.
+        But a text was taken to be on one line, and one whose quote was left open ran to the end of its line: so a no
+        after a quote left open on its line (an inline [platforms] table with a typo in it) wasn't taken, and writing
+        the file again from your answers put their yes over it, and the hourly read, with your log-ins, was on; and a
+        text of several lines (\"\"\"...\"\"\") hid nothing, so prose in it with the colon or singular forms
+        ("Background stats: none on screen") was a no nobody gave, which Change your answers started from and writing
+        the file again put in the answers too. Now only a text whose quotes are closed hides what's in it."""
+        import json
+
+        from studio import generate
+
+        self.onboard_main()                     # the answers say yes
+        text = P.SETTINGS.read_text(encoding="utf-8")
+        line = "background_stats = true"
+        typo = '\nsubjects_extra = "a snowball\n'
+        start = text.index("[platforms]")
+        platforms = text[start:text.index("\n[", start + 1)]
+
+        def verdict(body: str, raw: bytes | None = None) -> bool:
+            P.SETTINGS.write_bytes(raw if raw is not None else body.encode("utf-8"))
+            with self.assertRaises(settings.SettingsError):
+                settings.load()
+            said: list[str] = []
+            on = generate.background_stats(profiles.main(), say=said.append)
+            self.assertIn("goes by its background_stats line", said[0])
+            return on
+
+        def regenerate() -> tuple[bool, bool]:
+            with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(main(["-p", "1", "channel", "--regenerate"]), 0, out.getvalue())
+            answered = json.loads(P.ANSWERS.read_text(encoding="utf-8"))["background_stats"]
+            return answered, settings.load()["platforms"]["background_stats"]
+
+        # a quote left open hides nothing: not the no after it on its line ...
+        inline = 'platforms = { enabled = ["tiktok", "youtube], background_stats = false }'
+        self.assertIs(verdict(text.replace(platforms, inline)), False)
+        self.assertIs(verdict(text.replace(platforms, inline.replace("false", "true"))), True)
+        self.assertIs(verdict(text.replace('about = "What-if videos with real science."',
+                                           "about = 'What-if videos, background_stats = false")), False)
+        self.assertIs(verdict(text.replace(platforms, inline)), False)
+        self.assertEqual(regenerate(), (False, False))      # and the way out keeps it
+        self.onboard_main()
+        # ... nor the lines below a text of several lines left open
+        self.assertIs(verdict(text.replace("[format]\n", '[format]\nstyle_long = """\nLow-poly worlds.\n', 1)
+                              .replace(line, "background_stats = false")), False)
+        # a text of several lines whose quotes are closed hides what's in it, as one on one line does
+        closed = {
+            "prose with a colon": '"""\nLow-poly worlds.\nBackground stats: none on screen, just the counter.\n"""',
+            "in single quotes": "'''\nbackground_stats = false\n'''",
+            "with quotes in it": '"""\nShe said \\"""\nbackground_stat = false\n"""',
+            "ending with a quote": '""""Calm," she said.\nbackground_stats: off""""',
+            "two of them": '"""a"""\nnotes = """\nbackground_stats = false\n"""',
+        }
+        for what, words in closed.items():
+            with self.subTest(what):
+                body = text.replace("[format]\n", f"[format]\nstyle_long = {words}\n", 1) + typo
+                self.assertIs(verdict(body), True)
+                self.assertIs(verdict(body.replace(line, "background_stats = false")), False)   # the file's own no
+                # saved by Notepad, with a byte order mark and Windows line endings
+                self.assertIs(verdict("", b"\xef\xbb\xbf" + body.replace("\n", "\r\n").encode("utf-8")), True)
+        body = text.replace("[format]\n", f"[format]\nstyle_long = {closed['prose with a colon']}\n", 1) + typo
+        self.assertIs(verdict(body), True)
+        self.assertIs(generate.as_read(json.loads(P.ANSWERS.read_text(encoding="utf-8")), profiles.main())
+                      ["background_stats"], True)       # Change your answers starts from the yes
+        self.assertEqual(regenerate(), (True, True))
+        # with no line of its own, the answers have the say
+        self.onboard_main(background_stats=False)
+        P.SETTINGS.write_text(body.replace(line + "\n", ""), encoding="utf-8")
+        said: list[str] = []
+        self.assertIs(generate.background_stats(profiles.main(), say=said.append), False)
+        self.assertIn("goes by its answers", said[0])
+
     def test_a_long_run_of_spaces_in_a_file_with_a_mistake_is_looked_through_at_once(self):
         """While studio.toml has a mistake in it, the hourly read of your stats goes by the file's own background_stats
         lines, which were looked for in a way that took longer and longer on a line of spaces or tabs with no = or

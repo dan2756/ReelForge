@@ -68,7 +68,9 @@ that no, and its questions, in its Settings in the profile menu or `reelforge -p
 yes is yours to give there). While that `studio.toml` has a mistake in it, the job goes by the file's own
 `background_stats` lines, wherever they are and however they're written (`Background-Stats`, `background stats`,
 `background_stat`, with `=` or a colon, as `answers.json` has it), and only a yes there is a yes; words in a text
-setting or a comment are never taken for one.
+setting or a comment are never taken for one. A text is one whose quotes are closed, on its own line or, for one of
+several lines (`"""` or `'''`), on any line below; a quote left open, often the very mistake, hides nothing, so a
+`background_stats` line after it, on its line or below, still counts.
 
 ## Several windows
 
