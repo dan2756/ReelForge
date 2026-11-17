@@ -227,8 +227,12 @@ def _answered(p) -> dict | None:
 # (platforms.background_stats), or in an inline table (platforms = { ..., background_stats = false }), quoted or not,
 # with = or a colon (as answers.json has it) after it, and its value up to a space, a comment or the end of the inline
 # table. _own_background_stats keeps those whose key is the setting (S.stats_key, so a key the file's error names is one
-# it goes by) and which aren't words in a text or a comment (_texts).
-_STATS_LINE = re.compile(r"""(?:^|(?<=[.{,]))[ \t]*(["']?)([-\w \t]+?)\1[ \t]*[=:][ \t]*([^\s#,}]*)""", re.M)
+# it goes by) and which aren't words in a text or a comment (_texts). A key without quotes starts and ends with a
+# letter, a digit, - or _, and the spaces round it are the pattern's alone: spaces that could go to either took longer
+# and longer to look through on a line of them with no = in it (3,200 took 46 seconds).
+_STATS_LINE = re.compile(r"""(?:^|(?<=[.{,]))[ \t]*"""
+                         r"""(?:(?P<q>["'])(?P<quoted>[-\w \t]*)(?P=q)|(?P<bare>[-\w](?:[-\w \t]*[-\w])?))"""
+                         r"""[ \t]*[=:][ \t]*(?P<value>[^\s#,}]*)""", re.M)
 
 
 def _texts(text: str) -> list[tuple[int, int]]:
@@ -265,8 +269,8 @@ def _own_background_stats(path: Path) -> bool | None:
     except OSError:
         return None
     texts = _texts(text)
-    said = [m.group(3) for m in _STATS_LINE.finditer(text)
-            if S.stats_key(m.group(2)) and not any(a < m.start() < b for a, b in texts)]
+    said = [m["value"] for m in _STATS_LINE.finditer(text)
+            if S.stats_key(m["quoted"] if m["q"] else m["bare"]) and not any(a < m.start() < b for a, b in texts)]
     return None if not said else all(S.yes_no(v) is True for v in said)
 
 

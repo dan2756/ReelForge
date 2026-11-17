@@ -253,6 +253,41 @@ class Loading(Scratch):
         self.assertIs(settings.load()["platforms"]["background_stats"], True)
         self.assertNotIn("left off", out.getvalue())
 
+    def test_a_long_run_of_spaces_in_a_file_with_a_mistake_is_looked_through_at_once(self):
+        """While studio.toml has a mistake in it, the hourly read of your stats goes by the file's own background_stats
+        lines, which were looked for in a way that took longer and longer on a line of spaces or tabs with no = or
+        colon in it (a pasted blank line, say): 3,200 spaces took 46 seconds, and the hourly job, Change your answers
+        and writing the file again from your answers all waited for it. Each run of them here is looked through in a
+        separate Python, which is stopped if it takes too long."""
+        import subprocess
+        import sys
+
+        self.onboard_main()
+        text = P.SETTINGS.read_text(encoding="utf-8")
+        text = text.replace("background_stats = true", "background_stats = false") + '\nsubjects_extra = "a snowball\n'
+        runs = {"spaces": " " * 100_000, "tabs": "\t" * 100_000, "spaces between two words": "a" + " " * 100_000 + "b",
+                "tabs and spaces between words": "about stats" + " \t" * 50_000 + "background stats"}
+        files = []
+        for i, (what, run) in enumerate(runs.items()):
+            f = P.SETTINGS.with_name(f"studio.{i}.toml")
+            f.write_text(text + run + "\n", encoding="utf-8")
+            files.append(str(f))
+        look = ("import json, sys, time\nfrom pathlib import Path\nfrom studio import generate\nfor f in sys.argv[1:]:\n"
+                "    start = time.perf_counter()\n    said = generate._own_background_stats(Path(f))\n"
+                "    print(json.dumps([said, time.perf_counter() - start]), flush=True)\n")
+        kit = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        try:
+            done = subprocess.run([sys.executable, "-c", look, *files], cwd=kit, capture_output=True, text=True,
+                                  timeout=60)
+        except subprocess.TimeoutExpired as e:
+            self.fail(f"still looking after a minute, through {len((e.stdout or b'').splitlines())} of {len(runs)}")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        for what, line in zip(runs, done.stdout.splitlines(), strict=True):
+            with self.subTest(what):
+                said, took = json.loads(line)
+                self.assertIs(said, False)      # the file's own no, found all the same
+                self.assertLess(took, 0.5)
+
     def test_a_file_saved_by_notepad_with_a_byte_order_mark_still_reads(self):
         self.onboard_main()
         P.SETTINGS.write_bytes(b"\xef\xbb\xbf" + b'[captions]\r\nmax_hashtags = 2\r\n')
