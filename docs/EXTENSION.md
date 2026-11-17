@@ -107,9 +107,11 @@ the press, it has the post as "not sure it posted", and the note and the popup s
 pressed: look at your profile, then answer on its row. Once the extension has pressed Post, there is no Stop any
 more. **Cancel** on the post's row in ReelForge while the extension is asking works the same way: ReelForge says no,
 the extension clicks nothing, and the note on the page says the post was ended in ReelForge, without asking you to
-press Post. Nothing is clicked either when the page is reloaded, or left, while the extension is asking: if ReelForge
-said yes, the post is "not sure it posted" at once, and its row says Post was not pressed. A page reloaded once
-ReelForge has said no says what any page left before Post was pressed says: nothing was posted.
+press Post. Nothing is clicked either when the page is reloaded, or left, while the extension is asking. The
+extension knows as soon as the browser leaves the page, before the next one has loaded: if ReelForge said yes, the
+post is "not sure it posted" at once, its row says Post was not pressed, and the page there now says so when it has
+loaded. A page reloaded once ReelForge has said no says what any page left before Post was pressed says: nothing
+was posted.
 
 The extension asks ReelForge for the press once, and waits up to 20 seconds for the answer (ReelForge may wait up
 to 10 for its database first). Just before, it checks that ReelForge answers: one closed meanwhile is reported as not

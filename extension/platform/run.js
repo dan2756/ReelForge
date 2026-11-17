@@ -9,8 +9,12 @@ void (async () => {
   globalThis.__reelforgeRun = true
   const rf = globalThis.__reelforge
   const hello = await rf.send({ t: "job.hello" })
-  // Not a job's tab (any more): do nothing at all.
-  if (!hello?.ok) return
+  // Not a job's tab (any more): do nothing at all. Only a page whose post ended while it was loading is told how,
+  // when the worker kept words for it (the page before it had asked for the press, and went before the answer).
+  if (!hello?.ok) {
+    if (hello?.stop) rf.say(hello.stop.posted ? "Posted" : "Stopped", hello.stop.posted ? "good" : "bad", String(hello.stop.message || ""))
+    return
+  }
   const job = (rf.job = hello.job)
   rf.sel = { hooks: {}, ...hello.selectors }
   const flow = rf.flows[job.platform]
@@ -31,6 +35,8 @@ void (async () => {
       rf.unoutline()
       rf.say(message.posted ? "Posted" : "Stopped", message.posted ? "good" : "bad", message.message || "")
       resume?.()
+      // (The worker learns that this page heard it.)
+      reply({ heard: true })
     }
   })
 
@@ -158,7 +164,18 @@ void (async () => {
       await rf.report({ step: "ready", detail: `Not pressed: ${why}` })
     }
     if (cannot) return stay(cannot)
+    // While ReelForge is asked, this page holds a line open to the worker. The browser closes it when the page goes
+    // (reloaded, taken to another page, or its tab closed), even before the next page has loaded, and a yes that comes
+    // after that is clicked by nobody: the worker ends the post as "not sure" at once, with words that say Post was
+    // not pressed.
+    let line = null
+    try {
+      line = chrome.runtime.connect({ name: "rf-press" })
+    } catch {
+      // The extension was reloaded or removed under this page: rf.send finds that out.
+    }
     const grant = await rf.send({ t: "job.press" })
+    line?.disconnect()
     // Stopped while ReelForge was being asked: with the popup's Stop, or ended in ReelForge. Whatever the answer
     // says, nothing is clicked and nobody is asked to press. The worker answers no to a stopped job, and its
     // word on why comes with the stop (if the stop has not reached this page yet, the note says Stopped meanwhile).

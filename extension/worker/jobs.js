@@ -238,13 +238,26 @@ function unsure(job) {
 }
 
 // `posted`: the job is over because ReelForge has the post as up, which the note says in place of "Stopped".
+// True when the page in the tab heard it.
 async function stopTab(job, message, posted = false) {
-  if (job.tabId == null) return
+  if (job.tabId == null) return false
   try {
-    await chrome.tabs.sendMessage(job.tabId, { t: "stop", message, posted })
+    return Boolean(await chrome.tabs.sendMessage(job.tabId, { t: "stop", message, posted }))
   } catch {
-    // No script is listening there: the tab is closed or showing another page.
+    // No script is listening there: the tab is closed, showing another page, or a new page has not loaded yet.
+    return false
   }
+}
+
+// Words for the page in a job's tab that no script of this extension was on to hear them (a new page still loading).
+// They are kept, and that page is given a script once it has loaded, if it is on the job's own platform: its hello is
+// answered with the words, once (tabHello). Called inside the job's lock, with the job as it is kept now.
+async function tellNext(job, message) {
+  await save({ ...job, untold: message })
+  const now = await chrome.tabs.get(job.tabId).catch(() => null)
+  if (!now || (now.url && !allowedPage(job.platform, now.url))) return
+  // (Not waited for: the browser puts the scripts in when the page is far enough along, which can take seconds.)
+  chrome.scripting.executeScript({ target: { tabId: job.tabId }, files: SCRIPTS(job.platform) }).catch(() => {})
 }
 
 // ---- reporting ---------------------------------------------------------------------------------------------
@@ -493,7 +506,8 @@ async function pressSwitch(platform) {
 // and so does a page that is not on the job's own platform: the answer carries the job's text.
 export async function tabHello(tabId, url) {
   const held = await jobOfTab(tabId)
-  if (!held || !allowedPage(held.platform, url)) return { ok: false }
+  if (!held) return untold(tabId, url)
+  if (!allowedPage(held.platform, url)) return { ok: false }
   const job = await locked(held.id, async () => {
     const fresh = await getJob(held.id)
     if (!fresh || !isLive(fresh)) return null
@@ -522,6 +536,19 @@ export async function tabHello(tabId, url) {
       press: job.press && !job.pressAsked && await pressSwitch(job.platform),
     },
   }
+}
+
+// A page whose post ended while it was loading, with words kept for it (tellNext): it shows them, and does nothing else.
+async function untold(tabId, url) {
+  const ended = await jobOfTabEver(tabId)
+  if (!ended?.untold || isLive(ended) || !allowedPage(ended.platform, url)) return { ok: false }
+  const message = await locked(ended.id, async () => {
+    const fresh = await getJob(ended.id)
+    if (!fresh?.untold) return null
+    await save({ ...fresh, untold: null })
+    return fresh.untold
+  })
+  return message ? { ok: false, stop: { message, posted: false } } : { ok: false }
 }
 
 async function patchLive(tabId, change) {
@@ -607,7 +634,7 @@ export async function tabPress(tabId) {
   if (first === "lost") return no("press_lost", LOST)
   if (first === "asked" && pressing.has(job.id)) return pressing.get(job.id)
   // "asked", and nobody here is waiting for it: this worker was stopped after it asked, and the answer is lost.
-  const work = askPress(job, first === "asked")
+  const work = askPress(job, first === "asked", lines.get(tabId))
   pressing.set(job.id, work)
   try {
     return await work
@@ -619,7 +646,36 @@ export async function tabPress(tabId) {
 // (ReelForge was asked, and can't be reached now: its answer may be late, cut off, or it may have been closed.)
 const LOST = "its answer did not come back, and it is not answering now (it may have been closed), so nothing was clicked."
 
-async function askPress(job, asked) {
+// The page asking for the press holds a line open to the worker while it asks (platform/run.js), by tab. The browser
+// closes that line when the page goes: reloaded, taken to another page, put away in the back-forward cache, or its
+// tab closed. It is not closed when the page only changes its own address, as a page's own script may: that page is
+// still there. Kept in memory only: a worker stopped meanwhile has lost the press request too.
+const lines = new Map()
+
+function pressLine(port) {
+  const tabId = port.sender.tab.id
+  const line = { gone: false }
+  lines.set(tabId, line)
+  port.onDisconnect.addListener(() => {
+    // Known here at once, so a yes taken after this sees it, whatever is still on its way to the job's record.
+    line.gone = true
+    pageLeft(tabId).catch(() => {})
+  })
+}
+
+// The page that asked for the press is gone, and ReelForge has not answered yet. Nothing will click for a yes that
+// comes now: askPress ends the post as "not sure" at once, with words that say Post was not pressed. (Once its
+// answer is in, the page had it, and the line's end changes nothing.)
+async function pageLeft(tabId) {
+  const held = await jobOfTab(tabId)
+  if (!held) return
+  await locked(held.id, async () => {
+    const fresh = await getJob(held.id)
+    if (fresh && isLive(fresh) && pressOpen(fresh) && !fresh.pressAnswer) await save({ ...fresh, pressPageGone: true })
+  })
+}
+
+async function askPress(job, asked, line = null) {
   const no = (error, message, more = {}) => ({ ok: false, error, message, ...more })
   let res = null
   let lost = asked
@@ -664,13 +720,15 @@ async function askPress(job, asked) {
       const now = { ...fresh, state: "posting", step: "press", progress: null, pressedAt: Date.now(), touched: Date.now(), port: job.port, pressAnswer: answer }
       await save(now)
       await remember(now)
-      if (!fresh.pressPageGone) return { ok: true }
+      if (!fresh.pressPageGone && !line?.gone) return { ok: true }
       // The page that asked is gone (reloaded, or left) and nothing will click for this yes: the post ends now as
       // "not sure", the one way out ReelForge has for a press it granted, with words that say Post was not pressed.
-      // The page there now hears of it, instead of waiting for a sign that can't come.
+      // The page there now hears of it, instead of waiting for a sign that can't come: at once when it has said hello,
+      // else once it has loaded (TikTok's own takes seconds).
       const why = `ReelForge said yes to pressing Post on ${platformName(job.platform)} after its upload page was left, so Post was not pressed.`
       const { job: ended } = await record(job.id, { state: "unknown", error_code: "unknown_outcome", error_message: why })
-      await stopTab(ended || now, `${why} ${advice("unknown_outcome", job.platform)}`)
+      const words = `${why} ${advice("unknown_outcome", job.platform)}`
+      if (!(await stopTab(ended || now, words)) && ended) await tellNext(ended, words)
       await settle()
       return no("stopped", "This post was stopped.", { stopped: true })
     }
@@ -705,7 +763,9 @@ function base64(bytes) {
 // The video goes to the tab one piece per request, over a Port. The tab asks for a piece by its offset, so a
 // worker that was restarted in the middle simply answers the next request.
 export function onConnect(port) {
-  if (port.name !== "rf-file" || port.sender?.id !== chrome.runtime.id || !port.sender.tab) return
+  if (port.sender?.id !== chrome.runtime.id || !port.sender.tab) return
+  if (port.name === "rf-press" && port.sender.frameId === 0) return pressLine(port)
+  if (port.name !== "rf-file") return
   port.onMessage.addListener(async message => {
     let answer
     try {

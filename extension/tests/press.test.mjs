@@ -355,6 +355,53 @@ export const tests = {
     equal([presses(app).length, await tab.evaluate(() => [fixture.clicks, fixture.trustedClicks])], [1, [0, 0]], "press requests, and presses the page saw")
   },
 
+  async "the page reloaded while ReelForge is asked for the press, and its yes comes before the new page has loaded: nothing is clicked, and ReelForge's row says Post was not pressed"({ app, site, browser, video }) {
+    // ReelForge says yes at once and its answer takes a moment to come back. The person reloads TikTok's page in that
+    // moment, and the new page takes its time to load (TikTok's real one takes seconds): here one image of it waits
+    // until the test lets it go, so the new page can't say hello before ReelForge's yes is back.
+    await browser.context.addInitScript(() => {
+      // Every click on Post in this tab, across the reload (the tab keeps its sessionStorage).
+      document.addEventListener("click", event => {
+        if (event.target?.closest?.("[data-e2e=post_video_button]")) sessionStorage.rfClicks = String(Number(sessionStorage.rfClicks || 0) + 1)
+      }, true)
+    })
+    await switchOn(browser, app, "tiktok")
+    const held = holdPress(app, { decided: true })
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("www.tiktok.com")
+    const job = made.jobs[0]
+    await until(() => `the press request (it is ${job.state} ${job.step})`, () => held.arrived, 30000)
+    await until(() => `ReelForge to say yes (it is ${job.state})`, () => job.state === "posting")
+    let loaded
+    const image = new Promise(resolve => (loaded = resolve))
+    await tab.route("https://www.tiktok.com/__slow.png", async route => {
+      await image
+      await route.fulfill({ status: 200, contentType: "image/png", body: Buffer.alloc(0) }).catch(() => {})
+    })
+    const page = site.pages.tiktok.replace("__MODE__", "ok").replace("</body>", '<img src="/__slow.png" alt=""></body>')
+    await tab.route("https://www.tiktok.com/tiktokstudio/upload", route => route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", body: page }))
+    try {
+      await tab.reload({ waitUntil: "commit" })
+      // The page that asked is gone, and the new one has not said hello: the worker knows all the same.
+      await until("the extension to know the page that asked is gone", async () => (await browser.jobRecord(job.id)).pressPageGone === true, 10000)
+      held.release()
+      await until(() => `the job to end (it is ${job.state})`, () => job.state === "unknown", 10000)
+      const said = "ReelForge said yes to pressing Post on TikTok after its upload page was left, so Post was not pressed."
+      equal([job.error_code, job.error_message], ["unknown_outcome", said], "ReelForge's row")
+      const kept = await browser.jobRecord(job.id)
+      equal([kept.state, kept.error_code, kept.error_message], ["unknown", "unknown_outcome", said], "the extension's own record")
+      // The page that is there now hears of it once it has loaded.
+      loaded()
+      await until("the new page to hear of it", async () => (await note(tab))?.line === "Stopped", 15000)
+      const told = await note(tab)
+      ok(told.tone === "bad" && told.more.startsWith(said), `what the note says (${JSON.stringify(told)})`)
+      equal([presses(app).length, await tab.evaluate(() => [Number(sessionStorage.rfClicks || 0), fixture.clicks, fixture.posted])], [1, [0, 0, false]], "press requests, and clicks on Post in the tab across both pages")
+    } finally {
+      loaded()
+    }
+  },
+
   async "the page reloaded while ReelForge is asked for the press, which it then refuses: the page's words say only that Post was not pressed"({ app, browser, video }) {
     // The switch is on in the browser, but this ReelForge has no assisted post on TikTok yet: it will say no. The
     // reloaded page can't know the answer, so its words are true either way.
