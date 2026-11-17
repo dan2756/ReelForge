@@ -235,8 +235,9 @@ _STATS_LINE = re.compile(r"""(?:^|(?<=[.{,]))[ \t]*"""
                          r"""[ \t]*[=:][ \t]*(?P<value>[^\s#,}]*)""", re.M)
 
 
-def _texts(text: str) -> list[tuple[int, int]]:
-    """Where a studio.toml's text has a string or a comment: (where it starts, where it ends). Only a string whose
+def _texts(text: str) -> list[tuple[int, int, bool]]:
+    """Where a studio.toml's text has a string or a comment: (where it starts, where it ends, whether it's a string of
+    several lines). Only a string whose
     quotes are closed is one: one on one line ("...", '...') closed on that line, or one of several lines
     (\"\"\"...\"\"\", '''...''') closed by its own three quotes on any line below (with up to two quotes of its own just
     inside them); in double quotes a backslash keeps the character after it in the string. A quote left open, which
@@ -249,7 +250,7 @@ def _texts(text: str) -> list[tuple[int, int]]:
         if c == "#":
             j = text.find("\n", i)
             j = n if j < 0 else j
-            spans.append((i, j))
+            spans.append((i, j, False))
             i = j
             continue
         if c not in "\"'":
@@ -276,7 +277,7 @@ def _texts(text: str) -> list[tuple[int, int]]:
             left_open[q] = j if len(q) == 1 else n
             i += len(q)
             continue
-        spans.append((i, end))
+        spans.append((i, end, len(q) == 3))
         i = end
     return spans
 
@@ -286,7 +287,10 @@ def _own_background_stats(path: Path) -> bool | None:
     they are and however the key is written (_STATS_LINE): True or False, None when it has no such line. Only a yes
     (S.yes_no: true, yes, on, 1, in any case, quoted or not) is True: a no typed by hand in a form TOML refuses (False,
     no, off) is often the very mistake in the file, and must not leave the answers' yes to decide. Two lines that
-    disagree (one added below the other, or a no in the wrong place: itself a mistake, see S.load) are no yes."""
+    disagree (one added below the other, or a no in the wrong place: itself a mistake, see S.load) are no yes. Words
+    in a text or a comment (_texts) aren't such a line, but for a clear no (S.yes_no) in a string of several lines:
+    three quotes left open by mistake are taken to start one by any three further down, so a no typed between them is
+    still a no, and the hourly read, with your log-ins, isn't turned on against it."""
     try:
         raw = path.read_bytes()
     except OSError:
@@ -296,8 +300,13 @@ def _own_background_stats(path: Path) -> bool | None:
     code = "utf-16" if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8-sig"
     text = raw.decode(code, errors="replace").replace("\r\n", "\n").replace("\r", "\n")
     texts = _texts(text)
-    said = [m["value"] for m in _STATS_LINE.finditer(text)
-            if S.stats_key(m["quoted"] if m["q"] else m["bare"]) and not any(a < m.start() < b for a, b in texts)]
+    said = []
+    for m in _STATS_LINE.finditer(text):
+        if not S.stats_key(m["quoted"] if m["q"] else m["bare"]):
+            continue
+        inside = next((several for a, b, several in texts if a < m.start() < b), None)
+        if inside is None or (inside and S.yes_no(m["value"]) is False):
+            said.append(m["value"])
     return None if not said else all(S.yes_no(v) is True for v in said)
 
 
@@ -627,8 +636,9 @@ def write_all(answers: dict, profile=None, *, account: str = "", again: bool = F
     # The hourly read uses your log-ins, and goes by studio.toml, which invites edits by hand: a no written there stays
     # a no when the saved answers are written out again (after a brief, an edit of the answers, or as the way out of a
     # mistake in the file, S.fix_it), or that would turn the read on again without a word. Answers given now have the
-    # say. A yes written there against the answers' no (given, or kept from the file before) doesn't turn the read on
-    # either, but it doesn't go without a word: it's said, with where it is, the file's copy.
+    # say. A yes in the file (written there by hand, or by default) against the answers' no (given, or kept from the
+    # file before) doesn't turn the read on either, but it doesn't go without a word: the file says no now too, and
+    # where its copy is (with the yes, if one was written in it) is said.
     kept_no = kept_off = False
     if again and not account and w.settings.is_file():
         said = _says(w.settings)
@@ -720,9 +730,9 @@ def write_all(answers: dict, profile=None, *, account: str = "", again: bool = F
                              f"was is in {copy}.")
             if kept_off:
                 notes.append(f"{a['channel_name'].strip()}'s stats aren't read every hour while ReelForge is closed: "
-                             f"its answers say no to that, and its settings file, {w.settings}, was written again from "
-                             f"them, so the yes in it is only in the copy of it as it was, {copy}. To have them read, "
-                             f"say yes to it in its questions: reelforge -p {w.profile.flag} channel")
+                             f"its answers say no to that, so its settings file, {w.settings}, says no now too (a copy "
+                             f"of it as it was is in {copy}). To have them read, say yes to it in its questions: "
+                             f"reelforge -p {w.profile.flag} channel")
             if edit is not None and edit.waited:
                 notes.append(_brought_in(edit.waited, a["channel_name"].strip(), w.settings, copy))
             if edit is not None and edit.text is None:      # its own layout is in the copy alone

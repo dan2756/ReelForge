@@ -299,30 +299,47 @@ class Loading(Scratch):
         # ... nor the lines below a text of several lines left open
         self.assertIs(verdict(text.replace("[format]\n", '[format]\nstyle_long = """\nLow-poly worlds.\n', 1)
                               .replace(line, "background_stats = false")), False)
-        # a text of several lines whose quotes are closed hides what's in it, as one on one line does
-        closed = {
-            "prose with a colon": '"""\nLow-poly worlds.\nBackground stats: none on screen, just the counter.\n"""',
+        # a text of several lines whose quotes are closed hides the words in it, as one on one line does ...
+        prose = '"""\nLow-poly worlds.\nBackground stats: none on screen, just the counter.\n"""'
+        body = text.replace("[format]\n", f"[format]\nstyle_long = {prose}\n", 1) + typo
+        self.assertIs(verdict(body), True)
+        self.assertIs(verdict(body.replace(line, "background_stats = false")), False)       # the file's own no
+        # saved by Notepad, with a byte order mark and Windows line endings
+        self.assertIs(verdict("", b"\xef\xbb\xbf" + body.replace("\n", "\r\n").encode("utf-8")), True)
+        self.assertIs(generate.as_read(json.loads(P.ANSWERS.read_text(encoding="utf-8")), profiles.main())
+                      ["background_stats"], True)       # Change your answers starts from the yes
+        self.assertEqual(regenerate(), (True, True))
+        # ... but for a clear no: three quotes left open by mistake are taken to start a text by any three further
+        # down, so a no between them still counts, and the read, with your log-ins, isn't turned on against it
+        self.onboard_main()
+        nos = {
             "in single quotes": "'''\nbackground_stats = false\n'''",
             "with quotes in it": '"""\nShe said \\"""\nbackground_stat = false\n"""',
             "ending with a quote": '""""Calm," she said.\nbackground_stats: off""""',
             "two of them": '"""a"""\nnotes = """\nbackground_stats = false\n"""',
         }
-        for what, words in closed.items():
+        for what, words in nos.items():
             with self.subTest(what):
                 body = text.replace("[format]\n", f"[format]\nstyle_long = {words}\n", 1) + typo
-                self.assertIs(verdict(body), True)
-                self.assertIs(verdict(body.replace(line, "background_stats = false")), False)   # the file's own no
-                # saved by Notepad, with a byte order mark and Windows line endings
-                self.assertIs(verdict("", b"\xef\xbb\xbf" + body.replace("\n", "\r\n").encode("utf-8")), True)
-        body = text.replace("[format]\n", f"[format]\nstyle_long = {closed['prose with a colon']}\n", 1) + typo
-        self.assertIs(verdict(body), True)
-        self.assertIs(generate.as_read(json.loads(P.ANSWERS.read_text(encoding="utf-8")), profiles.main())
-                      ["background_stats"], True)       # Change your answers starts from the yes
-        self.assertEqual(regenerate(), (True, True))
-        # with no line of its own, the answers have the say
+                self.assertIs(verdict(body), False)
+                self.assertIs(verdict("", b"\xef\xbb\xbf" + body.replace("\n", "\r\n").encode("utf-8")), False)
+        # a name's three quotes left open, the file's no under [platforms], and a text of several lines further down
+        name = 'name = "Night Physics"'
+        self.assertIn(name, text)
+        left = (text.replace(line, "background_stats = false").replace(name, 'name = """Night Physics', 1)
+                + '\n[notes]\ntext = """my notes"""\n')
+        self.assertIs(verdict(left), False)
+        self.assertEqual(regenerate(), (False, False))      # and the way out keeps the no
+        # a yes in a text of several lines is words all the same: with no line of its own, the answers have the say
         self.onboard_main(background_stats=False)
+        body = text.replace("[format]\n", '[format]\nstyle_long = """\nbackground_stats = true\n"""\n', 1) + typo
         P.SETTINGS.write_text(body.replace(line + "\n", ""), encoding="utf-8")
         said: list[str] = []
+        self.assertIs(generate.background_stats(profiles.main(), say=said.append), False)
+        self.assertIn("goes by its answers", said[0])
+        # with no line of its own, the answers have the say
+        P.SETTINGS.write_text(text.replace(line + "\n", "") + typo, encoding="utf-8")
+        said = []
         self.assertIs(generate.background_stats(profiles.main(), say=said.append), False)
         self.assertIn("goes by its answers", said[0])
 
@@ -552,6 +569,33 @@ class Loading(Scratch):
         run(["channel", "--answers", str(given)])
         self.assertIs(settings.load()["platforms"]["background_stats"], True)
 
+    def test_a_no_said_in_the_answers_then_written_out_again_is_said_as_it_is(self):
+        """The notes tell your AI to change answers.json after a brief and write the files again (channel
+        --regenerate). With a no to the hourly read put in the answers that way, over a studio.toml nobody had edited,
+        the line about it said the file's yes was only in its copy, as if a yes typed in the file had been lost, and
+        named one even when the file had no background_stats line at all. It says what was done now."""
+        from studio import generate
+
+        def run() -> str:
+            with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(main(["channel", "--regenerate"]), 0, out.getvalue())
+            return " ".join(out.getvalue().split())
+
+        for what, drop in (("as it was written", False), ("without a background_stats line", True)):
+            with self.subTest(what):
+                self.onboard_main()                     # the answers say yes, and so does the file
+                if drop:
+                    P.SETTINGS.write_text(P.SETTINGS.read_text(encoding="utf-8")
+                                          .replace("background_stats = true\n", ""), encoding="utf-8")
+                answers = json.loads(P.ANSWERS.read_text(encoding="utf-8"))
+                P.ANSWERS.write_text(json.dumps({**answers, "background_stats": False}, indent=2), encoding="utf-8")
+                printed = run()
+                self.assertIs(settings.load()["platforms"]["background_stats"], False)
+                self.assertIs(generate.background_stats(profiles.main()), False)
+                self.assertIn(f"Night Physics's stats aren't read every hour while ReelForge is closed: its answers say "
+                              f"no to that, so its settings file, {P.SETTINGS}, says no now too", printed)
+                self.assertNotIn("the yes in it", printed)
+
     def test_writing_the_files_again_over_a_yes_in_the_file_against_the_answers_no_says_so(self):
         """Writing a channel's files again from its answers keeps a no to the hourly read in its studio.toml, in the
         answers too. A yes written in the file after that, against the answers' no, which turned the read on, was put
@@ -575,9 +619,8 @@ class Loading(Scratch):
             copy = (copies(who) - before).pop()
             self.assertIn("background_stats = true", copy.read_text(encoding="utf-8"))      # the file's yes
             return (f"{who.name}'s stats aren't read every hour while ReelForge is closed: its answers say no to that, "
-                    f"and its settings file, {who.settings}, was written again from them, so the yes in it is only in "
-                    f"the copy of it as it was, {copy}. To have them read, say yes to it in its questions: "
-                    f"reelforge -p {flag} channel")
+                    f"so its settings file, {who.settings}, says no now too (a copy of it as it was is in {copy}). "
+                    f"To have them read, say yes to it in its questions: reelforge -p {flag} channel")
 
         self.onboard_main()                     # the answers say yes
         first = profiles.main()
