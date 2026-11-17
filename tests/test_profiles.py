@@ -434,6 +434,13 @@ class Job(Scratch):
         # a no added below the yes: two lines for one thing, which is itself what TOML refuses
         check(text.replace("background_stats = true", "background_stats = true\nbackground_stats = false"), False,
               "whether its stats are read every hour goes by its background_stats line")
+        # a no typed in a form TOML refuses is often the mistake itself: it is still a no, never the answers' yes
+        for no in ("False", "FALSE", "no", "off", "'false'", "", "nope   # I don't want it"):
+            check(text.replace("background_stats = true", f"background_stats = {no}"), False,
+                  "whether its stats are read every hour goes by its background_stats line")
+        for yes in ("True", "yes", "On", '"true"'):
+            check(text.replace("background_stats = true", f"background_stats = {yes}"), True,
+                  "whether its stats are read every hour goes by its background_stats line")
         without = text.replace("background_stats = true\n", "")
         check(without, True, "whether its stats are read every hour goes by its answers")
         main.answers.write_text(main.answers.read_text(encoding="utf-8").rstrip().rstrip("}") + ",}\n",

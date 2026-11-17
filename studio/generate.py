@@ -223,14 +223,17 @@ def _answered(p) -> dict | None:
 
 def _own_background_stats(path: Path) -> bool | None:
     """What a studio.toml that can't be read says about the hourly read in its own background_stats line: True or
-    False, None when it has no such line. Two lines that disagree (one added below the other: itself a mistake TOML
-    refuses) are no yes."""
+    False, None when it has no such line. Only a yes (true, yes or on, in any case, quoted or not) is True: a no typed
+    by hand in a form TOML refuses (False, no, off, "false") is often the very mistake in the file, and must not leave
+    the answers' yes to decide. Two lines that disagree (one added below the other: itself a mistake TOML refuses)
+    are no yes."""
     try:
-        said = set(re.findall(r"^[ \t]*background_stats[ \t]*=[ \t]*(true|false)[ \t]*(?:#.*)?$",
-                              path.read_text(encoding="utf-8-sig", errors="replace"), re.M))
+        said = {v.strip("\"'").lower() for v in re.findall(r"^[ \t]*background_stats[ \t]*=[ \t]*([^\s#]*)",
+                                                            path.read_text(encoding="utf-8-sig", errors="replace"),
+                                                            re.M)}
     except OSError:
         return None
-    return None if not said else said == {"true"}
+    return None if not said else said <= {"true", "yes", "on"}
 
 
 def background_stats(p, say=None) -> bool:
