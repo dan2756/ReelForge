@@ -14,7 +14,8 @@
   reelforge profiles delete NAME [--yes]
                                take one you added out of ReelForge: its folder moves whole into backups/
   reelforge profiles restore [NAME]    bring a deleted one back (with no name: the deleted ones)
-  reelforge -p NAME ...        any command, for one profile: its name, the start of it, or its number in the list
+  reelforge -p NAME ...        any command, for one profile: its name, the start of it, its number in the list, or
+                               its folder (profiles/NAME)
                                (the window opens on the one you had open last; everything else works on the first)
 
   reelforge setup [--yes]      set up or repair: Blender, ffmpeg, the sounds, the reelforge command, then your channel
@@ -181,7 +182,7 @@ def onboard(argv: list[str], *, preserve_settings: bool = False, only: profiles.
             return 1
         _print_written(written)
         if target is not None:
-            print(f"\nNew profile: {target.name} ({target.describe()}). Open it with: reelforge -p {target.slug}")
+            print(f"\nNew profile: {target.name} ({target.describe()}). Open it with: reelforge -p {target.flag}")
         if not args.regenerate:
             print("\n" + apply_background_stats())
         print(next_steps(target, again))
@@ -246,7 +247,7 @@ def regenerate(*, preserve_settings: bool = False, only: profiles.Profile | None
             # Said with the rest at the end, not only printed now: an update passes on what's said (SAID) and
             # nothing else, and with another channel's notes written it doesn't fail, so this was heard nowhere.
             why = str(e).replace(":\n  ", ": ").replace("\n  ", "; ")
-            again = (f"reelforge -p {'1' if p.main else p.folder.name} channel --regenerate"
+            again = (f"reelforge -p {p.flag} channel --regenerate"
                      + (" --preserve-settings" if preserve_settings else ""))
             what = "notes for your AI" if preserve_settings else "files"
             said.append(f"{p.name}'s {what} couldn't be written again ({why}). Once that's put right, run: {again}")
@@ -403,7 +404,7 @@ def restore_profile(argv: list[str]) -> int:
     from . import generate
 
     generate.write_guides(profiles.main(), saved_settings=True, say=print)   # your AI's notes list it again
-    print(f"{p.name} is back ({p.describe()}), as it was. Open it with: reelforge -p {p.slug}")
+    print(f"{p.name} is back ({p.describe()}), as it was. Open it with: reelforge -p {p.flag}")
     return 0
 
 

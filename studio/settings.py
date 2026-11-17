@@ -92,13 +92,13 @@ def _merge(base: dict, over: dict) -> dict:
 
 def fix_it(path: Path) -> str:
     """How to put right a channel's studio.toml with a mistake in it: by hand, then its notes for your AI again from
-    it, or the file again from the channel's answers. Both commands name the channel (-p: 1 is the first, whose name
-    can't be read from the file meanwhile, another its folder), so the other channels' settings and notes are left as
-    they are, and the second keeps a copy of the file first (generate.write_all)."""
+    it, or the file again from the channel's answers. Both commands name the channel (-p: Profile.flag, 1 for the
+    first, whose name can't be read from the file meanwhile, profiles/<folder> for another, which no other channel
+    answers to), so the other channels' settings and notes are left as they are, and the second keeps a copy of the
+    file first (generate.write_all)."""
     from . import profiles
 
-    p = profiles.of(path)
-    who = "1" if p.main else p.folder.name
+    who = profiles.of(path).flag
     return (f"Fix it in a text editor, then run reelforge -p {who} channel --regenerate --preserve-settings so your "
             "AI's notes follow it. Or write it again from your answers, keeping a copy of it as it is, with: "
             f"reelforge -p {who} channel --regenerate")

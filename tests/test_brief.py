@@ -75,7 +75,7 @@ class Brief(unittest.TestCase):
         self.assertIn("copy it into\n     `profiles/cool-epic-facts/my-studio/backups/` first", notes)
         self.assertIn("- its settings, brief and channel bible: `profiles/cool-epic-facts/my-studio/`", notes)
         self.assertIn("**Brief:** `profiles/cool-epic-facts/my-studio/brief.md`", p.bible.read_text(encoding="utf-8"))
-        self.assertIn("-m studio -p cool-epic-facts channel --regenerate`", notes)   # not every channel's
+        self.assertIn("-m studio -p profiles/cool-epic-facts channel --regenerate`", notes)   # not every channel's
         # the first channel's notes send a file about another channel to that channel's notes
         self.assertIn("A file or a description of\none of them is that channel's brief", self.notes(self.root))
 

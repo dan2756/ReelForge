@@ -513,11 +513,11 @@ class AfterTest(unittest.TestCase):
         self.assertEqual(len(notes), 2, notes)
         quiet_line, tiny_line = sorted(notes)
         self.assertTrue(quiet_line.startswith("Quiet One's notes for your AI couldn't be written again ("), notes)
-        self.assertTrue(quiet_line.endswith("). Once that's put right, run: reelforge -p quiet-one channel "
+        self.assertTrue(quiet_line.endswith("). Once that's put right, run: reelforge -p profiles/quiet-one channel "
                                             "--regenerate --preserve-settings"), notes)
         self.assertEqual(tiny_line, "Tiny Worlds's notes for your AI couldn't be written again (its answers need "
                                     "fixing first: cadence: pick one of: 2/day, 1/day, 3/week, 1/week, ask). Once "
-                                    "that's put right, run: reelforge -p tiny-worlds channel --regenerate "
+                                    "that's put right, run: reelforge -p profiles/tiny-worlds channel --regenerate "
                                     "--preserve-settings")
         self.assertEqual(summary, " ".join(["Updated ReelForge from 1.0.0 to 1.1.0.", *notes]))
         self.assertEqual(logged, [])        # the first channel's notes were written: the run itself went through

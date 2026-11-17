@@ -86,6 +86,15 @@ class Profile:
         return slug_for(self.name) if self.main else self.folder.name
 
     @property
+    def flag(self) -> str:
+        """What a command ReelForge writes out for you or your AI to run puts after -p: 1 for the first profile (always
+        first in the list), another's key, profiles/<folder>. Its folder's name alone can find another profile (find):
+        all digits it is a number in the list (-p 3 is the third, whatever its folder), and "Night Physics 🌙"'s
+        folder, night-physics, is the short name of a first channel called "Night Physics", which comes first; the
+        first one can be renamed so after its notes are written, too. A word with a / in it is only ever a folder."""
+        return "1" if self.main else self.key
+
+    @property
     def name(self) -> str:
         """The channel's name: from its onboarding settings, else from profile.toml (or, for the first profile, the
         name older versions kept in the dashboard's config.toml)."""

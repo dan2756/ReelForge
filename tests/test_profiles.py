@@ -170,7 +170,7 @@ class Onboarding(Scratch):
         notes = (a.folder / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertIn("one of several channels in this ReelForge folder", notes)
         self.assertIn(f"profiles{os.sep}cool-epic-facts{os.sep}episodes{os.sep}<id>", notes)
-        self.assertIn("-m studio -p cool-epic-facts new-episode <slug>", notes)
+        self.assertIn("-m studio -p profiles/cool-epic-facts new-episode <slug>", notes)
         self.assertIn("`profiles/cool-epic-facts/completed videos/production-log.md`", notes)
         self.assertNotIn(".claude", [p.name for p in a.folder.iterdir()])
         claude = (self.root / "CLAUDE.md").read_text(encoding="utf-8")
@@ -749,49 +749,69 @@ class Deleting(Scratch):
     def test_the_way_out_a_mistake_gives_is_for_that_channel_alone_and_keeps_a_copy(self):
         """Every line about a channel's settings file with a mistake in it ended "write it again from your answers
         with: reelforge channel --regenerate", which wrote every channel's studio.toml again from its answers and kept
-        no copy: what was edited by hand in the other channels went too, and the file with the mistake in it with it."""
+        no copy: what was edited by hand in the other channels went too, and the file with the mistake in it with it.
+        Then it named an added channel by its folder's name, which can find another channel: "Night Physics 🌙"'s
+        folder, night-physics, is the first channel's short name, and a folder called 3 is the third in the list."""
         import re
 
         from studio.__main__ import main
 
-        self.onboard_main()
-        quiet = profiles.create("Quiet One")
-        with redirect_stdout(io.StringIO()):
-            generate.write_all({**ANSWERS, "channel_name": "Quiet One"}, quiet)
-        mine = self.root / "my-studio" / "studio.toml"
-        for broken, other, who in ((quiet.settings, mine, "quiet-one"), (mine, quiet.settings, "1")):
-            with self.subTest(broken=broken):
-                for f in (broken, other):   # each edited by hand, which the answers don't know of
+        self.onboard_main()                              # "Night Physics"
+        added = []
+        for name in ("3", "4", "Night Physics 🌙"):      # in the list: 1 Night Physics, 2 "3", 3 "4", 4 the moon one
+            added.append(profiles.create(name))
+            with redirect_stdout(io.StringIO()):
+                generate.write_all({**ANSWERS, "channel_name": name}, added[-1])
+        self.assertEqual([p.folder.name for p in profiles.extra()], ["3", "4", "night-physics"])
+        everyone = [profiles.main(), *added]
+        for broken_p in everyone:
+            broken, who = broken_p.settings, "1" if broken_p.main else f"profiles/{broken_p.folder.name}"
+            others = [p.settings for p in everyone if p != broken_p]
+            with self.subTest(broken=broken_p.name):
+                for f in (broken, *others):   # each edited by hand, which the answers don't know of
                     f.write_text(re.sub(r"max_seconds = .*", "max_seconds = 90.0", f.read_text(encoding="utf-8")),
                                  encoding="utf-8")
-                edited, typo = other.read_text(encoding="utf-8"), broken.read_text(encoding="utf-8") + "\nx = = 1\n"
+                edited = {f: f.read_text(encoding="utf-8") for f in others}
+                typo = broken.read_text(encoding="utf-8") + "\nx = = 1\n"
                 broken.write_text(typo, encoding="utf-8")
                 said: list[str] = []
                 generate.write_guides(profiles.main(), saved_settings=True, say=said.append)
                 with self.assertRaises(S.SettingsError) as raised:
                     S.load(broken)
-                for line in (said[0], str(raised.exception)):    # the two say the same, and name that channel
-                    self.assertEqual(re.findall(r"reelforge [-\w ]+", line),
-                                     [f"reelforge -p {who} channel --regenerate --preserve-settings so your AI",
-                                      f"reelforge -p {who} channel --regenerate"], line)
-                    self.assertIn("keeping a copy of it as it is", line)
-                before = {p: sorted(p.my_studio.joinpath("backups").glob("studio.*")) for p in (profiles.main(), quiet)}
-                for argv in (["-p", who, "channel", "--regenerate", "--preserve-settings"],
-                             ["-p", who, "channel", "--regenerate"]):
+                self.assertEqual(len(said), 1, said)
+                word = re.search(r"reelforge -p (\S+) channel --regenerate$", said[0]).group(1)   # as written
+                self.assertEqual(profiles.find(word), broken_p, word)
+                before = {p: sorted(p.my_studio.joinpath("backups").glob("studio.*")) for p in everyone}
+                for argv in (["-p", word, "channel", "--regenerate", "--preserve-settings"],
+                             ["-p", word, "channel", "--regenerate"]):
                     with redirect_stdout(io.StringIO()) as out:
                         self.assertEqual(main(argv), 0, out.getvalue())
-                    self.assertEqual(other.read_text(encoding="utf-8"), edited, argv)   # the other channel's alone
+                    # the other channels' alone
+                    self.assertEqual({f: f.read_text(encoding="utf-8") for f in others}, edited, argv)
                 self.assertEqual(S.load(broken)["video"]["max_seconds"], 75.0)          # from the answers, then
-                mine_p = profiles.of(broken)
-                copies = sorted(mine_p.my_studio.joinpath("backups").glob("studio.*"))
-                self.assertEqual(len(copies), len(before[mine_p]) + 1, copies)
-                copy = next(c for c in copies if c not in before[mine_p])
+                copies = sorted(broken_p.my_studio.joinpath("backups").glob("studio.*"))
+                self.assertEqual(len(copies), len(before[broken_p]) + 1, copies)
+                copy = next(c for c in copies if c not in before[broken_p])
                 self.assertEqual(copy.read_text(encoding="utf-8"), typo)               # as it was, mistake and all
                 self.assertIn(f"settings file, {broken}, had a mistake in it (", out.getvalue())
                 self.assertIn(f"so it was written again from your answers. A copy of it as it was is in {copy}.",
                               out.getvalue())
-                theirs = profiles.of(other)
-                self.assertEqual(sorted(theirs.my_studio.joinpath("backups").glob("studio.*")), before[theirs])
+                for theirs in everyone:
+                    if theirs != broken_p:
+                        self.assertEqual(sorted(theirs.my_studio.joinpath("backups").glob("studio.*")),
+                                         before[theirs])
+                for line in (said[0], str(raised.exception)):    # the two say the same, and name that channel
+                    self.assertEqual(re.findall(r"reelforge [-\w/ ]+", line),
+                                     [f"reelforge -p {who} channel --regenerate --preserve-settings so your AI",
+                                      f"reelforge -p {who} channel --regenerate"], line)
+                    self.assertIn("keeping a copy of it as it is", line)
+        # and what an added channel's notes tell its AI to run after a brief changes its answers is for it alone
+        for p in added:
+            with self.subTest(notes=p.name):
+                notes = (p.folder / "CLAUDE.md").read_text(encoding="utf-8")
+                cmd = re.findall(r"-m studio -p (\S+) channel --regenerate`", notes)
+                self.assertEqual(cmd, [f"profiles/{p.folder.name}"])
+                self.assertEqual(profiles.find(cmd[0]), p)
 
     def test_connect_with_a_mistake_in_the_settings_leaves_your_ais_notes_and_the_way_out_brings_them_back(self):
         """Connect with a typo in studio.toml wrote your AI's notes and the channel bible from the first-time answers,
@@ -808,7 +828,7 @@ class Deleting(Scratch):
         quiet = profiles.create("Quiet One")
         with redirect_stdout(io.StringIO()):
             generate.write_all({**ANSWERS, "channel_name": "Quiet One"}, quiet)
-        for p, who in ((profiles.main(), "1"), (quiet, "quiet-one")):
+        for p, who in ((profiles.main(), "1"), (quiet, "profiles/quiet-one")):
             with self.subTest(channel=p.name):
                 profiles.use(p)
                 good = p.settings.read_text(encoding="utf-8").replace("max_seconds = 75.0", "max_seconds = 90.0")

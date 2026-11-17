@@ -101,7 +101,7 @@ class YouTubeApiRow(Scratch):
         self.assertEqual(status, doctor.WARN)
         self.assertEqual(said, f"{Path('profiles') / 'cool-epic-facts' / 'dashboard' / 'data' / 'youtube_api.json'} "
                                "can't be read, so ReelForge has no client there. Give it the client file again: "
-                               "reelforge -p cool-epic-facts youtube-api client FILE")
+                               "reelforge -p profiles/cool-epic-facts youtube-api client FILE")
         # The command as it is printed, with the file: the warning goes, and the first channel has no file still.
         from studio.__main__ import main
 
@@ -120,8 +120,8 @@ class YouTubeApiRow(Scratch):
         said = self.row()[2]
         first, second = Path("dashboard") / "data" / "youtube_api.json", Path("profiles") / "cool-epic-facts"
         self.assertIn(f"{first}, {second}", said)
-        self.assertTrue(said.endswith("again: reelforge -p night-physics youtube-api client FILE and reelforge -p "
-                                      "cool-epic-facts youtube-api client FILE"), said)
+        self.assertTrue(said.endswith("again: reelforge -p 1 youtube-api client FILE and reelforge -p "
+                                      "profiles/cool-epic-facts youtube-api client FILE"), said)
 
     def test_whatever_else_goes_wrong_is_a_warning_without_the_errors_own_words(self):
         self.give_client()

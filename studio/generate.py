@@ -357,13 +357,14 @@ def context(a: dict, s: dict, assistant: str, profile=None, notes: list[str] | N
         "py": P.venv_python(), "sep": sep, "win": win,
         "app_cmd": "reelforge",
         "onboard_cmd": ("reelforge channel, or " + ("channel.bat" if win else "./channel.sh")) if profile.main else
-                       f"reelforge -p {profile.folder.name} channel, or its Settings in ReelForge's profile menu",
+                       f"reelforge -p {profile.flag} channel, or its Settings in ReelForge's profile menu",
         "dims": "1080×1920",
-        # another channel's notes: its files are in its folder (here), and every command runs from the ReelForge folder
+        # another channel's notes: its files are in its folder (here), and every command runs from the ReelForge folder,
+        # with -p naming it by profiles/<folder> (Profile.flag): its folder's name alone can find another channel
         "extra": not profile.main, "here": here, "here_cmd": here.replace("/", sep), "main_name": profiles.main().name,
-        "pflag": "" if profile.main else f" -p {profile.folder.name}",
+        "pflag": "" if profile.main else f" -p {profile.flag}",
         # this channel's alone, the first one's too: without -p, --regenerate writes every channel's files again
-        "only": " -p 1" if profile.main else f" -p {profile.folder.name}",
+        "only": f" -p {profile.flag}",
         "channels": channels,   # the first channel's notes: the others in this folder
         "notes_file": "AGENTS.md" if assistant == "codex" else "CLAUDE.md",
     }
