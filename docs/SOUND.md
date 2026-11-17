@@ -61,9 +61,14 @@ length and listen for noise before you rely on it.
 An update brings the kit's new list and keeps what is yours in the one you have: the sounds and licence notes you
 added, anything else you put in it, and any entry you changed. It tells them from the kit's own by the kit's list as
 the last update (or first-time setup) put it in place, which it keeps beside yours as `assets/sfx/.kit-manifest.json`:
-an entry that is the same as there is the kit's, and the kit's new one replaces it (or, where the new list no longer
-has it, it goes; one you changed stays). A sound of yours by a name the new list also uses stays yours, and the
-update says so when it is done: give yours another name, in your cue sheets too, to have both.
+an entry that is the same as there is the kit's, and the kit's new one replaces it. A sound of yours by a name the new
+list also uses stays yours, and the update says so when it is done: give yours another name, in your cue sheets too,
+to have both.
+
+Where the new list no longer has one of the kit's own (one you changed stays), a sound whose file is on your computer
+(in `assets/sfx/`, or its converted copy in `assets/sfx/_cache/`) stays too, so cue sheets that use it go on mixing
+it. Any other goes, after a copy of your list goes to `backups/sounds-before-update-<date>.json`, and the update names
+it and the copy: a cue sheet that uses it needs another sound.
 
 The first update that keeps that record can't tell yet. There the new list's entries go in, a copy of your list as it
 was goes to `backups/sounds-before-update-<date>.json` first, and the update names the entries it replaced: put back

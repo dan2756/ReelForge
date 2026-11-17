@@ -229,18 +229,49 @@ class InstallTest(unittest.TestCase):
                                "assets/sfx/manifest.json had by those names. If any of it was yours, your list as it "
                                f"was is in backups/{copy.name}.")
 
-    def test_a_sound_the_new_version_takes_out_of_its_list_goes_unless_you_changed_it(self):
+    def test_a_sound_the_new_version_takes_out_of_its_list_goes_unless_you_changed_it_or_its_file_is_here(self):
         """The kit's own entries follow the kit, but one it took out of its list stayed in yours for good: setup went
-        on trying to download a sound the kit had withdrawn."""
+        on trying to download a sound the kit had withdrawn. Then it went without a word or a copy, also when its file
+        was on this computer: a cue sheet of yours that used it stopped on "the cue sheet names sounds that aren't in
+        assets/sfx/manifest.json", with nothing to say why."""
         zap = {"file": "mixkit/mixkit_7.wav", "source": "mixkit", "id": 7}
         ding = {"file": "mixkit/mixkit_8.wav", "source": "mixkit", "id": 8}
+        rumble = {"file": "mixkit/mixkit_5.wav", "source": "mixkit", "id": 5}
+        thud = {"file": "mixkit/mixkit_6.wav", "source": "mixkit", "id": 6}
         old_kit = {**self.OLD_KIT, "_licenses": {"kenney": "CC0", "mixkit": "Mixkit"},
-                   "sounds": {**self.OLD_KIT["sounds"], "zap": zap, "ding": ding}}
+                   "sounds": {**self.OLD_KIT["sounds"], "zap": zap, "ding": ding, "rumble": rumble, "thud": thud}}
         yours = {**old_kit, "sounds": {**old_kit["sounds"], "ding": {**ding, "title": "the one in my outros"}}}
-        now, said = self.sounds_update(yours, self.NEW_KIT, record=old_kit)
-        self.assertEqual(now["sounds"], {**self.NEW_KIT["sounds"], "ding": yours["sounds"]["ding"]})  # zap: gone
+        before = json.dumps(yours, indent=2).encode("utf-8")
+        now, said = self.sounds_update(yours, self.NEW_KIT, record=old_kit,
+                                       files_here=("mixkit/mixkit_5.wav", "_cache/thud.wav"))
+        # zap goes; ding is yours; rumble's file and thud's converted copy are here, so cue sheets still mix them
+        self.assertEqual(now["sounds"], {**self.NEW_KIT["sounds"], "ding": yours["sounds"]["ding"], "rumble": rumble,
+                                         "thud": thud})
         self.assertEqual(now["_licenses"], self.NEW_KIT["_licenses"])
-        self.assertEqual(said, "Updated ReelForge from 1.0.0 to 1.1.0.")
+        [copy] = (self.root / "backups").glob("sounds-before-update-*.json")
+        self.assertEqual(copy.read_bytes(), before)
+        self.assertEqual(said, 'Updated ReelForge from 1.0.0 to 1.1.0. The new version no longer has sound "zap", and '
+                               'licence note "mixkit", so they were taken out of your assets/sfx/manifest.json too: a '
+                               "cue sheet of yours that uses them needs another. Your list as it was is in "
+                               f"backups/{copy.name}.")
+        # With nowhere to keep a copy first, they stay, and the record still has them as the kit's: the next update
+        # takes them out, with a copy then.
+        shutil.rmtree(self.root / "backups")
+        (self.root / "backups").write_text("a file, not a folder", encoding="utf-8")
+        now, said = self.sounds_update(yours, self.NEW_KIT, record=old_kit, recorded=False,
+                                       files_here=("mixkit/mixkit_5.wav", "_cache/thud.wav"))
+        self.assertEqual(now["sounds"]["zap"], zap)
+        self.assertEqual(now["_licenses"]["mixkit"], "Mixkit")
+        self.assertEqual(said, 'Updated ReelForge from 1.0.0 to 1.1.0. Your assets/sfx/manifest.json keeps sound '
+                               '"zap", and licence note "mixkit", which the new version no longer has: ReelForge '
+                               "couldn't keep a copy of your list in backups/ before taking them out.")
+        (self.root / "backups").unlink()
+        now, said = self.sounds_update(now, self.NEW_KIT,
+                                       record=json.loads((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8")),
+                                       files_here=("mixkit/mixkit_5.wav", "_cache/thud.wav"))
+        self.assertNotIn("zap", now["sounds"])
+        self.assertNotIn("mixkit", now["_licenses"])
+        self.assertIn('The new version no longer has sound "zap", and licence note "mixkit"', said)
 
     def test_a_list_of_yours_that_cant_be_read_is_kept_in_backups_before_the_new_one_takes_its_place(self):
         """A comma after the last entry you added (your mixes already stop on it): the new list went over yours with

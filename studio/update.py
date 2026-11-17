@@ -348,12 +348,15 @@ def _named(items: list[tuple[str, str]]) -> str:
     return groups[0] if len(groups) == 1 else ", ".join(groups[:-1]) + ", and " + groups[-1]
 
 
-def _merge_sounds(theirs: dict, mine: dict, was: dict | None, keep_unknown: bool):
+def _merge_sounds(theirs: dict, mine: dict, was: dict | None, keep_unknown: bool,
+                  on_disk: Callable[[str, object], bool] = lambda name, entry: False):
     """The new list with what is yours in mine, and which of yours by a name the new list also has were kept and which
-    replaced. was: the kit's list as it was (None: no record of it), which tells your entries from the kit's own:
-    one that is the same as there is the kit's, and its new one goes in, or none, where the new list no longer has
-    it. With no record, keep_unknown says which goes in."""
-    out, kept, replaced = dict(theirs), [], []
+    replaced, and which of the kit's own the new list no longer has were taken out. was: the kit's list as it was
+    (None: no record of it), which tells your entries from the kit's own: one that is the same as there is the kit's,
+    and its new one goes in, or none, where the new list no longer has it. With no record, keep_unknown says which
+    goes in; it also keeps the kit's own that it took out, still named as taken out (nowhere to keep a copy of your
+    list first). on_disk: whether a sound's file is on this computer (a sound the kit took out stays while it is)."""
+    out, kept, replaced, dropped = dict(theirs), [], [], []
     for key, value in mine.items():
         if key in TABLES and not (isinstance(value, dict) and isinstance(out.get(key), dict)):
             if value != out.get(key):
@@ -366,8 +369,17 @@ def _merge_sounds(theirs: dict, mine: dict, was: dict | None, keep_unknown: bool
         for name, entry in (value.items() if kind else [(key, value)]):
             if name not in table:
                 if before is not None and name in before and before[name] == entry:
-                    continue        # the kit's own, which it has taken out of its list since (a sound withdrawn
-                                    # from Mixkit, say, that setup would go on trying to download): it goes
+                    # The kit's own, which it has taken out of its list since: a sound withdrawn from Mixkit, say,
+                    # that setup would go on trying to download. While its file is here, nothing is downloaded and
+                    # a cue sheet of yours that uses it goes on mixing it, so it stays; otherwise it goes, and is
+                    # named (a licence note too), unless your list can't be copied first.
+                    if kind == "sounds" and on_disk(name, entry):
+                        table[name] = entry
+                    elif kind:
+                        dropped.append((kind, name))
+                        if keep_unknown:
+                            table[name] = entry
+                    continue
                 table[name] = entry                          # yours, or one the kit took out that you had changed
             elif table[name] == entry or (before is not None and name in before and before[name] == entry):
                 continue                                     # the kit's own, as it put it there: its new one goes in
@@ -378,7 +390,7 @@ def _merge_sounds(theirs: dict, mine: dict, was: dict | None, keep_unknown: bool
                 replaced.append((kind, name))
         if kind:
             out[key] = table
-    return out, kept, replaced
+    return out, kept, replaced, dropped
 
 
 def _backup_sounds(yours: Path, root: Path) -> str:
@@ -412,8 +424,9 @@ def _with_your_sounds(new: Path, yours: Path, root: Path) -> tuple[bytes | None,
     added or changed, which the kit's list as it was (KIT_SOUNDS) tells from the kit's own. Yours stays and is
     named: a cue sheet of yours that uses it goes on mixing your sound, and nothing is lost. With no record of the
     kit's list as it was (the first update that keeps one), the new list's entry goes in, after a copy of your list
-    is kept in backups/, and the entries it replaced are named. None for the list: there is nothing of yours to carry
-    over, or yours can't be read and a copy of it is in backups/, so the new file goes in as it is.
+    is kept in backups/, and the entries it replaced are named. The kit's own that the new list no longer has go too,
+    after a copy, and are named, except a sound whose file is on this computer. None for the list: there is nothing
+    of yours to carry over, or yours can't be read and a copy of it is in backups/, so the new file goes in as it is.
     Then whether yours stays as it is instead (it can't be read, and no copy of it could be kept). Last, the record of
     the kit's list to keep for the next update (_note_kit_sounds): None for the new list as it is."""
     theirs, was = _json(new), _json(root / KIT_SOUNDS)
@@ -434,14 +447,26 @@ def _with_your_sounds(new: Path, yours: Path, root: Path) -> tuple[bytes | None,
         return None, [f"Your {SOUNDS} couldn't be read ({why}), so the new version's list took its place. Your list "
                       f"as it was is in {backup}: copy your own entries from there into the new one."], False, None
     was = was if isinstance(was, dict) else None
-    out, kept, replaced = _merge_sounds(theirs, mine, was, keep_unknown=False)
+    sfx = yours.parent
+
+    def on_disk(name: str, entry) -> bool:
+        """Whether a sound's file is here, as setup and the mixes look for it (studio/sounds.py missing())."""
+        file = entry.get("file") if isinstance(entry, dict) else None
+        try:
+            return bool(isinstance(file, str) and file and (sfx / file).is_file()) or \
+                (sfx / "_cache" / f"{name}.wav").is_file()
+        except (OSError, ValueError):
+            return False
+
+    out, kept, replaced, dropped = _merge_sounds(theirs, mine, was, keep_unknown=False, on_disk=on_disk)
     notes, backup, record = [], "", None
-    if replaced:
+    if replaced or dropped:
         try:
             backup = _backup_sounds(yours, root)
         except OSError:  # nowhere to keep a copy: they stay as they are, which may be the kit's old ones
-            out, held, replaced = _merge_sounds(theirs, mine, was, keep_unknown=True)
+            out, held, replaced, held_out = _merge_sounds(theirs, mine, was, keep_unknown=True, on_disk=on_disk)
             unsure = [k for k in held if k not in kept]
+            dropped = []
             if unsure:
                 one = len(unsure) == 1
                 notes.append(f"Your {SOUNDS} keeps what it had for {_named(unsure)}, though the new version has its "
@@ -451,6 +476,16 @@ def _with_your_sounds(new: Path, yours: Path, root: Path) -> tuple[bytes | None,
                 # entries held here would be the same as nothing in it and count as yours for good. The next
                 # update asks again, and keeps a copy of your list then.
                 record = False
+            if held_out:
+                one = len(held_out) == 1
+                notes.append(f"Your {SOUNDS} keeps {_named(held_out)}, which the new version no longer has: ReelForge "
+                             f"couldn't keep a copy of your list in backups/ before taking {'it' if one else 'them'} "
+                             "out.")
+                if record is None:  # the record still has them as the kit's, for the next update to take out then
+                    record = {k: dict(v) if isinstance(v, dict) else v for k, v in theirs.items()}
+                    for kind, name in held_out:
+                        record[kind] = {**(record.get(kind) if isinstance(record.get(kind), dict) else {}),
+                                        name: mine[kind][name]}
     if kept:
         one = len(kept) == 1
         notes.append(f"Your own {_named(kept)} in {SOUNDS} {'is' if one else 'are'} kept: the new version has "
@@ -463,18 +498,24 @@ def _with_your_sounds(new: Path, yours: Path, root: Path) -> tuple[bytes | None,
                      f"{'that name' if one else 'those names'}. " +
                      (f"If any of it was yours, your list as it was is in {backup}." if backup else
                       "ReelForge couldn't keep a copy of your list in backups/ first."))
+    if dropped:
+        one = len(dropped) == 1
+        notes.append(f"The new version no longer has {_named(dropped)}, so {'it was' if one else 'they were'} taken "
+                     f"out of your {SOUNDS} too: a cue sheet of yours that uses {'it' if one else 'them'} needs "
+                     f"another. Your list as it was is in {backup}.")
     text = None if out == theirs else json.dumps(out, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
     return text, notes, False, record
 
 
 def _note_kit_sounds(new: Path, root: Path, record=None) -> None:
-    """The kit's list as it is put in place, for the next update to tell your entries from the kit's own (record:
-    False for none this time, see _with_your_sounds). Not kept (a full disk): the next update keeps a copy of yours
-    in backups/ before it replaces any."""
+    """The kit's list as it is put in place (or record, see _with_your_sounds; False: none this time), for the next
+    update to tell your entries from the kit's own. Not kept (a full disk): the next update keeps a copy of yours in
+    backups/ before it replaces any."""
     if record is False:
         return
     try:
-        data = new.read_bytes()
+        data = new.read_bytes() if record is None else \
+            json.dumps(record, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
         record = root / KIT_SOUNDS
         if not record.exists() or record.read_bytes() != data:
             record.parent.mkdir(parents=True, exist_ok=True)
