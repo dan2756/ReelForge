@@ -46,7 +46,8 @@ For each platform the extension then:
 4. fills in the text, in one go, and reads it back;
 5. scrolls the platform's final button into view, rings it in red and leaves a note in the corner: **Check it, then
    press Post**. With Press Post for me (below), while the extension asks ReelForge for the press, the note says
-   **Pressing Post for you** instead, and the button is ringed only if the extension does not press it after all.
+   **Pressing Post for you** instead, and the button is brought into view but ringed only if the extension does
+   not press it after all.
    Where the page does not show its account, every one of these notes says to look which account the tab is on.
 
 Then it waits. When the platform shows its own sign that the post went out, ReelForge is told. The tab is left

@@ -262,9 +262,13 @@ void (async () => {
     const button = end.hold ? rf.probe(end.hold) : await rf.find(flow.final)
     const cannot = end.hold ? "something on the page is still yours to answer." : end.noPress
     // Press Post for me is about to be asked for. The note does not invite a press of the person's own meanwhile,
-    // and the button is not ringed: if the press is refused, press() says so and rings it then.
+    // and the button is not ringed: if the press is refused, press() says so and rings it then. It is brought
+    // into view all the same, where the person can see it pressed, or press it themselves.
     const asking = job.press && !flow.neverPress && !cannot && !pressed
-    if (button && !pressed && !asking) rf.outline(button)
+    if (button && !pressed) {
+      if (asking) rf.show(button)
+      else rf.outline(button)
+    }
     if (!pressed && rf.sign("success")) signBroken = true
     const hint = end.more || (flow.button === "Post" ? "Nothing is posted until you do." : `On ${P} the button says ${flow.button}.`)
     // A person who pressed already is not asked to press again: the platform has the next word.

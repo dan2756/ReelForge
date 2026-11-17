@@ -509,11 +509,14 @@
     note.more.hidden = !more
   }
 
+  // Scrolls the platform's final button into view: for the person to press, or to watch it being pressed for them.
+  rf.show = el => el.scrollIntoView({ block: "center", inline: "nearest" })
+
   // Scrolls the button the person should press into view and rings it in ReelForge's red.
   let ringed = null
   rf.outline = el => {
     rf.unoutline()
-    el.scrollIntoView({ block: "center", inline: "nearest" })
+    rf.show(el)
     ringed = { el, outline: el.style.getPropertyValue("outline"), offset: el.style.getPropertyValue("outline-offset") }
     el.style.setProperty("outline", "3px solid #e8213a", "important")
     el.style.setProperty("outline-offset", "3px", "important")

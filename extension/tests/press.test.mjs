@@ -189,6 +189,24 @@ export const tests = {
     equal(await tab.evaluate(() => fixture.clicks), 0, "presses the page saw")
   },
 
+  async "while ReelForge is asked for the press, Post is brought into view, without its ring"({ app, browser, video }) {
+    // (On this copy of TikTok, Post sits below a tall part of the form, out of view until something scrolls to it.)
+    await switchOn(browser, app, "tiktok")
+    const held = holdPress(app, { decided: false })
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("www.tiktok.com")
+    const job = made.jobs[0]
+    await until(() => `the press request (it is ${job.state} ${job.step})`, () => held.arrived, 30000)
+    equal(await tab.evaluate(() => {
+      const button = document.querySelector("[data-e2e=post_video_button]")
+      const box = button.getBoundingClientRect()
+      return [box.top >= 0 && box.bottom <= innerHeight, button.style.getPropertyValue("outline"), scrollY > 0]
+    }), [true, "", true], "Post in view, its ring, and the page scrolled to it")
+    held.release()
+    await until(() => `posted (it is ${job.state})`, () => job.state === "posted")
+  },
+
   async "a grant that was already used is refused and nothing is pressed a second time"({ app, browser, video }) {
     await switchOn(browser, app, "tiktok")
     const made = app.createBatch(video(), ["tiktok"], { press: true })
