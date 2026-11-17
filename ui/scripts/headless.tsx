@@ -35,17 +35,37 @@ export async function headless(
   const bridge = opened.bridge
   sides.adopt(bridge)
   const t = await createTestRenderer({ ...RENDERER, width, height }) // as the real window's: Ctrl+C is a key, not the end
-  // A frame read while the renderer is writing one out is refused (OutputBusy, once in many runs on GitHub's machines):
-  // it is read again a moment later. Anything else it throws is the test's to see.
-  const capture = t.captureCharFrame
+  // A frame read while the renderer is writing the next one out is refused (OutputBusy, once in many runs on GitHub's
+  // machines). Waiting for it can't be done here: the renderer finishes on the event loop, which a read blocks (reading
+  // again for 200 ms still failed). The screen still shows the frame before then, so that is the one given: the last
+  // one read, at least as new as the end of the last settle(). Anything else it throws is the test's to see.
+  const busy = (e: unknown) => String((e as Error)?.message ?? e).includes("OutputBusy")
+  const chars = t.captureCharFrame
+  const spans = t.captureSpans
+  let lastChars: string | undefined
+  let lastSpans: ReturnType<typeof spans> | undefined
   t.captureCharFrame = () => {
-    for (let i = 0; ; i++) {
-      try {
-        return capture()
-      } catch (e) {
-        if (i >= 200 || !String((e as Error)?.message ?? e).includes("OutputBusy")) throw e
-        Bun.sleepSync(1)
-      }
+    try {
+      return (lastChars = chars())
+    } catch (e) {
+      if (lastChars === undefined || !busy(e)) throw e
+      return lastChars
+    }
+  }
+  t.captureSpans = () => {
+    try {
+      return (lastSpans = spans())
+    } catch (e) {
+      if (lastSpans === undefined || !busy(e)) throw e
+      return lastSpans
+    }
+  }
+  const remember = () => {
+    try {
+      lastChars = chars()
+      lastSpans = spans()
+    } catch (e) {
+      if (!busy(e)) throw e
     }
   }
   const exits: { code: number; result?: object }[] = []
@@ -57,6 +77,7 @@ export async function headless(
     for (let i = 0; i < 3; i++) await t.renderOnce()
     await Bun.sleep(ms)
     for (let i = 0; i < 3; i++) await t.renderOnce()
+    remember()
   }
   return {
     t,
