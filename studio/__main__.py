@@ -26,6 +26,7 @@
       --answers FILE.json      write everything from saved answers, no questions
       --regenerate             rebuild everything from my-studio/answers.json (after you edit it), every profile's,
                                or with -p NAME that one's alone; a studio.toml it changes is copied into backups first
+                               (and one with a mistake in it keeps a no to the hourly stats read it has)
       --preserve-settings      with --regenerate: only CLAUDE.md / AGENTS.md again, from your settings as they are
                                (what an update runs: studio.toml and your accounts stay as you left them)
       --new                    for a new profile (with --answers too, for an AI running the interview in chat)
@@ -242,7 +243,7 @@ def regenerate(*, preserve_settings: bool = False, only: profiles.Profile | None
                     raise ValueError("its answers need fixing first: " + "; ".join(problems))
                 written = generate.write_guides(p, saved_settings=True, say=said.append)
             else:
-                written = generate.write_all(answers, p, say=said.append)
+                written = generate.write_all(answers, p, again=True, say=said.append)
         except (ValueError, OSError) as e:
             # Said with the rest at the end, not only printed now: an update passes on what's said (SAID) and
             # nothing else, and with another channel's notes written it doesn't fail, so this was heard nowhere.

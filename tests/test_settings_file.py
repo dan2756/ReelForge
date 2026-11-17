@@ -202,6 +202,80 @@ class Loading(Scratch):
             self.assertEqual(onboard(["--regenerate"]), 0)
         self.assertEqual(settings.load()["channel"]["name"], "Night Physics")
 
+    def test_writing_it_again_from_the_answers_keeps_the_files_no_to_the_hourly_read(self):
+        """While studio.toml has a mistake in it, the hourly read of your stats goes by the file's own
+        background_stats lines. The way out the error gives, writing the file again from your answers, put the
+        answers' yes back over a no in it (one in the wrong place, or one under [platforms] in a file with a typo
+        elsewhere) without a word, and the read, with your log-ins, was on again."""
+        import shlex
+
+        from studio import generate
+        from studio.__main__ import apply_background_stats
+
+        self.onboard_main()                     # the answers say yes
+        text = P.SETTINGS.read_text(encoding="utf-8")
+        line = "background_stats = true"
+        typo = '\nsubjects_extra = "a snowball\n'
+
+        def follow_the_advice(body: str) -> str:
+            P.SETTINGS.write_text(body, encoding="utf-8")
+            with self.assertRaises(settings.SettingsError) as raised:
+                settings.load()
+            argv = shlex.split(str(raised.exception).split("with: ", 1)[1])   # as a shell splits it
+            self.assertEqual(argv[-2:], ["channel", "--regenerate"])
+            with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(main(argv[1:]), 0, out.getvalue())
+            return out.getvalue()
+
+        def answered(who=None) -> bool:
+            return json.loads((who or profiles.main()).answers.read_text(encoding="utf-8"))["background_stats"]
+
+        for what, body in {"a no at the end, under [ai]": text + "background_stats = false\n",
+                           "a no under [platforms], a typo elsewhere": text.replace(line, "background_stats = false")
+                           + typo,
+                           "a no spelled with a space": text.replace(line, "background stats = false")}.items():
+            with self.subTest(what):
+                self.onboard_main()
+                printed = follow_the_advice(body)
+                self.assertIs(settings.load()["platforms"]["background_stats"], False)
+                self.assertIs(generate.background_stats(profiles.main()), False)
+                with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}):
+                    self.assertNotIn("(dry run) would run", apply_background_stats())
+                self.assertIs(answered(), False)     # and the next time it's written from them, too
+                self.assertIn("so it was written again from your answers, with the hourly read of its stats left "
+                              "off, as its background_stats line had it", " ".join(printed.split()))
+        # a yes in a file with a mistake in it is the answers' business as before, and so is a file without the line
+        for body, answers_say, on in ((text.replace(line, "background_stats = true") + typo, False, False),
+                                      (text.replace(line + "\n", "") + typo, True, True)):
+            with self.subTest(body=body[-60:], answers_say=answers_say):
+                self.onboard_main(background_stats=answers_say)
+                printed = follow_the_advice(body)
+                self.assertIs(settings.load()["platforms"]["background_stats"], on)
+                self.assertNotIn("hourly read", printed)
+        # answers given now (the questions asked again, or a file of them) are the say on it
+        self.onboard_main()
+        P.SETTINGS.write_text(text + "background_stats = false\n", encoding="utf-8")
+        given = self.root / "given.json"
+        given.write_text(json.dumps({**ANSWERS, "background_stats": True}), encoding="utf-8")
+        with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["channel", "--answers", str(given)]), 0)
+        self.assertIs(settings.load()["platforms"]["background_stats"], True)
+        # another channel's way out, from the line the hourly job logs about it
+        b = profiles.create("Bee Facts")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**ANSWERS, "channel_name": "Bee Facts"}, b)
+        good = b.settings.read_text(encoding="utf-8")
+        b.settings.write_text(good + "background_stats = false\n", encoding="utf-8")
+        said: list[str] = []
+        self.assertIs(generate.background_stats(b, say=said.append), False)
+        argv = shlex.split(said[0].split("with: ", 1)[1])
+        with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(main(argv[1:]), 0, out.getvalue())
+        self.assertIs(settings.load(b.settings)["platforms"]["background_stats"], False)
+        self.assertIs(generate.background_stats(b), False)
+        self.assertIs(answered(b), False)
+        self.assertIs(settings.load()["platforms"]["background_stats"], True)     # the first channel's stays
+
 
 class Commands(Scratch):
     def setUp(self):

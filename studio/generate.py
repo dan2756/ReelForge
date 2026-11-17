@@ -497,7 +497,7 @@ def _free(path: Path) -> Path:
     return free
 
 
-def write_all(answers: dict, profile=None, *, account: str = "", say=None) -> list[Path]:
+def write_all(answers: dict, profile=None, *, account: str = "", again: bool = False, say=None) -> list[Path]:
     """Validate the answers and write every file, for a profile (the one this process works on, by default). Returns
     the paths written. Raises ValueError on bad answers, or when a file can't be made right (the message says which),
     before any file has changed. A studio.toml written again is copied into the channel's backups first (when it
@@ -506,9 +506,12 @@ def write_all(answers: dict, profile=None, *, account: str = "", say=None) -> li
     (_for_account): studio.toml invites edits by hand, and an account connected on the Accounts tab must not put the
     first-time answers back over them, nor a platform taken out of it by hand. While studio.toml has a mistake in it,
     a platform connected is kept in the channel's to-add list (_to_add), for write_guides or the next Connect to put
-    in once it's fixed. say: called with a line for each file that was left as it was because it has a mistake in it,
-    or written again with one in it, or whole in place of a line at a time (and where its copy is), once everything
-    else is written."""
+    in once it's fixed. again: the answers are the saved ones, written out again (reelforge channel --regenerate), not
+    answers given now: written again over a studio.toml with a mistake in it, a no to the hourly read of your stats
+    in the file's own background_stats lines, which the hourly job goes by meanwhile (background_stats), is kept, in
+    the answers too, since nobody has said yes since. say: called with a line for each file that was left as it was
+    because it has a mistake in it, or written again with one in it, or whole in place of a line at a time (and where
+    its copy is), once everything else is written."""
     w = _where(profile)
     notes = w.notes
     first = not w.settings.exists()                     # first-time setup: the channel isn't set up yet
@@ -524,6 +527,18 @@ def write_all(answers: dict, profile=None, *, account: str = "", say=None) -> li
             pass
     # The answers file is often the one being read (my-studio/answers.json), with no date yet: today, then.
     a["_created"] = a.get("_created") or dt.date.today().isoformat()
+    # The hourly read uses your log-ins. "Write it again from your answers" (S.fix_it) is the way out of a mistake in
+    # studio.toml, and meanwhile the read goes by the file's own background_stats lines: a no there stays a no, or
+    # following ReelForge's own advice would turn the read on again without a word. Answers given now have the say.
+    kept_no = False
+    if again and not account and w.settings.is_file():
+        try:
+            S.load(w.settings)
+        except S.SettingsError:
+            if _own_background_stats(w.settings) is False and bool(a.get("background_stats", True)):
+                a["background_stats"], kept_no = False, True
+        except OSError:
+            pass
     s = settings_from(a)
     cfg = s                     # what ReelForge's settings (config.toml) are written from
     connecting = account if a.get(f"handle_{account}") else ""
@@ -601,9 +616,11 @@ def write_all(answers: dict, profile=None, *, account: str = "", say=None) -> li
             copy = _free(w.backups / f"studio.{dt.datetime.now():%Y%m%d-%H%M%S}.toml")
             P.write_atomic(copy, before_bytes)
             if mistake is not None:
+                kept = (", with the hourly read of its stats left off, as its background_stats line had it (your "
+                        "answers say no to it now too)") if kept_no else ""
                 notes.append(f"{a['channel_name'].strip()}'s settings file, {w.settings}, had a mistake in it "
-                             f"({mistake.reason}), so it was written again from your answers. A copy of it as it was "
-                             f"is in {copy}.")
+                             f"({mistake.reason}), so it was written again from your answers{kept}. A copy of it as it "
+                             f"was is in {copy}.")
             if edit is not None and edit.waited:
                 notes.append(_brought_in(edit.waited, a["channel_name"].strip(), w.settings, copy))
             if edit is not None and edit.text is None:      # its own layout is in the copy alone
