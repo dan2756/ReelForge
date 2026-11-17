@@ -1188,7 +1188,9 @@ class Deleting(Scratch):
             """The words bash hands the command, pasted into an interactive bash (the Mac's zsh does the same)."""
             args = line.split(" ", 2)[2]       # what follows python pipeline/make_episode.py
             if os.name == "nt" or not shutil.which("bash"):
-                return shlex.split(args, posix=os.name != "nt")
+                # PowerShell and Git Bash take the quotes off and keep a backslash in them, as a POSIX split does
+                # (a split for Windows' own rules keeps the quotes in the words)
+                return shlex.split(args)
             shown = subprocess.run(["bash", "--norc", "--noprofile", "-i"], capture_output=True, text=True,
                                    input=f"printf '<%s>\\n' {args}\nexit\n", timeout=30, cwd=self.root).stdout
             return re.findall(r"<(.*?)>\n", shown)
