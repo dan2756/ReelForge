@@ -598,7 +598,8 @@ export async function tabPress(tabId) {
   }
 }
 
-const LOST = "its answer did not come back in time, so nothing was clicked."
+// (ReelForge was asked, and can't be reached now: its answer may be late, cut off, or it may have been closed.)
+const LOST = "its answer did not come back, and it is not answering now (it may have been closed), so nothing was clicked."
 
 async function askPress(job, asked) {
   const no = (error, message, more = {}) => ({ ok: false, error, message, ...more })
@@ -606,7 +607,9 @@ async function askPress(job, asked) {
   let lost = asked
   if (!asked) {
     try {
-      res = await withApp(job, async found => app.api(found, `/v1/jobs/${job.id}/press`, { method: "POST", body: { install: await app.install() }, timeout: PRESS_WAIT }), { once: true })
+      // The port says hello first, so a ReelForge that was closed, or opened again on another port, is found out
+      // before the request goes: it is then asked on its new port, or reported as not running.
+      res = await withApp(job, async found => app.api(found, `/v1/jobs/${job.id}/press`, { method: "POST", body: { install: await app.install() }, timeout: PRESS_WAIT, fresh: true }), { once: true })
     } catch (error) {
       // Nothing answered. Sent, it may have been granted; never sent (nothing proved to be ReelForge), it was not.
       lost = error?.sent === true
@@ -626,7 +629,7 @@ async function askPress(job, asked) {
     if (theirs) {
       lost = false
       granted = theirs.state === "posting"
-      if (!granted) res = { ok: false, data: { error: "press_not_allowed", message: "ReelForge's answer did not come back in time, and it has not allowed the press." } }
+      if (!granted) res = { ok: false, data: { error: "press_not_allowed", message: "ReelForge's answer did not come back, and it has not allowed the press." } }
     }
   }
   // The answer is taken under the job's lock. A Stop from the popup while it was on its way has ended the job by

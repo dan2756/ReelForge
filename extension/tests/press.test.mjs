@@ -69,6 +69,22 @@ function holdReports(app, job, states) {
   return held
 }
 
+// ReelForge is closed as soon as it has answered the job's "ready" (and, with `port`, opened again there), so the
+// extension's next request, the press, finds it gone from the port it knew.
+function closeAfterReady(app, job, port) {
+  const handle = app.handle.bind(app)
+  let closed = false
+  app.handle = async (request, response) => {
+    const out = await handle(request, response)
+    if (!closed && job.state === "ready") {
+      closed = true
+      await app.stop()
+      if (port) await app.start(port)
+    }
+    return out
+  }
+}
+
 // Every ring Post is given on the page from now on, kept in the page as window.rings.
 const watchRings = tab => tab.evaluate(() => {
   const button = document.querySelector("[data-e2e=post_video_button]")
@@ -332,7 +348,7 @@ export const tests = {
     const job = made.jobs[0]
     await until("the note to say why", async () => (await note(tab))?.line === "Check it, then press Post", 30000)
     await sleep(1000)
-    equal((await note(tab)).more, `ReelForge did not press for you: its answer did not come back in time, so nothing was clicked.${LOOK}`, "what the note says")
+    equal((await note(tab)).more, `ReelForge did not press for you: its answer did not come back, and it is not answering now (it may have been closed), so nothing was clicked.${LOOK}`, "what the note says")
     equal([presses(app).length, await tab.evaluate(() => fixture.clicks)], [1, 0], "press requests, and presses the page saw")
     const kept = await browser.jobRecord(job.id)
     equal([kept.state, kept.pressAnswer, job.state], ["ready", "lost", "posting"], "the job here, and in ReelForge (which said yes)")
@@ -341,6 +357,32 @@ export const tests = {
     await tab.locator("[data-e2e=post_video_button]").click()
     await until(() => `posted (it is ${job.state})`, () => job.state === "posted", 20000)
     equal([presses(app).length, await tab.evaluate(() => [fixture.clicks, fixture.trustedClicks])], [1, [1, 1]], "press requests, and presses the page saw")
+  },
+
+  async "ReelForge closed just before the press is asked: nothing is clicked, and the page says ReelForge is not running"({ app, browser, video }) {
+    // ReelForge takes the page's "ready" and is closed before the press request goes, which then finds nobody.
+    await switchOn(browser, app, "tiktok")
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    const job = made.jobs[0]
+    closeAfterReady(app, job)
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("www.tiktok.com")
+    await until("the note to say why", async () => (await note(tab))?.line === "Check it, then press Post", 30000)
+    equal((await note(tab)).more, `ReelForge did not press for you: ReelForge is not running, so it could not allow the press.${LOOK}`, "what the note says")
+    equal([presses(app).length, await tab.evaluate(() => fixture.clicks)], [0, 0], "press requests, and presses the page saw")
+    // No request reached ReelForge: nothing it could have said yes to, so a later ending may say nothing was posted.
+    equal((await browser.jobRecord(job.id)).pressAnswer, "refused", "what the extension keeps of the press")
+  },
+
+  async "ReelForge opened again on another port just before the press is asked: the press is asked there, once, and Post is pressed"({ app, browser, video }) {
+    await switchOn(browser, app, "tiktok")
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    const job = made.jobs[0]
+    closeAfterReady(app, job, 47826)
+    await browser.post(app, made.batch, { yes: true })
+    await until(() => `posted (it is ${job.state})`, () => job.state === "posted", 30000)
+    equal([app.port, presses(app).map(entry => entry.status)], [47826, [200]], "ReelForge's port, and press requests")
+    equal(await (await browser.tab("www.tiktok.com")).evaluate(() => [fixture.clicks, fixture.trustedClicks]), [1, 0], "presses the page saw")
   },
 
   async "the person's own press while the video is going up is the only press, whatever was asked for"({ app, site, browser, video }) {

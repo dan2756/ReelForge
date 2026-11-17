@@ -110,11 +110,12 @@ the extension clicks nothing, and the note on the page says the post was ended i
 press Post.
 
 The extension asks ReelForge for the press once, and waits up to 20 seconds for the answer (ReelForge may wait up
-to 10 for its database first). It never asks a second time, even when the answer gets lost on the way: then it
-reads what ReelForge has for the post, and presses only when that says the press was given. When ReelForge can't
-be asked either, nothing is clicked, and the note says **Check it, then press Post**: its answer did not come back
-in time. If ReelForge has Post as pressed already while nothing was clicked in the tab, the note says **Look at
-your profile first** instead of asking you to press.
+to 10 for its database first). Just before, it checks that ReelForge answers: one closed meanwhile is reported as not
+running, and one opened again on another port is asked there. It never asks a second time, even when the answer
+gets lost on the way: then it reads what ReelForge has for the post, and presses only when that says the press was
+given. When ReelForge can't be asked either, nothing is clicked, and the note says **Check it, then press Post**:
+its answer did not come back, and it is not answering now. If ReelForge has Post as pressed already while nothing
+was clicked in the tab, the note says **Look at your profile first** instead of asking you to press.
 
 ## What is automatic, and what never is
 
