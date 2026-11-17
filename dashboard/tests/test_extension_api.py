@@ -1705,6 +1705,7 @@ class CommandLine(ApiTest):
         return code, out.getvalue()
 
     def test_with_no_word_it_says_where_the_extension_stands(self):
+        TOKEN_HASH = "9c1e7d0b4f6a"  # letters no folder, name or word here has (a temporary folder's name is random)
         code, said = self.run_main()
         self.assertEqual(code, 0)
         self.assertIn(f"folder     {self.folder}\n", said)
@@ -1712,7 +1713,7 @@ class CommandLine(ApiTest):
         self.assertIn("connected  no browser yet: reelforge extension pair connects one", said)
         seen = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(timespec="seconds")
         extension_api.change_store(lambda s: s["paired"].extend([
-            {"install": CHROME, "name": "Chrome on macOS", "version": "0.1.0", "last_seen": seen, "token_sha256": "ab"},
+            {"install": CHROME, "name": "Chrome on macOS", "version": "0.1.0", "last_seen": seen, "token_sha256": TOKEN_HASH},
             {"install": EDGE, "name": "Edge on Windows"}]))
         code, said = self.run_main()
         self.assertIn("connected  Chrome on macOS · v0.1.0 · last seen 5m ago", said)
@@ -1722,7 +1723,7 @@ class CommandLine(ApiTest):
             extension_api.change_store(lambda s: s["paired"][0].update(last_seen=odd))
             self.assertIn("connected  Chrome on macOS · v0.1.0 · last seen never", self.run_main()[1], odd)
         extension_api.change_store(lambda s: s["paired"][0].update(last_seen=seen))
-        self.assertNotIn("ab", said.replace("able", "").replace("about", ""))  # nothing of a token's
+        self.assertNotIn(TOKEN_HASH, said)  # nothing of a token's
         (self.folder / "manifest.json").unlink()
         code, said = self.run_main()
         self.assertEqual(code, 0)
