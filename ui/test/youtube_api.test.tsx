@@ -109,6 +109,16 @@ function row(h: Headless): string {
   return rows.slice(at, next).map((r) => r.slice(r.lastIndexOf("┃") + 1).replace(/[█▀▄]\s*$/, "")).join(" ").replace(/\s+/g, " ").trim()
 }
 
+/** The YouTube row with these buttons, as if the Python side had sent them. A view the Python side sends a moment later
+ * (from the step before, on a slow machine) puts its own buttons back, so the row is sent again until it shows `shows`. */
+async function withButtons(h: Headless, fields: Partial<PostingView["rows"][number]>, shows: string) {
+  for (let i = 0; i < 10; i++) {
+    h.bridge.emit("posting", { ...posting(h), rows: posting(h).rows.map((r) => (r.key === "youtube" ? { ...r, ...fields } : r)) })
+    await h.settle(300)
+    if (row(h).includes(shows)) return
+  }
+}
+
 /** What the open dialog says, as one line of words. */
 function dialog(h: Headless): string {
   const rows = frame(h).split("\n").map((r) => [...r])
@@ -634,8 +644,7 @@ describe("a post through the API", () => {
     await until(h, () => popups().length > 0)
     expect(popups()).toEqual(["Nothing was started: Press Post with API… on the YouTube row to try again. Its question shows what will be sent now."])
     toasts.clear()
-    h.bridge.emit("posting", { ...posting(h), rows: posting(h).rows.map((r) => (r.key === "youtube" ? { ...r, actions: ["retry"] } : r)) })
-    await h.settle(300)
+    await withButtons(h, { actions: ["retry"] }, "Try again")
     await ask(h, "Try again")
     expect(frame(h)).not.toContain("BROWSER EXTENSION")
     expect(focused(h)).toBe("Cancel")
@@ -878,9 +887,7 @@ describe("when something goes wrong, or the window is small", () => {
 
   test("a button only ever shows its words: an action the window has none for isn't drawn", async () => {
     const h = await kit({ api: { client: "on" } })
-    const view = posting(h)
-    h.bridge.emit("posting", { ...view, rows: view.rows.map((r) => (r.key === "youtube" ? { ...r, actions: ["post_api", "connect_api", "something_new"], api: { force: true } } : r)) })
-    await h.settle(300)
+    await withButtons(h, { actions: ["post_api", "connect_api", "something_new"], api: { force: true } }, "Again with API…")
     expect(row(h)).toMatch(/▐ Post with API… ▌ ▐ Connect API ▌ ▐ Again with API… ▌$/)
     for (const name of ["post_api", "connect_api", "something_new", "post_api_again"]) expect(frame(h)).not.toContain(name)
   })
