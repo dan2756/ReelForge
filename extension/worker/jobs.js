@@ -665,8 +665,9 @@ function pressLine(port) {
 }
 
 // The page that asked for the press is gone, and ReelForge has not answered yet. Nothing will click for a yes that
-// comes now: askPress ends the post as "not sure" at once, with words that say Post was not pressed. (Once its
-// answer is in, the page had it, and the line's end changes nothing.)
+// comes now: askPress ends the post as "not sure" at once, with words that say Post was not pressed, unless the
+// person pressed Post themselves before the page went (then theirs is the press). (Once its answer is in, the page
+// had it, and the line's end changes nothing.)
 async function pageLeft(tabId) {
   const held = await jobOfTab(tabId)
   if (!held) return
@@ -725,7 +726,11 @@ async function askPress(job, asked, line = null) {
       const now = { ...fresh, state: "posting", step: "press", progress: null, pressedAt: Date.now(), touched: Date.now(), port: job.port, pressAnswer: answer }
       await save(now)
       await remember(now)
-      if (!fresh.pressPageGone && !line?.gone) return { ok: true }
+      // The person pressed Post themselves while ReelForge was being asked, and their press is the post's: the page
+      // clicks nothing for this yes, and it never says Post was not pressed. That holds when their page has gone since,
+      // as it does when the platform takes the press and loads its next page (TikTok's list of posts): what that page
+      // shows decides, posted on the platform's own sign, else "not sure" after the press.
+      if (fresh.pressedByPerson || (!fresh.pressPageGone && !line?.gone)) return { ok: true }
       // The page that asked is gone (reloaded, or left) and nothing will click for this yes: the post ends now as
       // "not sure", the one way out ReelForge has for a press it granted, with words that say Post was not pressed.
       // The page there now hears of it, instead of waiting for a sign that can't come: at once when it has said hello,

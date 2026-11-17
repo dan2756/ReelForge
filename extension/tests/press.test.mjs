@@ -2,6 +2,7 @@
 // browser and the app's grant, once, never on X.
 import { equal, ok, until, sleep, note, quickSelectors, launch } from "./harness.mjs"
 import { toReady } from "./posting.test.mjs"
+import { tiktokContent } from "./fixtures/pages.mjs"
 
 const presses = app => app.requests("POST", /\/press$/)
 
@@ -407,6 +408,54 @@ export const tests = {
       const told = await note(tab)
       ok(told.tone === "bad" && told.more.startsWith(said), `what the note says (${JSON.stringify(told)})`)
       equal([presses(app).length, await tab.evaluate(() => [Number(sessionStorage.rfClicks || 0), fixture.clicks, fixture.posted])], [1, [0, 0, false]], "press requests, and clicks on Post in the tab across both pages")
+    } finally {
+      loaded()
+    }
+  },
+
+  async "the person's own press while ReelForge is asked, then TikTok's own next page, with the yes before that page has loaded: posted, and nothing says Post was not pressed"({ app, site, browser, video }) {
+    // ReelForge says yes at once and its answer takes a moment to come back. The person presses Post in that moment,
+    // and TikTok takes it and loads its list of posts ("fullnav"), which takes its time (one image of it waits until
+    // the test lets it go). So the page that asked is gone, and ReelForge's yes is back before the next page has loaded.
+    await browser.context.addInitScript(() => {
+      // Every click on Post in this tab, across both pages (the tab keeps its sessionStorage).
+      document.addEventListener("click", event => {
+        if (event.target?.closest?.("[data-e2e=post_video_button]")) sessionStorage.rfClicks = String(Number(sessionStorage.rfClicks || 0) + 1)
+      }, true)
+    })
+    site.mode.tiktok = "fullnav"
+    await switchOn(browser, app, "tiktok")
+    const held = holdPress(app, { decided: true })
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("www.tiktok.com")
+    const job = made.jobs[0]
+    await until(() => `the press request (it is ${job.state} ${job.step})`, () => held.arrived, 30000)
+    await until(() => `ReelForge to say yes (it is ${job.state})`, () => job.state === "posting")
+    let loaded
+    const image = new Promise(resolve => (loaded = resolve))
+    await tab.route("https://www.tiktok.com/__slow.png", async route => {
+      await image
+      await route.fulfill({ status: 200, contentType: "image/png", body: Buffer.alloc(0) }).catch(() => {})
+    })
+    const posts = tiktokContent.replace("</body>", '<img src="/__slow.png" alt=""></body>')
+    await tab.route("https://www.tiktok.com/tiktokstudio/content", route => route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", body: posts }))
+    try {
+      await tab.locator("[data-e2e=post_video_button]").click()
+      await until("the press to be noticed", async () => (await browser.jobRecord(job.id)).pressedByPerson === true)
+      // The page that asked is gone, the next one has not said hello, and the worker knows.
+      await until("the extension to know the page that asked is gone", async () => (await browser.jobRecord(job.id)).pressPageGone === true, 10000)
+      held.release()
+      await until(() => `the extension to take the yes (it is ${job.state})`, async () => (await browser.jobRecord(job.id)).pressAnswer === "granted", 10000)
+      loaded()
+      await until(() => `the job to end (it is ${job.state})`, () => ["posted", "unknown", "failed"].includes(job.state), 30000)
+      equal([job.state, job.error_code, job.error_message], ["posted", null, null], "ReelForge's row")
+      const kept = await browser.jobRecord(job.id)
+      equal([kept.state, kept.pressedByPerson], ["posted", true], "the extension's own record")
+      const said = await note(tab)
+      ok(said.tone === "good" && said.line === "Posted" && !/not pressed/i.test(said.more), `the note on TikTok's list of posts (${JSON.stringify(said)})`)
+      ok(!job.events.some(event => /not pressed/i.test(String(event.detail))), `what the app was told (${job.events.map(event => event.detail)})`)
+      equal([presses(app).map(entry => entry.status), await tab.evaluate(() => Number(sessionStorage.rfClicks || 0))], [[200], 1], "press requests, and clicks on Post in the tab (the person's own)")
     } finally {
       loaded()
     }

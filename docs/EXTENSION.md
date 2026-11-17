@@ -113,8 +113,10 @@ and the note says **ReelForge said no**: if you cancelled the post in ReelForge,
 it, then press Post yourself. Nothing is clicked either when the page is reloaded, or left, while the extension is
 asking. The extension knows as soon as the browser leaves the page, before the next one has loaded: if ReelForge said
 yes, the post is "not sure it posted" at once, its row says Post was not pressed, and the page there now says so when
-it has loaded. A page reloaded once ReelForge has said no says what any page left before Post was pressed says:
-nothing was posted.
+it has loaded. That is not so when you pressed Post yourself before the page went, as TikTok's page goes to your list
+of posts once it has taken the press: yours is the press, as above, and the next page decides. The post ends as posted
+when the platform shows it, else as "not sure it posted", and nothing says Post was not pressed. A page reloaded once
+ReelForge has said no says what any page left before Post was pressed says: nothing was posted.
 
 The extension asks ReelForge for the press once, and waits up to 20 seconds for the answer (ReelForge may wait up
 to 10 for its database first). Just before, it checks that ReelForge answers: one closed meanwhile is reported as not
