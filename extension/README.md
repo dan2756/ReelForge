@@ -88,7 +88,9 @@ If you still want it, it takes all of these:
 - you have not pressed **Stop** in the popup while ReelForge was being asked, or just before. A Stop then wins:
   nothing is clicked, Post is not ringed, and the note on the page says **Stopped** at once, before ReelForge has
   taken the stop. **Cancel** on the post's row in ReelForge then works the same way: ReelForge says no, and the note
-  says the post was ended in ReelForge;
+  says the post was ended in ReelForge, even when ReelForge is closed straight after (its no says how it has the
+  post). If an older ReelForge says no without that, or the no is cut off on its way back, and ReelForge can't be
+  reached afterwards, Post is not ringed, and the note says not to press it if you cancelled the post;
 - you have not pressed the button yourself already. Your own press, even one made while the video is still going
   up or while ReelForge is being asked for the press, is the post's press: the extension then clicks nothing, and
   ReelForge would refuse another.
@@ -137,7 +139,7 @@ open, and what was already attached or filled in stays there.
 | `challenge` | A captcha or a verification. Finish it yourself. |
 | `platform_error` | The page showed an error of its own. Its words are passed on. |
 | `changed` | The video file is no longer the one you confirmed. |
-| `tab_closed` | The tab was closed, or left the platform, before Post was pressed. Nothing was posted. When that happened while ReelForge was being asked for the press, the words say only that Post was not pressed: ReelForge may have said yes, and then it keeps the post as "not sure", with these words. |
+| `tab_closed` | The tab was closed, or left the platform, before Post was pressed. Nothing was posted. When that happened while ReelForge was being asked for the press, before its answer came back, the words say only that Post was not pressed: ReelForge may have said yes, and then it keeps the post as "not sure", with these words. |
 | `timeout` | The page stopped answering. |
 | `app_unreachable` | ReelForge was closed before the video was handed over. |
 | `press_rejected` | Press Post for me pressed, and the page showed no reaction and no sign that it posted. The post is "not sure", like the next row, not failed. |

@@ -919,6 +919,34 @@ class Jobs(ApiTest):
         self.event(x, "ready")
         self.assertEqual(self.post(f"/v1/jobs/{x['id']}/press").json["error"], "press_not_allowed")  # never on X
 
+    def test_a_refused_press_carries_the_post_as_reelforge_has_it(self):
+        # Cancel in the window while the extension asks for the press: the no itself says the post is cancelled, so
+        # the extension needs no second request to learn it (that one finds nobody when ReelForge is closed straight
+        # after), and it asks nobody to press Post.
+        first = self.job()
+        self.post(f"/v1/jobs/{first['id']}/claim")
+        self.event(first, "ready")
+        self.event(first, "posted", url=TIKTOK_URL)  # the first one there is always pressed by the person
+        video = self.root / "videos" / "ep02.mp4"
+        video.write_bytes(b"the second video")
+        job = self.job(video=video, press=True)
+        self.post(f"/v1/jobs/{job['id']}/claim")
+        self.event(job, "ready")
+        posting.cancel(job["id"], "cancelled in ReelForge")
+        refused = self.post(f"/v1/jobs/{job['id']}/press")
+        self.assertEqual((refused.status, refused.json["ok"], refused.json["error"]), (409, False, "not_ready"))
+        row = refused.json["job"]
+        self.assertEqual((row["id"], row["state"], row["detail"]), (job["id"], "cancelled", "cancelled in ReelForge"))
+        # The same row the batch gives, without the post's text.
+        (listed,) = [j for j in self.get(f"/v1/batch/{job['batch']}").json["jobs"] if j["id"] == job["id"]]
+        self.assertEqual(row, {key: value for key, value in listed.items() if key != "text"})
+        # Every refusal of the press carries it, as it stands.
+        x = self.job("x", video=video, press=True)
+        self.post(f"/v1/jobs/{x['id']}/claim")
+        self.event(x, "ready")
+        never = self.post(f"/v1/jobs/{x['id']}/press").json
+        self.assertEqual((never["error"], never["job"]["id"], never["job"]["state"]), ("press_not_allowed", x["id"], "ready"))
+
     def test_news_that_a_pressed_post_is_up_is_taken_after_the_window_ended_its_job(self):
         first = self.job()
         self.post(f"/v1/jobs/{first['id']}/claim")

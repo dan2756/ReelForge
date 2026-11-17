@@ -507,7 +507,10 @@ export const tests = {
     equal(await (await t.browser.tab(HOST.tiktok)).evaluate(() => [fixture.clicks, fixture.posted]), [1, true], "presses of TikTok's Post")
     // The browser that was granted the press asks once more, and asks for X.
     const second = await t.browser.call(t.app.port, `/v1/jobs/${jobs.tiktok}/press`, {})
-    equal([second.status, second.data], [409, { ok: false, error: "already_pressed", message: "Post was already pressed for this one." }], "a second ask for TikTok")
+    const { job: row, ...said } = second.data
+    equal([second.status, said], [409, { ok: false, error: "already_pressed", message: "Post was already pressed for this one." }], "a second ask for TikTok")
+    // The no carries the post as ReelForge has it, without its text.
+    equal([row.id, row.state, "text" in row], [jobs.tiktok, "posted", false], "the post the no carries")
     const forX = await t.browser.call(t.app.port, `/v1/jobs/${jobs.x}/press`, {})
     equal([forX.status, forX.data.ok, forX.data.error], [409, false, "press_not_allowed"], "an ask for X")
     await sleep(1200)

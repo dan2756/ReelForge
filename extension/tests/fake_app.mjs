@@ -56,6 +56,7 @@ export class FakeApp {
     this.busy = 0               // how many reports to answer with 503 (the database is busy), before taking one
     this.fileChanged = false    // the video was replaced after the job was made
     this.corrupt = false        // the bytes on disk no longer match the job's hash
+    this.pressRows = true       // a no to the press carries the job as it stands (an older ReelForge's did not)
     this.log = []               // every request, in order
     this.heartbeats = []
     this.server = null
@@ -457,8 +458,9 @@ export class FakeApp {
       if (!this.move(job, body)) return fail(409, "bad_transition", `A post that is ${was} can't become ${state}.`)
       return send(200, this.view(job))
     }
-    // The press. In the ledger's order: whose job it is, allowed at all, then whether this is the moment.
-    const no = (error, message) => send(409, { ok: false, error, message })
+    // The press. In the ledger's order: whose job it is, allowed at all, then whether this is the moment. A no carries
+    // the job as it stands, without its text (pressRows false: as a ReelForge older than that answered).
+    const no = (error, message) => send(409, { ok: false, error, message, ...(this.pressRows ? { job: this.view(job, { text: false }) } : {}) })
     if (job.claimed_by !== browser.install) return no("not_yours", "Another browser took this post.")
     if (!job.press || !this.unlocked(job.platform, job)) return no("press_not_allowed", "Press Post yourself: ReelForge isn't allowed to for this post.")
     if (job.pressed) return no("already_pressed", "Post was already pressed for this one.")

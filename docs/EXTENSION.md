@@ -107,8 +107,17 @@ the press, it has the post as "not sure it posted", and the note and the popup s
 pressed: look at your profile, then answer on its row. Once the extension has pressed Post, there is no Stop any
 more. **Cancel** on the post's row in ReelForge while the extension is asking works the same way: ReelForge says no,
 the extension clicks nothing, and the note on the page says the post was ended in ReelForge, without asking you to
-press Post. Nothing is clicked either when the page is reloaded, or left, while the extension is asking: if ReelForge
-said yes, the post is "not sure it posted" at once, and its row says Post was not pressed.
+press Post. ReelForge's no itself says how it has the post, so this holds even when you close ReelForge straight
+after. An older ReelForge's no does not say it, and a no cut off on its way back can't be read: if ReelForge can't
+be reached afterwards either, Post is not ringed, and the note says **ReelForge said no**: if you cancelled the post
+in ReelForge, don't press Post; otherwise check it, then press Post yourself. Nothing is clicked either when the page
+is reloaded, or left, while the extension is asking. The extension knows as soon as the browser leaves the page,
+before the next one has loaded: if ReelForge said yes, the post is "not sure it posted" at once, its row says Post was
+not pressed, and the page there now says so when it has loaded. That is not so when you pressed Post yourself before
+the page went, as TikTok's page goes to your list of posts once it has taken the press: yours is the press, as above,
+and the next page decides. The post ends as posted when the platform shows it, else as "not sure it posted", and
+nothing says Post was not pressed. A page reloaded once ReelForge has said no says what any page left before Post was
+pressed says: nothing was posted.
 
 The extension asks ReelForge for the press once, and waits up to 20 seconds for the answer (ReelForge may wait up
 to 10 for its database first). Just before, it checks that ReelForge answers: one closed meanwhile is reported as not
@@ -311,7 +320,7 @@ Calls are JSON under `/v1`. `hello` and `pair/claim` need no token; the rest nee
 | `POST /v1/jobs/<id>/claim` | take a job. The first browser to ask has it |
 | `GET /v1/jobs/<id>/file` | the job's video, whole or a `Range` of it |
 | `POST /v1/jobs/<id>/event` | report a step, a failure or the post |
-| `POST /v1/jobs/<id>/press` | ask to press Post. Granted once, where it is allowed. The extension sends it once: an answer that never came back is read from the batch |
+| `POST /v1/jobs/<id>/press` | ask to press Post. Granted once, where it is allowed. A no carries `job`, the post as it stands (without its text). The extension sends it once: an answer that never came back is read from the batch |
 | `GET /v1/selectors` | `extension/selectors.json`, the list of what to look for on each upload page |
 | `POST /v1/unpair` | disconnect this browser |
 | `GET /pair`, `GET /post/<batch>` | the two local pages (they need their key) |
