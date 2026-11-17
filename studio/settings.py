@@ -104,6 +104,18 @@ def fix_it(path: Path) -> str:
             f"reelforge -p {who} channel --regenerate")
 
 
+def yes_no(value) -> bool | None:
+    """A yes or no in any form a person types it (true, "yes", on, 1, False, "no", off, 0: the words the questions
+    take), else None. A no in quotes is a word to TOML, and any word is a yes to bool(), so a hand edit of
+    `background_stats = "false"` turned the hourly read of your stats on."""
+    if isinstance(value, bool):
+        return value
+    if not isinstance(value, (str, int)):
+        return None
+    v = str(value).strip().strip("\"'").strip().lower()
+    return True if v in ("y", "yes", "true", "1", "on") else False if v in ("n", "no", "false", "0", "off") else None
+
+
 class SettingsError(ValueError):
     """A studio.toml that can't be used. The message names the file, says what's wrong in it and how to put it right,
     so whoever catches it can show it as it is."""
@@ -134,6 +146,12 @@ def load(path: Path | None = None) -> dict:
     if not isinstance(s["platforms"]["enabled"], list):
         raise SettingsError(path, 'enabled under [platforms] should be a list, like ["tiktok", "youtube"]')
     s["platforms"]["enabled"] = [p for p in s["platforms"]["enabled"] if p in PLATFORMS] or list(PLATFORMS)
+    # the hourly read uses your log-ins: a yes or no typed as a word is read as meant, anything else is a mistake that
+    # says where (and generate.background_stats then goes by the line as written, where only a yes is a yes)
+    stats = yes_no(s["platforms"]["background_stats"])
+    if stats is None:
+        raise SettingsError(path, "background_stats under [platforms] should be true or false")
+    s["platforms"]["background_stats"] = stats
     try:
         s["captions"]["max_hashtags"] = max(0, int(s["captions"]["max_hashtags"]))
     except (TypeError, ValueError):
