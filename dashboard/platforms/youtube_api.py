@@ -674,7 +674,8 @@ def disconnect() -> dict:
 
 def upload(video: Path, title: str, description: str, privacy: str, made_for_kids: bool | None, *,
            started: Callable[[str], object], progress: Callable[[int, int], object] = lambda sent, size: None,
-           last: Callable[[], object] = lambda: None, stop: Callable[[], bool] = lambda: False) -> dict:
+           sha256: str | None, last: Callable[[], object] = lambda: None,
+           stop: Callable[[], bool] = lambda: False) -> dict:
     """Send a video to the connected channel and return what YouTube says it made of it (_made).
 
     Who can see it always goes with it, and is asked back: left out, YouTube would make the video public. The
@@ -683,6 +684,13 @@ def upload(video: Path, title: str, description: str, privacy: str, made_for_kid
     session's address before any of the file goes, progress(sent, size) after each piece, and last() before the
     piece that ends the upload: from then on the video may exist. stop() saying True ends it between two pieces
     (Stopped).
+
+    sha256: the video you said yes to, which every caller has to name (None only where nobody said yes to any).
+    Each piece is read from the file as it is when it goes, so a new cut written over the file meanwhile (with its
+    size and time kept, or longer) would go up spliced into the old one. So the bytes are added up as they go, a
+    piece sent again must be the same bytes as the first time, and the piece that ends the upload goes only when
+    everything sent is that video: ApiError "changed" otherwise, before anything could be posted. (The file is read
+    once, as it goes up, not once more before.)
 
     ApiError: it didn't happen, and nothing was posted. Unknown: the last piece went out and neither its answer nor
     the session says whether YouTube has the whole file. Nothing here ever starts a second session for a video.
@@ -701,6 +709,7 @@ def upload(video: Path, title: str, description: str, privacy: str, made_for_kid
     started(uri)
     sent = stuck = 0  # stuck: how many pieces in a row left YouTube with no more of the file than before
     out = False       # the piece that ends the upload has left this computer at least once
+    check = _Sent(video.name) if sha256 else None
     with video.open("rb", buffering=0) as f, _client() as http:  # (unbuffered: each piece is read as the file is now)
         while True:
             if stop():
@@ -710,11 +719,15 @@ def upload(video: Path, title: str, description: str, privacy: str, made_for_kid
             try:
                 if stuck > TRIES:
                     raise ApiError("offline", "The connection to YouTube kept breaking, so the upload stopped.")
-                if end == size and not out:
-                    last()
                 piece = _piece(f, sent, end - sent)
                 if len(piece) != end - sent:  # the file ends before where it ended when the upload started
                     raise ApiError("changed", f"{video.name} changed while it was being uploaded.")
+                if check:
+                    check.add(sent, piece)
+                    if end == size and check.digest() != sha256:
+                        raise ApiError("changed", f"{video.name} changed while it was being uploaded.")
+                if end == size and not out:
+                    last()
                 out = out or end == size
                 what, value = _stands(_put(http, uri, {"Content-Type": kind,
                                                        "Content-Range": f"bytes {sent}-{end - 1}/{size}"}, piece),
@@ -735,6 +748,31 @@ def upload(video: Path, title: str, description: str, privacy: str, made_for_kid
             stuck = 0 if value > sent else stuck + 1
             sent = value
             progress(sent, size)
+
+
+class _Sent:
+    """What has gone of a video, added up in order: its SHA-256 so far, and the last piece read, which a piece sent
+    again (YouTube had less of it than was sent) is held against."""
+
+    def __init__(self, name: str):
+        self.name, self.sha, self.upto, self.last = name, hashlib.sha256(), 0, (0, b"")
+
+    def add(self, start: int, piece: bytes) -> None:
+        """A piece about to go. ApiError "changed": it isn't the bytes that went there before."""
+        at, before = self.last
+        if start > self.upto or start < at:
+            # YouTube has always said it has at most what was sent, and never less than it had: a piece outside that
+            # can't be checked against what went, so it doesn't go.
+            raise ApiError("odd", "YouTube asked for a part of the video ReelForge can't check, so the upload stopped.")
+        again = piece[:self.upto - start]
+        if again != before[start - at:start - at + len(again)]:
+            raise ApiError("changed", f"{self.name} changed while it was being uploaded.")
+        self.sha.update(piece[len(again):])
+        self.upto = max(self.upto, start + len(piece))
+        self.last = (start, piece)
+
+    def digest(self) -> str:
+        return self.sha.hexdigest()
 
 
 def _piece(f, start: int, length: int) -> bytes:
