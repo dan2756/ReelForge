@@ -65,6 +65,28 @@ class Finding(Scratch):
                 self.assertEqual(p.folder.name, name.lower() + "-channel")
                 self.assertEqual(profiles.get(p.key), p)
 
+    @unittest.skipIf(os.name == "nt", "Windows takes a space at the end off a folder's name")
+    def test_a_folder_renamed_with_a_space_at_the_end_is_found_as_it_is(self):
+        """On macOS and Linux a folder can be renamed by hand to "sea " beside a "sea". Its notes' -p
+        "profiles/sea ", and the profile the window chose for what it starts (REELFORGE_PROFILE), had the space taken
+        off, so they found the other channel."""
+        import shlex
+
+        self.onboard_main()
+        sea = profiles.create("Sea")
+        two = profiles.create("Sea Two")
+        two = profiles.Profile(two.folder.rename(two.folder.with_name("sea ")))
+        self.assertEqual(profiles.every(), [profiles.main(), sea, two])
+        self.assertEqual(profiles.find(shlex.split(two.kept_flag)[0]), two)
+        self.assertEqual(profiles.get(two.key), two)
+        profiles.use(two)
+        self.assertEqual(profiles.current(), two)
+        profiles.remember(two)                  # the window opens on it next time
+        self.assertEqual(profiles.last(), two)
+        # a space typed by mistake after a folder that has none still finds it
+        self.assertEqual(profiles.find("profiles/sea-two "), None)
+        self.assertEqual(profiles.find("profiles/sea\n"), sea)
+
     def test_the_first_profile_is_the_reelforge_folder_itself(self):
         main = profiles.main()
         self.assertEqual(profiles.every(), [main])

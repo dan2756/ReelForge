@@ -252,19 +252,23 @@ def others(*besides: Profile | None) -> list[str]:
 
 
 def get(key: str | os.PathLike | None) -> Profile | None:
-    """The profile a key (".", "profiles/<name>" or a folder's full path) names, if there's one there."""
-    key = str(key or "").strip()
+    """The profile a key (".", "profiles/<name>" or a folder's full path) names, if there's one there: as given first
+    (on macOS and Linux a folder renamed by hand can end in a space, "sea " beside a "sea"), else without the spaces
+    round it."""
+    given = str(key or "")
+    key = given.strip()
     if not key:
         return None
     if key in (".", "./", ".\\"):
         return main()
-    path = Path(key)
-    if not path.is_absolute():
-        path = ROOT / path
-    if _same(path, ROOT):
-        return main()
-    if (path / MARK).is_file():
-        return Profile(path)
+    for k in dict.fromkeys((given, key)):
+        path = Path(k)
+        if not path.is_absolute():
+            path = ROOT / path
+        if _same(path, ROOT):
+            return main()
+        if (path / MARK).is_file():
+            return Profile(path)
     return None
 
 
@@ -281,7 +285,8 @@ def use(profile: Profile) -> None:
 def find(word: str) -> Profile | None:
     """The profile typed after -p: its number in the list (1 is the first), its name or short name (any case), the
     start of either when only one profile starts that way, or its folder."""
-    word = (word or "").strip()
+    given = word or ""
+    word = given.strip()
     if not word:
         return None
     every_ = every()
@@ -289,7 +294,7 @@ def find(word: str) -> Profile | None:
         n = int(word)
         return every_[n - 1] if 1 <= n <= len(every_) else None
     if word in (".", "./", ".\\") or "/" in word or "\\" in word:
-        return get(word)
+        return get(given)       # (as typed first: a folder's name can end in a space)
     low = word.casefold()
     for p in every_:
         if low in (p.name.casefold(), p.slug.casefold()):
@@ -313,7 +318,7 @@ def of(path: str | os.PathLike) -> Profile:
 def last() -> Profile:
     """The profile the window showed last (the one it opens on), else the first."""
     try:
-        key = (FOLDER / LAST).read_text(encoding="utf-8").strip()
+        key = (FOLDER / LAST).read_text(encoding="utf-8").strip("\r\n")    # (a folder's name can end in a space)
     except OSError:
         return main()
     return get(key) or main()
