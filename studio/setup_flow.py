@@ -117,6 +117,7 @@ def apply(item: Item, progress=None) -> str:
     if item.key == "ffmpeg":
         return f"ffmpeg ready ({P.rel(tools.install_ffmpeg(progress))})"
     if item.key == "sounds":
+        sounds.note_kit_list()
         failed = sounds.fetch_mixkit(progress=progress)
         if failed:
             raise RuntimeError(f"{len(failed)} sounds didn't download ({', '.join(failed[:3])}). Run setup again "

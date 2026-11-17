@@ -269,6 +269,86 @@ class SetAccount(Scratch):
         generate.write_all(json.loads(P.ANSWERS.read_text(encoding="utf-8")))
         self.assertEqual(settings.load(P.SETTINGS)["sound"]["target_lufs"], -25.5)
 
+    def test_a_settings_file_with_a_mistake_in_it_stays_as_it_was_and_the_rest_still_get_the_handle(self):
+        """With a typo in studio.toml, Connect wrote the handle into config.toml alone and said nothing: the answers
+        never had it, so Change your answers, once the typo was fixed, disconnected the account without a word."""
+        generate.write_all({"channel_name": "Night Physics", "about": "What-ifs.", "assistant": "claude",
+                            "platforms": ["tiktok", "youtube"], "handle_tiktok": "@np"})
+        good = P.SETTINGS.read_text(encoding="utf-8")
+        typo = good + "\nthis is = = a typo\n"
+        P.SETTINGS.write_text(typo, encoding="utf-8")
+        said = []
+        generate.set_account("x", "@np_x", say=said.append)    # Connect
+        self.assertEqual(P.SETTINGS.read_text(encoding="utf-8"), typo)   # what's edited by hand in it isn't lost
+        a = json.loads(P.ANSWERS.read_text(encoding="utf-8"))
+        self.assertEqual((a["platforms"], a["handle_x"]), (["tiktok", "youtube", "x"], "@np_x"))
+        for notes in ("CLAUDE.md", "AGENTS.md"):
+            self.assertIn("@np_x", (P.ROOT / notes).read_text(encoding="utf-8"), notes)
+        self.assertEqual(self.handles()["x"], "@np_x")
+        line = good.count("\n") + 2
+        self.assertEqual(said, [f"Night Physics's settings file, {P.SETTINGS}, has a mistake in it (Expected '=' "
+                                f"after a key in a key/value pair (at line {line}, column 6)), so it couldn't be "
+                                "updated with this account (your answers and your AI's notes were). Fix it in a text "
+                                "editor, or write it again from your answers with: reelforge channel --regenerate"])
+        P.SETTINGS.write_text(good, encoding="utf-8")            # the typo fixed, then Change your answers
+        generate.write_all(json.loads(P.ANSWERS.read_text(encoding="utf-8")))
+        self.assertEqual(self.handles()["x"], "@np_x")
+        self.assertEqual(settings.load(P.SETTINGS)["platforms"]["handles"]["x"], "@np_x")
+
+    def test_a_settings_file_with_a_mistake_in_it_leaves_the_rest_of_the_dashboard_settings_as_they_are(self):
+        """While studio.toml couldn't be read, Connect wrote all of config.toml from the answers: the hashtags for
+        new videos on Publish went back to the answers' over the ones edited into studio.toml by hand."""
+        generate.write_all({"channel_name": "Night Physics", "about": "What-ifs.", "assistant": "claude",
+                            "platforms": ["tiktok", "youtube"], "handle_tiktok": "@np", "default_tags": "#fyp #physics"})
+        text = P.SETTINGS.read_text(encoding="utf-8")
+        self.assertIn('default_tags = ["fyp", "physics"]', text)
+        P.SETTINGS.write_text(text.replace('default_tags = ["fyp", "physics"]',
+                                           'default_tags = ["fyp", "mine", "nightphysics"]'), encoding="utf-8")
+        generate.set_account("youtube", "@np_yt")           # config.toml follows studio.toml
+        tags = tomllib.loads(self.config.read_text(encoding="utf-8"))["default_tags"]
+        self.assertEqual(tags, "#fyp #mine #nightphysics")
+        P.SETTINGS.write_text(P.SETTINGS.read_text(encoding="utf-8") + "\nthis is = = a typo\n", encoding="utf-8")
+        before = self.config.read_text(encoding="utf-8")
+        said = []
+        generate.set_account("x", "@np_x", say=said.append)  # Connect, with the typo there
+        self.assertEqual(len(said), 1, said)
+        self.assertEqual(self.handles(), {"tiktok": "@np", "youtube": "@np_yt", "instagram": "", "x": "@np_x"})
+        self.assertEqual(self.config.read_text(encoding="utf-8"),
+                         before.replace('[x]\nhandle = ""', '[x]\nhandle = "@np_x"'))   # the handle, nothing else
+
+    def test_answers_that_need_fixing_first_still_get_the_handle_and_it_is_said(self):
+        """With an answer first-time setup would ask about again, Connect put the handle into config.toml alone and
+        said nothing: once the answer was fixed, Change your answers disconnected the account without a word."""
+        generate.write_all({"channel_name": "Night Physics", "about": "What-ifs.", "assistant": "claude",
+                            "platforms": ["tiktok"], "handle_tiktok": "@np"})
+        good = json.loads(P.ANSWERS.read_text(encoding="utf-8"))
+        P.ANSWERS.write_text(json.dumps({**good, "assistant": "gemini"}), encoding="utf-8")     # by hand
+        notes = (P.ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+        said = []
+        generate.set_account("x", "@np_x", say=said.append)      # Connect
+        self.assertEqual(said, ["Your AI's notes couldn't be updated: some answers need fixing: assistant: 'gemini' "
+                                "isn't one of: claude, codex. Your answers are, so the notes follow once that's put "
+                                "right (Change your answers on the Settings tab)."])
+        self.assertEqual(self.handles()["x"], "@np_x")
+        a = json.loads(P.ANSWERS.read_text(encoding="utf-8"))
+        self.assertEqual((a["handle_x"], a["platforms"], a["assistant"]), ("@np_x", ["tiktok", "x"], "gemini"))
+        self.assertEqual((P.ROOT / "CLAUDE.md").read_text(encoding="utf-8"), notes)
+        generate.write_all({**a, "assistant": "claude"})          # the answer fixed: Change your answers
+        self.assertEqual(self.handles()["x"], "@np_x")
+        self.assertIn("@np_x", (P.ROOT / "CLAUDE.md").read_text(encoding="utf-8"))
+
+    def test_answers_that_cant_be_read_stay_as_they_are_and_it_is_said(self):
+        generate.write_all({"channel_name": "Night Physics", "about": "What-ifs.", "assistant": "claude",
+                            "platforms": ["tiktok"], "handle_tiktok": "@np"})
+        P.ANSWERS.write_text('{"channel_name": "Night Physics",}', encoding="utf-8")
+        said = []
+        generate.set_account("x", "@np_x", say=said.append)
+        self.assertEqual(said, [f"Your answers file, {P.ANSWERS}, can't be read (Expecting property name enclosed in "
+                                "double quotes: line 1 column 34 (char 33)), so it and your AI's notes stay as they "
+                                "were. Fix it in a text editor, then do this here again."])
+        self.assertEqual(self.handles()["x"], "@np_x")
+        self.assertEqual(P.ANSWERS.read_text(encoding="utf-8"), '{"channel_name": "Night Physics",}')
+
     def test_a_handle_typed_into_the_dashboard_settings_counts(self):
         generate.write_all({"channel_name": "Night Physics", "about": "What-ifs.", "assistant": "claude",
                             "platforms": ["tiktok"],

@@ -466,13 +466,16 @@ def go(p: Plan, reopen: bool = False, pause: bool = True, say=print) -> tuple[in
         stats = _stats_off(p, say)
         err = rename(p)
     except BaseException:
-        # Stopped in between (Ctrl+C while it waited for a stats read to finish): the folder hasn't moved, so its
-        # note goes and the hourly read goes back on, where it was.
-        _undo(p)
-        if p.system.get("stats"):
-            from . import reset
+        # Stopped in between (Ctrl+C while it waited for a stats read to finish, or for a file in use): the folder
+        # hasn't moved, so its note goes and the hourly read goes back on, where it was. Stopped just as the rename
+        # was done, it has moved: the note goes along, and the next start finishes the move from the new place
+        # (finish_leftover), the hourly read with it. Put back on here, the read would run from a folder gone.
+        if os.path.lexists(p.source) or not p.target.is_dir():
+            _undo(p)
+            if p.system.get("stats"):
+                from . import reset
 
-            reset._stats_on_again()
+                reset._stats_on_again()
         raise
     if err:
         _undo(p)

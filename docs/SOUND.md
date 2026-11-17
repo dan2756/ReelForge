@@ -58,6 +58,21 @@ and **Kenney** (CC0). Put the file in `assets/sfx/<source>/`, add a manifest ent
 `title`, licence note), run `python -I pipeline/post/sfx_cache.py`, then use its name in a cue sheet. Check its
 length and listen for noise before you rely on it.
 
-An update brings the kit's new list and keeps the entries you added to yours. The one exception is the update
-away from ReelForge 2.2.1, which 2.2.1's own updater does: it puts the new list over yours. Your sound files stay
-where they are, so add their entries again after that update, or keep a copy of your `manifest.json` before it.
+An update brings the kit's new list and keeps what is yours in the one you have: the sounds and licence notes you
+added, anything else you put in it, and any entry you changed. It tells them from the kit's own by the kit's list as
+the last update (or first-time setup) put it in place, which it keeps beside yours as `assets/sfx/.kit-manifest.json`:
+an entry that is the same as there is the kit's, and the kit's new one replaces it (or, where the new list no longer
+has it, it goes; one you changed stays). A sound of yours by a name the new list also uses stays yours, and the
+update says so when it is done: give yours another name, in your cue sheets too, to have both.
+
+The first update that keeps that record can't tell yet. There the new list's entries go in, a copy of your list as it
+was goes to `backups/sounds-before-update-<date>.json` first, and the update names the entries it replaced: put back
+any of yours from the copy, under a name of its own. (Where that copy can't be made, your entries stay as they are
+instead.) The one exception is the update away from ReelForge 2.2.1, which 2.2.1's own updater does: it puts the new
+list over yours. Your sound files stay where they are, so add their entries again after that update, or keep a copy
+of your `manifest.json` before it.
+
+A `manifest.json` that can't be read (a comma after the last entry you added, say: every mix stops on it) is copied to
+`backups/sounds-before-update-<date>.json` too, and the new list takes its place; the update says so and names the
+copy, so you can bring your own entries over from it. Where that copy can't be made, yours stays as it was, without
+the new version's sounds until the next update, and the update says that instead.

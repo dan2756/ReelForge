@@ -545,6 +545,35 @@ class WindowTest(unittest.TestCase):
         self.assertIn("error: saving YouTube's handle: OSError: [Errno 28] No space left on device: 'AGENTS.md'",
                       sync.log_path().read_text("utf-8"))
 
+    def test_a_settings_file_left_as_it_was_is_said_when_the_handle_is_saved(self):
+        """A studio.toml with a mistake in it stays as it was while the rest gets the handle
+        (studio.generate.set_account): the window said only that the account was connected."""
+        every = self.real_platforms({"tiktok": "@mine"})
+        save = config.save_handle
+        line = ("Night Physics's settings file, my-studio/studio.toml, has a mistake in it (Expected '=' after a key "
+                "in a key/value pair (at line 68, column 6)), so it couldn't be updated with this account (your "
+                "answers and your AI's notes were). Fix it in a text editor, or write it again from your answers "
+                "with: reelforge channel --regenerate")
+
+        def with_a_mistake(key: str, handle: str) -> list[str]:
+            save(key, handle)
+            return [line]
+
+        with mock.patch.object(sync, "refresh", lambda *a, **k: sync.Result()):
+            w = self.open(every, demo_mode=False)
+            w.forget()
+            with mock.patch.object(config, "save_handle", with_a_mistake):
+                self.assertIsNone(w.call("connect", "youtube", "@new"))
+                self.assertTrue(w.until(lambda: "youtube" in w.svc.platforms))
+                self.assertTrue(w.until(lambda: any(t["severity"] == "warning" for t in w.sent("toast"))))
+            self.assertIn(f"YouTube's handle is saved. {line}", w.toasts())
+            self.assertEqual(self.panel(w, "youtube")["state"], "on")
+            w.forget()
+            with mock.patch.object(config, "save_handle", with_a_mistake):
+                w.call("disconnect", "tiktok")
+                self.assertTrue(w.until(lambda: any(t["severity"] == "warning" for t in w.sent("toast"))))
+            self.assertIn(f"TikTok is disconnected. {line}", w.toasts())
+
     def test_a_handle_in_config_toml_that_isnt_one_is_said_on_its_panel(self):
         """A link pasted into config.toml as a handle counts as none (Platform.public_handle). The platform used
         to show as not connected and nothing said why."""

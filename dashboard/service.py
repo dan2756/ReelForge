@@ -541,11 +541,13 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
         if problem:
             self.loop.call_soon(lambda: self.notify(problem, title="Not deleted", severity="error", timeout=12))
             return
-        self.write_guides()  # your AI's notes no longer list it
+        undone = self.write_guides()  # your AI's notes no longer list it
 
         def done() -> None:
             self.notify(f"{name} is kept whole in {gone.where}. Restore on the Settings tab brings it back.",
                         title="Profile deleted", timeout=12)
+            for line in undone:
+                self.notify(line, severity="warning", timeout=20)
             self.update_profile()
             if self.tab == "settings":
                 self.update_settings()
@@ -553,15 +555,18 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
         self.loop.call_soon(done)
 
     @staticmethod
-    def write_guides() -> None:
-        """The first channel's notes for your AI list every channel: write them again once one goes or comes back."""
+    def write_guides() -> list[str]:
+        """The first channel's notes for your AI list every channel: write them again once one goes or comes back.
+        Returns a line for each channel's settings that have a mistake in them, for the window to say."""
+        said: list[str] = []
         try:
             from studio import generate
 
             # (from the settings as they are on file: studio.toml is yours to edit by hand)
-            generate.write_guides(profiles.main(), saved_settings=True)
+            generate.write_guides(profiles.main(), saved_settings=True, say=said.append)
         except Exception:
             pass  # notes for your AI, which `reelforge channel --regenerate` writes again too
+        return said
 
     @rpc
     def restore_profile(self, backup: str) -> bool:
@@ -578,9 +583,11 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
             self.notify(str(e), title="Not restored", severity="error", timeout=12)
             self.update_settings()
             return False
-        self.write_guides()
+        undone = self.write_guides()
         self.notify(f"{p.name} is back, as it was. Switch to it with the button at the top left (p).",
                     title="Profile restored", timeout=10)
+        for line in undone:
+            self.notify(line, severity="warning", timeout=20)
         self.update_profile()
         self.update_settings()
         return True
@@ -1454,8 +1461,9 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
         for p in ps:
             xs, ys = curves[p.key]
             series = [{"key": p.key, "name": p.name, "color": p.color, "xs": xs, "ys": ys, "style": "area"}]
-            heading = Text.assemble((p.name + "  ", f"bold {p.color}"),
-                                    (f"typical video, first {fmt_age(horizon)}", MUTED))
+            # Each piece with the separator before it: where the chart is too narrow for all of them, the window
+            # leaves out whole pieces from the end (whole() in ui/src/lib/fit.ts), never leaving a "·" at the end.
+            heading = Text.assemble((p.name, f"bold {p.color}"), (f"  typical video, first {fmt_age(horizon)}", MUTED))
             if ys:
                 heading.append(f" · {fmt_num(ys[-1])} views by {fmt_age(xs[-1])}", MUTED)
             charts.append(self.compare_chart(p, heading, series, horizon, "Needs a few videos with some history."))
@@ -1501,10 +1509,11 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
             txs, tys = analytics.typical_curve(self.posts, self.parsed, p.key, span, exclude=q)
             series = [{"key": p.key, "name": "this", "color": p.color, "xs": xs, "ys": ys, "style": "area"},
                       {"key": "typical", "name": "typical", "color": TYPICAL, "xs": txs, "ys": tys, "style": "line"}]
-            heading = Text.assemble((p.name + "  ", f"bold {p.color}"), (f"{fmt_num(q['views'])} views", "bold"),
-                                    (f" · {fmt_num(q['likes'])} likes · ", MUTED))
-            heading.append_text(score_text(q["score"]))
-            heading.append(" typical", MUTED)
+            # (In whole pieces, each with the separator before it, as the typical video's above: " · 249 likes ·"
+            # was one piece, and the window, short of room, kept it without the score it led to.)
+            score = score_text(q["score"]).json()[0]
+            heading = Text.assemble((p.name, f"bold {p.color}"), (f"  {fmt_num(q['views'])} views", "bold"),
+                                    (f" · {fmt_num(q['likes'])} likes", MUTED), (f" · {score[0]} typical", score[1]))
             charts.append(self.compare_chart(p, heading, series, span, "No snapshots for this post yet."))
         rows = []
         for p in ps:
@@ -2016,11 +2025,12 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
             elif guess:
                 est.append([i, i + 1])
         first = pts[0][0].astimezone()  # the first reading, not the start of its hour, so the date matches the panel
-        heading = Text.assemble(("FOLLOWERS  ", "bold"),
-                                (f"since {first:%b} {first.day}  " if days < 30 else "last 30 days  ", MUTED),
-                                (fmt_num(pts[-1][1]), "bold"))
-        heading.append("  ")
-        heading.append_text(change_text(pts[-1][1] - (ys[0] if len(ys) > 1 else pts[0][1])))
+        # Each piece with the space before it, so that where the panel is too narrow for all of them the window
+        # leaves out whole pieces from the end (whole() in ui/src/lib/fit.ts), and no space stands in for one.
+        change = change_text(pts[-1][1] - (ys[0] if len(ys) > 1 else pts[0][1])).json()
+        heading = Text.assemble(("FOLLOWERS", "bold"),
+                                (f"  since {first:%b} {first.day}" if days < 30 else "  last 30 days", MUTED),
+                                (f"  {fmt_num(pts[-1][1])}", "bold"), *[(f"  {s[0]}", s[1]) for s in change])
         return {"heading": heading.json(), "n": fr.n, "step_h": fr.step.total_seconds() / 3600,
                 "slots": slot_info(fr), "values": b.totals, "guessed": guessed,
                 "series": [{"key": p.key, "name": p.name, "color": p.color, "xs": xs, "ys": ys, "style": "area",
@@ -2278,7 +2288,7 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
         """Connect a platform with its handle, or disconnect it (""): your settings change (config.save_handle), then
         it shows up everywhere, or leaves, straight away."""
         try:
-            config.save_handle(p.key, handle)
+            undone = config.save_handle(p.key, handle)
         except Exception as e:
             sync.log([f"error: saving {p.name}'s handle: {detail(e)}"])
             # The handle goes into several files in turn, config.toml among the last (studio.generate.set_account),
@@ -2300,6 +2310,9 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
                 "ReelForge couldn't write your settings; data/refresh.log says what stopped it."
             self.loop.call_soon(self.notify, f"{not_done}. {why}", "", "error", 12)
             return
+        if undone:  # a settings file with a mistake in it, left as it was: said, never passed over
+            done = f"{p.name}'s handle is saved" if handle else f"{p.name} is disconnected"
+            self.loop.call_soon(self.notify, f"{done}. " + " ".join(undone), "", "warning", 20)
         self.loop.call_soon(self.account_saved, p, handle)
 
     def account_saved(self, p: Platform, handle: str) -> None:
@@ -2632,11 +2645,16 @@ class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
             return
         done = kit_update.take_marker()
         if done:
-            self.notify(f"You're on ReelForge {done.get('to')} now (from {done.get('from')}).", title="Updated",
-                        timeout=15)
+            # What else the update had to say (a sound of yours kept by a name the new version also uses): the
+            # summary that said it first was up for a moment before the restart.
+            notes = done.get("notes") if isinstance(done.get("notes"), list) else []
+            notes = " ".join(str(n) for n in notes if n)
+            said = f"You're on ReelForge {done.get('to')} now (from {done.get('from')})."
+            self.notify(f"{said} {notes}".strip(), title="Updated", severity="warning" if notes else "information",
+                        timeout=30 if notes else 15)
             self._safe(lambda: notify.add("update", f"Updated to ReelForge {done.get('to')}",
-                                          f"From {done.get('from')}. See what's new on the Updates tab.",
-                                          key=f"updated:{done.get('to')}", read=True), False)
+                                          f"From {done.get('from')}. {notes + ' ' if notes else ''}See what's new on "
+                                          "the Updates tab.", key=f"updated:{done.get('to')}", read=not notes), False)
         self.update_info = self._safe(lambda: db.get_meta("update_check"), None)
         self.show_update()
         info = self.update_info

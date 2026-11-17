@@ -19,7 +19,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from dashboard import config
-from studio import dashboard_config, generate, profiles, signup
+from studio import dashboard_config, generate, profiles, signup, tui
 from studio import paths as P
 from studio import settings as S
 from studio.bridge import Loop
@@ -187,6 +187,29 @@ class Onboarding(Scratch):
         shutil.rmtree(a.folder)
         generate.write_guides(profiles.main())
         self.assertEqual((self.root / "CLAUDE.md").read_text(encoding="utf-8"), before)
+
+    def test_a_new_channel_made_in_the_window_with_a_mistake_in_the_first_ones_settings(self):
+        """Create the profile wrote every file of the new channel, then said it had failed: the first channel's
+        notes, which list it, couldn't be written from a studio.toml with a typo in it."""
+        self.onboard_main()
+        mine = self.root / "my-studio" / "studio.toml"
+        mine.write_text(mine.read_text(encoding="utf-8") + "\nthis is = = a typo\n", encoding="utf-8")
+        svc = Setup(Loop(out=io.StringIO()))
+        svc.start({"start": "onboard", "new": True, "embedded": True})
+        svc.onboard_start()
+        svc.answers.update(channel_name="Cool Epic Facts", about="Mind-blowing facts.", platforms=["tiktok"])
+        with mock.patch.object(svc.loop, "run_worker"):
+            self.assertEqual(svc.onboard_create(), {"ok": True})
+        self.assertTrue(profiles.find("Cool Epic Facts").settings.is_file())
+        self.assertIn("**Cool Epic Facts**", (self.root / "CLAUDE.md").read_text(encoding="utf-8"))
+        sent = []
+        with mock.patch.object(svc.loop, "call_soon", lambda fn, *a: fn(*a)), \
+                mock.patch.object(svc, "emit", lambda name, data: sent.append((name, data))):
+            svc._apply_system()   # the last screen's list of what was set up
+        rows = ["".join(seg[0] for seg in row) for row in sent[-1][1]["rows"]]
+        self.assertTrue(rows[0].startswith(f"  {tui.CROSS}  Night Physics's settings file, {mine}, has a mistake in "
+                                           "it ("), rows)
+        self.assertIn("so your AI's notes go by its answers instead.", rows[0])
 
     def test_the_interview_makes_a_new_profile_from_your_answers_about_you(self):
         self.onboard_main(assistant="codex")
@@ -357,6 +380,55 @@ class Job(Scratch):
         self.assertEqual(calls[0][1], ["dashboard", "refresh"])
         self.assertTrue(all(0 < c[2] <= 600 for c in calls))
         self.assertIn("Cool Epic Facts:", out.getvalue())
+
+    def test_a_mistake_in_one_channels_settings_stops_the_read_of_none(self):
+        """The hourly read went through every channel's studio.toml first, and stopped at one with a typo in it: the
+        channels after it weren't read, and with the typo in the first channel's, none was."""
+        from dashboard import __main__ as dash
+
+        self.onboard_main()
+        a, b = profiles.create("Cool Epic Facts"), profiles.create("Quiet One")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**ANSWERS, "channel_name": "Cool Epic Facts"}, a)
+            generate.write_all({**ANSWERS, "channel_name": "Quiet One", "background_stats": False}, b)
+        mine = self.root / "my-studio" / "studio.toml"
+        for f in (mine, b.settings):
+            f.write_text(f.read_text(encoding="utf-8") + "\nthis is = = a typo\n", encoding="utf-8")
+        calls = []
+        with mock.patch.object(subprocess, "call", lambda cmd, cwd=None, env=None, timeout=None:
+                               calls.append(env[profiles.ENV]) or 0), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(dash.refresh_profiles(), 0)
+        self.assertEqual(calls, [".", a.key])       # Quiet One's answers still say no
+        said = out.getvalue()
+        self.assertEqual(said.count("has a mistake in it"), 2, said)
+        for name, f in (("Night Physics", mine), ("Quiet One", b.settings)):
+            self.assertIn(f"{name}'s settings file, {f}, has a mistake in it (", said)
+        self.assertIn("so whether its stats are read every hour goes by its answers.", said)
+
+    def test_a_mistake_in_the_first_channels_settings_still_sets_up_the_hourly_read_for_a_new_one(self):
+        """One hourly job reads every channel. With a typo in the first channel's studio.toml, setting it up for a
+        new channel that wants it stopped there: "Background stats couldn't be set up", and it wasn't."""
+        from studio.__main__ import main
+
+        self.onboard_main(background_stats=False)
+        mine = self.root / "my-studio" / "studio.toml"
+        mine.write_text(mine.read_text(encoding="utf-8") + "\nthis is = = a typo\n", encoding="utf-8")
+        answers = self.root / "tiny.json"
+        answers.write_text(json.dumps({**ANSWERS, "channel_name": "Tiny Worlds"}), encoding="utf-8")
+        with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(main(["channel", "--new", "--answers", str(answers)]), 0, out.getvalue())
+        self.assertNotIn("couldn't be set up", out.getvalue())
+        self.assertIn("(dry run) would run", out.getvalue())       # the job, for Tiny Worlds
+        svc = Setup(Loop(out=io.StringIO()))                      # and on setup's last screen in the window
+        svc.start({"start": "onboard", "new": True, "embedded": True})
+        sent = []
+        with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), \
+                mock.patch.object(svc.loop, "call_soon", lambda fn, *a: fn(*a)), \
+                mock.patch.object(svc, "emit", lambda name, data: sent.append((name, data))):
+            svc._apply_system()
+        rows = ["".join(seg[0] for seg in row) for row in sent[-1][1]["rows"]]
+        self.assertFalse([r for r in rows if "couldn't be set up" in r], rows)
+        self.assertTrue([r for r in rows if r.startswith(f"  {tui.CHECK}  Background stats: (dry run)")], rows)
 
     def test_one_profile_or_one_asked_for_is_read_here(self):
         from dashboard import __main__ as dash
@@ -553,6 +625,83 @@ class Deleting(Scratch):
             self.assertNotIn("-25.5", notes, argv)
         self.assertIn("target_lufs = -24.0", mine.read_text(encoding="utf-8"))
 
+    def test_a_mistake_in_the_first_channels_settings_stops_nothing_done_to_another(self):
+        """The first channel's notes list every channel, so they are written again when another is deleted, restored
+        or made. With a typo in its studio.toml, delete and restore said only that the file couldn't be read, after
+        they had happened, and a new channel's folder was taken away again though its files were written."""
+        from studio.__main__ import main
+
+        self.onboard_main()
+        mine = self.root / "my-studio" / "studio.toml"
+        typo = mine.read_text(encoding="utf-8") + "\nthis is = = a typo\n"
+        mine.write_text(typo, encoding="utf-8")
+        profiles.create("Cool Epic Facts")
+        said = (f"Night Physics's settings file, {mine}, has a mistake in it (Expected '=' after a key in a key/value "
+                f"pair (at line {typo.count(chr(10))}, column 6)), so your AI's notes go by its answers instead. "
+                "Fix it in a text editor, or write it again from your answers with: reelforge channel --regenerate\n")
+        for argv, done in ((["profiles", "delete", "cool epic facts", "--yes"],
+                            "Cool Epic Facts is deleted. It's kept whole in backups"),
+                           (["profiles", "restore", "1"], "Cool Epic Facts is back")):
+            with redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(main(argv), 0, out.getvalue())
+            self.assertIn(done, out.getvalue())
+            self.assertEqual(out.getvalue().count(said), 1, out.getvalue())
+        self.assertIn("**Cool Epic Facts**", (self.root / "CLAUDE.md").read_text(encoding="utf-8"))
+        answers = self.root / "tiny.json"
+        answers.write_text(json.dumps({**ANSWERS, "channel_name": "Tiny Worlds"}), encoding="utf-8")
+        with redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(main(["channel", "--new", "--answers", str(answers)]), 0, out.getvalue())
+        self.assertEqual(out.getvalue().count(said), 1, out.getvalue())
+        self.assertTrue(profiles.find("Tiny Worlds").settings.is_file())
+        self.assertIn("**Tiny Worlds**", (self.root / "CLAUDE.md").read_text(encoding="utf-8"))
+        self.assertEqual(mine.read_text(encoding="utf-8"), typo)  # yours to fix: nothing writes over it
+
+    def test_a_mistake_in_another_channels_settings_stops_nothing_done_to_the_first(self):
+        """The first channel's notes say how often each other channel posts, from its studio.toml: a typo there
+        stopped "Change your answers" on the first channel."""
+        self.onboard_main()
+        a = profiles.create("Cool Epic Facts")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**ANSWERS, "channel_name": "Cool Epic Facts", "cadence": "3/week"}, a)
+        a.settings.write_text(a.settings.read_text(encoding="utf-8") + "\nthis is = = a typo\n", encoding="utf-8")
+        said: list[str] = []
+        generate.write_all({**ANSWERS, "about": "Changed."}, say=said.append)
+        self.assertEqual(len(said), 1, said)
+        self.assertTrue(said[0].startswith(f"Cool Epic Facts's settings file, {a.settings}, has a mistake in it ("))
+        self.assertEqual(S.load()["channel"]["about"], "Changed.")
+        self.assertIn("**Cool Epic Facts**: `profiles/cool-epic-facts/` (its notes: "
+                      "`profiles/cool-epic-facts/CLAUDE.md`; 3 videos a week)",
+                      (self.root / "CLAUDE.md").read_text(encoding="utf-8"))
+
+    def test_writing_every_channels_files_again_says_a_mistake_once_and_only_while_it_is_there(self):
+        """reelforge channel --regenerate, the way out the line itself gives, said it once for every other channel
+        (each brings up the first one's notes again), then wrote the file again from the answers, which put it right."""
+        from studio.__main__ import main
+
+        self.onboard_main()
+        extra = []
+        for name in ("Tiny Worlds", "Cool Epic Facts"):
+            p = profiles.create(name)
+            with redirect_stdout(io.StringIO()):
+                generate.write_all({**ANSWERS, "channel_name": name}, p)
+            extra.append(p)
+        mine, theirs = self.root / "my-studio" / "studio.toml", extra[1].settings
+        for f in (mine, theirs):
+            f.write_text(f.read_text(encoding="utf-8") + "\nthis is = = a typo\n", encoding="utf-8")
+        typos = {f: f.read_text(encoding="utf-8") for f in (mine, theirs)}
+        with redirect_stdout(io.StringIO()) as out:        # what an update runs: your settings stay as they are
+            self.assertEqual(main(["channel", "--regenerate", "--preserve-settings"]), 0)
+        said = out.getvalue()
+        self.assertEqual(said.count("has a mistake in it"), 2, said)
+        self.assertEqual(said.count(f"Night Physics's settings file, {mine}, has a mistake in it"), 1, said)
+        self.assertEqual(said.count(f", {theirs}, has a mistake in it"), 1, said)
+        self.assertEqual({f: f.read_text(encoding="utf-8") for f in typos}, typos)
+        with redirect_stdout(io.StringIO()) as out:        # every channel's files from its answers, studio.toml too
+            self.assertEqual(main(["channel", "--regenerate"]), 0)
+        self.assertNotIn("has a mistake in it", out.getvalue())
+        for f in typos:
+            S.load(f)                                       # written again: nothing left to say about it
+
     def test_the_commands_delete_and_restore_one(self):
         from studio.__main__ import main
 
@@ -639,6 +788,24 @@ class Menu(Scratch):
         self.assertEqual(w.view("settings")["profiles"]["deleted"], [])
         self.assertFalse(w.call("restore_profile", gone["id"]))  # it's back already
         self.assertTrue(any("isn't in backups any more" in t for t in w.toasts()))
+
+    def test_deleting_and_restoring_in_the_window_say_a_mistake_in_the_first_channels_settings(self):
+        """The window wrote the first channel's notes again after a delete or a restore and passed over a typo in
+        its studio.toml in silence: the notes kept listing a channel that was gone, or left out one that was back."""
+        self.onboard_main()
+        a = profiles.create("Cool Epic Facts")
+        w = self.window()
+        mine = self.root / "my-studio" / "studio.toml"
+        mine.write_text(mine.read_text(encoding="utf-8") + "\nthis is = = a typo\n", encoding="utf-8")
+        said = f"Night Physics's settings file, {mine}, has a mistake in it ("
+        self.assertTrue(w.call("delete_profile", a.key, "Cool Epic Facts"))
+        self.assertTrue(w.until(lambda: any(t.startswith(said) for t in w.toasts())), w.toasts())
+        self.assertTrue(any(t.endswith("brings it back.") for t in w.toasts()))
+        self.assertNotIn("Cool Epic Facts", (self.root / "CLAUDE.md").read_text(encoding="utf-8"))
+        w.forget()
+        self.assertTrue(w.call("restore_profile", profiles.deleted()[0].backup.name))
+        self.assertTrue(any(t.startswith(said) for t in w.toasts()), w.toasts())
+        self.assertIn("**Cool Epic Facts**", (self.root / "CLAUDE.md").read_text(encoding="utf-8"))
 
     def test_a_profile_another_window_shows_isnt_deleted_and_this_window_holds_its_own(self):
         from dashboard.sync import ReadLock

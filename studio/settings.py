@@ -97,7 +97,7 @@ class SettingsError(ValueError):
     def __init__(self, path: Path, reason: str):
         super().__init__(f"{path} can't be read: {reason}. Fix it in a text editor, or write it again from your "
                          "answers with: reelforge channel --regenerate")
-        self.path = path
+        self.path, self.reason = path, reason
 
 
 def load(path: Path | None = None) -> dict:

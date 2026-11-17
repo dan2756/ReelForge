@@ -109,10 +109,10 @@ def next_steps(profile=None, again: bool = False) -> str:
 def apply_background_stats() -> str:
     """Turn the hourly stats job on or off to match the profiles' settings (my-studio/studio.toml): one job reads every
     profile that wants it, so it's on while any of them does."""
-    from . import settings as S
-    from . import stats_schedule
+    from . import generate, stats_schedule
     try:
-        if any(S.load(p.settings)["platforms"].get("background_stats", True) for p in profiles.every()):
+        # (a channel's studio.toml with a typo in it goes by its answers: what was written has said so already)
+        if any(generate.background_stats(p) for p in profiles.every()):
             return stats_schedule.enable()
         if stats_schedule.status() == "on":
             return stats_schedule.disable()
@@ -166,7 +166,7 @@ def onboard(argv: list[str], *, preserve_settings: bool = False) -> int:
             target = profiles.create(a["channel_name"])
             answers = {**answers, "_created": ""}
         try:
-            written = generate.write_all(answers, target)
+            written = generate.write_all(answers, target, say=print)
         except Exception as e:
             # A new profile that never got its files: its folder goes again, so the same command works once the
             # answers are fixed (left there, the folder had the channel's name taken).
@@ -200,7 +200,7 @@ def onboard(argv: list[str], *, preserve_settings: bool = False) -> int:
             prior = None        # answers that can't be read: the questions start from their defaults
         again = S.onboarded()
         answers = onboard_cli.ask(prior)
-        written = generate.write_all(answers)
+        written = generate.write_all(answers, say=print)
         _print_written(written)
         print("\n" + apply_background_stats())
         print(next_steps(again=again))
@@ -214,20 +214,32 @@ def regenerate(*, preserve_settings: bool = False) -> int:
     and refresh only instructions; an explicit channel regeneration can apply edited answers."""
     from . import generate
 
-    done = 0
+    done, said = 0, []
     for p in [*profiles.extra(), profiles.main()]:
         if not p.answers.exists():
             continue
         try:
             answers = json.loads(p.answers.read_text(encoding="utf-8-sig"))
-            written = (generate.write_guides(p, saved_settings=True) if preserve_settings
-                       else generate.write_all(answers, p))
+            written = (generate.write_guides(p, saved_settings=True, say=said.append) if preserve_settings
+                       else generate.write_all(answers, p, say=said.append))
         except (ValueError, OSError) as e:
             print(f"{p.name}: {e}")
             continue
         done += 1
         if p.main:
             _print_written(written)
+    # Said once at the end: each channel's files bring up the first one's notes again, and with them every settings
+    # file with a mistake in it. Without --preserve-settings each channel's studio.toml has been written again from
+    # its answers by now, which puts right a mistake come across before it was its turn: that one isn't said.
+    lines = generate.standing(said)
+    for line in lines:
+        print(line)
+    from .update import SAID
+    if os.environ.get(SAID):    # an update runs this, and passes these on to you: what else is printed goes nowhere
+        try:
+            Path(os.environ[SAID]).write_text(json.dumps(lines, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
     if not done:
         print(f"{P.ANSWERS} not found. Run first-time setup first: reelforge channel")
         return 1
@@ -333,7 +345,8 @@ def delete_profile(argv: list[str]) -> int:
         return 1
     from . import generate
 
-    generate.write_guides(profiles.main(), saved_settings=True)   # your AI's notes no longer list it
+    # your AI's notes no longer list it (a mistake in the first channel's settings is said, and stops nothing)
+    generate.write_guides(profiles.main(), saved_settings=True, say=print)
     print(f"{p.name} is deleted. It's kept whole in {gone.where}: reelforge profiles restore "
           f"\"{p.name}\" brings it back.")
     return 0
@@ -364,7 +377,7 @@ def restore_profile(argv: list[str]) -> int:
         return 1
     from . import generate
 
-    generate.write_guides(profiles.main(), saved_settings=True)   # your AI's notes list it again
+    generate.write_guides(profiles.main(), saved_settings=True, say=print)   # your AI's notes list it again
     print(f"{p.name} is back ({p.describe()}), as it was. Open it with: reelforge -p {p.slug}")
     return 0
 

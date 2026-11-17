@@ -160,21 +160,105 @@ def _per_run(per_day: int, per_week: int) -> int:
     return per_day or (1 if per_week else 0)
 
 
-def _other_channel(p) -> dict:
+class Mistake(str):
+    """A line about a settings file with a mistake in it (typo_line), which knows the file: one file is come across
+    once for every note that's written, sometimes under two names, and a run that writes the file again (reelforge
+    channel --regenerate) puts right what it said about it earlier."""
+
+    path: Path
+
+    def __new__(cls, text: str, path: Path):
+        line = super().__new__(cls, text)
+        line.path = path
+        return line
+
+
+def typo_line(e: S.SettingsError, name: str, what: str) -> Mistake:
+    """What to say when a channel's studio.toml has a mistake in it and something went ahead without it: which file,
+    what's wrong in it, what was done instead (what) and how to put it right."""
+    return Mistake(f"{name}'s settings file, {e.path}, has a mistake in it ({e.reason}), so {what}. Fix it in a text "
+                   "editor, or write it again from your answers with: reelforge channel --regenerate", Path(e.path))
+
+
+def once(lines: list[str]) -> list[str]:
+    """Each line once, and one line for each file with a mistake in it (the first said about it)."""
+    seen, out = set(), []
+    for line in lines:
+        key = ("file", line.path) if isinstance(line, Mistake) else line
+        if key not in seen:
+            seen.add(key)
+            out.append(line)
+    return out
+
+
+def standing(lines: list[str]) -> list[str]:
+    """once(lines), less those about a settings file that reads now: written again since they were said."""
+    def still(line) -> bool:
+        if not isinstance(line, Mistake):
+            return True
+        try:
+            S.load(line.path)
+        except (S.SettingsError, OSError):
+            return True
+        return False
+    return [line for line in once(lines) if still(line)]
+
+
+def _say_once(say, lines: list[str]) -> None:
+    """Each line once (one file's mistake is come across once for every note that's written), through say."""
+    for line in once(lines):
+        if say is not None:
+            say(line)
+
+
+def _answered(p) -> dict | None:
+    """A channel's settings as its saved answers make them, or None when they can't be used either."""
+    try:
+        a, problems = validate(json.loads(p.answers.read_text(encoding="utf-8-sig")))
+    except (OSError, ValueError):
+        return None
+    return None if problems else settings_from(a)
+
+
+def background_stats(p, say=None) -> bool:
+    """Whether a channel has its stats read every hour while ReelForge is closed: as its settings say, or, while its
+    studio.toml has a mistake in it, as its answers say (and say gets a line about the file). One job reads every
+    channel, so a typo in one channel's settings must not stop the read of the others, or the job's setting up."""
+    try:
+        return bool(S.load(p.settings)["platforms"].get("background_stats", True))
+    except S.SettingsError as e:
+        s = _answered(p)    # (its name too: the profile's own comes from the file that can't be read)
+        if say is not None:
+            say(typo_line(e, s["channel"]["name"] if s else p.name,
+                          "whether its stats are read every hour goes by its answers"))
+        return True if s is None else bool(s["platforms"].get("background_stats", True))
+
+
+def _other_channel(p, notes: list[str] | None = None) -> dict:
     """Another channel, for the first one's notes: its folder, how often it posts and how many videos a production
-    run makes for it (ready: False while it isn't set up)."""
+    run makes for it (ready: False while it isn't set up). notes: gets a line when its studio.toml has a mistake in
+    it, and its answers are gone by instead."""
     c = {"name": p.name, "folder": f"profiles/{p.folder.name}/", "ready": p.onboarded, "cadence": "", "per_day": 0,
          "per_week": 0, "per_run": 0}
     if p.onboarded:
-        s = S.load(p.settings)
-        per_day, per_week = s["schedule"]["per_day"], s["schedule"]["per_week"]
-        c.update(cadence=_cadence(s), per_day=per_day, per_week=per_week, per_run=_per_run(per_day, per_week))
+        try:
+            s = S.load(p.settings)
+        except S.SettingsError as e:
+            # A typo in one channel's settings never stops what's done for another, such as the first one's notes
+            # written again when a channel is added: how often this one posts comes from its answers meanwhile.
+            s = _answered(p)
+            if notes is not None:
+                notes.append(typo_line(e, p.name, "your AI's notes go by its answers instead"))
+        if s is not None:
+            per_day, per_week = s["schedule"]["per_day"], s["schedule"]["per_week"]
+            c.update(cadence=_cadence(s), per_day=per_day, per_week=per_week, per_run=_per_run(per_day, per_week))
     return c
 
 
-def context(a: dict, s: dict, assistant: str, profile=None) -> dict:
+def context(a: dict, s: dict, assistant: str, profile=None, notes: list[str] | None = None) -> dict:
     """What the templates see. profile: the one the notes are for (the first one, by default): another channel's
-    paths start at its folder (here), and the first one's notes list the other channels."""
+    paths start at its folder (here), and the first one's notes list the other channels. notes: gets a line for each
+    other channel whose settings have a mistake in them (_other_channel)."""
     profile = profile or profiles.main()
     fmt = dict(FORMATS[s["format"]["template"]])
     creator = s["channel"]["creator"]
@@ -211,7 +295,7 @@ def context(a: dict, s: dict, assistant: str, profile=None) -> dict:
     stills = sorted({1, *(round(typical * k / 9) for k in range(1, 9)), int(typical) - 1})
     preview = [2, round(typical * 0.3), round(typical * 0.7), int(typical) - 3]
     here = "" if profile.main else f"profiles/{profile.folder.name}/"
-    channels = [] if not profile.main else [_other_channel(p) for p in profiles.extra()]
+    channels = [] if not profile.main else [_other_channel(p, notes) for p in profiles.extra()]
     return {
         "kit": KIT_NAME, "version": KIT_VERSION, "date": dt.date.today().isoformat(),
         "mark": GENERATED_MARK,
@@ -291,22 +375,23 @@ def _backup_if_foreign(path: Path, backups: Path | None = None) -> Path | None:
 
 def _where(profile=None) -> SimpleNamespace:
     """The files onboarding writes for a profile: the one this process works on (studio.paths, which the tests point
-    at a scratch folder), or another one (a profile being made, say)."""
+    at a scratch folder), or another one (a profile being made, say). notes: what writing them comes across that is
+    to be said once they're written (a channel's studio.toml with a mistake in it, see typo_line)."""
     if profile is None or profile == P.PROFILE:
         here = P.PROFILE
         return SimpleNamespace(profile=here, root=P.ROOT if here.main else here.folder, my_studio=P.MY_STUDIO,
                                answers=P.ANSWERS, settings=P.SETTINGS, bible=P.BIBLE, backups=P.BACKUPS,
-                               completed=P.COMPLETED)
+                               completed=P.COMPLETED, notes=[])
     return SimpleNamespace(profile=profile, root=profile.folder, my_studio=profile.my_studio, answers=profile.answers,
                            settings=profile.settings, bible=profile.bible, backups=profile.backups,
-                           completed=profile.completed)
+                           completed=profile.completed, notes=[])
 
 
 def _guides(a: dict, s: dict, w: SimpleNamespace, out) -> None:
     for name, who in (("CLAUDE.md", "claude"), ("AGENTS.md", "codex")):
         target = w.root / name
         _backup_if_foreign(target, w.backups)
-        text = render("context.md.j2", context(a, s, who, w.profile))
+        text = render("context.md.j2", context(a, s, who, w.profile, w.notes))
         if who == "codex" and len(text.encode("utf-8")) > 30_000:
             raise ValueError(f"AGENTS.md came out at {len(text.encode()) // 1024} KiB, and Codex reads only 32 KiB: "
                              "shorten your format's description or the look's notes in your answers")
@@ -364,13 +449,15 @@ def _keep_yours(old: str, new: str, taken_out: list[str] | None = None) -> str:
     return new
 
 
-def write_all(answers: dict, profile=None, *, account_only: bool = False) -> list[Path]:
+def write_all(answers: dict, profile=None, *, account_only: bool = False, say=None) -> list[Path]:
     """Validate the answers and write every file, for a profile (the one this process works on, by default). Returns
     the paths written. Raises ValueError on bad answers, or when a file can't be made right (the message says which),
     before any file has changed. account_only: nothing but a platform's handle changed in the answers (set_account),
     so the settings on file stay as they are apart from the platforms: studio.toml invites edits by hand, and an
-    account connected on the Accounts tab must not put the first-time answers back over them."""
+    account connected on the Accounts tab must not put the first-time answers back over them. say: called with a
+    line for each file that was left as it was because it has a mistake in it, once everything else is written."""
     w = _where(profile)
+    notes = w.notes
     first = not w.settings.exists()                     # first-time setup: the channel isn't set up yet
     a, problems = validate(answers)
     if problems:
@@ -385,19 +472,30 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False) -> lis
     # The answers file is often the one being read (my-studio/answers.json), with no date yet: today, then.
     a["_created"] = a.get("_created") or dt.date.today().isoformat()
     s = settings_from(a)
+    keep_settings = False
     if account_only and w.settings.is_file():
-        saved = S.load(w.settings)   # (a typo in it is a SettingsError, a ValueError: nothing is written then)
-        s = {**saved, "platforms": {**saved["platforms"], "enabled": s["platforms"]["enabled"],
-                                    "handles": s["platforms"]["handles"]}}
+        try:
+            saved = S.load(w.settings)
+        except S.SettingsError as e:
+            # A typo in it: written again, what was edited by hand in it would be lost, so it stays as it is. The rest
+            # still gets the handle, the answers above all: "Change your answers" writes config.toml from them, so
+            # an account they didn't have would be disconnected then without a word.
+            keep_settings = True
+            notes.append(typo_line(e, a["channel_name"].strip(), "it couldn't be updated with this account (your "
+                                                                 "answers and your AI's notes were)"))
+        else:
+            s = {**saved, "platforms": {**saved["platforms"], "enabled": s["platforms"]["enabled"],
+                                        "handles": s["platforms"]["handles"]}}
     files: list[tuple[Path, str]] = []
 
     def out(path: Path, text: str):
         files.append((path, text))
 
     out(w.answers, json.dumps({k: v for k, v in a.items()}, indent=2, ensure_ascii=False) + "\n")
-    out(w.settings, "# Your studio's settings, from first-time setup. The pipeline and the dashboard read this file.\n" +
-        S.dump_toml(s, SETTINGS_COMMENTS))
-    bible = render("channel-bible.md.j2", context(a, s, "claude", w.profile))
+    if not keep_settings:
+        out(w.settings, "# Your studio's settings, from first-time setup. The pipeline and the dashboard read this "
+            "file.\n" + S.dump_toml(s, SETTINGS_COMMENTS))
+    bible = render("channel-bible.md.j2", context(a, s, "claude", w.profile, notes))
     old = w.bible.read_text(encoding="utf-8", errors="replace") if w.bible.exists() else None
     if old is not None:
         try:    # studio.toml isn't written again yet, so it still lists the ideas of the answers before these
@@ -410,9 +508,11 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False) -> lis
     _guides(a, s, w, out)
     log = w.completed / "production-log.md"
     if not log.exists():
-        out(log, render("production-log.md.j2", context(a, s, "claude", w.profile)))
+        out(log, render("production-log.md.j2", context(a, s, "claude", w.profile, notes)))
     from . import dashboard_config
-    config = dashboard_config.rendered(s, w.profile)
+    # With studio.toml left as it is, the settings here are the answers': the handles are all that changed, and
+    # anything else they'd put in config.toml (the hashtags for new videos, say) could undo an edit made by hand.
+    config = dashboard_config.rendered(s, w.profile, only=S.PLATFORMS if keep_settings else None)
     # Every file is rendered and checked by now, so whatever stops this (answers to fix, a typo in the dashboard's
     # config.toml, notes too long for Codex) has stopped it above, with every file still as it was.
 
@@ -431,14 +531,17 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False) -> lis
         P.write_atomic(*config)
         written.append(config[0])
     if not w.profile.main:
-        written += write_guides(profiles.main(), saved_settings=True)  # the first channel's notes list this one
+        # the first channel's notes list this one
+        written += write_guides(profiles.main(), saved_settings=True, say=notes.append)
+    _say_once(say, notes)
     return written
 
 
-def write_guides(profile=None, *, saved_settings: bool = False) -> list[Path]:
+def write_guides(profile=None, *, saved_settings: bool = False, say=None) -> list[Path]:
     """A profile's CLAUDE.md and AGENTS.md again from its saved answers, nothing else: the first profile's list the
     other channels, so they follow when a channel is added or removed. Updates use saved_settings to honor manual
-    settings and account edits. Nothing for a profile not set up yet."""
+    settings and account edits. Nothing for a profile not set up yet. say: called once with a line for each
+    studio.toml that has a mistake in it, whose channel's answers were gone by instead."""
     w = _where(profile)
     try:
         a, problems = validate(json.loads(w.answers.read_text(encoding="utf-8-sig")))
@@ -452,7 +555,15 @@ def write_guides(profile=None, *, saved_settings: bool = False) -> list[Path]:
         P.write_atomic(path, text)
         written.append(path)
 
-    s = S.load(w.settings) if saved_settings and w.settings.is_file() else settings_from(a)
+    notes = w.notes
+    s = settings_from(a)
+    if saved_settings and w.settings.is_file():
+        try:
+            s = S.load(w.settings)
+        except S.SettingsError as e:
+            # A channel added, deleted or restored writes the first one's notes again (they list every channel): a
+            # typo in its settings must not stop, or seem to stop, what was done to the other channel.
+            notes.append(typo_line(e, a["channel_name"].strip(), "your AI's notes go by its answers instead"))
     if saved_settings:
         # Settings are documented as editable. An update refreshes instructions
         # from the effective settings without rewriting them from older answers.
@@ -461,23 +572,33 @@ def write_guides(profile=None, *, saved_settings: bool = False) -> list[Path]:
         if handles is not None:
             s["platforms"]["handles"] = handles
     _guides(a, s, w, out)
+    _say_once(say, notes)
     return written
 
 
-def set_account(platform: str, handle: str) -> list[Path]:
+def set_account(platform: str, handle: str, say=None) -> list[Path]:
     """Connect a platform ("@name") or disconnect it (""), as the ReelForge window's Accounts tab does. Its handle goes
     into the dashboard's settings and, once you've been through onboarding, into your answers too, and everything
     onboarding writes follows: your AI's notes and caption rules then cover the platforms you're connected to, and
     running onboarding again keeps them. Disconnecting keeps the platform in "Where will you post?" (your AI still
-    writes its captions) and only forgets the handle. Returns the paths written."""
+    writes its captions) and only forgets the handle. Returns the paths written. say: called with a line for what
+    couldn't follow, and why (a studio.toml with a mistake in it, answers to fix first), for the window to show."""
     from . import dashboard_config
 
     if not P.ANSWERS.exists():
         return dashboard_config.set_handle(platform, handle)
     try:
         a = json.loads(P.ANSWERS.read_text(encoding="utf-8-sig"))
-    except ValueError:
-        return dashboard_config.set_handle(platform, handle)   # unreadable answers: leave them for onboarding
+        if not isinstance(a, dict):
+            raise ValueError("it isn't a list of answers")
+    except ValueError as e:
+        # Unreadable answers stay as they are, yours to fix: the handle goes into ReelForge's settings alone, and
+        # you're told, since "Change your answers" would otherwise drop it without a word.
+        written = dashboard_config.set_handle(platform, handle)
+        if say is not None:
+            say(f"Your answers file, {P.ANSWERS}, can't be read ({e}), so it and your AI's notes stay as they were. "
+                "Fix it in a text editor, then do this here again.")
+        return written
     # The handles connected in the dashboard are the ones that count (someone may have typed one into its settings).
     for p, h in {**(dashboard_config.handles() or {}), platform: handle}.items():
         if h:
@@ -486,6 +607,15 @@ def set_account(platform: str, handle: str) -> list[Path]:
         else:
             a.pop(f"handle_{p}", None)
     try:
-        return write_all(a, account_only=True)
-    except ValueError:                                        # answers onboarding would ask about again first
-        return dashboard_config.set_handle(platform, handle)
+        return write_all(a, account_only=True, say=say)
+    except ValueError as e:
+        # Answers first-time setup would ask about again, or notes too long for Codex: nothing was written. The
+        # handle still goes into ReelForge's settings and your answers ("Change your answers" writes the settings
+        # from those, and would drop it), and you're told why your AI's notes don't follow yet.
+        written = dashboard_config.set_handle(platform, handle)
+        P.write_atomic(P.ANSWERS, json.dumps(a, indent=2, ensure_ascii=False) + "\n")
+        if say is not None:
+            why = str(e).replace(":\n  ", ": ").replace("\n  ", "; ")
+            say(f"Your AI's notes couldn't be updated: {why}. Your answers are, so the notes follow once that's put "
+                "right (Change your answers on the Settings tab).")
+        return [*written, P.ANSWERS]

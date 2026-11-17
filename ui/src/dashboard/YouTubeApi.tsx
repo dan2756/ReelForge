@@ -90,7 +90,9 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
   const [why, setWhy] = useState("") // why the last try at connecting couldn't start, in the Python side's words
   const [leaving, setLeaving] = useState(false) // Disconnect was pressed: asking
   const [busy, setBusy] = useState(false)
-  const [read, setRead] = useState("") // what the Python side said that something typed since has put away
+  // What the Python side said (which time, by its said_id) that something typed since has put away. By its words, a
+  // second no from Google after a retry was put away too, as the first had been: it was said nowhere.
+  const [read, setRead] = useState(-1)
   /** Connect: with the client file at this path, or ("") with the one on file. The answer is true when Google's page
    * is opening, and the view follows your answer on that page. When it can't start, the answer is the sentence that
    * says why, which is shown here. (true: this dialog says how it goes, so the Python side sends no pop-up to sit on
@@ -129,7 +131,7 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
   }
   const waiting = api.state === "connecting"
   const on = api.state === "on"
-  const said = plain(api.said) === read ? [] : api.said // what the Python side has to say, until something is typed
+  const said = api.said_id === read ? [] : api.said // what the Python side has to say, until something is typed
   // (typed: the box's own word on what is in it, which is ahead of this dialog's when Enter follows a paste at once)
   const withFile = (typed = path) => (typed.trim() ? void connect(typed) : setBad(true))
   const kids = api.made_for_kids === null ? "" : api.made_for_kids ? "yes" : "no"
@@ -221,7 +223,7 @@ export function ApiDialog({ connect: now, close }: { connect?: boolean; close: (
                 setPath(v)
                 setBad(false)
                 setWhy("")
-                setRead(plain(api.said))
+                setRead(api.said_id)
               }}
               onSubmit={(typed) => withFile(typed)}
             />

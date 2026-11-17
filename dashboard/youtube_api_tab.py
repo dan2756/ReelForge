@@ -346,6 +346,7 @@ class YouTubeApiTab:
     api_seen: float | None | bool = False           # the connection file's time as last shown (False: not yet)
     api_dialog = False                              # the window's dialog for the connection is open
     api_said: tuple[str, bool] = ("", False)        # what that dialog has to say of what it asked for (and: amber)
+    api_said_id = 0                                 # one more each time it's said, the same words again included
 
     def mind_the_jobs(self) -> None:
         """At start and every half minute, before PostingTab's own: a connection another window made or ended, and
@@ -394,6 +395,9 @@ class YouTubeApiTab:
                 # How the last thing the dialog asked for went, while it is open ([]: nothing to say): see _api_say.
                 "said": Text(self.api_said[0], AMBER if self.api_said[1] else MUTED).json() if self.api_said[0]
                 else [],
+                # Which time it was said: something typed in the dialog puts what it says away, and Google saying
+                # no a second time, in the same words, is news all the same.
+                "said_id": self.api_said_id,
                 "lines": [t.json() for t in lines], "client": said["client"], "channel": said["channel"],
                 "privacy": said["privacy"], "made_for_kids": said["made_for_kids"],
                 "privacies": [{"key": key, "label": WHO[key]} for key in PRIVACY], "docs": DOCS,
@@ -511,6 +515,7 @@ class YouTubeApiTab:
         """How something the connection's dialog asked for went: in the dialog while it is open, else a pop-up."""
         if self.api_dialog:
             self.api_said = (message, warning)
+            self.api_said_id += 1
         else:
             self.notify(message, title="YouTube's API", severity="warning" if warning else "information",
                         timeout=timeout)
