@@ -218,9 +218,9 @@ def regenerate(*, preserve_settings: bool = False, only: profiles.Profile | None
     alone (reelforge -p NAME channel --regenerate, what a line about a settings file with a mistake in it gives), so
     the other channels' settings and notes stay as they are; with preserve_settings the first one's notes follow it
     too, since they say how often each channel posts. (Without preserve_settings, write_all does that itself.)"""
-    from . import generate
+    from . import generate, questions
 
-    done, said = 0, []
+    done, tried, said = 0, 0, []
     if only is None:
         chosen = [*profiles.extra(), profiles.main()]
     else:
@@ -228,12 +228,28 @@ def regenerate(*, preserve_settings: bool = False, only: profiles.Profile | None
     for p in chosen:
         if not p.answers.exists():
             continue
+        tried += 1
         try:
-            answers = json.loads(p.answers.read_text(encoding="utf-8-sig"))
-            written = (generate.write_guides(p, saved_settings=True, say=said.append) if preserve_settings
-                       else generate.write_all(answers, p, say=said.append))
+            try:
+                answers = json.loads(p.answers.read_text(encoding="utf-8-sig"))
+            except ValueError as e:
+                raise ValueError(f"{p.answers} can't be read: {e}") from None
+            if not isinstance(answers, dict):
+                raise ValueError(f"{p.answers} isn't a list of answers")
+            if preserve_settings:
+                if problems := questions.validate(answers)[1]:    # write_guides leaves the notes without a word
+                    raise ValueError("its answers need fixing first: " + "; ".join(problems))
+                written = generate.write_guides(p, saved_settings=True, say=said.append)
+            else:
+                written = generate.write_all(answers, p, say=said.append)
         except (ValueError, OSError) as e:
-            print(f"{p.name}: {e}")
+            # Said with the rest at the end, not only printed now: an update passes on what's said (SAID) and
+            # nothing else, and with another channel's notes written it doesn't fail, so this was heard nowhere.
+            why = str(e).replace(":\n  ", ": ").replace("\n  ", "; ")
+            again = (f"reelforge -p {'1' if p.main else p.folder.name} channel --regenerate"
+                     + (" --preserve-settings" if preserve_settings else ""))
+            what = "notes for your AI" if preserve_settings else "files"
+            said.append(f"{p.name}'s {what} couldn't be written again ({why}). Once that's put right, run: {again}")
             continue
         done += 1
         if p.main or only is not None:
@@ -250,10 +266,9 @@ def regenerate(*, preserve_settings: bool = False, only: profiles.Profile | None
             Path(os.environ[SAID]).write_text(json.dumps(lines, ensure_ascii=False), encoding="utf-8")
         except OSError:
             pass
-    if not done:
+    if not tried:
         print(f"{P.ANSWERS} not found. Run first-time setup first: reelforge channel")
-        return 1
-    return 0
+    return 0 if done else 1
 
 
 def first_run(start: str, new: bool = False) -> int:

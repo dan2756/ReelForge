@@ -447,6 +447,33 @@ class AfterTest(unittest.TestCase):
         self.assertEqual(len(held), 1, held)
         real_unlink(held[0], missing_ok=True)
 
+    def test_a_channel_whose_notes_couldnt_be_written_again_is_said_when_the_update_is_done(self):
+        """The run that writes every channel's notes again printed a line for a channel whose notes couldn't be
+        written, which went nowhere: with another channel's written, the update didn't fail, and that channel's notes
+        kept the old version's text without a word. Answers that need fixing left them so without even that line."""
+        root = self.folder("Night Physics", "Quiet One", "Tiny Worlds")
+        quiet, tiny = root / "profiles" / "quiet-one", root / "profiles" / "tiny-worlds"
+        (quiet / "CLAUDE.md").unlink()
+        (quiet / "CLAUDE.md").mkdir()       # where its notes go, something they can't take the place of
+        answers = json.loads((tiny / "my-studio" / "answers.json").read_text(encoding="utf-8"))
+        (tiny / "my-studio" / "answers.json").write_text(json.dumps({**answers, "cadence": "now and then"}),
+                                                         encoding="utf-8")
+        logged = []
+        summary = self.finish(root, logged)
+        notes = json.loads((root / "dashboard" / "data" / "updated.json").read_text(encoding="utf-8"))["notes"]
+        self.assertEqual(len(notes), 2, notes)
+        quiet_line, tiny_line = sorted(notes)
+        self.assertTrue(quiet_line.startswith("Quiet One's notes for your AI couldn't be written again ("), notes)
+        self.assertTrue(quiet_line.endswith("). Once that's put right, run: reelforge -p quiet-one channel "
+                                            "--regenerate --preserve-settings"), notes)
+        self.assertEqual(tiny_line, "Tiny Worlds's notes for your AI couldn't be written again (its answers need "
+                                    "fixing first: cadence: pick one of: 2/day, 1/day, 3/week, 1/week, ask). Once "
+                                    "that's put right, run: reelforge -p tiny-worlds channel --regenerate "
+                                    "--preserve-settings")
+        self.assertEqual(summary, " ".join(["Updated ReelForge from 1.0.0 to 1.1.0.", *notes]))
+        self.assertEqual(logged, [])        # the first channel's notes were written: the run itself went through
+        self.assertIn("**Quiet One**", (root / "CLAUDE.md").read_text(encoding="utf-8"))
+
 
 @unittest.skipUnless(shutil.which("git"), "needs git")
 class GitPullTest(unittest.TestCase):
