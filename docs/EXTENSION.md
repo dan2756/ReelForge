@@ -105,7 +105,9 @@ press Post. The note on the page says **Stopped** at once, even when ReelForge i
 stop reached ReelForge first, the post is cancelled and nothing was posted. When ReelForge had already said yes to
 the press, it has the post as "not sure it posted", and the note and the popup say so, and that Post was not
 pressed: look at your profile, then answer on its row. Once the extension has pressed Post, there is no Stop any
-more.
+more. **Cancel** on the post's row in ReelForge while the extension is asking works the same way: ReelForge says no,
+the extension clicks nothing, and the note on the page says the post was ended in ReelForge, without asking you to
+press Post.
 
 The extension asks ReelForge for the press once, and waits up to 20 seconds for the answer (ReelForge may wait up
 to 10 for its database first). It never asks a second time, even when the answer gets lost on the way: then it

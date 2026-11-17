@@ -618,10 +618,11 @@ async function askPress(job, asked) {
     lost = true
   }
   let granted = res?.ok === true && res.data?.ok === true
+  // ReelForge's own record of the post, read when its answer is anything but a yes.
+  const theirs = lost || (res && !granted) ? await theirJob(job) : null
   if (lost) {
     // The request is never sent again. ReelForge's own record of the post says whether it said yes: "posting" is
     // the press it granted, and nothing else puts a post there.
-    const theirs = await theirJob(job)
     if (theirs) {
       lost = false
       granted = theirs.state === "posting"
@@ -643,6 +644,14 @@ async function askPress(job, asked) {
       await save(now)
       await remember(now)
       return { ok: true }
+    }
+    // Ended in ReelForge meanwhile (cancelled in its window, say), which is why it said no. Its ending is taken here
+    // now, not at the next look up to half a minute away, and the page hears of it before this answer: it must not
+    // ask for a press, or the post would go up with ReelForge calling it over, free to be posted again.
+    if (theirs && isFinal(theirs.state)) {
+      Object.assign(fresh, { port: job.port, pressAnswer: answer })
+      await adopt(fresh, theirs)
+      return no("stopped", "This post was ended in ReelForge.", { stopped: true })
     }
     const now = { ...fresh, port: job.port, pressAnswer: answer }
     await save(now)

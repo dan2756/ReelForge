@@ -87,7 +87,8 @@ If you still want it, it takes all of these:
   clicks nothing and says so in its note;
 - you have not pressed **Stop** in the popup while ReelForge was being asked, or just before. A Stop then wins:
   nothing is clicked, Post is not ringed, and the note on the page says **Stopped** at once, before ReelForge has
-  taken the stop;
+  taken the stop. **Cancel** on the post's row in ReelForge then works the same way: ReelForge says no, and the note
+  says the post was ended in ReelForge;
 - you have not pressed the button yourself already. Your own press, even one made while the video is still going
   up or while ReelForge is being asked for the press, is the post's press: the extension then clicks nothing, and
   ReelForge would refuse another.

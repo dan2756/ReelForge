@@ -522,6 +522,30 @@ export const tests = {
     equal([job.state, (await browser.jobRecord(job.id)).state], ["cancelled", "cancelled"], "the job, in ReelForge and here")
   },
 
+  async "Cancel in ReelForge while the extension asks it for the press: nothing is clicked, Post is not ringed, and the page says it was ended there"({ app, browser, video }) {
+    // The person cancels the post in ReelForge's window while the press request waits for ReelForge, which then
+    // refuses the press: the post is not ready any more. The extension's next look at the post would be up to half
+    // a minute away; the page must not ask for a press meanwhile, or the post would go up with ReelForge calling it
+    // cancelled.
+    await switchOn(browser, app, "tiktok")
+    const held = holdPress(app, { decided: false })
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("www.tiktok.com")
+    const job = made.jobs[0]
+    await until(() => `the press request (it is ${job.state} ${job.step})`, () => held.arrived, 30000)
+    await watchRings(tab)
+    Object.assign(job, { state: "cancelled", detail: "cancelled in ReelForge" })
+    held.release()
+    await until("the refusal", () => presses(app).some(entry => entry.status === 409))
+    await until("the note to say so", async () => (await note(tab)).line !== "Pressing Post for you", 10000)
+    await sleep(1000)
+    equal(await note(tab), { tone: "bad", line: "Stopped", more: "This post was ended in ReelForge." }, "the note")
+    equal(await tab.evaluate(() => [window.rings.filter(Boolean), fixture.clicks, fixture.trustedClicks]), [[], 0, 0], "rings round Post, and presses the page saw")
+    equal([job.state, (await browser.jobRecord(job.id)).state], ["cancelled", "cancelled"], "the job, in ReelForge and here")
+    equal(app.requests("POST", /\/event$/).filter(entry => entry.status !== 200).map(entry => [entry.status, entry.body.state, entry.body.detail]), [], "reports ReelForge turned down")
+  },
+
   async "a newer list that moves YouTube's error hook does not get a press past YouTube's own error"({ app, site, browser, video }) {
     // The app's newer list points the hook for YouTube's error message at nothing. The packed one is used all
     // the same: the engine stops a job at that message before anything is pressed. ("held": the upload never
