@@ -45,7 +45,8 @@ For each platform the extension then:
    their size and SHA-256 match what you confirmed;
 4. fills in the text, in one go, and reads it back;
 5. scrolls the platform's final button into view, rings it in red and leaves a note in the corner: **Check it, then
-   press Post**.
+   press Post**. With Press Post for me (below) the note says **Pressing Post for you** instead, and the button is
+   ringed only if the extension does not press it after all.
 
 Then it waits. When the platform shows its own sign that the post went out, ReelForge is told. The tab is left
 open.
@@ -79,7 +80,10 @@ If you still want it, it takes all of these:
   the post in its window, or **Yes, press Post for me** on the page ReelForge opens when you start it there. The
   extension listens for that click itself, and a click made by a script does not count. A post page that was only
   opened presses nothing;
-- ReelForge grants the press, once per post.
+- ReelForge grants the press, once per post;
+- you have not pressed the button yourself already. Your own press, even one made while the video is still going
+  up or while ReelForge is being asked for the press, is the post's press: the extension then clicks nothing, and
+  ReelForge would refuse another.
 
 It is never offered for X. X's rules name scripting its website and suspend accounts for it.
 
@@ -159,9 +163,13 @@ rules are written in code. A click on the way to the last screen is refused when
 final button, sits around or inside it, or carries its words (`rf.click` in `platform/engine.js`). And these are
 always taken from the copy packed with the extension: the hooks whose element gets clicked and the final button's
 hook (`PACKED_HOOKS` in `shared/consts.js`); the `success`, `challenge` and `signed_out` signs with every hook they
-name; and the hooks that guard a post (`GUARD_HOOKS`: the captcha, the account, YouTube's audience and visibility
-answers, the end of its upload and the link its video's id is read from). A newer list can only change how long
-those are waited for.
+name; the hooks that guard a post (`GUARD_HOOKS`: every hook `platform/engine.js` and `platform/run.js` read by
+name on every platform, which are the captcha, the platform's own error message, the account, the link a post's id
+is read from and the question after the press; and YouTube's audience and visibility answers, its upload's progress
+and end); and every hook one of those looks inside or near (Instagram's Share is found inside its dialog, so the
+dialog is kept too). A newer list can only change how long those are waited for, and it cannot add one of the
+engine's hooks where the packed list has none. `tests/manifest.test.mjs` reads the scripts and fails when a hook
+they read before the press is neither kept nor named there as a step a newer list may change.
 
 To fix a hook, edit the file and raise `"version"`. ReelForge serves its own copy to the extension, and for every
 other hook a newer one is used at once, without a Reload. A fix to one of the kept hooks or signs takes a Reload. The role and

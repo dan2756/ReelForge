@@ -88,6 +88,17 @@ ReelForge allows the press once for each post. From the press on, a post ends as
 never as failed: a page that shows nothing after the press may still have taken it. ReelForge never tries such a
 post again by itself. You check your profile and say what happened.
 
+If you press Post yourself first, on a post where you asked for Press Post for me (say while YouTube is still taking
+the video in), your press is the one. The extension asks for no other and presses nothing, even when the page still
+shows its form, and ReelForge would refuse it anyway. The post ends as your press decides: posted when the platform
+shows it, else "not sure it posted".
+
+The same goes for a press you make while the extension is asking ReelForge for its own. The note on the page says
+**Pressing Post for you** then, and the button is not ringed in red. If you press it all the same, yours is the one:
+the extension clicks nothing, whatever ReelForge answers, and the note says **You pressed Post** (or the button's
+own name) while it waits for the platform. It does not ask you to press again, and ReelForge is not told "not
+pressed".
+
 ## What is automatic, and what never is
 
 Automatic, once you have started a post, with **Start** in ReelForge or **Post** in the popup:
@@ -125,7 +136,9 @@ The Publish tab shows the same states under **POST**, in a row for each platform
 each platform, and a video that is up somewhere is not posted there again unless you ask for it, with **Post
 again…** on its row. A video is known by its content, not its file name, so a renamed copy counts as the same
 video. A new cut under the same name is another video, but where an earlier cut of it is up, or may be, its row
-says so ("posted as an earlier cut") and the new cut goes there only with **Post again…** too.
+says so ("posted as an earlier cut") and the new cut goes there only with **Post again…** too. That includes an
+earlier cut whose Post was pressed, by you in the tab or for you, while the platform hasn't said yet that it is up:
+the new cut's row shows that press, with **It's posted** and **It didn't post** for it.
 
 Once the platform's button was pressed, by you in the tab or for you, the row has no **Cancel** any more: a press
 can't be taken back. It says that it is waiting for the platform, and asks **It's posted** or **It didn't post**.

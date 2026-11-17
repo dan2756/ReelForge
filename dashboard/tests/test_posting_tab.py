@@ -5,7 +5,9 @@ page that hands it a batch is a stand-in (the server opens the real one)."""
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import textwrap
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -336,6 +338,26 @@ class Posting(PostingTest):
         made = w.call("post_with_extension", ["tiktok"], CAPTION, TAGS, True, None, asked["path"], asked["sha256"])
         self.assertEqual([posting.get(j["id"])["video_sha256"] for j in made["jobs"]], [asked["sha256"]])
 
+    def test_a_yes_to_a_file_written_over_with_the_same_size_and_time_starts_nothing(self):
+        """A copy made with cp -p, rsync -t or a sync client keeps the size and time of the file it replaced, so
+        the fingerprint ReelForge remembers still fits it. The yes reads the file afresh."""
+        w = self.window()
+        asked = w.call("post_info", CAPTION, TAGS)["video"]
+        st = self.video.stat()
+        other = bytes(reversed(self.video.read_bytes()))
+        self.video.write_bytes(other)
+        os.utime(self.video, ns=(st.st_atime_ns, st.st_mtime_ns))
+        self.assertEqual(posting.digest(self.video), asked["sha256"])  # (as remembered)
+        made = w.call("post_with_extension", ["tiktok"], CAPTION, TAGS, False, None, asked["path"], asked["sha256"])
+        self.assertIsNone(made)
+        self.assertEqual(w.sent("toast")[-1]["title"], "Nothing was started")
+        self.assertEqual((posting.recent(), self.pages), ([], []))
+        # The question asked again shows the file as it is now, and its yes goes ahead with it.
+        asked = w.call("post_info", CAPTION, TAGS)["video"]
+        self.assertEqual(asked["sha256"], hashlib.sha256(other).hexdigest())
+        made = w.call("post_with_extension", ["tiktok"], CAPTION, TAGS, True, None, asked["path"], asked["sha256"])
+        self.assertEqual([posting.get(j["id"])["video_sha256"] for j in made["jobs"]], [asked["sha256"]])
+
     def test_stop_before_posting_off_is_kept_on_the_job_and_never_for_x(self):
         w = self.window()
         made = self.post(w, "tiktok", "x", stop_before=False)
@@ -602,6 +624,33 @@ class Posting(PostingTest):
                          "An earlier cut of this video was posted there with ReelForge's help.")
         made = self.post(w, "tiktok")
         self.assertEqual((made["jobs"], [b["reason"] for b in made["blocked"]]), ([], ["posted"]))
+        (again,) = self.post(w, "tiktok", force=["tiktok"])["jobs"]
+        self.assertEqual(self.rows(w)["tiktok"]["job"], again["id"])
+
+    def test_a_new_cut_of_a_video_you_pressed_post_for_shows_that_press(self):
+        # You pressed Post in the tab for the first cut, and TikTok hasn't said yet that it's up. Then the file is
+        # rendered again under its name: the episode may be up there, as much as one nobody is sure of.
+        w = self.window()
+        (job,) = self.post(w)["jobs"]
+        self.work(job["id"], "opening", "uploading", "filling", "ready")
+        posting.advance(job["id"], "ready", install=CHROME, step="press")
+        self.video.write_bytes(b"the same video, rendered again")
+        w.svc.scan_files()
+        w.svc.update_posting(fresh=True)
+        row = self.rows(w)["tiktok"]
+        self.assertEqual((row["state"], row["job"], row["actions"]), ("ready", job["id"], ["mark_posted", "not_posted"]))
+        self.assertEqual(plain(row["line"]),
+                         "● you pressed Post there: waiting for TikTok to say it's up  for an earlier cut")
+        asked = w.call("post_info", CAPTION, TAGS)
+        tiktok = {q["key"]: q for q in asked["platforms"]}["tiktok"]
+        self.assertEqual((tiktok["blocked"]["reason"], tiktok["again"]), ("unknown", True))
+        made = self.post(w, "tiktok")
+        self.assertEqual((made["jobs"], [b["reason"] for b in made["blocked"]]), ([], ["unknown"]))
+        # Once TikTok says the first cut is up, the episode is there once, and the new cut goes only when you say again.
+        posting.advance(job["id"], "posted", install=CHROME, post_id="7300000000000000001", url=TIKTOK_URL)
+        self.assertEqual([j["state"] for j in posting.recent()], ["posted"])
+        w.svc.update_posting()
+        self.assertEqual(self.rows(w)["tiktok"]["state"], "posted")
         (again,) = self.post(w, "tiktok", force=["tiktok"])["jobs"]
         self.assertEqual(self.rows(w)["tiktok"]["job"], again["id"])
 

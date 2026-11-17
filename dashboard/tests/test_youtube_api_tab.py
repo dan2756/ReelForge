@@ -12,6 +12,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
@@ -627,6 +628,24 @@ class Posting(ApiPosting):
         job = self.over(w, made["jobs"][0]["id"])
         self.assertEqual((job["state"], bytes(self.google.videos[0]["data"])), ("posted", BYTES[::-1] + b"another cut"))
 
+    def test_a_yes_to_a_file_written_over_with_the_same_size_and_time_starts_nothing(self):
+        """A copy made with cp -p, rsync -t or a sync client keeps the size and time of the file it replaced, so
+        the fingerprint ReelForge remembers still fits it. The yes reads the file afresh."""
+        w = self.window()
+        info = w.call("youtube_api_info", CAPTION, TAGS)
+        st = self.video.stat()
+        self.video.write_bytes(BYTES[::-1])
+        os.utime(self.video, ns=(st.st_atime_ns, st.st_mtime_ns))
+        self.assertEqual(posting.digest(self.video), info["video"]["sha256"])  # (as remembered)
+        self.assertIsNone(w.call("post_with_api", CAPTION, TAGS, "private", False, self.yes_to(info)))
+        self.assertEqual(w.sent("toast")[-1]["title"], "Nothing was started")
+        self.assertEqual((posting.recent(), self.google.starts), ([], []))
+        info = w.call("youtube_api_info", CAPTION, TAGS)
+        self.assertEqual(info["video"]["sha256"], hashlib.sha256(BYTES[::-1]).hexdigest())
+        made = w.call("post_with_api", CAPTION, TAGS, "private", False, self.yes_to(info))
+        job = self.over(w, made["jobs"][0]["id"])
+        self.assertEqual((job["state"], bytes(self.google.videos[0]["data"])), ("posted", BYTES[::-1]))
+
     def test_a_made_for_kids_answer_changed_since_the_question_starts_nothing(self):
         """The question shows the made-for-kids answer a post will carry, or that none will be sent. When that is
         another one by the time of the yes (changed in another window), what was shown is not what would be sent."""
@@ -970,6 +989,26 @@ class Posting(ApiPosting):
         self.assertEqual((again["state"], again["via"]), ("posted", "api"))
         self.assertEqual((self.pages, len(self.google.videos)), ([], 1))  # no page for the extension was opened
 
+    def test_a_failed_try_whose_upload_page_was_then_opened_by_hand_is_posted_again_only_with_the_api(self):
+        # The try through the API failed, and BY HAND's YouTube button opened the upload page since. A new post is a
+        # post again (the video may be up by your hand), and on this row that is Again with API…: the extension's
+        # Post again… would open the extension's question, which with no browser connected only says to connect one.
+        self.google.start_script = [(403, "quotaExceeded")]
+        w = self.window(connect=False)
+        job = self.posted(w)
+        self.assertEqual(job["state"], "failed")
+        w.call("open_upload", "youtube", CAPTION, TAGS)
+        row = self.rows(w)["youtube"]
+        self.assertEqual((row["state"], row["via"], row["by_hand"], row["actions"], row["api"]),
+                         ("failed", "api", True, [], {"force": True}))
+        # In a window that has just opened (not connected in it yet): the row offers to connect, and nothing that
+        # goes through the extension.
+        self.reopen()
+        w.svc.follow_youtube_api(changed=True)
+        w.svc.update_posting()
+        row = self.rows(w)["youtube"]
+        self.assertEqual((row["actions"], row.get("api")), (["connect_api"], None))
+
     def test_a_try_that_ended_without_a_post_is_never_sent_again_as_it_was(self):
         """Try again on one of the extension's posts hands the same text to the extension, which stops at the
         platform's own Post button. Through the API the same press would upload at once, with the old try's caption,
@@ -1152,6 +1191,22 @@ class Posting(ApiPosting):
                                                 "post again. Nothing was posted.")
         w.svc.jobs_changed()
         self.assertEqual(self.rows(w)["youtube"]["state"], "none")  # the file there now is another video
+
+    def test_a_file_written_over_with_the_same_size_and_time_while_its_upload_waits_is_not_sent(self):
+        """A post can wait its turn behind another upload for minutes. A copy made meanwhile with cp -p, rsync -t or a
+        sync client keeps the size and time of the file it replaced, so the fingerprint ReelForge remembers still
+        fits it. The upload reads the file afresh before any of it goes."""
+        w = self.window()
+        job = self.job()
+        st = self.video.stat()
+        self.video.write_bytes(BYTES[::-1])
+        os.utime(self.video, ns=(st.st_atime_ns, st.st_mtime_ns))
+        self.assertEqual(posting.digest(self.video), job["video_sha256"])  # (as remembered)
+        done = youtube_api_tab.run(job["id"])
+        self.assertEqual((done["state"], done["error_code"]), ("failed", "changed"))
+        self.assertEqual((self.google.starts, self.google.puts, self.google.videos), ([], [], []))
+        w.svc.jobs_changed()
+        self.assertEqual(self.rows(w)["youtube"]["state"], "none")  # nothing is under way for the file there now
 
     def test_a_job_that_does_not_say_who_may_see_it_is_never_sent(self):
         made = posting.create_batch(self.video, ["youtube"], CAPTION, TAGS, self.cfg, via={"youtube": "api"})

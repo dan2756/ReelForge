@@ -178,7 +178,10 @@ def _upload(job: dict, stop: Callable[[], bool]) -> None:
         if privacy not in PRIVACY:  # never guessed: left out, YouTube would make the video public
             raise ApiError("odd", "This post doesn't say who may see the video, so it wasn't sent. Post it again.")
         move("uploading", step="upload", progress=0.0, detail=f"to YouTube, as {privacy}")
-        if not posting.unchanged(job):
+        # Read afresh: the job may have waited its turn behind another upload for minutes, and a copy written over
+        # the file meanwhile with its size and time kept looks unchanged to the remembered fingerprint. The upload
+        # reads the whole file anyway.
+        if not posting.unchanged(job, fresh=True):
             raise ApiError("changed", "The video file changed after you pressed Post. Check it, then post again.")
         made = youtube_api.upload(Path(job["video_path"]), text.get("title", ""), text.get("description", ""),
                                   privacy, kids_answer(options), started=started, progress=progress, last=last,
@@ -451,7 +454,10 @@ class YouTubeApiTab:
         for row in rows:
             job, post = jobs.get(row["key"]), posts.get(row["key"])
             if job is not None and job["via"] == "api" and row["job"] == job["id"]:
-                row["actions"] = [a for a in row["actions"] if a != "retry"]
+                # (Post again… stands in for Try again where the video may be up by your hand. On this row that is
+                # a post through the API too, Again with API… below: the extension's would ask about the browser.)
+                row["actions"] = [a for a in row["actions"]
+                                  if a != "retry" and not (a == "post_again" and row["state"] in posting.FREE)]
                 if row["state"] == "posting":
                     row["actions"] = []
                 elif row["state"] == "queued" and self._safe(lambda: another_uploading(job["id"]), False):
@@ -698,8 +704,8 @@ class YouTubeApiTab:
                             "video now. Press Post with API… again to post this one.",
                             title="Nothing was started", severity="warning", timeout=12)
                 return None
-            try:
-                same = shown.get("sha256") == posting.digest(self.selected_file)
+            try:  # (read afresh: a copy written over it with the same size and time keeps the remembered one)
+                same = shown.get("sha256") == posting.digest(self.selected_file, fresh=True)
             except OSError:
                 same = False
             if not same:  # (nobody sees the video again before it is up)

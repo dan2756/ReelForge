@@ -299,7 +299,10 @@ What the window gets and calls:
 
 A job goes `queued`, `uploading` (with `progress`), `posting` (the last piece is on its way), then `posted`, or
 ends as `failed` or `unknown`. A row whose job went through the API has no Try again (`retry`): a new try is a new
-post, from `post_api` and the question, and `post_action(job, "retry")` on such a job uploads nothing. A posted
+post, from `post_api` and the question, and `post_action(job, "retry")` on such a job uploads nothing. Nor does
+such a row get the extension's Post again… (`post_again`) when its try ended without a post and the upload page
+was opened by hand since: posting again there goes through the API too, with `api: {"force": true}` (the window's
+**Again with API…**). A posted
 job whose `step` is `confirm` has a sentence in `detail` about how YouTube stored the video: something for the
 person to look at. One whose `step` is `note` went without a made-for-kids answer, and its `detail` says so.
 

@@ -4,11 +4,18 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { EXTENSION_ID } from "./fake_app.mjs"
 import { EXTENSION_DIR, equal, ok } from "./harness.mjs"
-import { ACCOUNT_SHOWN, GUARD_HOOKS, PACKED_HOOKS, PLATFORMS } from "../shared/consts.js"
+import { ACCOUNT_SHOWN, GUARD_HOOKS, PACKED_HOOKS, PLATFORMS, keptHooks } from "../shared/consts.js"
 
 const manifest = JSON.parse(readFileSync(join(EXTENSION_DIR, "manifest.json"), "utf8"))
 const selectors = JSON.parse(readFileSync(join(EXTENSION_DIR, "selectors.json"), "utf8"))
 const source = name => readFileSync(join(EXTENSION_DIR, name), "utf8")
+
+// The hooks a newer list never replaces for a platform, as worker/selectors.js works them out from the packed list.
+function keptFor(platform) {
+  const own = selectors.platforms[platform]
+  const named = [own.success, own.challenge, own.signed_out].flatMap(sign => [...(sign?.hooks || []), sign?.gone_after_press]).filter(Boolean)
+  return keptHooks(own.hooks, [...PACKED_HOOKS[platform], ...GUARD_HOOKS[platform], ...named])
+}
 
 export const tests = {
   // Chrome's rule: SHA-256 of the public key, first 16 bytes, each hex digit moved to the letters a to p.
@@ -51,7 +58,8 @@ export const tests = {
       const theirs = JSON.parse(JSON.stringify(packed))
       theirs.version = packed.version + 1
       for (const platform of Object.values(theirs.platforms)) {
-        for (const name of Object.keys(platform.hooks)) platform.hooks[name] = { strategies: [{ id: "page", css: "body" }], timeout_ms: 1234 }
+        // (and the hooks the engine reads on every platform, where the packed list has none of them)
+        for (const name of [...Object.keys(platform.hooks), "error", "account", "post_link", "post_confirm"]) platform.hooks[name] = { strategies: [{ id: "page", css: "body" }], timeout_ms: 1234 }
         Object.assign(platform, { success: { url: ["/"], hooks: ["file_input"], gone_after_press: "file_input", timeout_ms: 4321 }, challenge: {}, signed_out: {} })
       }
       if (!sel.valid(theirs)) return null
@@ -69,16 +77,59 @@ export const tests = {
       equal([got.challenge, got.signed_out], [own.challenge, own.signed_out], `${platform}'s challenge and signed-out signs`)
       const named = [own.success, own.challenge, own.signed_out].flatMap(sign => [...(sign?.hooks || []), sign?.gone_after_press]).filter(Boolean)
       ok(named.length > 0 && GUARD_HOOKS[platform].includes("captcha"), `${platform} has hooks to keep`)
-      for (const hook of new Set([...PACKED_HOOKS[platform], ...GUARD_HOOKS[platform], ...named])) {
-        ok(own.hooks[hook], `${platform} has the hook ${hook}`)
+      for (const hook of keptFor(platform)) {
+        // A kept hook the packed list does not have is not taken from a newer list either: the engine reads
+        // "error" and "account" on every platform, and one a newer list added would be read there.
+        if (!own.hooks[hook]) {
+          equal(got.hooks[hook], undefined, `${platform}'s ${hook}: none, as packed`)
+          continue
+        }
         equal(got.hooks[hook].strategies, own.hooks[hook].strategies, `${platform}'s ${hook}: where it looks`)
       }
       equal(got.hooks.file_input.strategies, [{ id: "page", css: "body" }], `${platform}'s file_input: any other hook is the app's`)
     }
-    // The account is compared wherever the page shows it, and YouTube's last screen is left alone unless its
-    // answers are the channel's own: those hooks are among the kept ones.
+    // The account is compared wherever the page shows it, YouTube's last screen is left alone unless its answers
+    // are the channel's own, its own error message stops a job, and Instagram's Share is looked for in its own
+    // dialog: those hooks are among the kept ones.
     for (const platform of ACCOUNT_SHOWN) ok(GUARD_HOOKS[platform].includes("account"), `${platform}'s account hook is kept`)
-    for (const hook of ["kids_no", "kids_yes", "visibility", "upload_done"]) ok(GUARD_HOOKS.youtube.includes(hook), `YouTube's ${hook} is kept`)
+    for (const hook of ["kids_no", "kids_yes", "visibility", "upload_done", "error"]) ok(keptFor("youtube").has(hook), `YouTube's ${hook} is kept`)
+    equal(seen.youtube.hooks.error.strategies, selectors.platforms.youtube.hooks.error.strategies, "YouTube's error message: where it looks")
+    for (const hook of ["dialog", "reels_notice"]) equal(seen.instagram.hooks[hook].strategies, selectors.platforms.instagram.hooks[hook].strategies, `Instagram's ${hook}: where it looks`)
+  },
+
+  "every hook the engine reads by name, and every hook a script reads before the press, is one a newer list cannot replace"() {
+    // What a newer list may still change: hooks only typed into or given the video (rf.fill, rf.find), and these
+    // steps on the way, which a wrong newer list can only stop: the platform's own final button and its guards
+    // are kept, so none of them can lead to a press.
+    const steps = {
+      tiktok: {},
+      youtube: {},
+      instagram: { heading: "which screen of the dialog is showing, to see that Next took", caption: "that the caption's screen is there" },
+      x: { attached: "that the video is in before the text is typed (X is never pressed)" },
+    }
+    const reads = text => new Set([...text.matchAll(/rf\.(?:probe|read)\("(\w+)"/g), ...text.matchAll(/rf\.sel\.hooks\.(\w+)/g)].map(match => match[1]))
+    // engine.js and run.js run on every platform. Each hook they read by name is kept on every one of them.
+    const engine = reads(source("platform/engine.js") + source("platform/run.js"))
+    ok(engine.has("error") && engine.has("account"), `the engine's own reads are found (${[...engine]})`)
+    for (const platform of Object.keys(PLATFORMS)) {
+      for (const hook of engine) ok(GUARD_HOOKS[platform].includes(hook), `${platform}: ${hook}, read by the engine, is kept`)
+    }
+    // rf.guard() runs on every look before the press: every sign it reads is one of the packed signs.
+    const guard = /rf\.guard = \(\) => \{([\s\S]*?)\n  \}/.exec(source("platform/engine.js"))[1]
+    ok(reads(guard).has("error"), "rf.guard reads the platform's error message")
+    for (const [, sign] of guard.matchAll(/rf\.sign\("(\w+)"\)/g)) ok(["challenge", "signed_out", "success"].includes(sign), `rf.guard's ${sign} sign is a packed one`)
+    for (const platform of Object.keys(PLATFORMS)) {
+      const script = source(`platform/${platform}.js`)
+      const read = reads(script)
+      for (const [, hook] of script.matchAll(/(?:final|hold): "(\w+)"/g)) read.add(hook)
+      for (const [, hook] of script.matchAll(/\b(visibility_\w+):/g)) read.add(hook)  // (YouTube's choices, read through a list)
+      ok(read.size > 0, `${platform}: hooks are found`)
+      for (const hook of read) {
+        ok(selectors.platforms[platform].hooks[hook], `${platform} has the hook ${hook}`)
+        ok(keptFor(platform).has(hook) || steps[platform][hook], `${platform}.js reads ${hook} before the press: it is kept, or a step a newer list may change`)
+      }
+      for (const hook of Object.keys(steps[platform])) ok(read.has(hook) && !keptFor(platform).has(hook), `${platform}'s ${hook} is still a step the script reads`)
+    }
   },
 
   "every hook a script clicks is one a newer list from the app cannot replace"() {

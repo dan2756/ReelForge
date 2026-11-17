@@ -121,17 +121,41 @@ void (async () => {
     await signSeen()
   }
 
+  // The note for a person who pressed already. They are not asked to press again, and nothing is pressed for
+  // them: the platform has the next word.
+  function sayPressed() {
+    rf.unoutline()
+    rf.say(`You pressed ${flow.button}`, "work", `Waiting for ${P} to say it is up.`)
+  }
+
   // Press Post for the person. Asked for once; the app's ledger grants it once. From the click on, the job
   // ends as posted (the platform's own sign) or as "not sure", never as failed: a page that shows nothing for
   // a few seconds may still have taken the click, and a post called failed would be offered again.
   async function press(button, cannot) {
+    // The person pressed it already, maybe while the video was still going up, and the page has not shown the
+    // outcome yet. Nothing is asked and nothing is pressed: a second press would post the video twice. What the
+    // page shows next decides, and watch() is there for it.
+    if (pressed) {
+      sayPressed()
+      return false
+    }
     const stay = async why => {
+      // Until now the note said Post was about to be pressed for them, and the button was left alone.
+      if (button) rf.outline(button)
       rf.say("Check it, then press Post", "ready", `ReelForge did not press for you: ${why}`)
       // (A sentence of its own: ReelForge's page and the popup show it as it is.)
       await rf.report({ step: "ready", detail: `Not pressed: ${why}` })
     }
     if (cannot) return stay(cannot)
     const grant = await rf.send({ t: "job.press" })
+    // The person pressed it while ReelForge was being asked. The answer was decided before ReelForge heard of
+    // that press (a yes), or because of it (already pressed): either way their press is the post's only one. A
+    // click now would post the video twice, and "not pressed" would ask them for a press they made. So nothing
+    // is clicked or reported, and what the page shows next decides.
+    if (pressed) {
+      sayPressed()
+      return false
+    }
     if (!grant?.ok) return stay(grant?.message || "the extension did not answer.")
     // From here on nothing is ever pressed again, whatever happens.
     rf.phase = "watch"
@@ -214,16 +238,23 @@ void (async () => {
       throw new rf.Stop("unknown_outcome", `${P}'s upload form closed before ReelForge had finished, and it saw no press of ${flow.button}. Check your profile before you post again.`, { state: "unknown" })
     }
     const button = end.hold ? rf.probe(end.hold) : await rf.find(flow.final)
-    if (button) rf.outline(button)
+    const cannot = end.hold ? "something on the page is still yours to answer." : end.noPress
+    // Press Post for me is about to be asked for. The note does not invite a press of the person's own meanwhile,
+    // and the button is not ringed: if the press is refused, press() says so and rings it then.
+    const asking = job.press && !flow.neverPress && !cannot && !pressed
+    if (button && !pressed && !asking) rf.outline(button)
     if (!pressed && rf.sign("success")) signBroken = true
     let hint = end.more || (flow.button === "Post" ? "Nothing is posted until you do." : `On ${P} the button says ${flow.button}.`)
     // Where the page does not show which account it is on, nothing was checked: the person has to look.
     if (!rf.sel.hooks.account && job.handle) hint += ` ReelForge has ${job.handle} for this channel, and could not check the account here: look at which one this tab is on.`
-    rf.say("Check it, then press Post", "ready", hint)
+    // A person who pressed already is not asked to press again: the platform has the next word.
+    if (pressed) sayPressed()
+    else if (asking) rf.say("Pressing Post for you", "work", "Checking with ReelForge first.")
+    else rf.say("Check it, then press Post", "ready", hint)
     await rf.report({ state: "ready", step: "ready", detail: end.detail || (rf.fallback ? `${P}'s page has changed a little; still working` : undefined), ...postInfo() })
     rf.guard()
     clearInterval(alive)
-    const done = job.press && !flow.neverPress && await press(button, end.hold ? "something on the page is still yours to answer." : end.noPress)
+    const done = job.press && !flow.neverPress && await press(button, cannot)
     if (!done) await watch()
   }
 

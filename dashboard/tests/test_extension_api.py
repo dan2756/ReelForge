@@ -1060,6 +1060,31 @@ class VideoFile(ApiTest):
         self.video.write_bytes(self.bytes)  # the very same video again: fine
         self.assertEqual(self.get().status, 200)
 
+    def test_a_video_written_over_with_the_same_size_and_time_is_refused_at_the_start_of_the_hand_over(self):
+        # cp -p, rsync -t or a sync client: other bytes with the size and time of the video they replaced, so the
+        # fingerprint ReelForge remembers still fits. The first piece is checked against the bytes, read afresh.
+        self.assertEqual(self.get("bytes=0-9").status, 206)
+        st = self.video.stat()
+        self.video.write_bytes(self.bytes[::-1])
+        os.utime(self.video, ns=(st.st_atime_ns, st.st_mtime_ns))
+        self.assertEqual(posting.digest(self.video), self.made["video_sha256"])  # (as remembered)
+        for asked in ("bytes=0-9", None):
+            with self.subTest(range=asked):
+                changed = self.get(asked)
+                self.assertEqual((changed.status, changed.error), (409, "changed"))
+        # Once seen, it is remembered: no piece of it is handed over after that either.
+        self.assertEqual(self.get("bytes=100-199").error, "changed")
+        self.video.write_bytes(self.bytes)  # the very same video again: fine
+        os.utime(self.video, ns=(st.st_atime_ns, st.st_mtime_ns))
+        self.assertEqual((self.get("bytes=0-9").status, self.get("bytes=100-199").status), (206, 206))
+
+    def test_a_large_video_is_read_in_full_once_per_hand_over_not_once_per_piece(self):
+        with mock.patch.object(posting, "digest", wraps=posting.digest) as hashed:
+            for start in range(0, len(self.bytes), 32768):
+                self.assertEqual(self.get(f"bytes={start}-{start + 32767}").status, 206)
+        self.assertEqual([c.kwargs.get("fresh", c.args[1] if len(c.args) > 1 else False) for c in hashed.mock_calls],
+                         [True] + [False] * (len(range(0, len(self.bytes), 32768)) - 1))
+
     def test_the_path_is_the_jobs_never_the_requests(self):
         secret = self.root / "secret.txt"
         secret.write_text("not a video", "utf-8")

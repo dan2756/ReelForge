@@ -404,6 +404,47 @@ class Making(LedgerTest):
         posting.resolve(unsure["id"], False)
         self.assertEqual(self.job("instagram")["state"], "queued")
 
+    def test_a_new_cut_of_an_episode_that_post_was_pressed_for_waits_like_one_nobody_is_sure_of(self):
+        # Post was pressed for the first cut, by you in the tab or for you, and the platform hasn't said yet that it
+        # is up. Then the file is rendered again under its name. The episode may be up there already.
+        self.earlier_post_for_press()
+        yours = self.walk(self.job("tiktok"), *STEPS)
+        posting.advance(yours["id"], "ready", install=CHROME, step="press")
+        early = self.walk(self.job("youtube"), "opening", "uploading")
+        posting.advance(early["id"], "uploading", install=CHROME, step="press")  # (while it was still going up)
+        granted = self.walk(self.job("instagram", press=True), *STEPS)
+        posting.grant_press(granted["id"], CHROME)
+        nobody = self.walk(self.job("x"), *STEPS)  # nothing pressed: another video as far as the ledger goes
+        self.video.write_bytes(b"a second cut, under the same name")
+        look = posting.preview(self.video, ["tiktok", "youtube", "instagram", "x"], CAPTION, TAGS, self.cfg)["blocked"]
+        self.assertEqual({k: (b["reason"], b["job"], b["state"]) for k, b in look.items()},
+                         {"tiktok": ("unknown", yours["id"], "ready"), "youtube": ("unknown", early["id"], "uploading"),
+                          "instagram": ("unknown", granted["id"], "posting")})
+        self.assertEqual(look["tiktok"]["message"], "Post was pressed there for an earlier cut of this video, and "
+                                                    "ReelForge hasn't heard yet whether it's up.")
+        made = self.batch("tiktok", "youtube", "instagram", "x")
+        self.assertEqual(([j["platform"] for j in made["jobs"]], [b["reason"] for b in made["blocked"]]),
+                         (["x"], ["unknown", "unknown", "unknown"]))
+        rows = posting.for_files([self.video])[self.video]
+        self.assertEqual({k: (j["id"], j.get("earlier_cut", False)) for k, j in rows.items()},
+                         {"tiktok": (yours["id"], True), "youtube": (early["id"], True),
+                          "instagram": (granted["id"], True), "x": (made["jobs"][0]["id"], False)})
+        self.assertEqual(posting.get(nobody["id"])["state"], "ready")
+        # Saying again gets past it, as for any post that may be up.
+        self.assertEqual(self.job("tiktok", force=("tiktok",))["state"], "queued")
+        # The earlier cut's press decides the rest: up, and a plain post of the new cut is refused as a post again.
+        posting.advance(early["id"], "posted", install=CHROME)
+        (block,) = self.batch("youtube")["blocked"]
+        self.assertEqual((block["reason"], block["job"]), ("posted", early["id"]))
+
+    def earlier_post_for_press(self) -> None:
+        """One post on Instagram that went up with the extension's help, of another episode, so the press may be
+        granted there; the tests' video stays the one it was."""
+        video = self.video
+        first = posting.create_batch(self.another_video(), ["instagram"], "The one before", TAGS, self.cfg)
+        self.walk(first["jobs"][0], *STEPS, "posted")
+        self.video = video
+
     def test_two_presses_at_the_same_moment_make_one_job(self):
         go, results = threading.Barrier(2), []
 
@@ -858,6 +899,21 @@ class Pressing(LedgerTest):
                 self.assertEqual(posting.resolve(job["id"], False)["state"], "cancelled")
                 self.assertEqual(posting.advance(job["id"], "posted", install=CHROME)["state"], "unknown")
 
+    def test_after_your_own_press_nothing_is_pressed_for_you(self):
+        # You pressed the platform's button yourself while the video was still going up, on a post you had asked
+        # ReelForge to press for you. The page then still shows its form, and the extension calls the post ready:
+        # a second press would post the video twice.
+        self.earlier_post("youtube")
+        job = self.walk(self.job("youtube", press=True), *STEPS[:3])
+        posting.advance(job["id"], "filling", install=CHROME, step="press")
+        posting.advance(job["id"], "ready", install=CHROME, step="ready")
+        said = self.refused("already_pressed", posting.grant_press, job["id"], CHROME)
+        self.assertEqual(said.message, "You pressed Post for this one yourself already.")
+        self.assertEqual(self.state(job), "ready")
+        self.assertNotIn("posting", [state for state, _, _ in self.events(job)])
+        # It ends as your press decides: posted when the page shows it.
+        self.assertEqual(posting.advance(job["id"], "posted", install=CHROME)["state"], "posted")
+
     def test_an_upload_through_an_api_cannot_be_called_off_once_its_last_piece_is_on_its_way(self):
         job = self.job("youtube", via={"youtube": "api"}, options={"youtube": {"privacy": "private"}})
         posting.advance(job["id"], "uploading", by="app")
@@ -1290,6 +1346,18 @@ class Digest(LedgerTest):
             self.assertEqual(posting.digest(self.video), hashlib.sha256(b"and a longer third cut").hexdigest())
             self.assertEqual(posting.digest(self.video), hashlib.sha256(b"and a longer third cut").hexdigest())
             self.assertEqual(reads(), 3)
+
+    def test_read_afresh_it_sees_a_copy_written_over_with_the_same_size_and_time(self):
+        # cp -p, rsync -t or a sync client: other bytes, and the size and time of the file they replaced. Only a
+        # fresh read sees it, and from then on the new bytes are what is remembered.
+        posting.digest(self.video)
+        st = self.video.stat()
+        self.video.write_bytes(b"THE FIRST CUT")
+        os.utime(self.video, ns=(st.st_atime_ns, st.st_mtime_ns))
+        new = hashlib.sha256(b"THE FIRST CUT").hexdigest()
+        self.assertEqual(posting.digest(self.video), hashlib.sha256(b"the first cut").hexdigest())  # remembered
+        self.assertEqual(posting.digest(self.video, fresh=True), new)
+        self.assertEqual(posting.digest(self.video), new)
 
     def test_it_is_kept_in_the_database_by_path_size_and_time(self):
         posting.digest(self.video)

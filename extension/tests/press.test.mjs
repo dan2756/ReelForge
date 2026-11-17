@@ -18,6 +18,29 @@ async function switchOn(browser, app, platform) {
   await options.close()
 }
 
+// Holds ReelForge's answer to the press request until the test lets it go, so the person can press Post while
+// ReelForge is being asked. "decided": the app decides at once and only its answer is slow to come back (a busy
+// machine); otherwise the request waits before the app has looked at it.
+function holdPress(app, { decided }) {
+  const handle = app.handle.bind(app)
+  const held = { arrived: false }
+  const gate = new Promise(resolve => (held.release = resolve))
+  app.handle = async (request, response) => {
+    if (request.method === "POST" && /\/press$/.test(request.url)) {
+      held.arrived = true
+      if (decided) {
+        const end = response.end.bind(response)
+        response.end = (...args) => {
+          gate.then(() => end(...args))
+          return response
+        }
+      } else await gate
+    }
+    return handle(request, response)
+  }
+  return held
+}
+
 // The same switch set straight in the extension's storage, for the cases the options page refuses.
 async function forceOn(browser, app, platform) {
   equal(await browser.pair(app), "ok", "pairing")
@@ -139,6 +162,117 @@ export const tests = {
     const tab = await browser.tab("www.tiktok.com")
     equal(await tab.evaluate(() => fixture.clicks), 0, "presses the page saw")
     ok((await note(tab)).more.includes("Post was already pressed for this one"), `the note (${(await note(tab)).more})`)
+  },
+
+  async "the person's own press while the video is going up is the only press, whatever was asked for"({ app, site, browser, video }) {
+    // Press Post for me is on, the post's own setting says press and the person said yes. They press Save
+    // themselves while YouTube is still taking the video in, and the page shows nothing yet ("slow_mute": it
+    // takes no click). When everything is filled in, the form is still there: a second press would post twice.
+    site.mode.youtube = "slow_mute"
+    await switchOn(browser, app, "youtube")
+    const made = app.createBatch(video(), ["youtube"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("studio.youtube.com")
+    const job = made.jobs[0]
+    await until(() => `the wait for the upload (it is ${job.state} ${job.step})`, () => job.step === "upload" && job.events.some(event => event.step === "visibility"), 30000)
+    await tab.locator("#done-button").click()
+    await until("the press to be noticed", async () => (await browser.jobRecord(job.id)).pressedByPerson === true)
+    await until(() => `ready (it is ${job.state} ${job.step})`, () => job.state === "ready", 40000)
+    await sleep(2500)
+    equal([presses(app).length, job.state], [0, "ready"], "press requests, and the job meanwhile")
+    equal(await tab.evaluate(() => [fixture.clicks, fixture.trustedClicks]), [1, 1], "presses the page saw")
+    // The page's script did not even ask: nothing says "not pressed" as if the person had not.
+    ok(!job.events.some(event => String(event.detail).startsWith("Not pressed")), `what the app was told (${job.events.map(event => event.detail)})`)
+    equal((await note(tab)).line, "You pressed Publish or Save", "the note")
+    // Nor would the worker have asked the app, had the page's script asked it.
+    const extension = await browser.popup()
+    const asked = await extension.evaluate(async tabId => (await import("/worker/jobs.js")).tabPress(tabId), (await browser.jobRecord(job.id)).tabId)
+    equal([asked.ok, asked.error, presses(app).length], [false, "already_pressed", 0], "a press asked for all the same")
+    // YouTube takes it in the end: the person's press is the post.
+    await tab.evaluate(() => {
+      const root = document.querySelector("ytcp-app").shadowRoot
+      root.querySelector("ytcp-uploads-dialog").remove()
+      const share = document.createElement("ytcp-video-share-dialog")
+      share.innerHTML = '<h2>Video published</h2><a href="https://youtu.be/FIXTUREvid1">https://youtu.be/FIXTUREvid1</a>'
+      root.append(share)
+    })
+    await until(() => `posted (it is ${job.state})`, () => job.state === "posted")
+    equal([job.post_id, await tab.evaluate(() => fixture.clicks), presses(app).length], ["FIXTUREvid1", 1, 0], "the video's id, presses and press requests")
+  },
+
+  async "the person's press while ReelForge is asked to press is the only press, though the app's yes is on its way"({ app, site, browser, video }) {
+    // The app says yes before it hears of the person's press, and its answer takes a moment to come back. The
+    // person presses Post in that moment, and the page shows nothing yet ("mute": it takes no click).
+    site.mode.tiktok = "mute"
+    await switchOn(browser, app, "tiktok")
+    const held = holdPress(app, { decided: true })
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("www.tiktok.com")
+    const job = made.jobs[0]
+    await until(() => `the press request (it is ${job.state} ${job.step})`, () => held.arrived, 30000)
+    // Meanwhile the page does not ask the person to press: the note says it is being pressed, and Post is not ringed.
+    equal((await note(tab)).line, "Pressing Post for you", "the note while ReelForge is asked")
+    equal(await tab.evaluate(() => document.querySelector("[data-e2e=post_video_button]").style.getPropertyValue("outline")), "", "the ring round Post")
+    await tab.locator("[data-e2e=post_video_button]").click()
+    await until("the press to be noticed", async () => (await browser.jobRecord(job.id)).pressedByPerson === true)
+    held.release()
+    await until("the note to say who pressed", async () => (await note(tab)).line === "You pressed Post", 10000)
+    await sleep(1500)
+    equal(await tab.evaluate(() => [fixture.clicks, fixture.trustedClicks]), [1, 1], "presses the page saw")
+    equal([presses(app).map(entry => entry.status), job.state], [[200], "posting"], "press requests, and the job meanwhile")
+    equal((await note(tab)).more, "Waiting for TikTok to say it is up.", "what the note says")
+    ok(!job.events.some(event => String(event.detail).startsWith("Not pressed")), `what the app was told (${job.events.map(event => event.detail)})`)
+    // TikTok takes it in the end: the person's press is the post.
+    await tab.evaluate(() => done())
+    await until(() => `posted (it is ${job.state})`, () => job.state === "posted")
+    equal(await tab.evaluate(() => fixture.clicks), 1, "presses the page saw in the end")
+  },
+
+  async "the person's press while ReelForge is asked to press is refused as theirs, and the page does not ask them for another"({ app, site, browser, video }) {
+    // This time ReelForge hears of the person's press before it looks at the request, and refuses it: Post was
+    // pressed already. That refusal is not "ReelForge did not press for you, press Post": they just did.
+    site.mode.tiktok = "mute"
+    await switchOn(browser, app, "tiktok")
+    const held = holdPress(app, { decided: false })
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("www.tiktok.com")
+    const job = made.jobs[0]
+    await until(() => `the press request (it is ${job.state} ${job.step})`, () => held.arrived, 30000)
+    await tab.locator("[data-e2e=post_video_button]").click()
+    await until("ReelForge to hear of the press", () => job.events.some(event => event.step === "press"))
+    held.release()
+    await until("the refusal", () => presses(app).some(entry => entry.status === 409))
+    await until("the note to say who pressed", async () => (await note(tab)).line === "You pressed Post", 10000)
+    await sleep(1500)
+    equal([(await note(tab)).line, (await note(tab)).more], ["You pressed Post", "Waiting for TikTok to say it is up."], "the note")
+    equal(await tab.evaluate(() => document.querySelector("[data-e2e=post_video_button]").style.getPropertyValue("outline")), "", "the ring round Post")
+    ok(!job.events.some(event => String(event.detail).startsWith("Not pressed")), `what the app was told (${job.events.map(event => event.detail)})`)
+    equal([await tab.evaluate(() => [fixture.clicks, fixture.trustedClicks]), job.state], [[1, 1], "ready"], "presses the page saw, and the job meanwhile")
+    await tab.evaluate(() => done())
+    await until(() => `posted (it is ${job.state})`, () => job.state === "posted")
+    equal(await tab.evaluate(() => fixture.clicks), 1, "presses the page saw in the end")
+  },
+
+  async "a newer list that moves YouTube's error hook does not get a press past YouTube's own error"({ app, site, browser, video }) {
+    // The app's newer list points the hook for YouTube's error message at nothing. The packed one is used all
+    // the same: the engine stops a job at that message before anything is pressed.
+    site.mode.youtube = "slow"
+    const list = quickSelectors()
+    list.platforms.youtube.hooks.error = { any: true, strategies: [{ id: "moved", css: "no-such-error-element" }] }
+    app.selectors = list
+    await switchOn(browser, app, "youtube")
+    const made = app.createBatch(video(), ["youtube"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("studio.youtube.com")
+    const job = made.jobs[0]
+    await until(() => `the wait for the upload (it is ${job.state} ${job.step})`, () => job.step === "upload" && job.events.some(event => event.step === "visibility"), 30000)
+    await tab.evaluate(() => { document.querySelector("ytcp-app").shadowRoot.querySelector(".error-area").textContent = "Daily upload limit reached" })
+    await until(() => `the job to end (it is ${job.state})`, () => ["failed", "posted", "unknown"].includes(job.state), 30000)
+    equal([job.state, job.error_code, job.error_message], ["failed", "platform_error", "YouTube says: Daily upload limit reached"], "state, code and message")
+    equal([await tab.evaluate(() => [fixture.clicks, fixture.posted]), presses(app).length], [[0, false], 0], "presses the page saw, and press requests")
+    equal((await browser.storage("local")).selectors?.version, list.version, "the newer list was taken for everything else")
   },
 
   async "X is never pressed, even with everything forced on"({ app, browser, video }) {
