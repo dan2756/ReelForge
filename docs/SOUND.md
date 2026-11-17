@@ -68,9 +68,10 @@ to have both.
 Where the new list no longer has one of the kit's own (one you changed stays), a sound whose file is on your computer
 (in `assets/sfx/`, or its converted copy in `assets/sfx/_cache/`) stays too, so cue sheets that use it go on mixing
 it. It is still the kit's: a later update takes it out once its file has gone, and puts the kit's new one in if the
-kit brings a sound by that name back. Any other goes, after a copy of your list goes to
-`backups/sounds-before-update-<date>.json`, and the update names it and the copy: a cue sheet that uses it needs
-another sound.
+kit brings a sound by that name back. A licence note the kit took out stays the same way while a sound in your list
+(one of yours, or one kept for its file) comes from that source, and goes with the last of them. Any other goes,
+after a copy of your list goes to `backups/sounds-before-update-<date>.json`, and the update names it and the copy: a
+cue sheet that uses a sound that went needs another.
 
 The first update that keeps that record can't tell yet. There the new list's entries go in, a copy of your list as it
 was goes to `backups/sounds-before-update-<date>.json` first, and the update names the entries it replaced: put back

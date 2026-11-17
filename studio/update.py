@@ -356,11 +356,12 @@ def _merge_sounds(theirs: dict, mine: dict, was: dict | None, keep_unknown: bool
                   on_disk: Callable[[str, object], bool] = lambda name, entry: False):
     """The new list with what is yours in mine, and which of yours by a name the new list also has were kept and which
     replaced, which of the kit's own the new list no longer has were taken out, and which of those stay all the same
-    (still the kit's: the record of its list keeps them, see _with_your_sounds). was: the kit's list as it was (None:
-    no record of it), which tells your entries from the kit's own: one that is the same as there is the kit's, and its
-    new one goes in, or none, where the new list no longer has it. With no record, keep_unknown says which goes in; it
-    also keeps the kit's own that it took out, still named as taken out (nowhere to keep a copy of your list first).
-    on_disk: whether a sound's file is on this computer (a sound the kit took out stays while it is)."""
+    (a sound whose file is here, a licence note a sound left comes from: still the kit's, which the record of its list
+    keeps, see _with_your_sounds). was: the kit's list as it was (None: no record of it), which tells your entries
+    from the kit's own: one that is the same as there is the kit's, and its new one goes in, or none, where the new
+    list no longer has it. With no record, keep_unknown says which goes in; it also keeps the kit's own that it took
+    out, still named as taken out (nowhere to keep a copy of your list first). on_disk: whether a sound's file is on
+    this computer (a sound the kit took out stays while it is)."""
     out, kept, replaced, dropped, stayed = dict(theirs), [], [], [], []
     for key, value in mine.items():
         if key in TABLES and not (isinstance(value, dict) and isinstance(out.get(key), dict)):
@@ -377,7 +378,8 @@ def _merge_sounds(theirs: dict, mine: dict, was: dict | None, keep_unknown: bool
                     # The kit's own, which it has taken out of its list since: a sound withdrawn from Mixkit, say,
                     # that setup would go on trying to download. While its file is here, nothing is downloaded and
                     # a cue sheet of yours that uses it goes on mixing it, so it stays; otherwise it goes, and is
-                    # named (a licence note too), unless your list can't be copied first.
+                    # named (a licence note too, unless a sound left uses it: below), unless your list can't be
+                    # copied first.
                     if kind == "sounds" and on_disk(name, entry):
                         table[name] = entry
                         stayed.append((kind, name))
@@ -396,6 +398,15 @@ def _merge_sounds(theirs: dict, mine: dict, was: dict | None, keep_unknown: bool
                 replaced.append((kind, name))
         if kind:
             out[key] = table
+    # A licence note the kit took out stays while a sound left in the list comes from that source (sound["source"]):
+    # one kept for its file, or one of yours. It is where that sound's terms are written down; it goes with the last.
+    sounds = out.get("sounds")
+    used = {e.get("source") for e in sounds.values() if isinstance(e, dict) and isinstance(e.get("source"), str)} \
+        if isinstance(sounds, dict) else set()
+    for item in [(kind, name) for kind, name in dropped if kind == "_licenses" and name in used]:
+        dropped.remove(item)
+        stayed.append(item)
+        out["_licenses"] = {**out["_licenses"], item[1]: mine["_licenses"][item[1]]}
     return out, kept, replaced, dropped, stayed
 
 
@@ -431,11 +442,12 @@ def _with_your_sounds(new: Path, yours: Path, root: Path) -> tuple[bytes | None,
     named: a cue sheet of yours that uses it goes on mixing your sound, and nothing is lost. With no record of the
     kit's list as it was (the first update that keeps one), the new list's entry goes in, after a copy of your list
     is kept in backups/, and the entries it replaced are named. The kit's own that the new list no longer has go too,
-    after a copy, and are named, except a sound whose file is on this computer. None for the list: there is nothing
-    of yours to carry over, or yours can't be read and a copy of it is in backups/, so the new file goes in as it is.
-    Then whether yours stays as it is instead (it can't be read, and no copy of it could be kept). Last, the record of
-    the kit's list to keep for the next update (_note_kit_sounds): None for the new list as it is, else the new list
-    with the kit's own that stay in yours, or False for none this time."""
+    after a copy, and are named, except a sound whose file is on this computer and a licence note that a sound left in
+    the list comes from. None for the list: there is nothing of yours to carry over, or yours can't be read and a copy
+    of it is in backups/, so the new file goes in as it is. Then whether yours stays as it is instead (it can't be
+    read, and no copy of it could be kept). Last, the record of the kit's list to keep for the next update
+    (_note_kit_sounds): None for the new list as it is, else the new list with the kit's own that stay in yours, or
+    False for none this time."""
     theirs, was = _json(new), _json(root / KIT_SOUNDS)
     if not isinstance(theirs, dict):
         return None, [], False, None
@@ -490,11 +502,11 @@ def _with_your_sounds(new: Path, yours: Path, root: Path) -> tuple[bytes | None,
                              f"couldn't keep a copy of your list in backups/ before taking {'it' if one else 'them'} "
                              "out.")
     if record is None and (stayed or held_out):
-        # The kit's own that stay in yours though the new list no longer has them (a sound whose file is here, one
-        # held for want of a copy) are still the kit's in the record of its list: the next update looks at each
-        # again, takes it out once its file has gone (with a copy of your list then), and puts the kit's new one in
-        # if it brings that name back. Left out of the record, they'd be the same as nothing in it, and count as yours
-        # for good: setup would go on trying to download a sound the kit withdrew.
+        # The kit's own that stay in yours though the new list no longer has them (a sound whose file is here, the
+        # licence note of a sound left, one held for want of a copy) are still the kit's in the record of its list:
+        # the next update looks at each again, takes it out once nothing keeps it (with a copy of your list then),
+        # and puts the kit's new one in if it brings that name back. Left out of the record, they'd be the same as
+        # nothing in it, and count as yours for good: setup would go on trying to download a sound the kit withdrew.
         record = {k: dict(v) if isinstance(v, dict) else v for k, v in theirs.items()}
         for kind, name in [*stayed, *held_out]:
             record[kind] = {**(record.get(kind) if isinstance(record.get(kind), dict) else {}), name: mine[kind][name]}
@@ -512,9 +524,12 @@ def _with_your_sounds(new: Path, yours: Path, root: Path) -> tuple[bytes | None,
                       "ReelForge couldn't keep a copy of your list in backups/ first."))
     if dropped:
         one = len(dropped) == 1
+        # A cue sheet names sounds, never a licence note: a note that went needs nothing more said of it.
+        gone = sum(kind == "sounds" for kind, _ in dropped)
+        uses = ("it" if one else "them") if gone == len(dropped) else "that sound" if gone == 1 else "those sounds"
+        needs = f": a cue sheet of yours that uses {uses} needs another" if gone else ""
         notes.append(f"The new version no longer has {_named(dropped)}, so {'it was' if one else 'they were'} taken "
-                     f"out of your {SOUNDS} too: a cue sheet of yours that uses {'it' if one else 'them'} needs "
-                     f"another. Your list as it was is in {backup}.")
+                     f"out of your {SOUNDS} too{needs}. Your list as it was is in {backup}.")
     text = None if out == theirs else json.dumps(out, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
     return text, notes, False, record
 

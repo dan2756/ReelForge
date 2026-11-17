@@ -234,11 +234,11 @@ class InstallTest(unittest.TestCase):
         on trying to download a sound the kit had withdrawn. Then it went without a word or a copy, also when its file
         was on this computer: a cue sheet of yours that used it stopped on "the cue sheet names sounds that aren't in
         assets/sfx/manifest.json", with nothing to say why."""
-        zap = {"file": "mixkit/mixkit_7.wav", "source": "mixkit", "id": 7}
+        zap = {"file": "zapkit/zap.wav", "source": "zapkit", "id": 7}     # the only sound from zapkit
         ding = {"file": "mixkit/mixkit_8.wav", "source": "mixkit", "id": 8}
         rumble = {"file": "mixkit/mixkit_5.wav", "source": "mixkit", "id": 5}
         thud = {"file": "mixkit/mixkit_6.wav", "source": "mixkit", "id": 6}
-        old_kit = {**self.OLD_KIT, "_licenses": {"kenney": "CC0", "mixkit": "Mixkit"},
+        old_kit = {**self.OLD_KIT, "_licenses": {"kenney": "CC0", "mixkit": "Mixkit", "zapkit": "ZapKit"},
                    "sounds": {**self.OLD_KIT["sounds"], "zap": zap, "ding": ding, "rumble": rumble, "thud": thud}}
         yours = {**old_kit, "sounds": {**old_kit["sounds"], "ding": {**ding, "title": "the one in my outros"}}}
         before = json.dumps(yours, indent=2).encode("utf-8")
@@ -247,15 +247,17 @@ class InstallTest(unittest.TestCase):
         # zap goes; ding is yours; rumble's file and thud's converted copy are here, so cue sheets still mix them
         self.assertEqual(now["sounds"], {**self.NEW_KIT["sounds"], "ding": yours["sounds"]["ding"], "rumble": rumble,
                                          "thud": thud})
+        # and so does the licence note on where they're from (test_a_licence_note_the_new_version_takes_out_...)
+        self.assertEqual(now["_licenses"], {**self.NEW_KIT["_licenses"], "mixkit": "Mixkit"})
         # and they are still the kit's (test_a_sound_kept_for_its_file_is_still_the_kits_at_the_updates_after)
-        still_the_kits = {**self.NEW_KIT, "sounds": {**self.NEW_KIT["sounds"], "rumble": rumble, "thud": thud}}
+        still_the_kits = {**self.NEW_KIT, "_licenses": now["_licenses"],
+                          "sounds": {**self.NEW_KIT["sounds"], "rumble": rumble, "thud": thud}}
         self.assertEqual(json.loads((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8")), still_the_kits)
-        self.assertEqual(now["_licenses"], self.NEW_KIT["_licenses"])
         [copy] = (self.root / "backups").glob("sounds-before-update-*.json")
         self.assertEqual(copy.read_bytes(), before)
         self.assertEqual(said, 'Updated ReelForge from 1.0.0 to 1.1.0. The new version no longer has sound "zap", and '
-                               'licence note "mixkit", so they were taken out of your assets/sfx/manifest.json too: a '
-                               "cue sheet of yours that uses them needs another. Your list as it was is in "
+                               'licence note "zapkit", so they were taken out of your assets/sfx/manifest.json too: a '
+                               "cue sheet of yours that uses that sound needs another. Your list as it was is in "
                                f"backups/{copy.name}.")
         # With nowhere to keep a copy first, they stay, and the record still has them as the kit's: the next update
         # takes them out, with a copy then.
@@ -264,17 +266,17 @@ class InstallTest(unittest.TestCase):
         now, said = self.sounds_update(yours, self.NEW_KIT, record=old_kit, recorded=False,
                                        files_here=("mixkit/mixkit_5.wav", "_cache/thud.wav"))
         self.assertEqual(now["sounds"]["zap"], zap)
-        self.assertEqual(now["_licenses"]["mixkit"], "Mixkit")
+        self.assertEqual(now["_licenses"]["zapkit"], "ZapKit")      # (a sound left, zap, is from there)
         self.assertEqual(said, 'Updated ReelForge from 1.0.0 to 1.1.0. Your assets/sfx/manifest.json keeps sound '
-                               '"zap", and licence note "mixkit", which the new version no longer has: ReelForge '
-                               "couldn't keep a copy of your list in backups/ before taking them out.")
+                               '"zap", which the new version no longer has: ReelForge couldn\'t keep a copy of your '
+                               "list in backups/ before taking it out.")
         (self.root / "backups").unlink()
         now, said = self.sounds_update(now, self.NEW_KIT,
                                        record=json.loads((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8")),
                                        recorded=False, files_here=("mixkit/mixkit_5.wav", "_cache/thud.wav"))
         self.assertNotIn("zap", now["sounds"])
-        self.assertNotIn("mixkit", now["_licenses"])
-        self.assertIn('The new version no longer has sound "zap", and licence note "mixkit"', said)
+        self.assertNotIn("zapkit", now["_licenses"])
+        self.assertIn('The new version no longer has sound "zap", and licence note "zapkit"', said)
         self.assertEqual(json.loads((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8")), still_the_kits)
 
     def test_a_sound_kept_for_its_file_is_still_the_kits_at_the_updates_after(self):
@@ -301,6 +303,51 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(said, 'Updated ReelForge from 1.0.0 to 1.1.0. The new version no longer has sound "rumble", '
                                "so it was taken out of your assets/sfx/manifest.json too: a cue sheet of yours that "
                                f"uses it needs another. Your list as it was is in backups/{copy.name}.")
+
+    def test_a_licence_note_the_new_version_takes_out_stays_while_a_sound_in_your_list_comes_from_that_source(self):
+        """When the new version stopped shipping a source, its sounds whose files were here stayed in your list, and
+        their licence note went from under them. The update said "a cue sheet of yours that uses it needs another" of
+        the note, which no cue sheet names."""
+        pop = self.OLD_KIT["sounds"]["pop"]
+        rumble = {"file": "mixkit/mixkit_5.wav", "source": "mixkit", "id": 5}
+        old_kit = {"_licenses": {"kenney": "CC0", "mixkit": "Mixkit", "freesfx": "FreeSFX"},
+                   "sounds": {"pop": pop, "rumble": rumble}}
+        kit = {"_licenses": {"kenney": "CC0"}, "sounds": {"pop": pop}}
+        backups = self.root / "backups"
+        # rumble's file is here, so it stays, and so does the note on where it's from; no sound is from freesfx
+        now, said = self.sounds_update(old_kit, kit, record=old_kit, recorded=False,
+                                       files_here=("mixkit/mixkit_5.wav",))
+        self.assertEqual(now, {"_licenses": {"kenney": "CC0", "mixkit": "Mixkit"},
+                               "sounds": {"pop": pop, "rumble": rumble}})
+        [copy] = backups.glob("sounds-before-update-*.json")
+        self.assertEqual(said, 'Updated ReelForge from 1.0.0 to 1.1.0. The new version no longer has licence note '
+                               '"freesfx", so it was taken out of your assets/sfx/manifest.json too. Your list as it '
+                               f"was is in backups/{copy.name}.")
+        record = json.loads((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8"))
+        self.assertEqual(record, now)                   # both still the kit's, for the next update to look at again
+        # Once rumble's file has gone, the two go together...
+        (self.root / "assets" / "sfx" / "mixkit" / "mixkit_5.wav").unlink()
+        shutil.rmtree(backups)
+        gone, said = self.sounds_update(now, kit, record=record)
+        self.assertEqual(gone, kit)
+        [copy] = backups.glob("sounds-before-update-*.json")
+        self.assertEqual(said, 'Updated ReelForge from 1.0.0 to 1.1.0. The new version no longer has sound "rumble", '
+                               'and licence note "mixkit", so they were taken out of your assets/sfx/manifest.json '
+                               "too: a cue sheet of yours that uses that sound needs another. Your list as it was is "
+                               f"in backups/{copy.name}.")
+        # ...unless a sound of yours comes from there too: then the note stays for it
+        hail = {"file": "mixkit/hail.wav", "source": "mixkit", "title": "my hail"}
+        shutil.rmtree(backups)
+        mine, said = self.sounds_update({**now, "sounds": {**now["sounds"], "hail": hail}}, kit, record=record,
+                                        recorded=False)
+        self.assertEqual(mine, {"_licenses": {"kenney": "CC0", "mixkit": "Mixkit"},
+                                "sounds": {"pop": pop, "hail": hail}})
+        [copy] = backups.glob("sounds-before-update-*.json")
+        self.assertEqual(said, 'Updated ReelForge from 1.0.0 to 1.1.0. The new version no longer has sound "rumble", '
+                               "so it was taken out of your assets/sfx/manifest.json too: a cue sheet of yours that "
+                               f"uses it needs another. Your list as it was is in backups/{copy.name}.")
+        self.assertEqual(json.loads((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8")),
+                         {**kit, "_licenses": mine["_licenses"]})
 
     def test_a_list_of_yours_that_cant_be_read_is_kept_in_backups_before_the_new_one_takes_its_place(self):
         """A comma after the last entry you added (your mixes already stop on it): the new list went over yours with
