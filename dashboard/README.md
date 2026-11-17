@@ -65,7 +65,10 @@ own `CLAUDE.md` and `AGENTS.md`. The hourly background job reads every profile, 
 first-time setup said no to background stats, or whose `my-studio/studio.toml` says `background_stats = false`, is read
 only while it's open; writing its files again from its answers, `reelforge -p <profile> channel --regenerate`, keeps
 that no, and its questions, in its Settings in the profile menu or `reelforge -p <profile> channel`, start from it: a
-yes is yours to give there).
+yes is yours to give there). While that `studio.toml` has a mistake in it, the job goes by the file's own
+`background_stats` lines, wherever they are and however they're written (`Background-Stats`, `background stats`,
+`background_stat`, with `=` or a colon, as `answers.json` has it), and only a yes there is a yes; words in a text
+setting or a comment are never taken for one.
 
 ## Several windows
 

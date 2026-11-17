@@ -190,6 +190,69 @@ class Loading(Scratch):
         on, job, said = verdict(text + 'background_statistics = false\nmy_background_stats = false\n')
         self.assertEqual((on, job, said), (True, True, []))
 
+    def test_a_no_for_the_hourly_read_with_a_colon_or_spelled_as_the_setting_is_taken_but_never_from_a_text(self):
+        """With a mistake in studio.toml, the hourly read of your stats goes by the file's own background_stats lines.
+        A no written with a colon, as answers.json has it (`"background_stats": false`), wasn't found, nor one spelled
+        as ReelForge takes the setting elsewhere (`_background_stats`, `"background stats "`, the singular
+        `background_stat`), so the answers' yes kept the read, with your log-ins, on. And words in a text setting or a
+        comment (about = "Space facts, background stats = none") were taken for that line: a no nobody gave, which
+        writing the file again from your answers then put in them, or a yes over the answers' no."""
+        import shlex
+
+        from studio import generate
+
+        self.onboard_main()                     # the answers say yes
+        text = P.SETTINGS.read_text(encoding="utf-8")
+        line = "background_stats = true"
+        typo = '\nsubjects_extra = "a snowball\n'
+
+        def verdict(body: str, who=None) -> tuple[bool, list[str]]:
+            P.SETTINGS.write_text(body, encoding="utf-8")
+            said: list[str] = []
+            return generate.background_stats(profiles.main(), say=said.append), said
+
+        for form in ("background_stats: false", '"background_stats": false', '"background_stats": false,',
+                     "'background_stats' : false", "background_stats:false", "background_stat = false",
+                     '"background stats " = false', "_background_stats = false", "back-ground_stats = false",
+                     '"Background-Stats-" = no', "BackgroundStat = off"):
+            with self.subTest(form):
+                for body in (text.replace(line, form), text.replace(line, form) + typo):
+                    on, said = verdict(body)
+                    self.assertIs(on, False, said)
+                    self.assertIn("goes by its background_stats line", said[0])
+                    yes = form.replace("false", "true").replace("no", "yes").replace("off", "on")
+                    self.assertIs(verdict(body.replace(form, yes))[0], True)
+        with self.assertRaises(settings.SettingsError) as raised:
+            settings.parse(text.replace(line, "background_stat = false"))
+        self.assertEqual(raised.exception.reason, "background_stat under [platforms] should be written background_stats")
+        # words in a text or a comment: the file's own line has the say, and with none, the answers
+        about = 'about = "What-if videos with real science."'
+        self.assertIn(about, text)
+        for words in ('about = "Space facts, background stats = none, ever"',
+                      'about = "Charts, e.g. background stats = boring"',
+                      "about = 'Clean look. Backgroundstats: 0 of them'",
+                      'about = "What-if videos."   # fewer, background_stats = false'):
+            with self.subTest(words):
+                on, said = verdict(text.replace(about, words) + typo)
+                self.assertIs(on, True, said)
+                self.assertIn("goes by its background_stats line", said[0])
+                self.onboard_main(background_stats=False)
+                on, said = verdict(text.replace(about, words.replace("none", "on").replace("false", "true"))
+                                   .replace(line + "\n", "") + typo)
+                self.assertIs(on, False, said)
+                self.assertIn("goes by its answers", said[0])
+                self.onboard_main()
+        # and the way out the error gives writes the yes back, not a no nobody gave
+        P.SETTINGS.write_text(text.replace(about, 'about = "Space facts, background stats = none"') + typo,
+                              encoding="utf-8")
+        with self.assertRaises(settings.SettingsError) as raised:
+            settings.load()
+        argv = shlex.split(str(raised.exception).split("with: ", 1)[1])
+        with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(main(argv[1:]), 0, out.getvalue())
+        self.assertIs(settings.load()["platforms"]["background_stats"], True)
+        self.assertNotIn("left off", out.getvalue())
+
     def test_a_file_saved_by_notepad_with_a_byte_order_mark_still_reads(self):
         self.onboard_main()
         P.SETTINGS.write_bytes(b"\xef\xbb\xbf" + b'[captions]\r\nmax_hashtags = 2\r\n')

@@ -126,10 +126,10 @@ class SettingsError(ValueError):
 
 
 def stats_key(key) -> bool:
-    """A key that is background_stats once case and what's between its two words (-, _, spaces or nothing) are set
-    aside (Background-Stats, "background stats", backgroundstats, say): how a person may write the setting for the
-    hourly read of their stats."""
-    return isinstance(key, str) and re.sub(r"[-_ \t]", "", key.casefold()) == "backgroundstats"
+    """A key that is background_stats once case, and any -, _, spaces or tabs in it, are set aside (Background-Stats,
+    "background stats", backgroundstats, _background_stats, say), or its singular, background_stat: how a person may
+    write the setting for the hourly read of their stats."""
+    return isinstance(key, str) and re.sub(r"[-_ \t]", "", key.casefold()) in ("backgroundstats", "backgroundstat")
 
 
 def _stray_stats(data, table: tuple[str, ...] = ()) -> tuple[tuple[str, ...], str] | None:

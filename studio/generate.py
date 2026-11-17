@@ -223,10 +223,35 @@ def _answered(p) -> dict | None:
     return None if problems else settings_from(a)
 
 
-# A background_stats key (S.stats_key: any case, with -, _, spaces or nothing between its words) in a studio.toml's
-# text: at the start of a line, after a dot (platforms.background_stats), or in an inline table (platforms = { ...,
-# background_stats = false }), quoted or not, with its value up to a space, a comment or the end of the inline table.
-_STATS_LINE = re.compile(r"""(?:^|[.{,])[ \t]*(["']?)background[-_ \t]*stats\1[ \t]*=[ \t]*([^\s#,}]*)""", re.I | re.M)
+# A key and its value in a studio.toml's text, as a person may write one: at the start of a line, after a dot
+# (platforms.background_stats), or in an inline table (platforms = { ..., background_stats = false }), quoted or not,
+# with = or a colon (as answers.json has it) after it, and its value up to a space, a comment or the end of the inline
+# table. _own_background_stats keeps those whose key is the setting (S.stats_key, so a key the file's error names is one
+# it goes by) and which aren't words in a text or a comment (_texts).
+_STATS_LINE = re.compile(r"""(?:^|(?<=[.{,]))[ \t]*(["']?)([-\w \t]+?)\1[ \t]*[=:][ \t]*([^\s#,}]*)""", re.M)
+
+
+def _texts(text: str) -> list[tuple[int, int]]:
+    """Where a studio.toml's text has a string on one line ("...", '...') or a comment: (where it starts, where it
+    ends). One left open ends at the end of its line, as TOML has it, so a typo leaves the lines below as they are; a
+    string of several lines (\"\"\"...\"\"\") isn't one here, so a line in it is looked at as any other."""
+    spans, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c not in "#\"'":
+            i += 1
+            continue
+        j = i + 1
+        while j < n and text[j] != "\n":
+            if c == '"' and text[j] == "\\" and text[j + 1:j + 2] not in ("", "\n"):
+                j += 2
+                continue
+            j += 1
+            if c != "#" and text[j - 1] == c:
+                break
+        spans.append((i, j))
+        i = j
+    return spans
 
 
 def _own_background_stats(path: Path) -> bool | None:
@@ -236,9 +261,12 @@ def _own_background_stats(path: Path) -> bool | None:
     no, off) is often the very mistake in the file, and must not leave the answers' yes to decide. Two lines that
     disagree (one added below the other, or a no in the wrong place: itself a mistake, see S.load) are no yes."""
     try:
-        said = [v for _, v in _STATS_LINE.findall(path.read_text(encoding="utf-8-sig", errors="replace"))]
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
     except OSError:
         return None
+    texts = _texts(text)
+    said = [m.group(3) for m in _STATS_LINE.finditer(text)
+            if S.stats_key(m.group(2)) and not any(a < m.start() < b for a, b in texts)]
     return None if not said else all(S.yes_no(v) is True for v in said)
 
 
