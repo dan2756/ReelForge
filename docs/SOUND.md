@@ -61,16 +61,28 @@ length and listen for noise before you rely on it.
 An update brings the kit's new list and keeps what is yours in the one you have: the sounds and licence notes you
 added, anything else you put in it, and any entry you changed. It tells them from the kit's own by the kit's list as
 the last update (or first-time setup) put it in place, which it keeps beside yours as `assets/sfx/.kit-manifest.json`:
-an entry that is the same as there is the kit's, and the kit's new one replaces it (or, where the new list no longer
-has it, it goes; one you changed stays). A sound of yours by a name the new list also uses stays yours, and the
-update says so when it is done: give yours another name, in your cue sheets too, to have both.
+an entry that is the same as there is the kit's, and the kit's new one replaces it. A sound of yours by a name the new
+list also uses stays yours, and the update says so when it is done: give yours another name, in your cue sheets too,
+to have both.
+
+Where the new list no longer has one of the kit's own (one you changed stays), a sound whose file is on your computer
+(in `assets/sfx/`, or its converted copy in `assets/sfx/_cache/`) stays too, so cue sheets that use it go on mixing
+it. It is still the kit's: a later update takes it out once its file has gone, and puts the kit's new one in if the
+kit brings a sound by that name back. A licence note the kit took out stays the same way while a sound in your list
+(one of yours, or one kept for its file) comes from that source, and goes with the last of them. Any other goes,
+after a copy of your list goes to `backups/sounds-before-update-<date>.json`, and the update names it and the copy: a
+cue sheet that uses a sound that went needs another.
 
 The first update that keeps that record can't tell yet. There the new list's entries go in, a copy of your list as it
 was goes to `backups/sounds-before-update-<date>.json` first, and the update names the entries it replaced: put back
 any of yours from the copy, under a name of its own. (Where that copy can't be made, your entries stay as they are
-instead.) The one exception is the update away from ReelForge 2.2.1, which 2.2.1's own updater does: it puts the new
-list over yours. Your sound files stay where they are, so add their entries again after that update, or keep a copy
-of your `manifest.json` before it.
+instead, the update says which, and it keeps no record yet, so the next update asks again and keeps the copy then.)
+The one exception is the update away from ReelForge 2.2.1, which 2.2.1's own updater does: it puts the new list over
+yours. Your sound files stay where they are, so add their entries again after that update, or keep a copy of your
+`manifest.json` before it.
+
+An update that stops at a file another program has open says all this in its message, and again when you update
+again and it finishes.
 
 A `manifest.json` that can't be read (a comma after the last entry you added, say: every mix stops on it) is copied to
 `backups/sounds-before-update-<date>.json` too, and the new list takes its place; the update says so and names the

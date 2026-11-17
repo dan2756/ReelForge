@@ -139,14 +139,18 @@ class InstallTest(unittest.TestCase):
         kept = [p.read_text(encoding="utf-8") for p in (self.root / "backups").iterdir()]
         self.assertEqual([text for text in kept if text == "{not json"], ["{not json"])
 
-    def sounds_update(self, yours: dict | str, kit: dict, record: dict | None = None) -> tuple[dict, str]:
+    def sounds_update(self, yours: dict | str, kit: dict, record: dict | None = None, *, recorded: bool = True,
+                      files_here: tuple[str, ...] = ()) -> tuple[dict, str]:
         """An update from 1.0.0 to 1.1.0 (the install line's, so that its summary and the note for the restarted
         window are there too) of a copy whose list of sounds is yours (or its text), beside the kit's as the last
-        update put it in place (record: None for a copy with none yet). Returns the list after it, and the summary."""
+        update put it in place (record: None for a copy with none yet), with these sound files in assets/sfx
+        (files_here). Returns the list after it, and the summary. recorded: whether the new list is the record of the
+        kit's after it (else checked by the test)."""
         import json
 
         files = {"studio/__init__.py": 'KIT_VERSION = "1.0.0"\n', "requirements.txt": "rich\n",
-                 update.SOUNDS: yours if isinstance(yours, str) else json.dumps(yours, indent=2)}
+                 update.SOUNDS: yours if isinstance(yours, str) else json.dumps(yours, indent=2),
+                 **{f"assets/sfx/{rel}": "a sound" for rel in files_here}}
         if record is not None:
             files[update.KIT_SOUNDS] = json.dumps(record, indent=2)
         for rel, text in files.items():
@@ -159,7 +163,8 @@ class InstallTest(unittest.TestCase):
             (new / rel).write_text(text, encoding="utf-8")
         with mock.patch.object(update, "ROOT", new), mock.patch.object(update, "_after"):
             said = update.move_in(self.root)
-        self.assertEqual((self.root / update.KIT_SOUNDS).read_bytes(), (new / update.SOUNDS).read_bytes())
+        if recorded:
+            self.assertEqual((self.root / update.KIT_SOUNDS).read_bytes(), (new / update.SOUNDS).read_bytes())
         return json.loads((self.root / update.SOUNDS).read_text(encoding="utf-8")), said
 
     OLD_KIT = {"_licenses": {"kenney": "CC0"}, "_mixkit_url": "https://example.invalid/{id}",
@@ -201,28 +206,148 @@ class InstallTest(unittest.TestCase):
                                "assets/sfx/manifest.json had by those names. If any of it was yours, your list as it "
                                f"was is in backups/{copies[0].name}.")
 
-    def test_with_no_record_and_nowhere_to_keep_a_copy_yours_stay(self):
+    def test_with_no_record_and_nowhere_to_keep_a_copy_yours_stay_and_the_next_update_asks_again(self):
+        """Kept as they were, the kit's old entries were also taken for yours by every later update: the record of the
+        kit's list went in all the same, they weren't the same as anything in it, and the kit's new entries never came,
+        even once backups/ was put right."""
         (self.root / "backups").write_text("a file, not a folder", encoding="utf-8")
         yours = {**self.OLD_KIT, "sounds": {**self.OLD_KIT["sounds"], "whoosh": self.WHOOSH}}
-        now, said = self.sounds_update(yours, self.NEW_KIT)
+        now, said = self.sounds_update(yours, self.NEW_KIT, recorded=False)
         self.assertEqual(now["sounds"], {"pop": self.OLD_KIT["sounds"]["pop"], "whoosh": self.WHOOSH})
         self.assertEqual(said, "Updated ReelForge from 1.0.0 to 1.1.0. Your assets/sfx/manifest.json keeps what it "
                                'had for sounds "pop" and "whoosh", and licence note "kenney", though the new version '
                                "has its own by those names: ReelForge couldn't keep a copy of your list in backups/ "
                                "before replacing any.")
+        self.assertFalse((self.root / update.KIT_SOUNDS).exists())     # not told apart: no record yet
+        (self.root / "backups").unlink()                                # put right before the next update
+        now, said = self.sounds_update(json.loads((self.root / update.SOUNDS).read_text(encoding="utf-8")),
+                                       self.NEW_KIT)
+        self.assertEqual(now["sounds"], self.NEW_KIT["sounds"])
+        [copy] = (self.root / "backups").glob("sounds-before-update-*.json")
+        self.assertEqual(said, 'Updated ReelForge from 1.0.0 to 1.1.0. The new version\'s own sounds "pop" and '
+                               '"whoosh", and licence note "kenney" took the place of what your '
+                               "assets/sfx/manifest.json had by those names. If any of it was yours, your list as it "
+                               f"was is in backups/{copy.name}.")
 
-    def test_a_sound_the_new_version_takes_out_of_its_list_goes_unless_you_changed_it(self):
+    def test_a_sound_the_new_version_takes_out_of_its_list_goes_unless_you_changed_it_or_its_file_is_here(self):
         """The kit's own entries follow the kit, but one it took out of its list stayed in yours for good: setup went
-        on trying to download a sound the kit had withdrawn."""
-        zap = {"file": "mixkit/mixkit_7.wav", "source": "mixkit", "id": 7}
+        on trying to download a sound the kit had withdrawn. Then it went without a word or a copy, also when its file
+        was on this computer: a cue sheet of yours that used it stopped on "the cue sheet names sounds that aren't in
+        assets/sfx/manifest.json", with nothing to say why."""
+        zap = {"file": "zapkit/zap.wav", "source": "zapkit", "id": 7}     # the only sound from zapkit
         ding = {"file": "mixkit/mixkit_8.wav", "source": "mixkit", "id": 8}
-        old_kit = {**self.OLD_KIT, "_licenses": {"kenney": "CC0", "mixkit": "Mixkit"},
-                   "sounds": {**self.OLD_KIT["sounds"], "zap": zap, "ding": ding}}
+        rumble = {"file": "mixkit/mixkit_5.wav", "source": "mixkit", "id": 5}
+        thud = {"file": "mixkit/mixkit_6.wav", "source": "mixkit", "id": 6}
+        old_kit = {**self.OLD_KIT, "_licenses": {"kenney": "CC0", "mixkit": "Mixkit", "zapkit": "ZapKit"},
+                   "sounds": {**self.OLD_KIT["sounds"], "zap": zap, "ding": ding, "rumble": rumble, "thud": thud}}
         yours = {**old_kit, "sounds": {**old_kit["sounds"], "ding": {**ding, "title": "the one in my outros"}}}
-        now, said = self.sounds_update(yours, self.NEW_KIT, record=old_kit)
-        self.assertEqual(now["sounds"], {**self.NEW_KIT["sounds"], "ding": yours["sounds"]["ding"]})  # zap: gone
-        self.assertEqual(now["_licenses"], self.NEW_KIT["_licenses"])
-        self.assertEqual(said, "Updated ReelForge from 1.0.0 to 1.1.0.")
+        before = json.dumps(yours, indent=2).encode("utf-8")
+        now, said = self.sounds_update(yours, self.NEW_KIT, record=old_kit, recorded=False,
+                                       files_here=("mixkit/mixkit_5.wav", "_cache/thud.wav"))
+        # zap goes; ding is yours; rumble's file and thud's converted copy are here, so cue sheets still mix them
+        self.assertEqual(now["sounds"], {**self.NEW_KIT["sounds"], "ding": yours["sounds"]["ding"], "rumble": rumble,
+                                         "thud": thud})
+        # and so does the licence note on where they're from (test_a_licence_note_the_new_version_takes_out_...)
+        self.assertEqual(now["_licenses"], {**self.NEW_KIT["_licenses"], "mixkit": "Mixkit"})
+        # and they are still the kit's (test_a_sound_kept_for_its_file_is_still_the_kits_at_the_updates_after)
+        still_the_kits = {**self.NEW_KIT, "_licenses": now["_licenses"],
+                          "sounds": {**self.NEW_KIT["sounds"], "rumble": rumble, "thud": thud}}
+        self.assertEqual(json.loads((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8")), still_the_kits)
+        [copy] = (self.root / "backups").glob("sounds-before-update-*.json")
+        self.assertEqual(copy.read_bytes(), before)
+        self.assertEqual(said, 'Updated ReelForge from 1.0.0 to 1.1.0. The new version no longer has sound "zap", and '
+                               'licence note "zapkit", so they were taken out of your assets/sfx/manifest.json too: a '
+                               "cue sheet of yours that uses that sound needs another. Your list as it was is in "
+                               f"backups/{copy.name}.")
+        # With nowhere to keep a copy first, they stay, and the record still has them as the kit's: the next update
+        # takes them out, with a copy then.
+        shutil.rmtree(self.root / "backups")
+        (self.root / "backups").write_text("a file, not a folder", encoding="utf-8")
+        now, said = self.sounds_update(yours, self.NEW_KIT, record=old_kit, recorded=False,
+                                       files_here=("mixkit/mixkit_5.wav", "_cache/thud.wav"))
+        self.assertEqual(now["sounds"]["zap"], zap)
+        self.assertEqual(now["_licenses"]["zapkit"], "ZapKit")      # (a sound left, zap, is from there)
+        self.assertEqual(said, 'Updated ReelForge from 1.0.0 to 1.1.0. Your assets/sfx/manifest.json keeps sound '
+                               '"zap", which the new version no longer has: ReelForge couldn\'t keep a copy of your '
+                               "list in backups/ before taking it out.")
+        (self.root / "backups").unlink()
+        now, said = self.sounds_update(now, self.NEW_KIT,
+                                       record=json.loads((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8")),
+                                       recorded=False, files_here=("mixkit/mixkit_5.wav", "_cache/thud.wav"))
+        self.assertNotIn("zap", now["sounds"])
+        self.assertNotIn("zapkit", now["_licenses"])
+        self.assertIn('The new version no longer has sound "zap", and licence note "zapkit"', said)
+        self.assertEqual(json.loads((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8")), still_the_kits)
+
+    def test_a_sound_kept_for_its_file_is_still_the_kits_at_the_updates_after(self):
+        """A sound the new version took out of its list, kept because its file was here, was left out of the record
+        of the kit's list, so every update after took it for yours: once its file had gone it stayed for good (setup
+        went on trying to download a sound the kit had withdrawn), and when the kit brought a sound by that name back,
+        the update said "Your own sound ... is kept" of the kit's old one and left the new one out."""
+        rumble = {"file": "mixkit/mixkit_5.wav", "source": "mixkit", "id": 5}
+        thud = {"file": "mixkit/mixkit_6.wav", "source": "mixkit", "id": 6}
+        old_kit = {**self.NEW_KIT, "sounds": {**self.NEW_KIT["sounds"], "rumble": rumble, "thud": thud}}
+        now, said = self.sounds_update(old_kit, self.NEW_KIT, record=old_kit, recorded=False,
+                                       files_here=("mixkit/mixkit_5.wav", "mixkit/mixkit_6.wav"))
+        self.assertEqual((now, said), (old_kit, "Updated ReelForge from 1.0.0 to 1.1.0."))   # both files are here
+        record = json.loads((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8"))
+        self.assertEqual(record, old_kit)                                   # and both are still the kit's
+        # Then rumble's file goes, and the kit brings back a thud of its own: rumble goes, named, and the kit's new
+        # thud takes the place of its old one, as any of its own sounds does.
+        (self.root / "assets" / "sfx" / "mixkit" / "mixkit_5.wav").unlink()
+        kit = {**self.NEW_KIT, "sounds": {**self.NEW_KIT["sounds"], "thud": {**thud, "file": "mixkit/mixkit_16.wav",
+                                                                             "id": 16}}}
+        now, said = self.sounds_update(now, kit, record=record)
+        self.assertEqual(now, kit)
+        [copy] = (self.root / "backups").glob("sounds-before-update-*.json")
+        self.assertEqual(said, 'Updated ReelForge from 1.0.0 to 1.1.0. The new version no longer has sound "rumble", '
+                               "so it was taken out of your assets/sfx/manifest.json too: a cue sheet of yours that "
+                               f"uses it needs another. Your list as it was is in backups/{copy.name}.")
+
+    def test_a_licence_note_the_new_version_takes_out_stays_while_a_sound_in_your_list_comes_from_that_source(self):
+        """When the new version stopped shipping a source, its sounds whose files were here stayed in your list, and
+        their licence note went from under them. The update said "a cue sheet of yours that uses it needs another" of
+        the note, which no cue sheet names."""
+        pop = self.OLD_KIT["sounds"]["pop"]
+        rumble = {"file": "mixkit/mixkit_5.wav", "source": "mixkit", "id": 5}
+        old_kit = {"_licenses": {"kenney": "CC0", "mixkit": "Mixkit", "freesfx": "FreeSFX"},
+                   "sounds": {"pop": pop, "rumble": rumble}}
+        kit = {"_licenses": {"kenney": "CC0"}, "sounds": {"pop": pop}}
+        backups = self.root / "backups"
+        # rumble's file is here, so it stays, and so does the note on where it's from; no sound is from freesfx
+        now, said = self.sounds_update(old_kit, kit, record=old_kit, recorded=False,
+                                       files_here=("mixkit/mixkit_5.wav",))
+        self.assertEqual(now, {"_licenses": {"kenney": "CC0", "mixkit": "Mixkit"},
+                               "sounds": {"pop": pop, "rumble": rumble}})
+        [copy] = backups.glob("sounds-before-update-*.json")
+        self.assertEqual(said, 'Updated ReelForge from 1.0.0 to 1.1.0. The new version no longer has licence note '
+                               '"freesfx", so it was taken out of your assets/sfx/manifest.json too. Your list as it '
+                               f"was is in backups/{copy.name}.")
+        record = json.loads((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8"))
+        self.assertEqual(record, now)                   # both still the kit's, for the next update to look at again
+        # Once rumble's file has gone, the two go together...
+        (self.root / "assets" / "sfx" / "mixkit" / "mixkit_5.wav").unlink()
+        shutil.rmtree(backups)
+        gone, said = self.sounds_update(now, kit, record=record)
+        self.assertEqual(gone, kit)
+        [copy] = backups.glob("sounds-before-update-*.json")
+        self.assertEqual(said, 'Updated ReelForge from 1.0.0 to 1.1.0. The new version no longer has sound "rumble", '
+                               'and licence note "mixkit", so they were taken out of your assets/sfx/manifest.json '
+                               "too: a cue sheet of yours that uses that sound needs another. Your list as it was is "
+                               f"in backups/{copy.name}.")
+        # ...unless a sound of yours comes from there too: then the note stays for it
+        hail = {"file": "mixkit/hail.wav", "source": "mixkit", "title": "my hail"}
+        shutil.rmtree(backups)
+        mine, said = self.sounds_update({**now, "sounds": {**now["sounds"], "hail": hail}}, kit, record=record,
+                                        recorded=False)
+        self.assertEqual(mine, {"_licenses": {"kenney": "CC0", "mixkit": "Mixkit"},
+                                "sounds": {"pop": pop, "hail": hail}})
+        [copy] = backups.glob("sounds-before-update-*.json")
+        self.assertEqual(said, 'Updated ReelForge from 1.0.0 to 1.1.0. The new version no longer has sound "rumble", '
+                               "so it was taken out of your assets/sfx/manifest.json too: a cue sheet of yours that "
+                               f"uses it needs another. Your list as it was is in backups/{copy.name}.")
+        self.assertEqual(json.loads((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8")),
+                         {**kit, "_licenses": mine["_licenses"]})
 
     def test_a_list_of_yours_that_cant_be_read_is_kept_in_backups_before_the_new_one_takes_its_place(self):
         """A comma after the last entry you added (your mixes already stop on it): the new list went over yours with
@@ -355,9 +480,8 @@ class AfterTest(unittest.TestCase):
     """What an update does once the new files are in, in a ReelForge folder of its own (the kit's studio/ and the
     dashboard's settings example), with only the window's packages left out."""
 
-    def test_a_mistake_in_a_channels_settings_is_said_when_the_update_is_done(self):
-        """The update writes every channel's notes again, and with a typo in a studio.toml they go by its answers
-        instead. What was said about that went nowhere: the update, and the window it restarted, said nothing."""
+    def folder(self, *channels: str) -> Path:
+        """A ReelForge folder with a channel set up for each name (the first is the first channel)."""
         import sys
 
         tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
@@ -368,27 +492,45 @@ class AfterTest(unittest.TestCase):
         (root / "dashboard").mkdir()
         shutil.copy(kit / "dashboard" / "config.example.toml", root / "dashboard")
         env = {k: v for k, v in os.environ.items() if k != "REELFORGE_PROFILE"}
-        answers = Path(tmp.name) / "answers.json"
-        answers.write_text(json.dumps({"channel_name": "Night Physics", "about": "What-ifs.", "assistant": "claude",
-                                       "background_stats": False}), encoding="utf-8")
-        made = subprocess.run([sys.executable, "-m", "studio", "channel", "--answers", str(answers)], cwd=root,
-                              env={**env, "STUDIO_DRY_SYSTEM": "1"}, capture_output=True, text=True)
-        self.assertEqual(made.returncode, 0, made.stdout + made.stderr)
-        mine = root / "my-studio" / "studio.toml"
-        typo = mine.read_text(encoding="utf-8") + "\nthis is = = a typo\n"
-        mine.write_text(typo, encoding="utf-8")
-        real, logged = subprocess.run, []
+        for i, name in enumerate(channels or ("Night Physics",)):
+            answers = Path(tmp.name) / "answers.json"
+            answers.write_text(json.dumps({"channel_name": name, "about": "What-ifs.", "assistant": "claude",
+                                           "background_stats": False}), encoding="utf-8")
+            made = subprocess.run([sys.executable, "-m", "studio", "channel", *(["--new"] if i else []), "--answers",
+                                   str(answers)], cwd=root, env={**env, "STUDIO_DRY_SYSTEM": "1"},
+                                  capture_output=True, text=True)
+            self.assertEqual(made.returncode, 0, made.stdout + made.stderr)
+        return root
+
+    def finish(self, root: Path, logged: list[str], *more) -> str:
+        """The update's last steps in root, with this Python as its own and the window's packages left out (more:
+        other patches); returns what it says."""
+        import sys
+
+        real = subprocess.run
 
         def run(cmd, *a, **k):
             if "studio.ui" in cmd:      # the window's packages (Bun): not this test's
                 return subprocess.CompletedProcess(cmd, 0, "", "")
             return real(cmd, *a, **k)
 
-        with mock.patch.object(update.subprocess, "run", run), \
-                mock.patch.object(update, "_venv_python", lambda r: sys.executable), \
-                mock.patch.object(update, "_packages", return_value=True), \
-                mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}):
-            summary = update._finish(root, "", "1.0.0", "1.1.0", lambda *a: None, logged.append)
+        with contextlib.ExitStack() as stack:
+            for patch in (mock.patch.object(update.subprocess, "run", run),
+                          mock.patch.object(update, "_venv_python", lambda r: sys.executable),
+                          mock.patch.object(update, "_packages", return_value=True),
+                          mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), *more):
+                stack.enter_context(patch)
+            return update._finish(root, "", "1.0.0", "1.1.0", lambda *a: None, logged.append)
+
+    def test_a_mistake_in_a_channels_settings_is_said_when_the_update_is_done(self):
+        """The update writes every channel's notes again, and with a typo in a studio.toml they go by its answers
+        instead. What was said about that went nowhere: the update, and the window it restarted, said nothing."""
+        root = self.folder()
+        mine = root / "my-studio" / "studio.toml"
+        typo = mine.read_text(encoding="utf-8") + "\nthis is = = a typo\n"
+        mine.write_text(typo, encoding="utf-8")
+        logged = []
+        summary = self.finish(root, logged)
         notes = json.loads((root / "dashboard" / "data" / "updated.json").read_text(encoding="utf-8"))["notes"]
         self.assertEqual(len(notes), 1, notes)
         # (The file as the update found it: on macOS the temporary folder is /private/var/..., not /var/....)
@@ -399,6 +541,63 @@ class AfterTest(unittest.TestCase):
         self.assertEqual(logged, [])
         self.assertEqual(mine.read_text(encoding="utf-8"), typo)         # yours to fix: the update leaves it
         self.assertFalse(list(Path(tempfile.gettempdir()).glob("reelforge-said-*")))
+
+    def test_a_temporary_file_that_cant_be_made_or_removed_never_fails_an_update_that_has_finished(self):
+        """Where the notes' run says what it has to say is a temporary file. With no temporary folder to write to, or
+        the file held open by a scanner on Windows when it's removed again, the update failed after every new file
+        was in place: "Update again to finish it", with no newer version to offer, and the note the restarted window
+        reads was never written."""
+        root = self.folder()
+        claude = root / "CLAUDE.md"
+        real_unlink = Path.unlink
+        held: list[Path] = []
+
+        def unlink(path, missing_ok=False):
+            if path.name.startswith("reelforge-said-"):
+                held.append(path)
+                raise PermissionError(13, "held by another program", str(path))
+            return real_unlink(path, missing_ok=missing_ok)
+
+        for what, patch in (("no temporary folder", mock.patch.object(
+                                update.tempfile, "mkstemp", side_effect=PermissionError(13, "can't write there"))),
+                            ("a file held open", mock.patch.object(Path, "unlink", unlink))):
+            with self.subTest(what=what):
+                claude.write_text("the old version's notes\n", encoding="utf-8")
+                logged = []
+                self.assertEqual(self.finish(root, logged, patch), "Updated ReelForge from 1.0.0 to 1.1.0.")
+                self.assertEqual(logged, [])
+                marker = update.take_marker(root)       # the restarted window says "Updated to 1.1.0"
+                self.assertEqual((marker["from"], marker["to"]), ("1.0.0", "1.1.0"))
+                self.assertIn("generated by ReelForge", claude.read_text(encoding="utf-8"))   # written all the same
+        self.assertEqual(len(held), 1, held)
+        real_unlink(held[0], missing_ok=True)
+
+    def test_a_channel_whose_notes_couldnt_be_written_again_is_said_when_the_update_is_done(self):
+        """The run that writes every channel's notes again printed a line for a channel whose notes couldn't be
+        written, which went nowhere: with another channel's written, the update didn't fail, and that channel's notes
+        kept the old version's text without a word. Answers that need fixing left them so without even that line."""
+        root = self.folder("Night Physics", "Quiet One", "Tiny Worlds")
+        quiet, tiny = root / "profiles" / "quiet-one", root / "profiles" / "tiny-worlds"
+        (quiet / "CLAUDE.md").unlink()
+        (quiet / "CLAUDE.md").mkdir()       # where its notes go, something they can't take the place of
+        answers = json.loads((tiny / "my-studio" / "answers.json").read_text(encoding="utf-8"))
+        (tiny / "my-studio" / "answers.json").write_text(json.dumps({**answers, "cadence": "now and then"}),
+                                                         encoding="utf-8")
+        logged = []
+        summary = self.finish(root, logged)
+        notes = json.loads((root / "dashboard" / "data" / "updated.json").read_text(encoding="utf-8"))["notes"]
+        self.assertEqual(len(notes), 2, notes)
+        quiet_line, tiny_line = sorted(notes)
+        self.assertTrue(quiet_line.startswith("Quiet One's notes for your AI couldn't be written again ("), notes)
+        self.assertTrue(quiet_line.endswith("). Once that's put right, run: reelforge -p profiles/quiet-one channel "
+                                            "--regenerate --preserve-settings"), notes)
+        self.assertEqual(tiny_line, "Tiny Worlds's notes for your AI couldn't be written again (its answers need "
+                                    "fixing first: cadence: pick one of: 2/day, 1/day, 3/week, 1/week, ask). Once "
+                                    "that's put right, run: reelforge -p profiles/tiny-worlds channel --regenerate "
+                                    "--preserve-settings")
+        self.assertEqual(summary, " ".join(["Updated ReelForge from 1.0.0 to 1.1.0.", *notes]))
+        self.assertEqual(logged, [])        # the first channel's notes were written: the run itself went through
+        self.assertIn("**Quiet One**", (root / "CLAUDE.md").read_text(encoding="utf-8"))
 
 
 @unittest.skipUnless(shutil.which("git"), "needs git")

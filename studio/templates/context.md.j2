@@ -46,8 +46,9 @@ format sections.
      `{{ py }} -m studio channel --questions`). Where the brief says something different or more (often the
      format: `"format": "custom"`, with the format described in `custom_format`; also `about`, `audience`, `tone`,
      `twist`, `subjects` for its video ideas, `references`, `avoid`, `length`, `cadence`), show {{ who }} the
-     changes in a few lines. On their OK, write them and run `{{ py }} -m studio channel --regenerate`. It rewrites
-     this file, the channel bible and the settings from the answers, and never touches the brief.
+     changes in a few lines. On their OK, write them and run `{{ py }} -m studio{{ only }} channel --regenerate`.
+     It rewrites this file, the channel bible and the settings from the answers (this channel's alone, with a copy of
+     the settings kept in `{{ here }}my-studio/backups/` first), and never touches the brief.
   3. Tell {{ who }} what you took from it, and ask about anything a video needs that it doesn't say.
 - **No brief yet?** Before the first video, ask {{ who }} for one: a file, a pasted description, or a few answers
   (what the channel is about, one or two videos they'd love to see on it, anything to avoid). If they'd rather

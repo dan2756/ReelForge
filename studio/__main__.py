@@ -14,7 +14,8 @@
   reelforge profiles delete NAME [--yes]
                                take one you added out of ReelForge: its folder moves whole into backups/
   reelforge profiles restore [NAME]    bring a deleted one back (with no name: the deleted ones)
-  reelforge -p NAME ...        any command, for one profile: its name, the start of it, or its number in the list
+  reelforge -p NAME ...        any command, for one profile: its name, the start of it, its number in the list, or
+                               its folder (profiles/NAME)
                                (the window opens on the one you had open last; everything else works on the first)
 
   reelforge setup [--yes]      set up or repair: Blender, ffmpeg, the sounds, the reelforge command, then your channel
@@ -23,7 +24,8 @@
       --plain                  the same questions as plain prompts
       --questions              the questions as JSON (for an AI running the interview in chat)
       --answers FILE.json      write everything from saved answers, no questions
-      --regenerate             rebuild everything from my-studio/answers.json (after you edit it), every profile's
+      --regenerate             rebuild everything from my-studio/answers.json (after you edit it), every profile's,
+                               or with -p NAME that one's alone; a studio.toml it changes is copied into backups first
       --preserve-settings      with --regenerate: only CLAUDE.md / AGENTS.md again, from your settings as they are
                                (what an update runs: studio.toml and your accounts stay as you left them)
       --new                    for a new profile (with --answers too, for an AI running the interview in chat)
@@ -111,7 +113,8 @@ def apply_background_stats() -> str:
     profile that wants it, so it's on while any of them does."""
     from . import generate, stats_schedule
     try:
-        # (a channel's studio.toml with a typo in it goes by its answers: what was written has said so already)
+        # (a channel's studio.toml with a typo in it goes by its own background_stats line, else its answers, else
+        # it's off: what was written has said so already)
         if any(generate.background_stats(p) for p in profiles.every()):
             return stats_schedule.enable()
         if stats_schedule.status() == "on":
@@ -125,7 +128,8 @@ def _interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def onboard(argv: list[str], *, preserve_settings: bool = False) -> int:
+def onboard(argv: list[str], *, preserve_settings: bool = False, only: profiles.Profile | None = None) -> int:
+    """reelforge channel. only: the profile -p named, if it was typed: --regenerate writes that one's files alone."""
     ap = argparse.ArgumentParser(prog="reelforge channel")
     ap.add_argument("--plain", action="store_true")
     ap.add_argument("--answers", type=Path)
@@ -142,7 +146,7 @@ def onboard(argv: list[str], *, preserve_settings: bool = False) -> int:
         print(json.dumps(questions.describe(), indent=2, ensure_ascii=False))
         return 0
     if args.regenerate and not args.answers:
-        return regenerate(preserve_settings=preserve_settings or args.preserve_settings)
+        return regenerate(preserve_settings=preserve_settings or args.preserve_settings, only=only)
     if args.answers or args.regenerate:
         src = args.answers or P.ANSWERS
         if not src.exists():
@@ -178,7 +182,7 @@ def onboard(argv: list[str], *, preserve_settings: bool = False) -> int:
             return 1
         _print_written(written)
         if target is not None:
-            print(f"\nNew profile: {target.name} ({target.describe()}). Open it with: reelforge -p {target.slug}")
+            print(f"\nNew profile: {target.name} ({target.describe()}). Open it with: reelforge -p {target.flag}")
         if not args.regenerate:
             print("\n" + apply_background_stats())
         print(next_steps(target, again))
@@ -208,25 +212,48 @@ def onboard(argv: list[str], *, preserve_settings: bool = False) -> int:
     return first_run("onboard", new=args.new)
 
 
-def regenerate(*, preserve_settings: bool = False) -> int:
+def regenerate(*, preserve_settings: bool = False, only: profiles.Profile | None = None) -> int:
     """Every profile's files again from its saved answers (after an update, so they get the new version's
     instructions): the first one last, so its notes list the others as they are now. Updates preserve settings
-    and refresh only instructions; an explicit channel regeneration can apply edited answers."""
-    from . import generate
+    and refresh only instructions; an explicit channel regeneration can apply edited answers. only: one profile's
+    alone (reelforge -p NAME channel --regenerate, what a line about a settings file with a mistake in it gives), so
+    the other channels' settings and notes stay as they are; with preserve_settings the first one's notes follow it
+    too, since they say how often each channel posts. (Without preserve_settings, write_all does that itself.)"""
+    from . import generate, questions
 
-    done, said = 0, []
-    for p in [*profiles.extra(), profiles.main()]:
+    done, tried, said = 0, 0, []
+    if only is None:
+        chosen = [*profiles.extra(), profiles.main()]
+    else:
+        chosen = [only, profiles.main()] if preserve_settings and not only.main else [only]
+    for p in chosen:
         if not p.answers.exists():
             continue
+        tried += 1
         try:
-            answers = json.loads(p.answers.read_text(encoding="utf-8-sig"))
-            written = (generate.write_guides(p, saved_settings=True, say=said.append) if preserve_settings
-                       else generate.write_all(answers, p, say=said.append))
+            try:
+                answers = json.loads(p.answers.read_text(encoding="utf-8-sig"))
+            except ValueError as e:
+                raise ValueError(f"{p.answers} can't be read: {e}") from None
+            if not isinstance(answers, dict):
+                raise ValueError(f"{p.answers} isn't a list of answers")
+            if preserve_settings:
+                if problems := questions.validate(answers)[1]:    # write_guides leaves the notes without a word
+                    raise ValueError("its answers need fixing first: " + "; ".join(problems))
+                written = generate.write_guides(p, saved_settings=True, say=said.append)
+            else:
+                written = generate.write_all(answers, p, say=said.append)
         except (ValueError, OSError) as e:
-            print(f"{p.name}: {e}")
+            # Said with the rest at the end, not only printed now: an update passes on what's said (SAID) and
+            # nothing else, and with another channel's notes written it doesn't fail, so this was heard nowhere.
+            why = str(e).replace(":\n  ", ": ").replace("\n  ", "; ")
+            again = (f"reelforge -p {p.flag} channel --regenerate"
+                     + (" --preserve-settings" if preserve_settings else ""))
+            what = "notes for your AI" if preserve_settings else "files"
+            said.append(f"{p.name}'s {what} couldn't be written again ({why}). Once that's put right, run: {again}")
             continue
         done += 1
-        if p.main:
+        if p.main or only is not None:
             _print_written(written)
     # Said once at the end: each channel's files bring up the first one's notes again, and with them every settings
     # file with a mistake in it. Without --preserve-settings each channel's studio.toml has been written again from
@@ -240,10 +267,9 @@ def regenerate(*, preserve_settings: bool = False) -> int:
             Path(os.environ[SAID]).write_text(json.dumps(lines, ensure_ascii=False), encoding="utf-8")
         except OSError:
             pass
-    if not done:
+    if not tried:
         print(f"{P.ANSWERS} not found. Run first-time setup first: reelforge channel")
-        return 1
-    return 0
+    return 0 if done else 1
 
 
 def first_run(start: str, new: bool = False) -> int:
@@ -378,7 +404,7 @@ def restore_profile(argv: list[str]) -> int:
     from . import generate
 
     generate.write_guides(profiles.main(), saved_settings=True, say=print)   # your AI's notes list it again
-    print(f"{p.name} is back ({p.describe()}), as it was. Open it with: reelforge -p {p.slug}")
+    print(f"{p.name} is back ({p.describe()}), as it was. Open it with: reelforge -p {p.flag}")
     return 0
 
 
@@ -570,7 +596,7 @@ def dispatch(argv: list[str] | None = None) -> int:
         # after copying new files. They must not replay old answers over hand-edited
         # settings/accounts. `channel --regenerate` still explicitly applies edited
         # answers; future updaters also pass --preserve-settings for clarity.
-        return onboard(rest, preserve_settings=cmd == "onboard" and "--regenerate" in rest)
+        return onboard(rest, preserve_settings=cmd == "onboard" and "--regenerate" in rest, only=chosen)
     if cmd == "profiles":
         return list_profiles(rest, chosen)
     if cmd == "setup":

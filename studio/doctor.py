@@ -128,7 +128,7 @@ def youtube_api_check(r: Report) -> None:
             # With several channels the command says whose file it means (-p): left to itself it works on the
             # first channel, and would give that one a client it never asked for.
             files = ", ".join(P.rel(p.data / "youtube_api.json") for p in unread)
-            again = " and ".join(f"reelforge{'' if len(every) == 1 else f' -p {p.slug}'} youtube-api client FILE"
+            again = " and ".join(f"reelforge{'' if len(every) == 1 else f' -p {p.flag}'} youtube-api client FILE"
                                  for p in unread)
             r.add(WARN, "YouTube API", f"{files} can't be read, so ReelForge has no client there. Give it the client "
                                        f"file again: {again}")

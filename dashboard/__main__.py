@@ -141,7 +141,8 @@ def refresh_profiles(demo: bool = False) -> int:
     end = time.monotonic() + JOB_BUDGET
     code = 0
     for p in profiles.every():
-        # (a channel's studio.toml with a typo in it: its answers say, and the other channels are read all the same)
+        # (a channel's studio.toml with a typo in it: its own background_stats line says, else its answers, else
+        # it isn't read; and the other channels are read all the same)
         if p.onboarded and not generate.background_stats(p, say=lambda line: print(line, flush=True)):
             continue
         left = int(end - time.monotonic())

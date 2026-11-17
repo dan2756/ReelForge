@@ -224,6 +224,52 @@ class FactoryReset(ResetScratch):
         self.assertEqual(sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob("*")), before)
         self.assertEqual(asked, ["off", "wait", "on"])   # nothing was reset: the read is back on
 
+    def test_a_ctrl_c_anywhere_in_the_moves_leaves_nothing_moved_unrecorded(self):
+        """Ctrl+C lands between any two steps. Between the end of a move and its being recorded, the folder it had
+        moved was neither put back nor in what the reset goes by: no README, and the hourly read back on over a
+        half-reset folder."""
+        import inspect
+        import sys
+
+        code = reset._move_all.__code__
+        lines, first = inspect.getsourcelines(reset._move_all)
+        start = first + next(i for i, ln in enumerate(lines) if ln.strip() == "try:")
+        stop = first + next(i for i, ln in enumerate(lines) if ln.strip().startswith("except BaseException"))
+        n = 0
+        while True:     # the n-th step of the moves (not of putting things back) is where Ctrl+C lands
+            n += 1
+            folder = self.root / f"try-{n}"
+            a, b = folder / "my-studio", folder / "research.md"
+            a.mkdir(parents=True)
+            (a / "answers.json").write_text("{}", encoding="utf-8")
+            b.write_text("notes", encoding="utf-8")
+            dest = folder / "backups" / "factory-reset-x"
+            moves, moved, seen = [(a, dest / "my-studio"), (b, dest / "research.md")], [], [0]
+
+            def local(frame, event, arg):
+                if event == "line" and start < frame.f_lineno < stop:
+                    seen[0] += 1
+                    if seen[0] == n:
+                        raise KeyboardInterrupt
+                return local
+
+            before = sys.gettrace()
+            sys.settrace(lambda frame, event, arg: local if frame.f_code is code else None)
+            try:
+                reset._move_all(moves, dest, moved)
+                stopped = False
+            except KeyboardInterrupt:
+                stopped = True
+            finally:
+                sys.settrace(before)
+            for src, dst in moves:      # each one where it was, or in what the reset goes by
+                self.assertEqual((src, dst) in moved, not os.path.lexists(src), (n, src, moved))
+                self.assertEqual(os.path.lexists(dst), not os.path.lexists(src), (n, src))
+            self.assertEqual(len(moved), len(set(moved)), moved)
+            if not stopped:             # every step has had its Ctrl+C
+                break
+        self.assertGreater(n, 6)
+
     def test_one_stopped_part_way_that_cant_put_everything_back_leaves_the_hourly_read_off_and_says_why(self):
         asked, tries = [], []
         first = reset.reset_items()[0][0]
@@ -265,6 +311,43 @@ class FactoryReset(ResetScratch):
                                             "on turns it on again")
         [backup] = (self.root / "backups").iterdir()
         self.assertIn("stopped part way", (backup / "README.txt").read_text(encoding="utf-8"))
+
+    def test_one_stopped_part_way_with_the_hourly_read_off_never_says_to_turn_it_on(self):
+        """The backup's README said "Then turn the hourly stats read on again with: reelforge stats on" whether the
+        read had been on or not: undoing the reset as it said turned on a read of your stats you had off."""
+        first = reset.reset_items()[0][0]
+        for stop in ("Ctrl+C", "a file in use"):
+            with self.subTest(stop=stop):
+                tries = []
+
+                def move(src, dst, wait=10):
+                    tries.append(src)
+                    if len(tries) == 1:
+                        return REAL_MOVE(src, dst, wait=0)
+                    if len(tries) == 2 and stop == "Ctrl+C":
+                        raise KeyboardInterrupt
+                    return "in use"     # the next item, or the first on its way back
+
+                asked, done = [], None
+                with mock.patch("studio.stats_schedule.status", return_value="off"), \
+                        mock.patch("studio.stats_schedule.disable", lambda: asked.append("off") or "off"), \
+                        mock.patch("studio.stats_schedule.enable", lambda: asked.append("on") or "on"), \
+                        mock.patch.object(reset, "_wait_for_reads", lambda say: None), \
+                        mock.patch.object(reset, "_move", move):
+                    try:
+                        done = self.quiet(reset.factory_reset)
+                    except KeyboardInterrupt:
+                        pass
+                [backup] = (self.root / "backups").iterdir()
+                readme = (backup / "README.txt").read_text(encoding="utf-8")
+                shutil.move(str(backup / first.relative_to(self.root)), str(first))   # as it was, for the next
+                shutil.rmtree(self.root / "backups")
+                self.assertEqual(asked, [])                 # off it was, and off it stays, with nothing said of it
+                if done is not None:
+                    self.assertFalse([p for p in done.problems if "hourly" in p], done.problems)
+                self.assertIn("factory reset was stopped part way on ", readme)
+                self.assertIn(f"  {first.relative_to(self.root)}  (", readme)
+                self.assertNotIn("stats", readme)
 
     def test_backups_being_a_file_is_said_as_it_is_before_anything_changes(self):
         """It was found item by item, after ten seconds of trying, and said to be the first item "in use", with

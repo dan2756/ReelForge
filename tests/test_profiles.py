@@ -170,7 +170,7 @@ class Onboarding(Scratch):
         notes = (a.folder / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertIn("one of several channels in this ReelForge folder", notes)
         self.assertIn(f"profiles{os.sep}cool-epic-facts{os.sep}episodes{os.sep}<id>", notes)
-        self.assertIn("-m studio -p cool-epic-facts new-episode <slug>", notes)
+        self.assertIn("-m studio -p profiles/cool-epic-facts new-episode <slug>", notes)
         self.assertIn("`profiles/cool-epic-facts/completed videos/production-log.md`", notes)
         self.assertNotIn(".claude", [p.name for p in a.folder.iterdir()])
         claude = (self.root / "CLAUDE.md").read_text(encoding="utf-8")
@@ -398,12 +398,54 @@ class Job(Scratch):
         with mock.patch.object(subprocess, "call", lambda cmd, cwd=None, env=None, timeout=None:
                                calls.append(env[profiles.ENV]) or 0), redirect_stdout(io.StringIO()) as out:
             self.assertEqual(dash.refresh_profiles(), 0)
-        self.assertEqual(calls, [".", a.key])       # Quiet One's answers still say no
+        self.assertEqual(calls, [".", a.key])       # Quiet One's own line still says no
         said = out.getvalue()
         self.assertEqual(said.count("has a mistake in it"), 2, said)
         for name, f in (("Night Physics", mine), ("Quiet One", b.settings)):
             self.assertIn(f"{name}'s settings file, {f}, has a mistake in it (", said)
-        self.assertIn("so whether its stats are read every hour goes by its answers.", said)
+        self.assertIn("so whether its stats are read every hour goes by its background_stats line.", said)
+
+    def test_a_mistake_in_a_channels_settings_never_turns_the_hourly_read_on_without_a_yes(self):
+        """With a typo anywhere in studio.toml, whether the hourly read was on went by the answers, and by yes when
+        they couldn't be read either: a no written in the file by hand (it invites that), or answers that couldn't be
+        read, turned the read of your stats with your log-ins on every hour."""
+        from studio.__main__ import apply_background_stats
+
+        main = profiles.main()
+        typo = '\nsubjects_extra = "a snowball\n'
+
+        def check(text: str, on: bool, what: str, name: str = "Night Physics"):
+            main.settings.write_text(text + typo, encoding="utf-8")
+            said: list[str] = []
+            self.assertIs(generate.background_stats(main, say=said.append), on, text)
+            self.assertEqual(len(said), 1, said)
+            self.assertTrue(said[0].startswith(f"{name}'s settings file, {main.settings}, has a mistake in it ("),
+                            said)
+            self.assertIn(f", so {what}.", said[0])
+            with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}):
+                self.assertEqual("(dry run) would run" in apply_background_stats(), on, text)
+
+        self.onboard_main()                         # the answers say yes (as they do unless you say no)
+        text = main.settings.read_text(encoding="utf-8")
+        self.assertIn("background_stats = true", text)
+        check(text.replace("background_stats = true", "background_stats = false"), False,
+              "whether its stats are read every hour goes by its background_stats line")
+        check(text, True, "whether its stats are read every hour goes by its background_stats line")
+        # a no added below the yes: two lines for one thing, which is itself what TOML refuses
+        check(text.replace("background_stats = true", "background_stats = true\nbackground_stats = false"), False,
+              "whether its stats are read every hour goes by its background_stats line")
+        # a no typed in a form TOML refuses is often the mistake itself: it is still a no, never the answers' yes
+        for no in ("False", "FALSE", "no", "off", "'false'", "", "nope   # I don't want it"):
+            check(text.replace("background_stats = true", f"background_stats = {no}"), False,
+                  "whether its stats are read every hour goes by its background_stats line")
+        for yes in ("True", "yes", "On", '"true"'):
+            check(text.replace("background_stats = true", f"background_stats = {yes}"), True,
+                  "whether its stats are read every hour goes by its background_stats line")
+        without = text.replace("background_stats = true\n", "")
+        check(without, True, "whether its stats are read every hour goes by its answers")
+        main.answers.write_text(main.answers.read_text(encoding="utf-8").rstrip().rstrip("}") + ",}\n",
+                                encoding="utf-8")   # and answers that can't be read either: no yes to go by
+        check(without, False, "its stats aren't read every hour until it's put right", name="My channel")
 
     def test_a_mistake_in_the_first_channels_settings_still_sets_up_the_hourly_read_for_a_new_one(self):
         """One hourly job reads every channel. With a typo in the first channel's studio.toml, setting it up for a
@@ -638,7 +680,9 @@ class Deleting(Scratch):
         profiles.create("Cool Epic Facts")
         said = (f"Night Physics's settings file, {mine}, has a mistake in it (Expected '=' after a key in a key/value "
                 f"pair (at line {typo.count(chr(10))}, column 6)), so your AI's notes go by its answers instead. "
-                "Fix it in a text editor, or write it again from your answers with: reelforge channel --regenerate\n")
+                "Fix it in a text editor, then run reelforge -p 1 channel --regenerate --preserve-settings so your "
+                "AI's notes follow it. Or write it again from your answers, keeping a copy of it as it is, with: "
+                "reelforge -p 1 channel --regenerate\n")
         for argv, done in ((["profiles", "delete", "cool epic facts", "--yes"],
                             "Cool Epic Facts is deleted. It's kept whole in backups"),
                            (["profiles", "restore", "1"], "Cool Epic Facts is back")):
@@ -701,6 +745,145 @@ class Deleting(Scratch):
         self.assertNotIn("has a mistake in it", out.getvalue())
         for f in typos:
             S.load(f)                                       # written again: nothing left to say about it
+
+    def test_the_way_out_a_mistake_gives_is_for_that_channel_alone_and_keeps_a_copy(self):
+        """Every line about a channel's settings file with a mistake in it ended "write it again from your answers
+        with: reelforge channel --regenerate", which wrote every channel's studio.toml again from its answers and kept
+        no copy: what was edited by hand in the other channels went too, and the file with the mistake in it with it.
+        Then it named an added channel by its folder's name, which can find another channel: "Night Physics 🌙"'s
+        folder, night-physics, is the first channel's short name, and a folder called 3 is the third in the list."""
+        import re
+
+        from studio.__main__ import main
+
+        self.onboard_main()                              # "Night Physics"
+        added = []
+        for name in ("3", "4", "Night Physics 🌙"):      # in the list: 1 Night Physics, 2 "3", 3 "4", 4 the moon one
+            added.append(profiles.create(name))
+            with redirect_stdout(io.StringIO()):
+                generate.write_all({**ANSWERS, "channel_name": name}, added[-1])
+        self.assertEqual([p.folder.name for p in profiles.extra()], ["3", "4", "night-physics"])
+        everyone = [profiles.main(), *added]
+        for broken_p in everyone:
+            broken, who = broken_p.settings, "1" if broken_p.main else f"profiles/{broken_p.folder.name}"
+            others = [p.settings for p in everyone if p != broken_p]
+            with self.subTest(broken=broken_p.name):
+                for f in (broken, *others):   # each edited by hand, which the answers don't know of
+                    f.write_text(re.sub(r"max_seconds = .*", "max_seconds = 90.0", f.read_text(encoding="utf-8")),
+                                 encoding="utf-8")
+                edited = {f: f.read_text(encoding="utf-8") for f in others}
+                typo = broken.read_text(encoding="utf-8") + "\nx = = 1\n"
+                broken.write_text(typo, encoding="utf-8")
+                said: list[str] = []
+                generate.write_guides(profiles.main(), saved_settings=True, say=said.append)
+                with self.assertRaises(S.SettingsError) as raised:
+                    S.load(broken)
+                self.assertEqual(len(said), 1, said)
+                word = re.search(r"reelforge -p (\S+) channel --regenerate$", said[0]).group(1)   # as written
+                self.assertEqual(profiles.find(word), broken_p, word)
+                before = {p: sorted(p.my_studio.joinpath("backups").glob("studio.*")) for p in everyone}
+                for argv in (["-p", word, "channel", "--regenerate", "--preserve-settings"],
+                             ["-p", word, "channel", "--regenerate"]):
+                    with redirect_stdout(io.StringIO()) as out:
+                        self.assertEqual(main(argv), 0, out.getvalue())
+                    # the other channels' alone
+                    self.assertEqual({f: f.read_text(encoding="utf-8") for f in others}, edited, argv)
+                self.assertEqual(S.load(broken)["video"]["max_seconds"], 75.0)          # from the answers, then
+                copies = sorted(broken_p.my_studio.joinpath("backups").glob("studio.*"))
+                self.assertEqual(len(copies), len(before[broken_p]) + 1, copies)
+                copy = next(c for c in copies if c not in before[broken_p])
+                self.assertEqual(copy.read_text(encoding="utf-8"), typo)               # as it was, mistake and all
+                self.assertIn(f"settings file, {broken}, had a mistake in it (", out.getvalue())
+                self.assertIn(f"so it was written again from your answers. A copy of it as it was is in {copy}.",
+                              out.getvalue())
+                for theirs in everyone:
+                    if theirs != broken_p:
+                        self.assertEqual(sorted(theirs.my_studio.joinpath("backups").glob("studio.*")),
+                                         before[theirs])
+                for line in (said[0], str(raised.exception)):    # the two say the same, and name that channel
+                    self.assertEqual(re.findall(r"reelforge [-\w/ ]+", line),
+                                     [f"reelforge -p {who} channel --regenerate --preserve-settings so your AI",
+                                      f"reelforge -p {who} channel --regenerate"], line)
+                    self.assertIn("keeping a copy of it as it is", line)
+        # and what an added channel's notes tell its AI to run after a brief changes its answers is for it alone
+        for p in added:
+            with self.subTest(notes=p.name):
+                notes = (p.folder / "CLAUDE.md").read_text(encoding="utf-8")
+                cmd = re.findall(r"-m studio -p (\S+) channel --regenerate`", notes)
+                self.assertEqual(cmd, [f"profiles/{p.folder.name}"])
+                self.assertEqual(profiles.find(cmd[0]), p)
+
+    def test_connect_with_a_mistake_in_the_settings_leaves_your_ais_notes_and_the_way_out_brings_them_back(self):
+        """Connect with a typo in studio.toml wrote your AI's notes and the channel bible from the first-time answers,
+        so what was edited by hand in studio.toml (the length here) went back in them, and nothing brought it back
+        once the file was fixed by hand, as the line said to."""
+        import re
+
+        from studio.__main__ import main
+
+        def lengths(f: Path) -> list[str]:
+            return sorted(set(re.findall(r"\b61[–-]\d+ ?s\b", f.read_text(encoding="utf-8"))))
+
+        self.onboard_main()
+        quiet = profiles.create("Quiet One")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**ANSWERS, "channel_name": "Quiet One"}, quiet)
+        for p, who in ((profiles.main(), "1"), (quiet, "profiles/quiet-one")):
+            with self.subTest(channel=p.name):
+                profiles.use(p)
+                good = p.settings.read_text(encoding="utf-8").replace("max_seconds = 75.0", "max_seconds = 90.0")
+                p.settings.write_text(good, encoding="utf-8")
+                generate.write_guides(p, saved_settings=True)          # as an update does: they follow the file
+                claude = p.folder / "CLAUDE.md"
+                self.assertEqual(lengths(claude), ["61-90 s"])
+                p.settings.write_text(good + "\nthis is = = a typo\n", encoding="utf-8")
+                kept = {f: f.read_text(encoding="utf-8") for f in (claude, p.folder / "AGENTS.md", p.bible,
+                                                                      self.root / "CLAUDE.md")}
+                said: list[str] = []
+                generate.set_account("x", "@np_x", say=said.append)   # Connect, for a platform not ticked before
+                self.assertEqual({f: f.read_text(encoding="utf-8") for f in kept}, kept)
+                self.assertEqual(len(said), 1, said)
+                self.assertIn(", so it and your AI's notes couldn't be updated with this account and stay as they "
+                              "were (your answers and ReelForge's settings have it). Fix it in a text editor, then "
+                              f"run reelforge -p {who} channel --regenerate --preserve-settings so your AI's notes "
+                              "follow it.", said[0])
+                p.settings.write_text(good, encoding="utf-8")         # fixed by hand, then the line's command
+                before = sorted(p.backups.glob("studio.*"))
+                with redirect_stdout(io.StringIO()) as out:
+                    self.assertEqual(main(["-p", who, "channel", "--regenerate", "--preserve-settings"]), 0,
+                                     out.getvalue())
+                self.assertNotIn("has a mistake in it", out.getvalue())
+                self.assertEqual(lengths(claude), ["61-90 s"])
+                self.assertIn("X @np_x", claude.read_text(encoding="utf-8"))   # and they have the account
+                # and so does studio.toml now, as Connect would have written it, with what was edited by hand in it
+                saved = S.load(p.settings)
+                self.assertEqual((saved["platforms"]["enabled"], saved["video"]["max_seconds"]),
+                                 (["tiktok", "youtube", "x"], 90.0))
+                copy = next(c for c in sorted(p.backups.glob("studio.*")) if c not in before)
+                self.assertEqual(copy.read_text(encoding="utf-8"), good)
+                self.assertIn(f"X, connected while {p.name}'s settings file, {p.settings}, had a mistake in it, is in "
+                              f"it now. A copy of it as it was is in {copy}.", out.getvalue())
+                # which it then follows: X taken out of it by hand, with its account still connected, stays out
+                p.settings.write_text(p.settings.read_text(encoding="utf-8").replace(
+                    'enabled = ["tiktok", "youtube", "x"]', 'enabled = ["tiktok", "youtube"]'), encoding="utf-8")
+                generate.write_guides(p, saved_settings=True)
+                self.assertNotIn("@np_x", claude.read_text(encoding="utf-8"))
+
+    def test_a_platform_taken_out_of_the_settings_by_hand_stays_out_of_your_ais_notes(self):
+        """Since your AI's notes listed every platform connected on the Accounts tab as one you post to, an update put
+        one you'd taken out of studio.toml by hand (its account still connected) back in them, with its caption
+        rule."""
+        self.onboard_main(platforms=["tiktok", "youtube", "x"], handle_youtube="@npyt", handle_x="@np_x")
+        main = profiles.main()
+        text = main.settings.read_text(encoding="utf-8")
+        self.assertIn('enabled = ["tiktok", "youtube", "x"]', text)
+        main.settings.write_text(text.replace('enabled = ["tiktok", "youtube", "x"]', 'enabled = ["tiktok", "youtube"]'),
+                                 encoding="utf-8")
+        generate.write_guides(main, saved_settings=True)        # what an update runs
+        notes = (self.root / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("TikTok @nightphysics · YouTube Shorts @npyt |", notes)
+        self.assertNotIn("@np_x", notes)
+        self.assertNotIn("X: the caption only", notes)
 
     def test_the_commands_delete_and_restore_one(self):
         from studio.__main__ import main

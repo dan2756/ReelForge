@@ -21,6 +21,8 @@ BROKEN = {
                                                                    "number"),
     "a value where a table goes": ("captions = 3\n", "[captions] should be a table of settings"),
     "a word where a list goes": ('[platforms]\nenabled = "tiktok"\n', "enabled under [platforms] should be a list"),
+    "a word for neither yes nor no": ('[platforms]\nbackground_stats = "maybe"\n',
+                                      "background_stats under [platforms] should be true or false"),
 }
 
 
@@ -35,8 +37,33 @@ class Loading(Scratch):
                 said = str(raised.exception)
                 self.assertTrue(said.startswith(f"{P.SETTINGS} can't be read: "), said)
                 self.assertIn(reason, said)
-                self.assertIn("reelforge channel --regenerate", said)
+                self.assertIn("reelforge -p 1 channel --regenerate", said)   # the first channel, by its number
                 self.assertIsInstance(raised.exception, ValueError)   # what callers already catch for bad settings
+
+    def test_a_yes_or_no_for_the_hourly_read_typed_as_a_word_reads_as_meant(self):
+        """`background_stats = "false"` reads as TOML (a word), and every word was a yes: the hourly read of your
+        stats, with your log-ins, was switched on against a no that could be read."""
+        from studio import generate
+        from studio.__main__ import apply_background_stats
+
+        self.onboard_main()
+        text = P.SETTINGS.read_text(encoding="utf-8")
+        for value, on in (('"false"', False), ("'no'", False), ('"off"', False), ("0", False), ('"No"', False),
+                          ('"true"', True), ('"yes"', True), ("1", True), ("true", True), ("false", False)):
+            with self.subTest(value=value):
+                P.SETTINGS.write_text(text.replace("background_stats = true", f"background_stats = {value}"),
+                                      encoding="utf-8")
+                self.assertIs(settings.load()["platforms"]["background_stats"], on)
+                said: list[str] = []
+                self.assertIs(generate.background_stats(profiles.main(), say=said.append), on)
+                self.assertEqual(said, [])
+                with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}):
+                    self.assertEqual("(dry run) would run" in apply_background_stats(), on)
+        # a word that is neither is a mistake, and while the file has one only a yes on that line is a yes
+        P.SETTINGS.write_text(text.replace("background_stats = true", 'background_stats = "maybe"'), encoding="utf-8")
+        said = []
+        self.assertIs(generate.background_stats(profiles.main(), say=said.append), False)
+        self.assertIn("(background_stats under [platforms] should be true or false)", said[0])
 
     def test_a_file_saved_by_notepad_with_a_byte_order_mark_still_reads(self):
         self.onboard_main()
