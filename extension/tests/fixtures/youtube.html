@@ -85,12 +85,21 @@ function details(file) {
 
   const label = content.querySelector(".progress-label")
   let percent = 0
-  const tick = setInterval(() => {
-    percent += MODE === "slow" || MODE === "slow_mute" ? 2 : 25
-    if (percent < 100) return (label.textContent = `Uploading ${percent}% ... 1 minute left`)
+  // "held", "held_mute": the upload stays short of its end until the test lets it finish, with
+  // fixture.finishUpload(), however long the machine takes over the rest. ("slow" ends on its own, about ten
+  // seconds after the video was attached.)
+  const held = MODE === "held" || MODE === "held_mute"
+  const finish = () => {
     clearInterval(tick)
     label.textContent = "Upload complete ... Checks complete. No issues found."
+  }
+  const tick = setInterval(() => {
+    percent += MODE === "slow" || MODE === "slow_mute" || held ? 2 : 25
+    if (held) percent = Math.min(percent, 98)
+    if (percent < 100) return (label.textContent = `Uploading ${percent}% ... 1 minute left`)
+    finish()
   }, 200)
+  fixture.finishUpload = finish
 
   const screens = ["details", "elements", "checks", "visibility"]
   let at = 0

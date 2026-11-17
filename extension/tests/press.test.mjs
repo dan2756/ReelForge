@@ -291,9 +291,10 @@ export const tests = {
 
   async "the person's own press while the video is going up is the only press, whatever was asked for"({ app, site, browser, video }) {
     // Press Post for me is on, the post's own setting says press and the person said yes. They press Save
-    // themselves while YouTube is still taking the video in, and the page shows nothing yet ("slow_mute": it
-    // takes no click). When everything is filled in, the form is still there: a second press would post twice.
-    site.mode.youtube = "slow_mute"
+    // themselves while YouTube is still taking the video in, and the page shows nothing yet ("held_mute": it
+    // takes no click, and the upload ends only when the test says). When everything is filled in, the form is
+    // still there: a second press would post twice.
+    site.mode.youtube = "held_mute"
     await switchOn(browser, app, "youtube")
     const made = app.createBatch(video(), ["youtube"], { press: true })
     await browser.post(app, made.batch, { yes: true })
@@ -302,6 +303,7 @@ export const tests = {
     await until(() => `the wait for the upload (it is ${job.state} ${job.step})`, () => job.step === "upload" && job.events.some(event => event.step === "visibility"), 30000)
     await tab.locator("#done-button").click()
     await until("the press to be noticed", async () => (await browser.jobRecord(job.id)).pressedByPerson === true)
+    await tab.evaluate(() => fixture.finishUpload())
     await until(() => `ready (it is ${job.state} ${job.step})`, () => job.state === "ready", 40000)
     await sleep(2500)
     equal([presses(app).length, job.state], [0, "ready"], "press requests, and the job meanwhile")
@@ -437,8 +439,9 @@ export const tests = {
 
   async "a newer list that moves YouTube's error hook does not get a press past YouTube's own error"({ app, site, browser, video }) {
     // The app's newer list points the hook for YouTube's error message at nothing. The packed one is used all
-    // the same: the engine stops a job at that message before anything is pressed.
-    site.mode.youtube = "slow"
+    // the same: the engine stops a job at that message before anything is pressed. ("held": the upload never
+    // ends by itself, so the error comes first however slow the machine is.)
+    site.mode.youtube = "held"
     const list = quickSelectors()
     list.platforms.youtube.hooks.error = { any: true, strategies: [{ id: "moved", css: "no-such-error-element" }] }
     app.selectors = list
