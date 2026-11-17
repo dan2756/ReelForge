@@ -242,11 +242,14 @@ class InstallTest(unittest.TestCase):
                    "sounds": {**self.OLD_KIT["sounds"], "zap": zap, "ding": ding, "rumble": rumble, "thud": thud}}
         yours = {**old_kit, "sounds": {**old_kit["sounds"], "ding": {**ding, "title": "the one in my outros"}}}
         before = json.dumps(yours, indent=2).encode("utf-8")
-        now, said = self.sounds_update(yours, self.NEW_KIT, record=old_kit,
+        now, said = self.sounds_update(yours, self.NEW_KIT, record=old_kit, recorded=False,
                                        files_here=("mixkit/mixkit_5.wav", "_cache/thud.wav"))
         # zap goes; ding is yours; rumble's file and thud's converted copy are here, so cue sheets still mix them
         self.assertEqual(now["sounds"], {**self.NEW_KIT["sounds"], "ding": yours["sounds"]["ding"], "rumble": rumble,
                                          "thud": thud})
+        # and they are still the kit's (test_a_sound_kept_for_its_file_is_still_the_kits_at_the_updates_after)
+        still_the_kits = {**self.NEW_KIT, "sounds": {**self.NEW_KIT["sounds"], "rumble": rumble, "thud": thud}}
+        self.assertEqual(json.loads((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8")), still_the_kits)
         self.assertEqual(now["_licenses"], self.NEW_KIT["_licenses"])
         [copy] = (self.root / "backups").glob("sounds-before-update-*.json")
         self.assertEqual(copy.read_bytes(), before)
@@ -268,10 +271,36 @@ class InstallTest(unittest.TestCase):
         (self.root / "backups").unlink()
         now, said = self.sounds_update(now, self.NEW_KIT,
                                        record=json.loads((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8")),
-                                       files_here=("mixkit/mixkit_5.wav", "_cache/thud.wav"))
+                                       recorded=False, files_here=("mixkit/mixkit_5.wav", "_cache/thud.wav"))
         self.assertNotIn("zap", now["sounds"])
         self.assertNotIn("mixkit", now["_licenses"])
         self.assertIn('The new version no longer has sound "zap", and licence note "mixkit"', said)
+        self.assertEqual(json.loads((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8")), still_the_kits)
+
+    def test_a_sound_kept_for_its_file_is_still_the_kits_at_the_updates_after(self):
+        """A sound the new version took out of its list, kept because its file was here, was left out of the record
+        of the kit's list, so every update after took it for yours: once its file had gone it stayed for good (setup
+        went on trying to download a sound the kit had withdrawn), and when the kit brought a sound by that name back,
+        the update said "Your own sound ... is kept" of the kit's old one and left the new one out."""
+        rumble = {"file": "mixkit/mixkit_5.wav", "source": "mixkit", "id": 5}
+        thud = {"file": "mixkit/mixkit_6.wav", "source": "mixkit", "id": 6}
+        old_kit = {**self.NEW_KIT, "sounds": {**self.NEW_KIT["sounds"], "rumble": rumble, "thud": thud}}
+        now, said = self.sounds_update(old_kit, self.NEW_KIT, record=old_kit, recorded=False,
+                                       files_here=("mixkit/mixkit_5.wav", "mixkit/mixkit_6.wav"))
+        self.assertEqual((now, said), (old_kit, "Updated ReelForge from 1.0.0 to 1.1.0."))   # both files are here
+        record = json.loads((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8"))
+        self.assertEqual(record, old_kit)                                   # and both are still the kit's
+        # Then rumble's file goes, and the kit brings back a thud of its own: rumble goes, named, and the kit's new
+        # thud takes the place of its old one, as any of its own sounds does.
+        (self.root / "assets" / "sfx" / "mixkit" / "mixkit_5.wav").unlink()
+        kit = {**self.NEW_KIT, "sounds": {**self.NEW_KIT["sounds"], "thud": {**thud, "file": "mixkit/mixkit_16.wav",
+                                                                             "id": 16}}}
+        now, said = self.sounds_update(now, kit, record=record)
+        self.assertEqual(now, kit)
+        [copy] = (self.root / "backups").glob("sounds-before-update-*.json")
+        self.assertEqual(said, 'Updated ReelForge from 1.0.0 to 1.1.0. The new version no longer has sound "rumble", '
+                               "so it was taken out of your assets/sfx/manifest.json too: a cue sheet of yours that "
+                               f"uses it needs another. Your list as it was is in backups/{copy.name}.")
 
     def test_a_list_of_yours_that_cant_be_read_is_kept_in_backups_before_the_new_one_takes_its_place(self):
         """A comma after the last entry you added (your mixes already stop on it): the new list went over yours with
