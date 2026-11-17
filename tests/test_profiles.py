@@ -851,8 +851,67 @@ class Deleting(Scratch):
         self.assertEqual([p.folder.name for p in profiles.every()][2], dollar.name)
         self.assertEqual(d.flag, "3")
         self.assertEqual(profiles.find(d.flag), d)
-        self.assertEqual(profiles.Profile(self.root / "profiles" / "not $listed").flag, '"profiles/not $listed"')
+        self.assertEqual(profiles.Profile(self.root / "profiles" / "not $listed").flag, "'profiles/not $listed'")
         self.assertEqual(profiles.main().flag, "1")
+
+    def test_a_channels_own_notes_name_it_by_its_folder_never_by_its_number_in_the_list(self):
+        """A channel whose folder was renamed by hand with $, % or ! in it was named by its number in the list in its
+        own notes too (new-episode, publish, channel --regenerate). Those aren't written again when another channel is
+        added or deleted, so the number came to name another channel: your AI made this one's episodes in that one's
+        folder, and Publish opened that one's."""
+        import re
+        import shlex
+
+        from studio.__main__ import main
+
+        def made(name: str, day: int) -> profiles.Profile:
+            p = profiles.create(name)
+            with redirect_stdout(io.StringIO()):
+                generate.write_all({**ANSWERS, "channel_name": name}, p)
+            (p.folder / "profile.toml").write_text(f'name = "{name}"\ncreated = "2026-01-0{day}T00:00:00"\n',
+                                                   encoding="utf-8")
+            return p
+
+        self.onboard_main()
+        bee = made("Bee Facts", 1)
+        sea = made("Sea Facts", 2)
+        sea = profiles.Profile(sea.folder.rename(sea.folder.with_name("sea $facts 100%!")))
+        self.assertEqual(profiles.every(), [profiles.main(), bee, sea])
+        self.assertEqual(sea.flag, "3")         # printed for you to run there and then, the number finds it
+        with redirect_stdout(io.StringIO()):
+            generate.write_guides(sea, saved_settings=True)
+        commands = {"new-episode": r"-m studio -p (.+?) new-episode <slug>", "publish": r"reelforge -p (.+?) publish",
+                    "regenerate": r"-m studio -p (.+?) channel --regenerate"}
+        for notes in ("CLAUDE.md", "AGENTS.md"):
+            text = (sea.folder / notes).read_text(encoding="utf-8")
+            for what, pattern in commands.items():
+                with self.subTest(notes=notes, command=what):
+                    flags = set(re.findall(pattern, text))
+                    self.assertEqual(flags, {sea.kept_flag})
+                    self.assertEqual(shlex.split(sea.kept_flag), ["profiles/sea $facts 100%!"])
+        new_episode = re.search(r"`(\S+ -m studio -p .+? new-episode) <slug>`", text).group(1)
+        # Bee is deleted and Dee added: Sea's notes aren't written again, and Dee is third in the list now
+        with redirect_stdout(io.StringIO()):
+            profiles.delete(bee, wait=0)
+        dee = made("Dee Facts", 3)
+        self.assertEqual(profiles.every(), [profiles.main(), sea, dee])
+        self.assertEqual((sea.folder / "AGENTS.md").read_text(encoding="utf-8"), text)
+        argv = shlex.split(new_episode)[3:] + ["probe"]    # what follows python -m studio, as a shell splits it
+        with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(main(argv), 0, out.getvalue())
+        self.assertEqual([e.name for e in (sea.folder / "episodes").glob("*probe*")], ["ep01_probe"])
+        self.assertFalse(list((dee.folder / "episodes").glob("*probe*")))
+        self.assertEqual(sea.flag, "2")
+        # a backslash or a double quote in a folder's name (macOS and Linux have them; Windows doesn't): single quotes
+        # keep it as it is in bash, which a backslash in double quotes isn't; printed there and then, its number
+        if os.name != "nt":
+            for name in ("trail\\", 'say "hi"', "it's $5"):
+                with self.subTest(name=name):
+                    sea = profiles.Profile(sea.folder.rename(sea.folder.with_name(name)))
+                    self.assertEqual(shlex.split(f"reelforge -p {sea.kept_flag} channel"),
+                                     ["reelforge", "-p", f"profiles/{name}", "channel"])
+                    self.assertEqual(profiles.find(shlex.split(sea.kept_flag)[0]), sea)
+                    self.assertEqual(sea.flag, "2")
 
     def test_connect_with_a_mistake_in_the_settings_leaves_your_ais_notes_and_the_way_out_brings_them_back(self):
         """Connect with a typo in studio.toml wrote your AI's notes and the channel bible from the first-time answers,

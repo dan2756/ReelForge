@@ -31,6 +31,7 @@ import errno
 import json
 import os
 import re
+import shlex
 import time
 import tomllib
 import unicodedata
@@ -47,6 +48,12 @@ DELETED = "deleted-profile"  # in backups/: deleted-profile-<its folder>-<date>/
 WINDOWS = "windows"         # in a profile's dashboard/data/: a lock for each ReelForge window showing it
 READ_LOCK = "stats.refresh.lock"  # ... and the one a ReelForge holds while it reads its stats (dashboard/sync.py)
 _STAMP = re.compile(r"-(\d{4}-\d{2}-\d{2}-\d{6})(?: \d+)?$")  # the date at the end of a deleted profile's backup
+_PLAIN = re.compile(r"[A-Za-z0-9._/-]+")  # a folder ReelForge named (slug_for): Profile.flag writes it bare
+# What bash or PowerShell changes between double quotes (PowerShell takes curly quotes for straight ones; a backslash
+# where a folder's name can have one, not on Windows, where it's what separates folders and double quotes keep it),
+# and what cmd changes too (reelforge.cmd drops a ! whatever its quotes): Profile.kept_flag, Profile.flag
+_NOT_IN_DOUBLE_QUOTES = '"$`“”„' + ("" if os.sep == "\\" else "\\")
+_UNQUOTABLE = _NOT_IN_DOUBLE_QUOTES + "%!"
 
 
 def _same(a: Path, b: Path) -> bool:
@@ -87,26 +94,42 @@ class Profile:
 
     @property
     def flag(self) -> str:
-        """What a command ReelForge writes out for you or your AI to run puts after -p: 1 for the first profile (always
-        first in the list), another's key, profiles/<folder>. Its folder's name alone can find another profile (find):
-        all digits it is a number in the list (-p 3 is the third, whatever its folder), and "Night Physics 🌙"'s
-        folder, night-physics, is the short name of a first channel called "Night Physics", which comes first; the
-        first one can be renamed so after its notes are written, too. A word with a / in it is only ever a folder.
-        A folder ReelForge named (slug_for) goes as it is. One renamed by hand with any other character in it (a space:
-        "night-physics - Copy", the copy Explorer makes) goes in double quotes, which keep it one word where the
-        command is pasted, in bash, PowerShell and cmd alike. One with a character in it that double quotes don't keep
-        as it is in all three (" $ ` % !, and the curly quotes PowerShell takes for straight ones) goes by its number
-        in the list while that finds it, else by its folder in quotes all the same."""
+        """What a command ReelForge prints for you or your AI to run now puts after -p: 1 for the first profile (always
+        first in the list), another's key, profiles/<folder> (as kept_flag writes it). Its folder's name alone can
+        find another profile (find): all digits it is a number in the list (-p 3 is the third, whatever its folder),
+        and "Night Physics 🌙"'s folder, night-physics, is the short name of a first channel called "Night Physics",
+        which comes first; the first one can be renamed so after its notes are written, too. A word with a / in it is
+        only ever a folder. A folder with a character in it that quotes don't keep as it is in every shell (" $ ` % !,
+        a backslash on macOS or Linux, and the curly quotes PowerShell takes for straight ones; reelforge.cmd drops a !
+        whatever its quotes) goes by its number in the list, while that finds it: a number is only right as long as no
+        channel is added or deleted, so it's never written into a file that's kept (kept_flag)."""
         if self.main:
             return "1"
         key = self.key
-        if re.fullmatch(r"[A-Za-z0-9._/-]+", key):
-            return key
-        if any(c in key for c in '"$`%!“”„'):
+        if any(c in key for c in _UNQUOTABLE):
             n = next((i for i, p in enumerate(every(), 1) if _same(p.folder, self.folder)), 0)
             found = find(str(n)) if n else None
             if found is not None and _same(found.folder, self.folder):
                 return str(n)
+        return self.kept_flag
+
+    @property
+    def kept_flag(self) -> str:
+        """What -p gets in a command written into a file that's kept, the channel's notes for your AI above all: 1 for
+        the first profile, which is always first, and another's folder, profiles/<folder>, never its number in the list,
+        which another channel added or deleted changes without those notes being written again. A folder ReelForge
+        named (slug_for) goes as it is. One renamed by hand with another character in it (a space: "night-physics -
+        Copy", the copy Explorer makes) goes in double quotes, which keep it one word in bash, PowerShell and cmd
+        alike, a % or ! included, as your AI runs them. One with a character in it that bash or PowerShell changes in
+        double quotes (" $ `, a backslash on macOS or Linux, and the curly quotes PowerShell takes for straight ones)
+        goes in single quotes, which both keep as it is (a ' in it as bash writes it: shlex.quote)."""
+        if self.main:
+            return "1"
+        key = self.key
+        if _PLAIN.fullmatch(key):
+            return key
+        if any(c in key for c in _NOT_IN_DOUBLE_QUOTES):
+            return shlex.quote(key)
         return f'"{key}"'
 
     @property
