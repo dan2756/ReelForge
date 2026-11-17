@@ -45,7 +45,7 @@ press **p**) for the menu:
 | In the menu | |
 |---|---|
 | a profile | shows it in this window, on the tab you're on (each profile's row has its connected platforms and its unread notifications) |
-| **New profile** | first-time setup for a new channel, inside the window: your name and your AI carry over, the channel's answers start fresh, and it opens on the new profile's Accounts tab |
+| **New profile** | first-time setup for a new channel, inside the window: your name and your AI carry over, and so does your answer to the hourly stats read (No when the profile you're on says no to it, in its answers or in its `studio.toml`), the channel's other answers start fresh, and it opens on the new profile's Accounts tab |
 | **Settings for …** | the channel's questions again, for the profile you're on |
 | **Delete** (or the Delete key) | takes another profile out of ReelForge once you type its name: its folder moves whole into `backups/` |
 
@@ -61,18 +61,19 @@ A red dot on the button means another profile has unread notifications. ReelForg
 last. The first profile is the ReelForge folder's own (`my-studio/`, `dashboard/config.toml`, `dashboard/data/`, as
 always); each one you add gets a folder in `profiles/`, laid out the same way: `profiles/<name>/my-studio/`,
 `profiles/<name>/dashboard/config.toml` and `profiles/<name>/dashboard/data/`, its episodes and finished videos, and its
-own `CLAUDE.md` and `AGENTS.md`. The hourly background job reads every profile, each in turn (a profile whose
-first-time setup said no to background stats, or whose `my-studio/studio.toml` says `background_stats = false`, is read
-only while it's open; writing its files again from its answers, `reelforge -p <profile> channel --regenerate`, keeps
-that no, and its questions, in its Settings in the profile menu or `reelforge -p <profile> channel`, start from it: a
-yes is yours to give there. A `background_stats = true` written in that file against its answers' no doesn't turn the
-read on either: writing its files again puts the no back, says so, and leaves the yes in the copy of the file it
-keeps in `my-studio/backups/`). While that `studio.toml` has a mistake in it, the job goes by the file's own
-`background_stats` lines, wherever they are and however they're written (`Background-Stats`, `background stats`,
-`background_stat`, with `=` or a colon, as `answers.json` has it), and only a yes there is a yes; words in a text
-setting or a comment are never taken for one. A text is one whose quotes are closed, on its own line or, for one of
-several lines (`"""` or `'''`), on any line below; a quote left open, often the very mistake, hides nothing, so a
-`background_stats` line after it, on its line or below, still counts.
+own `CLAUDE.md` and `AGENTS.md`. The hourly background job reads every profile, each in turn (a profile whose first-time
+setup said no to background stats, or whose `my-studio/studio.toml` says `background_stats = false`, is read only while
+it's open; writing its files again from its answers, `reelforge -p <profile> channel --regenerate`, keeps that no, and
+its questions, in its Settings in the profile menu or `reelforge -p <profile> channel`, start from it, as does that
+question for a new profile made from it (**New profile** while it's open): a yes is yours to give there. A
+`background_stats = true` written in that file against its answers' no doesn't turn the read on either: writing its
+files again puts the no back, says so, and leaves the yes in the copy of the file it keeps in `my-studio/backups/`).
+While that `studio.toml` has a mistake in it, the job goes by the file's own `background_stats` lines, wherever they are
+and however they're written (`Background-Stats`, `background stats`, `background_stat`, with `=` or a colon, as
+`answers.json` has it), and only a yes there is a yes; words in a text setting or a comment are never taken for one. A
+text is one whose quotes are closed, on its own line or, for one of several lines (`"""` or `'''`), on any line below; a
+quote left open, often the very mistake, hides nothing, so a `background_stats` line after it, on its line or below,
+still counts.
 
 ## Several windows
 
