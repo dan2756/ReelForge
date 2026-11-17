@@ -330,6 +330,54 @@ export const tests = {
     }
   },
 
+  async "the page reloaded while ReelForge is asked for the press: nothing is clicked, and no word says Post was pressed, or that nothing was posted"({ app, browser, video }) {
+    // ReelForge says yes at once and its answer takes a moment to come back. The person reloads TikTok's page in
+    // that moment: the page that asked is gone, and the reloaded one only watches. Nothing can click for that yes.
+    await switchOn(browser, app, "tiktok")
+    const held = holdPress(app, { decided: true })
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("www.tiktok.com")
+    const job = made.jobs[0]
+    await until(() => `the press request (it is ${job.state} ${job.step})`, () => held.arrived, 30000)
+    await until(() => `ReelForge to say yes (it is ${job.state})`, () => job.state === "posting")
+    const before = (await browser.jobRecord(job.id)).touched
+    await tab.reload()
+    await until("the reloaded page to say hello", async () => (await browser.jobRecord(job.id)).touched > before, 20000)
+    held.release()
+    await until(() => `the job to end (it is ${job.state})`, () => job.state === "unknown", 10000)
+    await until("the page to hear of it", async () => (await note(tab))?.line === "Stopped", 10000)
+    const said = "ReelForge said yes to pressing Post on TikTok after its upload page was left, so Post was not pressed."
+    equal([job.error_code, job.error_message], ["unknown_outcome", said], "ReelForge's row")
+    const kept = await browser.jobRecord(job.id)
+    equal([kept.state, kept.error_message], ["unknown", said], "the extension's own record")
+    ok((await note(tab)).more.startsWith(said), `what the note says (${(await note(tab)).more})`)
+    equal([presses(app).length, await tab.evaluate(() => [fixture.clicks, fixture.trustedClicks])], [1, [0, 0]], "press requests, and presses the page saw")
+  },
+
+  async "the page reloaded while ReelForge is asked for the press, which it then refuses: the page's words say only that Post was not pressed"({ app, browser, video }) {
+    // The switch is on in the browser, but this ReelForge has no assisted post on TikTok yet: it will say no. The
+    // reloaded page can't know the answer, so its words are true either way.
+    await forceOn(browser, app, "tiktok")
+    const held = holdPress(app, { decided: false })
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("www.tiktok.com")
+    const job = made.jobs[0]
+    await until(() => `the press request (it is ${job.state} ${job.step})`, () => held.arrived, 30000)
+    const before = (await browser.jobRecord(job.id)).touched
+    await tab.reload()
+    await until("the reloaded page to say hello", async () => (await browser.jobRecord(job.id)).touched > before, 20000)
+    held.release()
+    await until("the refusal", () => presses(app).some(entry => entry.status === 409))
+    // The reloaded page waits 20 seconds for TikTok's sign that a post went out, then gives up.
+    await until(() => `the job to end (it is ${job.state})`, () => job.state === "failed", 40000)
+    const said = "TikTok's upload page was left while ReelForge was being asked to press Post. Post was not pressed."
+    equal([job.error_code, job.error_message], ["tab_closed", said], "ReelForge's row")
+    equal(await note(tab), { tone: "bad", line: "Stopped", more: said }, "the note")
+    equal(await tab.evaluate(() => [fixture.clicks, fixture.trustedClicks]), [0, 0], "presses the page saw")
+  },
+
   async "ReelForge slow to answer the press (its database busy for six seconds) is waited for, and asked once"({ app, site, browser, video }) {
     await switchOn(browser, app, "tiktok")
     const held = holdPress(app, { decided: false })

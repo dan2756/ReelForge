@@ -494,7 +494,16 @@ async function pressSwitch(platform) {
 export async function tabHello(tabId, url) {
   const held = await jobOfTab(tabId)
   if (!held || !allowedPage(held.platform, url)) return { ok: false }
-  const job = await patchLive(tabId, { touched: Date.now() })
+  const job = await locked(held.id, async () => {
+    const fresh = await getJob(held.id)
+    if (!fresh || !isLive(fresh)) return null
+    const next = { ...fresh, touched: Date.now() }
+    // A page says hello once, when it starts. One that does while the press is being asked for is a new page (the
+    // old one was reloaded, or left): the page that asked is gone, and nothing will click whatever ReelForge says.
+    if (pressOpen(fresh) && !fresh.pressAnswer) next.pressPageGone = true
+    await save(next)
+    return next
+  })
   if (!job) return { ok: false }
   return {
     ok: true,
@@ -653,7 +662,15 @@ async function askPress(job, asked) {
       const now = { ...fresh, state: "posting", step: "press", progress: null, pressedAt: Date.now(), touched: Date.now(), port: job.port, pressAnswer: answer }
       await save(now)
       await remember(now)
-      return { ok: true }
+      if (!fresh.pressPageGone) return { ok: true }
+      // The page that asked is gone (reloaded, or left) and nothing will click for this yes: the post ends now as
+      // "not sure", the one way out ReelForge has for a press it granted, with words that say Post was not pressed.
+      // The page there now hears of it, instead of waiting for a sign that can't come.
+      const why = `ReelForge said yes to pressing Post on ${platformName(job.platform)} after its upload page was left, so Post was not pressed.`
+      const { job: ended } = await record(job.id, { state: "unknown", error_code: "unknown_outcome", error_message: why })
+      await stopTab(ended || now, `${why} ${advice("unknown_outcome", job.platform)}`)
+      await settle()
+      return no("stopped", "This post was stopped.", { stopped: true })
     }
     // Ended in ReelForge meanwhile (cancelled in its window, say), which is why it said no. Its ending is taken here
     // now, not at the next look up to half a minute away, and the page hears of it before this answer: it must not
