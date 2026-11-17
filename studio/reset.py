@@ -382,7 +382,8 @@ def factory_reset(say=print) -> Done:
         if job_was_on and not moved:
             _stats_on_again()
         if moved:
-            _readme(dest, [(src, what) for src, what in items if any(src == m for m, _ in moved)], stopped=True)
+            _readme(dest, [(src, what) for src, what in items if any(src == m for m, _ in moved)], stopped=True,
+                    read_was_on=job_was_on)
         try:
             BACKUPS.rmdir()   # when this made it for the backup, and it's empty again
         except OSError:
@@ -394,7 +395,8 @@ def factory_reset(say=print) -> Done:
         except OSError:
             pass
         if moved:   # some of it couldn't be put back: the read stays off, as above
-            _readme(dest, [(src, what) for src, what in items if any(src == m for m, _ in moved)], stopped=True)
+            _readme(dest, [(src, what) for src, what in items if any(src == m for m, _ in moved)], stopped=True,
+                    read_was_on=job_was_on)
             if job_was_on:
                 done.problems.append("the hourly stats read stays off until those are back: reelforge stats on turns "
                                      "it on again")
@@ -418,9 +420,10 @@ def factory_reset(say=print) -> Done:
     return done
 
 
-def _readme(dest: Path, items: list[tuple[Path, str]], stopped: bool = False) -> None:
+def _readme(dest: Path, items: list[tuple[Path, str]], stopped: bool = False, read_was_on: bool = False) -> None:
     """The backup's README.txt: what is in it, and how to undo the reset. stopped: the reset was stopped part way,
-    and these are what couldn't be put back."""
+    and these are what couldn't be put back. read_was_on: the hourly stats read was on before the reset (which left
+    it off): only then does undoing it turn the read on again, never one you had off."""
     if not dest.is_dir():
         return
     head = (f"{KIT_NAME}'s factory reset was stopped part way on {datetime.now():%d %B %Y at %H:%M}, and couldn't "
@@ -430,7 +433,8 @@ def _readme(dest: Path, items: list[tuple[Path, str]], stopped: bool = False) ->
         (dest / "README.txt").write_text(
             head + "\n\n" + "".join(f"  {p.relative_to(ROOT)}  ({what})\n" for p, what in items)
             + f"\nTo undo it, close {KIT_NAME} and move them back into the {KIT_NAME} folder, to the same places.\n"
-            + ("Then turn the hourly stats read on again with: reelforge stats on\n" if stopped else
+            + (("Then turn the hourly stats read on again with: reelforge stats on\n" if read_was_on else "")
+               if stopped else
                "The log-ins in dashboard/data/browser are your own: delete this folder once you're sure you don't "
                "need it.\n"), encoding="utf-8")
     except OSError:

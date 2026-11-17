@@ -312,6 +312,43 @@ class FactoryReset(ResetScratch):
         [backup] = (self.root / "backups").iterdir()
         self.assertIn("stopped part way", (backup / "README.txt").read_text(encoding="utf-8"))
 
+    def test_one_stopped_part_way_with_the_hourly_read_off_never_says_to_turn_it_on(self):
+        """The backup's README said "Then turn the hourly stats read on again with: reelforge stats on" whether the
+        read had been on or not: undoing the reset as it said turned on a read of your stats you had off."""
+        first = reset.reset_items()[0][0]
+        for stop in ("Ctrl+C", "a file in use"):
+            with self.subTest(stop=stop):
+                tries = []
+
+                def move(src, dst, wait=10):
+                    tries.append(src)
+                    if len(tries) == 1:
+                        return REAL_MOVE(src, dst, wait=0)
+                    if len(tries) == 2 and stop == "Ctrl+C":
+                        raise KeyboardInterrupt
+                    return "in use"     # the next item, or the first on its way back
+
+                asked, done = [], None
+                with mock.patch("studio.stats_schedule.status", return_value="off"), \
+                        mock.patch("studio.stats_schedule.disable", lambda: asked.append("off") or "off"), \
+                        mock.patch("studio.stats_schedule.enable", lambda: asked.append("on") or "on"), \
+                        mock.patch.object(reset, "_wait_for_reads", lambda say: None), \
+                        mock.patch.object(reset, "_move", move):
+                    try:
+                        done = self.quiet(reset.factory_reset)
+                    except KeyboardInterrupt:
+                        pass
+                [backup] = (self.root / "backups").iterdir()
+                readme = (backup / "README.txt").read_text(encoding="utf-8")
+                shutil.move(str(backup / first.relative_to(self.root)), str(first))   # as it was, for the next
+                shutil.rmtree(self.root / "backups")
+                self.assertEqual(asked, [])                 # off it was, and off it stays, with nothing said of it
+                if done is not None:
+                    self.assertFalse([p for p in done.problems if "hourly" in p], done.problems)
+                self.assertIn("factory reset was stopped part way on ", readme)
+                self.assertIn(f"  {first.relative_to(self.root)}  (", readme)
+                self.assertNotIn("stats", readme)
+
     def test_backups_being_a_file_is_said_as_it_is_before_anything_changes(self):
         """It was found item by item, after ten seconds of trying, and said to be the first item "in use", with
         closing the other windows as what to do (and the hourly read was taken off and put back meanwhile)."""
