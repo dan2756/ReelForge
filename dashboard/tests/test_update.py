@@ -153,14 +153,14 @@ class InstallTest(unittest.TestCase):
                  **{f"assets/sfx/{rel}": "a sound" for rel in files_here}}
         if record is not None:
             files[update.KIT_SOUNDS] = json.dumps(record, indent=2)
-        for rel, text in files.items():
-            (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
-            (self.root / rel).write_text(text, encoding="utf-8")
+        for rel, text in files.items():   # as these bytes on every system (text mode writes \r\n on Windows), so that a
+            (self.root / rel).parent.mkdir(parents=True, exist_ok=True)   # copy of yours is compared with what it was
+            (self.root / rel).write_bytes(text.encode("utf-8"))
         new = self.dir / "ReelForge-1.1.0"
         for rel, text in {"studio/__init__.py": 'KIT_VERSION = "1.1.0"\n', "requirements.txt": "rich\n",
                           update.SOUNDS: json.dumps(kit, indent=2)}.items():
             (new / rel).parent.mkdir(parents=True, exist_ok=True)
-            (new / rel).write_text(text, encoding="utf-8")
+            (new / rel).write_bytes(text.encode("utf-8"))
         with mock.patch.object(update, "ROOT", new), mock.patch.object(update, "_after"):
             said = update.move_in(self.root)
         if recorded:
