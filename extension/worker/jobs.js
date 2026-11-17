@@ -80,7 +80,7 @@ function ledger(change) {
 function remember(job) {
   return ledger(all => {
     if (isLive(job)) {
-      all[job.id] = { port: job.port, app_id: job.app_id, profile_key: job.profile_key, platform: job.platform, state: job.state, step: job.step, pressed: job.pressedByPerson === true, at: Date.now() }
+      all[job.id] = { port: job.port, app_id: job.app_id, profile_key: job.profile_key, platform: job.platform, state: job.state, step: job.step, pressed: job.pressedByPerson === true, asked: pressOpen(job), at: Date.now() }
     } else {
       delete all[job.id]
     }
@@ -96,9 +96,13 @@ export async function orphans() {
     if (await getJob(id)) continue
     const p = platformName(entry.platform)
     const pressed = entry.state === "posting" || entry.pressed
+    // Closed while ReelForge was being asked for the press: it may have said yes, which makes this "not sure"
+    // there, so the words don't say nothing was posted. (Nothing was pressed: the tab was told no answer yet.)
+    const why = entry.asked ? `The browser was closed, or the extension reloaded, while ReelForge was being asked to press Post on ${p}. Post was not pressed.`
+      : `The browser was closed, or the extension reloaded, ${entry.state === "ready" ? "before Post was pressed" : "before the post was ready"}. Nothing was posted.`
     const body = pressed
       ? { install, state: "unknown", error_code: "unknown_outcome", error_message: `The browser was closed after Post was pressed on ${p}, before any confirmation. Check your profile before you post again.` }
-      : { install, state: "failed", error_code: "tab_closed", error_message: `The browser was closed, or the extension reloaded, ${entry.state === "ready" ? "before Post was pressed" : "before the post was ready"}. Nothing was posted.` }
+      : { install, state: "failed", error_code: "tab_closed", error_message: why }
     // The step the job had reached when this was last written down (it is kept at each change of state).
     if (entry.step) body.step = entry.step
     try {
@@ -559,7 +563,9 @@ export async function tabPress(tabId) {
     if (!fresh || fresh.state !== "ready") return "over"
     if (fresh.pressedByPerson) return "theirs"
     if (fresh.pressAsked) return fresh.pressAnswer || "asked"
-    await save({ ...fresh, pressAsked: true })
+    const asked = { ...fresh, pressAsked: true }
+    await save(asked)
+    await remember(asked)
     return "first"
   })
   if (first === "over") return no("stopped", "This post was stopped.", { stopped: true })
@@ -623,7 +629,9 @@ async function askPress(job, asked) {
       await remember(now)
       return { ok: true }
     }
-    await save({ ...fresh, port: job.port, pressAnswer: answer })
+    const now = { ...fresh, port: job.port, pressAnswer: answer }
+    await save(now)
+    await remember(now)
     if (lost) return no("press_lost", LOST)
     if (!res) return no("app_unreachable", "ReelForge is not running, so it could not allow the press.")
     // ReelForge has Post as pressed for this one, and nothing was clicked here (the person's own press is seen

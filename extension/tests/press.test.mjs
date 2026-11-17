@@ -1,6 +1,6 @@
 // Press Post for me: only with the person's switch, the post's own setting, their yes for this batch in this
 // browser and the app's grant, once, never on X.
-import { equal, ok, until, sleep, note, quickSelectors } from "./harness.mjs"
+import { equal, ok, until, sleep, note, quickSelectors, launch } from "./harness.mjs"
 import { toReady } from "./posting.test.mjs"
 
 const presses = app => app.requests("POST", /\/press$/)
@@ -228,6 +228,28 @@ export const tests = {
     // Not "press Post" as if nothing had been pressed: ReelForge has it as pressed, so the person looks first.
     const said = await note(tab)
     equal([said.line, said.more], ["Look at your profile first", `ReelForge has Post as pressed for this one already, though nothing was clicked here. Look at your TikTok profile before you press it.${LOOK}`], "the note")
+  },
+
+  async "the browser closed while ReelForge is asked for the press: its ending never says nothing was posted"({ app, site, browser, video }) {
+    // ReelForge says yes, and the browser is closed before its answer arrives. Nothing was pressed, but ReelForge
+    // has the press as given, so the post is "not sure" there, and its words say Post was not pressed.
+    await switchOn(browser, app, "tiktok")
+    const held = holdPress(app, { decided: true })
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const job = made.jobs[0]
+    await until(() => `the press request (it is ${job.state} ${job.step})`, () => held.arrived, 30000)
+    await until(() => `ReelForge to say yes (it is ${job.state})`, () => job.state === "posting")
+    await browser.close(true)
+    held.release()
+    const again = await launch(site, browser.profile)
+    try {
+      await until(() => `the job to be ended (it is ${job.state})`, () => job.state === "unknown", 20000)
+      equal(job.error_message, "The browser was closed, or the extension reloaded, while ReelForge was being asked to press Post on TikTok. Post was not pressed.", "its ending")
+      equal(presses(app).length, 1, "press requests")
+    } finally {
+      await again.close()
+    }
   },
 
   async "ReelForge slow to answer the press (its database busy for six seconds) is waited for, and asked once"({ app, site, browser, video }) {

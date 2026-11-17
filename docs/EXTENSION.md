@@ -257,7 +257,7 @@ button whatever the first try was to do, and nothing is ever tried again by itse
 | `challenge` | The platform is asking you to prove it's you | Do what it asks in the tab. Then post again, or finish by hand there |
 | `platform_error` | The platform showed an error of its own | Read it in the tab. You can finish by hand there |
 | `timeout` | Nothing happened in time | The tab is still open. Finish by hand there |
-| `tab_closed` | The tab was closed, or left the platform, before Post was pressed | Post again when you are ready |
+| `tab_closed` | The tab was closed, or left the platform, before Post was pressed | Post again when you are ready. If it happened while the extension was asking ReelForge for the press, and ReelForge had said yes, the post is "not sure it posted" instead: check your profile, then answer on its row |
 | `press_rejected` | The extension pressed Post, and saw no reaction and no sign that it posted. The post is "not sure it posted", not failed | Check your profile on the platform. Then press **It's posted** or **It didn't post** on its row |
 | `changed` | The video file was replaced after you pressed Post in ReelForge | Check the video in ReelForge, then post again |
 | `unknown_outcome` | ReelForge cannot tell whether it posted | Check your profile on the platform. Then press **It's posted** or **It didn't post** on its row |
