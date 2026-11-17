@@ -77,6 +77,34 @@ class PartWayTest(unittest.TestCase):
         self.assertEqual(update.read_version(self.root), "1.1.0")
         self.assertEqual((self.root / "dashboard" / "service.py").read_text(encoding="utf-8"), "new")
 
+    def test_what_an_update_says_about_your_sounds_is_still_said_when_it_stopped_at_a_busy_file(self):
+        """Your list of sounds went in before the update stopped at a busy file, and what it had to say of it (a
+        sound of yours replaced, and where the copy of your list is) went with the attempt. Updating again, as the
+        message asks, found your list done already and had nothing to say either."""
+        import json
+
+        old = {"sounds": {"pop": {"file": "kenney/pop.ogg", "id": 1}}}
+        new_kit = {"sounds": {"pop": {"file": "kenney/pop2.ogg", "id": 2}, "whoosh": {"file": "mixkit/w.wav"}}}
+        mine = {"sounds": {**old["sounds"], "whoosh": {"file": "pixabay/my_whoosh.ogg"}}}   # and no record yet
+        self.kit("1.0.0", self.root, **{update.SOUNDS: json.dumps(mine), "bin/launcher": "old",
+                                        "requirements.txt": "a\n"})
+        new = self.kit("1.1.0", self.dir / "new", **{update.SOUNDS: json.dumps(new_kit), "bin/launcher": "new",
+                                                    "requirements.txt": "a\n"})
+        with self.busy("launcher"), self.assertRaises(update.UpdateError) as stopped:
+            update._copy_tree(new, self.root, lambda *a: None)
+        [copy] = (self.root / "backups").glob("sounds-before-update-*.json")
+        said = ('The new version\'s own sounds "pop" and "whoosh" took the place of what your assets/sfx/manifest.json '
+                f"had by those names. If any of it was yours, your list as it was is in backups/{copy.name}.")
+        self.assertTrue(str(stopped.exception).endswith(f"then update again to finish. {said}"), stopped.exception)
+        self.assertEqual(json.loads((self.root / update.SOUNDS).read_text(encoding="utf-8")), new_kit)
+        with mock.patch.object(update, "ROOT", new), mock.patch.object(update, "_after", return_value=[]):
+            summary = update.move_in(self.root)                      # update again: it finishes, and says it
+        self.assertEqual(summary, f"Updated ReelForge from 1.0.0 to 1.1.0. {said}")
+        self.assertEqual(update.take_marker(self.root)["notes"], [said])   # and so does the restarted window
+        self.assertFalse((self.root / update.UPDATE_NOTES).exists())
+        with mock.patch.object(update, "ROOT", new), mock.patch.object(update, "_after", return_value=[]):
+            self.assertEqual(update.move_in(self.root), "Updated ReelForge from 1.1.0 to 1.1.0.")   # said once
+
     def test_a_file_thats_busy_for_a_moment_is_waited_for(self):
         self.kit("1.0.0", self.root, **{"README.md": "old"})
         new = self.kit("1.1.0", self.dir / "new", **{"README.md": "new"})

@@ -65,6 +65,9 @@ VERSION_FILE = "studio/__init__.py"  # names this copy's version (read_version):
 # There from the first new file an update puts in place until its last: this folder is part old and part new. What a
 # later attempt says goes by it, since that attempt may stop without replacing a file itself.
 PART_WAY = "dashboard/data/update-part-way"
+# What an attempt that stopped at a busy file had to say about your sounds, for the attempt that finishes to say again:
+# by then your list is the merged one, and the later attempt finds nothing to say of it itself.
+UPDATE_NOTES = "dashboard/data/update-notes.json"
 BUSY_WAIT = 10.0  # seconds an update waits for a file another program has open (a virus scanner, another window)
 
 Progress = Callable[[str, int, int], None]  # (what's happening, done, total); total 0 = no idea how long
@@ -227,6 +230,7 @@ def _finish(root: Path, requirements_before: str, old: str, new: str, progress: 
     installed = _packages(root, requirements_before, progress)
     notes = [*notes, *_after(root, requirements_before, progress, log)]
     _write_marker(root, old, new, notes)
+    _drop(root / UPDATE_NOTES)  # said now, in the summary and the note: an earlier attempt's need keeping no longer
     if not installed:
         how = ("Close ReelForge and open it again: setup starts and installs them." if _stamp(root).exists() else
                f"Install them with: {_venv_python(root)} -m pip install -r requirements.txt")   # no .venv to repair
@@ -535,6 +539,8 @@ def _copy_tree(src: Path, root: Path, progress: Progress) -> list[str]:
         raise UpdateError("The download doesn't look like ReelForge; nothing was changed.")
     files = sorted((p for p in src.rglob("*") if p.is_file()), key=lambda p: p == src / VERSION_FILE)
     busy, changed, part_way, notes = [], 0, root / PART_WAY, []
+    earlier = _json(root / UPDATE_NOTES)       # an earlier attempt's, which stopped at a busy file
+    earlier = [line for line in earlier if isinstance(line, str) and line] if isinstance(earlier, list) else []
     for i, f in enumerate(files, 1):
         rel = f.relative_to(src).as_posix()
         progress("Copying the new files", i, len(files))
@@ -578,18 +584,35 @@ def _copy_tree(src: Path, root: Path, progress: Progress) -> list[str]:
         except OSError:
             busy.append(rel)
             _drop(tmp)
+    notes = list(dict.fromkeys([*earlier, *notes]))     # each once: a later attempt may say the same again
     if busy:
         # New files an earlier attempt put in count too: updating again, as the message asks, can stop at the same
         # busy file without replacing anything, and "Nothing was changed" would then be said of a mixed folder.
         partial = bool(changed) or part_way.exists()
         names = f"{', '.join(busy[:3])}{'…' if len(busy) > 3 else ''}"
+        _keep_notes(root, notes)    # said now, and again by the attempt that finishes
         raise UpdateError(
             f"{len(busy)} of the new files couldn't be put in place ({names}): another program has them open, or the "
             "disk is full. " + ("The other new files are in, and this copy still counts as the version you had. "
                                 if partial else "Nothing was changed. ") +
-            "Close other ReelForge windows, then update again to finish.", partial=partial)
+            "Close other ReelForge windows, then update again to finish." + "".join(f" {n}" for n in notes),
+            partial=partial)
     _drop(part_way)
     return notes
+
+
+def _keep_notes(root: Path, notes: list[str]) -> None:
+    """What this attempt had to say, for the one that finishes (UPDATE_NOTES). Nowhere to keep it: it was said once,
+    in the message the attempt stopped with."""
+    path = root / UPDATE_NOTES
+    try:
+        if notes:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(notes, ensure_ascii=False), encoding="utf-8")
+        else:
+            path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _note_part_way(part_way: Path) -> None:

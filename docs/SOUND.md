@@ -78,6 +78,9 @@ The one exception is the update away from ReelForge 2.2.1, which 2.2.1's own upd
 yours. Your sound files stay where they are, so add their entries again after that update, or keep a copy of your
 `manifest.json` before it.
 
+An update that stops at a file another program has open says all this in its message, and again when you update
+again and it finishes.
+
 A `manifest.json` that can't be read (a comma after the last entry you added, say: every mix stops on it) is copied to
 `backups/sounds-before-update-<date>.json` too, and the new list takes its place; the update says so and names the
 copy, so you can bring your own entries over from it. Where that copy can't be made, yours stays as it was, without
