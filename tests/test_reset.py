@@ -224,6 +224,52 @@ class FactoryReset(ResetScratch):
         self.assertEqual(sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob("*")), before)
         self.assertEqual(asked, ["off", "wait", "on"])   # nothing was reset: the read is back on
 
+    def test_a_ctrl_c_anywhere_in_the_moves_leaves_nothing_moved_unrecorded(self):
+        """Ctrl+C lands between any two steps. Between the end of a move and its being recorded, the folder it had
+        moved was neither put back nor in what the reset goes by: no README, and the hourly read back on over a
+        half-reset folder."""
+        import inspect
+        import sys
+
+        code = reset._move_all.__code__
+        lines, first = inspect.getsourcelines(reset._move_all)
+        start = first + next(i for i, ln in enumerate(lines) if ln.strip() == "try:")
+        stop = first + next(i for i, ln in enumerate(lines) if ln.strip().startswith("except BaseException"))
+        n = 0
+        while True:     # the n-th step of the moves (not of putting things back) is where Ctrl+C lands
+            n += 1
+            folder = self.root / f"try-{n}"
+            a, b = folder / "my-studio", folder / "research.md"
+            a.mkdir(parents=True)
+            (a / "answers.json").write_text("{}", encoding="utf-8")
+            b.write_text("notes", encoding="utf-8")
+            dest = folder / "backups" / "factory-reset-x"
+            moves, moved, seen = [(a, dest / "my-studio"), (b, dest / "research.md")], [], [0]
+
+            def local(frame, event, arg):
+                if event == "line" and start < frame.f_lineno < stop:
+                    seen[0] += 1
+                    if seen[0] == n:
+                        raise KeyboardInterrupt
+                return local
+
+            before = sys.gettrace()
+            sys.settrace(lambda frame, event, arg: local if frame.f_code is code else None)
+            try:
+                reset._move_all(moves, dest, moved)
+                stopped = False
+            except KeyboardInterrupt:
+                stopped = True
+            finally:
+                sys.settrace(before)
+            for src, dst in moves:      # each one where it was, or in what the reset goes by
+                self.assertEqual((src, dst) in moved, not os.path.lexists(src), (n, src, moved))
+                self.assertEqual(os.path.lexists(dst), not os.path.lexists(src), (n, src))
+            self.assertEqual(len(moved), len(set(moved)), moved)
+            if not stopped:             # every step has had its Ctrl+C
+                break
+        self.assertGreater(n, 6)
+
     def test_one_stopped_part_way_that_cant_put_everything_back_leaves_the_hourly_read_off_and_says_why(self):
         asked, tries = [], []
         first = reset.reset_items()[0][0]

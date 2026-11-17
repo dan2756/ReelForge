@@ -168,14 +168,15 @@ def _move_all(moves: list[tuple[Path, Path]], made: Path,
         for src, dst in moves:
             current = (src, dst)
             err = _move(src, dst)
-            current = None
             if err is None:
-                done.append((src, dst))
+                done.append((src, dst))     # recorded before it stops being current: a stop between the two
+                current = None              # still finds it in one or the other
                 continue
+            current = None
             problems = [f"{P.rel(src)} is in use ({err})", *_put_back(done, made)]
             return problems, len(problems) == 1
     except BaseException:
-        if current and not os.path.lexists(current[0]) and os.path.lexists(current[1]):
+        if current and current not in done and not os.path.lexists(current[0]) and os.path.lexists(current[1]):
             done.append(current)   # stopped just as that one moved
         _put_back(done, made)
         raise
