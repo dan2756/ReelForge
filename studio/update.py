@@ -406,18 +406,19 @@ def _read_list(path: Path) -> tuple[object, str]:
     return (data, "") if isinstance(data, dict) else (None, "it isn't a list of sounds like the kit's")
 
 
-def _with_your_sounds(new: Path, yours: Path, root: Path) -> tuple[bytes | None, list[str], bool]:
+def _with_your_sounds(new: Path, yours: Path, root: Path) -> tuple[bytes | None, list[str], bool, object]:
     """The kit's new list of sounds (new) with what is yours in the one in place (yours), and what to say about it.
     Yours: a sound, a licence note or any other key the new list lacks, and one it has by the same name that you
     added or changed, which the kit's list as it was (KIT_SOUNDS) tells from the kit's own. Yours stays and is
     named: a cue sheet of yours that uses it goes on mixing your sound, and nothing is lost. With no record of the
     kit's list as it was (the first update that keeps one), the new list's entry goes in, after a copy of your list
     is kept in backups/, and the entries it replaced are named. None for the list: there is nothing of yours to carry
-    over, or yours can't be read and a copy of it is in backups/, so the new file goes in as it is. Last, whether
-    yours stays as it is instead (it can't be read, and no copy of it could be kept)."""
+    over, or yours can't be read and a copy of it is in backups/, so the new file goes in as it is.
+    Then whether yours stays as it is instead (it can't be read, and no copy of it could be kept). Last, the record of
+    the kit's list to keep for the next update (_note_kit_sounds): None for the new list as it is."""
     theirs, was = _json(new), _json(root / KIT_SOUNDS)
     if not isinstance(theirs, dict):
-        return None, [], False
+        return None, [], False, None
     mine, why = _read_list(yours)
     if mine is None:
         # A comma after the last entry you added, say: every mix stops on it already, and the new list in its place
@@ -428,12 +429,13 @@ def _with_your_sounds(new: Path, yours: Path, root: Path) -> tuple[bytes | None,
         except OSError:
             return None, [f"Your {SOUNDS} can't be read ({why}), and ReelForge couldn't keep a copy of it in backups/, "
                           "so it's left as it was, and the new version's sounds aren't in it yet (the next update "
-                          "brings them). Put the mistake right in a text editor: every mix stops on it until then."], True
+                          "brings them). Put the mistake right in a text editor: every mix stops on it until then."], \
+                True, None
         return None, [f"Your {SOUNDS} couldn't be read ({why}), so the new version's list took its place. Your list "
-                      f"as it was is in {backup}: copy your own entries from there into the new one."], False
+                      f"as it was is in {backup}: copy your own entries from there into the new one."], False, None
     was = was if isinstance(was, dict) else None
     out, kept, replaced = _merge_sounds(theirs, mine, was, keep_unknown=False)
-    notes, backup = [], ""
+    notes, backup, record = [], "", None
     if replaced:
         try:
             backup = _backup_sounds(yours, root)
@@ -445,6 +447,10 @@ def _with_your_sounds(new: Path, yours: Path, root: Path) -> tuple[bytes | None,
                 notes.append(f"Your {SOUNDS} keeps what it had for {_named(unsure)}, though the new version has its "
                              f"own by {'that name' if one else 'those names'}: ReelForge couldn't keep a copy of your "
                              "list in backups/ before replacing any.")
+                # Not told from yours this time, so no record of the kit's list goes in either: kept now, the
+                # entries held here would be the same as nothing in it and count as yours for good. The next
+                # update asks again, and keeps a copy of your list then.
+                record = False
     if kept:
         one = len(kept) == 1
         notes.append(f"Your own {_named(kept)} in {SOUNDS} {'is' if one else 'are'} kept: the new version has "
@@ -458,12 +464,15 @@ def _with_your_sounds(new: Path, yours: Path, root: Path) -> tuple[bytes | None,
                      (f"If any of it was yours, your list as it was is in {backup}." if backup else
                       "ReelForge couldn't keep a copy of your list in backups/ first."))
     text = None if out == theirs else json.dumps(out, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
-    return text, notes, False
+    return text, notes, False, record
 
 
-def _note_kit_sounds(new: Path, root: Path) -> None:
-    """The kit's list as it is put in place, for the next update to tell your entries from the kit's own. Not kept
-    (a full disk): the next update keeps a copy of yours in backups/ before it replaces any."""
+def _note_kit_sounds(new: Path, root: Path, record=None) -> None:
+    """The kit's list as it is put in place, for the next update to tell your entries from the kit's own (record:
+    False for none this time, see _with_your_sounds). Not kept (a full disk): the next update keeps a copy of yours
+    in backups/ before it replaces any."""
+    if record is False:
+        return
     try:
         data = new.read_bytes()
         record = root / KIT_SOUNDS
@@ -494,8 +503,8 @@ def _copy_tree(src: Path, root: Path, progress: Progress) -> list[str]:
             continue
         tmp = dest.with_name(dest.name + ".rf-new")
         try:
-            merged, said, as_is = (_with_your_sounds(f, dest, root) if rel == SOUNDS and dest.exists() else
-                                   (None, [], False))
+            merged, said, as_is, record = (_with_your_sounds(f, dest, root) if rel == SOUNDS and dest.exists() else
+                                           (None, [], False, None))
             if as_is:   # yours, which can't be read, and no copy of it could be kept: it stays, and the kit's list
                 _drop(tmp)          # as it was stays the record of it
                 notes += said
@@ -506,7 +515,7 @@ def _copy_tree(src: Path, root: Path, progress: Progress) -> list[str]:
                     os.chmod(dest, 0o755)   # an earlier update left it unrunnable
                 _drop(tmp)                  # what an earlier update that stopped at this file left beside it
                 if rel == SOUNDS:
-                    _note_kit_sounds(f, root)
+                    _note_kit_sounds(f, root, record)
                     notes += said
                 continue  # unchanged (this also leaves a running launcher alone)
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -520,7 +529,7 @@ def _copy_tree(src: Path, root: Path, progress: Progress) -> list[str]:
             # one; once a file has stayed busy the update can't finish this time, and the rest aren't waited for.
             _replace(tmp, dest, wait=0 if busy else BUSY_WAIT)
             if rel == SOUNDS:   # (only once the list is in: a record of the new one beside your old one would take
-                _note_kit_sounds(f, root)   # the old kit's entries in it for yours at the next attempt)
+                _note_kit_sounds(f, root, record)   # the old kit's entries in it for yours at the next attempt)
                 notes += said
             changed += 1
             if changed == 1:
