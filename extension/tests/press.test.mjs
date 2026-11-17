@@ -44,6 +44,38 @@ function holdPress(app, { decided }) {
   return held
 }
 
+// Holds ReelForge's answer to the job's first report of each state named (ReelForge has taken the report), until the
+// test lets it go: a ReelForge whose database is busy. (Held for less than the five seconds the extension waits.)
+function holdReports(app, job, states) {
+  const handle = app.handle.bind(app)
+  const held = {}
+  for (const state of states) {
+    held[state] = { arrived: false }
+    held[state].gate = new Promise(resolve => (held[state].release = resolve))
+  }
+  app.handle = async (request, response) => {
+    if (request.method === "POST" && request.url === `/v1/jobs/${job.id}/event`) {
+      const end = response.end.bind(response)
+      response.end = (...args) => {
+        const one = held[job.state]
+        if (!one || one.arrived) return end(...args)
+        one.arrived = true
+        one.gate.then(() => end(...args))
+        return response
+      }
+    }
+    return handle(request, response)
+  }
+  return held
+}
+
+// Every ring Post is given on the page from now on, kept in the page as window.rings.
+const watchRings = tab => tab.evaluate(() => {
+  const button = document.querySelector("[data-e2e=post_video_button]")
+  window.rings = []
+  new MutationObserver(() => window.rings.push(button.style.getPropertyValue("outline"))).observe(button, { attributes: true, attributeFilter: ["style"] })
+})
+
 // ReelForge takes the press request and decides it, and its answer is cut off on the way back: the browser gets the
 // start of it, then the connection goes dead. (Cut before anything of the answer went, the browser itself would send
 // the request again, on its own.) `batch`: from the press on, ReelForge can't be asked about the batch either.
@@ -455,6 +487,37 @@ export const tests = {
     equal(await tab.evaluate(() => [fixture.clicks, fixture.trustedClicks]), [0, 0], "presses the page saw")
     equal(await note(tab), { tone: "bad", line: "Stopped", more: "You stopped this post. Nothing was posted by ReelForge." }, "the note")
     equal(await tab.evaluate(() => document.querySelector("[data-e2e=post_video_button]").style.getPropertyValue("outline")), "", "the ring round Post")
+    ok(!job.events.some(event => String(event.detail).startsWith("Not pressed")), `what the app was told (${job.events.map(event => event.detail)})`)
+    equal([job.state, (await browser.jobRecord(job.id)).state], ["cancelled", "cancelled"], "the job, in ReelForge and here")
+  },
+
+  async "Stop in the popup while the page's ready is on its way to ReelForge, with ReelForge slow to take the stop: Post is not ringed, and nobody is asked to press it"({ app, browser, video }) {
+    // The note says "Pressing Post for you" just before the page tells ReelForge it is ready, so a Stop in answer to
+    // it lands while that report is on its way. ReelForge is slow to answer it and the stop alike. By the time the
+    // page asks for the press the post is over here, though ReelForge has not yet answered the stop.
+    await switchOn(browser, app, "tiktok")
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    const job = made.jobs[0]
+    const held = holdReports(app, job, ["ready", "cancelled"])
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("www.tiktok.com")
+    await until(() => `ready at ReelForge (it is ${job.state})`, () => held.ready.arrived, 30000)
+    await watchRings(tab)
+    const popup = await browser.popup()
+    await popup.locator(`[data-job="${job.id}"]`).getByRole("button", { name: "Stop" }).click()
+    await sleep(300)
+    held.ready.release()
+    const lines = []
+    for (const end = Date.now() + 2500; Date.now() < end; await sleep(100)) lines.push((await note(tab))?.line)
+    ok(held.cancelled.arrived, "ReelForge has the stop, and has not answered it yet")
+    ok(!lines.includes("Check it, then press Post"), `the notes while ReelForge takes the stop (${[...new Set(lines)]})`)
+    // The page hears of the stop at once, not when ReelForge has answered it.
+    equal(await note(tab), { tone: "bad", line: "Stopped", more: "You stopped this post." }, "the note before ReelForge answers the stop")
+    held.cancelled.release()
+    await until("the stop's words", async () => (await note(tab)).more !== "You stopped this post.", 10000)
+    equal(await note(tab), { tone: "bad", line: "Stopped", more: "You stopped this post. Nothing was posted by ReelForge." }, "the note")
+    equal(await tab.evaluate(() => [window.rings.filter(Boolean), fixture.clicks, fixture.trustedClicks]), [[], 0, 0], "rings round Post, and presses the page saw")
+    equal(presses(app).length, 0, "press requests")
     ok(!job.events.some(event => String(event.detail).startsWith("Not pressed")), `what the app was told (${job.events.map(event => event.detail)})`)
     equal([job.state, (await browser.jobRecord(job.id)).state], ["cancelled", "cancelled"], "the job, in ReelForge and here")
   },

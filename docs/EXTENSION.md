@@ -99,11 +99,13 @@ the extension clicks nothing, whatever ReelForge answers, and the note says **Yo
 own name) while it waits for the platform. It does not ask you to press again, and ReelForge is not told "not
 pressed".
 
-**Stop** in the extension's popup while it is asking ReelForge for the press wins too: the extension clicks
-nothing, whatever ReelForge answers. When the stop reached ReelForge first, the post is cancelled and nothing was
-posted. When ReelForge had already said yes to the press, it has the post as "not sure it posted", and the note
-and the popup say so, and that Post was not pressed: look at your profile, then answer on its row. Once the
-extension has pressed Post, there is no Stop any more.
+**Stop** in the extension's popup while it is asking ReelForge for the press wins too, and so does one pressed
+just before it asks: the extension clicks nothing, whatever ReelForge answers, and the page does not ask you to
+press Post. The note on the page says **Stopped** at once, even when ReelForge is slow to take the stop. When the
+stop reached ReelForge first, the post is cancelled and nothing was posted. When ReelForge had already said yes to
+the press, it has the post as "not sure it posted", and the note and the popup say so, and that Post was not
+pressed: look at your profile, then answer on its row. Once the extension has pressed Post, there is no Stop any
+more.
 
 The extension asks ReelForge for the press once, and waits up to 20 seconds for the answer (ReelForge may wait up
 to 10 for its database first). It never asks a second time, even when the answer gets lost on the way: then it

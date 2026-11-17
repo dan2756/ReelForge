@@ -41,6 +41,12 @@ async function jobOfTab(tabId) {
   return (await allJobs()).find(job => job.tabId === tabId && isLive(job)) || null
 }
 
+// The job a tab was opened for, live or over (each job has a tab of its own). Null when it is no longer kept here.
+async function jobOfTabEver(tabId) {
+  const all = (await allJobs()).filter(job => job.tabId === tabId)
+  return all.find(isLive) || all.sort((a, b) => b.created - a.created)[0] || null
+}
+
 const save = job => session.set({ [key(job.id)]: job })
 
 // Two events for one job never interleave their read and write, or the later one would undo the earlier.
@@ -549,27 +555,36 @@ const pressing = new Map()
 // The exactly-once press. The app's ledger decides; this side makes sure it is asked at most once per job,
 // even if the worker is restarted between asking and hearing back.
 export async function tabPress(tabId) {
-  const job = await jobOfTab(tabId)
   const no = (error, message, more = {}) => ({ ok: false, error, message, ...more })
-  // The person pressed the platform's button themselves, maybe while the video was still going up, and the page
-  // may not show it yet. A second press would post the video twice: the app is not even asked.
-  if (job?.pressedByPerson) return no("already_pressed", "you pressed it yourself already.")
-  if (!job || job.state !== "ready") return no("not_ready", "This post is not ready to be pressed.")
-  if (!job.press || !(await pressSwitch(job.platform))) return no("press_not_allowed", "Press Post for me is off for this post.")
-  if (!(await pressSaid(job.batch))) return no("press_not_allowed", "nobody said yes to it for this post in this browser.")
-  // Asked once: what is kept here says so before the request goes. (A Stop that came first has ended the job.)
+  const stopped = () => no("stopped", "This post was stopped.", { stopped: true })
+  // Only a job's own page asks, after its hello said whose it is. A job that is over by now, or no longer kept here,
+  // was ended meanwhile: stopped in the popup (maybe while this page's "ready" was on its way, the stop then waiting
+  // on ReelForge's answer before the page hears of it), ended in ReelForge, or by the worker. Nothing is clicked for
+  // it, and its page does not ask the person to press Post: that post would go up with ReelForge calling it over.
+  const job = await jobOfTabEver(tabId)
+  if (!job || !isLive(job)) return stopped()
+  // Everything is looked at under the job's lock, after any change on its way: a Stop that comes first ends the job.
   const first = await locked(job.id, async () => {
     const fresh = await getJob(job.id)
-    if (!fresh || fresh.state !== "ready") return "over"
+    if (!fresh || !isLive(fresh)) return "over"
+    // The person pressed the platform's button themselves, maybe while the video was still going up, and the page
+    // may not show it yet. A second press would post the video twice: the app is not even asked.
     if (fresh.pressedByPerson) return "theirs"
+    if (fresh.state !== "ready") return "not_ready"
+    if (!fresh.press || !(await pressSwitch(fresh.platform))) return "off"
+    if (!(await pressSaid(fresh.batch))) return "unsaid"
+    // Asked once: what is kept here says so before the request goes.
     if (fresh.pressAsked) return fresh.pressAnswer || "asked"
     const asked = { ...fresh, pressAsked: true }
     await save(asked)
     await remember(asked)
     return "first"
   })
-  if (first === "over") return no("stopped", "This post was stopped.", { stopped: true })
+  if (first === "over") return stopped()
   if (first === "theirs") return no("already_pressed", "you pressed it yourself already.")
+  if (first === "not_ready") return no("not_ready", "This post is not ready to be pressed.")
+  if (first === "off") return no("press_not_allowed", "Press Post for me is off for this post.")
+  if (first === "unsaid") return no("press_not_allowed", "nobody said yes to it for this post in this browser.")
   if (first === "refused") return no("press_not_allowed", "ReelForge did not allow the press.")
   if (first === "lost") return no("press_lost", LOST)
   if (first === "asked" && pressing.has(job.id)) return pressing.get(job.id)
@@ -865,6 +880,9 @@ async function stopping(id) {
   const job = await getJob(id)
   if (!job || isFinal(job.state)) return { ok: false }
   if (wasPressed(job)) return { ok: false, message: "Post was already pressed for this one, so it can't be stopped. Look at its tab." }
+  // The job is over here from now on, whatever ReelForge answers. Its page hears so at once, not after ReelForge's
+  // answer, which can take seconds: until then it would go on saying Post is about to be pressed, or ringing it.
+  await stopTab(job, "You stopped this post.")
   const p = platformName(job.platform)
   const check = advice("unknown_outcome", job.platform)
   const words = {

@@ -85,7 +85,9 @@ If you still want it, it takes all of these:
 - ReelForge grants the press, once per post. The extension asks once and never again, even when the answer gets
   lost on the way: then it presses only if ReelForge's record of the post says the press was given, and otherwise
   clicks nothing and says so in its note;
-- you have not pressed **Stop** in the popup while ReelForge was being asked. A Stop then wins: nothing is clicked;
+- you have not pressed **Stop** in the popup while ReelForge was being asked, or just before. A Stop then wins:
+  nothing is clicked, Post is not ringed, and the note on the page says **Stopped** at once, before ReelForge has
+  taken the stop;
 - you have not pressed the button yourself already. Your own press, even one made while the video is still going
   up or while ReelForge is being asked for the press, is the post's press: the extension then clicks nothing, and
   ReelForge would refuse another.
