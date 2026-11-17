@@ -5,6 +5,9 @@ import { toReady } from "./posting.test.mjs"
 
 const presses = app => app.requests("POST", /\/press$/)
 
+// What every note before Post says on TikTok, whose upload page does not show which account it is on.
+const LOOK = " ReelForge has @fixtureuser for this channel, and could not check the account here: look at which one this tab is on."
+
 // Switches "Press Post for me" on for a platform the way a person does: on the options page, once the app
 // says one assisted post there went through.
 async function switchOn(browser, app, platform) {
@@ -170,6 +173,22 @@ export const tests = {
     ok(job.events.some(event => event.detail === "Not pressed: Press Post yourself: ReelForge isn't allowed to for this post."), `the app is told it was not pressed, and why (${job.events.map(event => event.detail)})`)
   },
 
+  async "on a page that does not show its account, the note says to look, while ReelForge is asked for the press and after it says no"({ app, site, browser, video }) {
+    // The switch is on in the browser, but this ReelForge has no assisted post on TikTok yet: it will say no.
+    await forceOn(browser, app, "tiktok")
+    const held = holdPress(app, { decided: false })
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("www.tiktok.com")
+    const job = made.jobs[0]
+    await until(() => `the press request (it is ${job.state} ${job.step})`, () => held.arrived, 30000)
+    equal(await note(tab), { tone: "work", line: "Pressing Post for you", more: `Checking with ReelForge first.${LOOK}` }, "the note while ReelForge is asked")
+    held.release()
+    await until("the note to say why", async () => (await note(tab)).line === "Check it, then press Post")
+    equal((await note(tab)).more, `ReelForge did not press for you: Press Post yourself: ReelForge isn't allowed to for this post.${LOOK}`, "the note after the no")
+    equal(await tab.evaluate(() => fixture.clicks), 0, "presses the page saw")
+  },
+
   async "a grant that was already used is refused and nothing is pressed a second time"({ app, browser, video }) {
     await switchOn(browser, app, "tiktok")
     const made = app.createBatch(video(), ["tiktok"], { press: true })
@@ -190,7 +209,7 @@ export const tests = {
     equal(await tab.evaluate(() => fixture.clicks), 0, "presses the page saw")
     // Not "press Post" as if nothing had been pressed: ReelForge has it as pressed, so the person looks first.
     const said = await note(tab)
-    equal([said.line, said.more], ["Look at your profile first", "ReelForge has Post as pressed for this one already, though nothing was clicked here. Look at your TikTok profile before you press it."], "the note")
+    equal([said.line, said.more], ["Look at your profile first", `ReelForge has Post as pressed for this one already, though nothing was clicked here. Look at your TikTok profile before you press it.${LOOK}`], "the note")
   },
 
   async "ReelForge slow to answer the press (its database busy for six seconds) is waited for, and asked once"({ app, site, browser, video }) {
@@ -241,7 +260,7 @@ export const tests = {
     const job = made.jobs[0]
     await until("the note to say why", async () => (await note(tab))?.line === "Check it, then press Post", 30000)
     await sleep(1000)
-    equal((await note(tab)).more, "ReelForge did not press for you: its answer did not come back in time, so nothing was clicked.", "what the note says")
+    equal((await note(tab)).more, `ReelForge did not press for you: its answer did not come back in time, so nothing was clicked.${LOOK}`, "what the note says")
     equal([presses(app).length, await tab.evaluate(() => fixture.clicks)], [1, 0], "press requests, and presses the page saw")
     const kept = await browser.jobRecord(job.id)
     equal([kept.state, kept.pressAnswer, job.state], ["ready", "lost", "posting"], "the job here, and in ReelForge (which said yes)")
