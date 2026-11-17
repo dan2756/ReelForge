@@ -223,10 +223,10 @@ def _answered(p) -> dict | None:
     return None if problems else settings_from(a)
 
 
-# A background_stats key (S.stats_key: any case, - or _) in a studio.toml's text: at the start of a line, after a dot
-# (platforms.background_stats), or in an inline table (platforms = { ..., background_stats = false }), quoted or not,
-# with its value up to a space, a comment or the end of the inline table.
-_STATS_LINE = re.compile(r"""(?:^|[.{,])[ \t]*(["']?)background[-_]stats\1[ \t]*=[ \t]*([^\s#,}]*)""", re.I | re.M)
+# A background_stats key (S.stats_key: any case, with -, _, spaces or nothing between its words) in a studio.toml's
+# text: at the start of a line, after a dot (platforms.background_stats), or in an inline table (platforms = { ...,
+# background_stats = false }), quoted or not, with its value up to a space, a comment or the end of the inline table.
+_STATS_LINE = re.compile(r"""(?:^|[.{,])[ \t]*(["']?)background[-_ \t]*stats\1[ \t]*=[ \t]*([^\s#,}]*)""", re.I | re.M)
 
 
 def _own_background_stats(path: Path) -> bool | None:

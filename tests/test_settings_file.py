@@ -138,6 +138,58 @@ class Loading(Scratch):
                 self.assertEqual(verdict(body.replace("= false", "= true") + typo)[:2], (True, True))
         self.assertEqual(verdict(inline)[:2], (False, False))   # (which reads as it is: it's under platforms)
 
+    def test_a_no_for_the_hourly_read_with_a_space_or_nothing_between_its_words_is_a_no(self):
+        """A no written `background stats = false` (which TOML refuses), `"background stats" = false` or
+        `backgroundstats = false` (which it reads) wasn't taken for the setting at all, so the answers' yes, or the
+        default yes, kept the hourly read of your stats, with your log-ins, on, without a word."""
+        from studio import generate
+        from studio.__main__ import apply_background_stats
+
+        self.onboard_main()                     # the answers say yes
+        text = P.SETTINGS.read_text(encoding="utf-8")
+        line = "background_stats = true"
+        without = text.replace(line + "\n", "")
+        typo = '\nsubjects_extra = "a snowball\n'
+
+        def verdict(body: str) -> tuple[bool, bool, list[str]]:
+            P.SETTINGS.write_text(body, encoding="utf-8")
+            said: list[str] = []
+            on = generate.background_stats(profiles.main(), say=said.append)
+            with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}):
+                job = "(dry run) would run" in apply_background_stats()
+            return on, job, said
+
+        spelled = {
+            "a space, in quotes": (text.replace(line, '"background stats" = false'),
+                                   "background stats under [platforms] should be written background_stats"),
+            "run together": (text.replace(line, "backgroundstats = false"),
+                             "backgroundstats under [platforms] should be written background_stats"),
+            "a space and capitals, in quotes, at the end": (without + "'Background  Stats' = false\n",
+                                                            "Background  Stats under [ai] belongs under [platforms], "
+                                                            "written background_stats"),
+        }
+        for what, (body, reason) in spelled.items():
+            with self.subTest(what):
+                P.SETTINGS.write_text(body, encoding="utf-8")
+                with self.assertRaises(settings.SettingsError) as raised:
+                    settings.load()
+                self.assertEqual(raised.exception.reason, reason)
+                for b in (body, body + typo):
+                    on, job, said = verdict(b)
+                    self.assertEqual((on, job), (False, False))
+                    self.assertIn("goes by its background_stats line", said[0])
+                    self.assertEqual(verdict(b.replace("= false", "= true"))[:2], (True, True))
+        # with a space and no quotes, TOML refuses the line: it's still the file's own no that counts
+        for body in (text.replace(line, "background stats = false"), without + "BACKGROUND STATS = false\n"):
+            with self.subTest(body[-30:]):
+                on, job, said = verdict(body)
+                self.assertEqual((on, job), (False, False))
+                self.assertIn("goes by its background_stats line", said[0])
+                self.assertEqual(verdict(body.replace("= false", "= true"))[:2], (True, True))
+        # a key that only starts or ends like it is another key
+        on, job, said = verdict(text + 'background_statistics = false\nmy_background_stats = false\n')
+        self.assertEqual((on, job, said), (True, True, []))
+
     def test_a_file_saved_by_notepad_with_a_byte_order_mark_still_reads(self):
         self.onboard_main()
         P.SETTINGS.write_bytes(b"\xef\xbb\xbf" + b'[captions]\r\nmax_hashtags = 2\r\n')
