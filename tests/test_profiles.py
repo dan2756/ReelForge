@@ -65,6 +65,28 @@ class Finding(Scratch):
                 self.assertEqual(p.folder.name, name.lower() + "-channel")
                 self.assertEqual(profiles.get(p.key), p)
 
+    @unittest.skipIf(os.name == "nt", "Windows takes a space at the end off a folder's name")
+    def test_a_folder_renamed_with_a_space_at_the_end_is_found_as_it_is(self):
+        """On macOS and Linux a folder can be renamed by hand to "sea " beside a "sea". Its notes' -p
+        "profiles/sea ", and the profile the window chose for what it starts (REELFORGE_PROFILE), had the space taken
+        off, so they found the other channel."""
+        import shlex
+
+        self.onboard_main()
+        sea = profiles.create("Sea")
+        two = profiles.create("Sea Two")
+        two = profiles.Profile(two.folder.rename(two.folder.with_name("sea ")))
+        self.assertEqual(profiles.every(), [profiles.main(), sea, two])
+        self.assertEqual(profiles.find(shlex.split(two.kept_flag)[0]), two)
+        self.assertEqual(profiles.get(two.key), two)
+        profiles.use(two)
+        self.assertEqual(profiles.current(), two)
+        profiles.remember(two)                  # the window opens on it next time
+        self.assertEqual(profiles.last(), two)
+        # a space typed by mistake after a folder that has none still finds it
+        self.assertEqual(profiles.find("profiles/sea-two "), None)
+        self.assertEqual(profiles.find("profiles/sea\n"), sea)
+
     def test_the_first_profile_is_the_reelforge_folder_itself(self):
         main = profiles.main()
         self.assertEqual(profiles.every(), [main])
@@ -210,6 +232,62 @@ class Onboarding(Scratch):
         self.assertTrue(rows[0].startswith(f"  {tui.CROSS}  Night Physics's settings file, {mine}, has a mistake in "
                                            "it ("), rows)
         self.assertIn("so your AI's notes go by its answers instead.", rows[0])
+
+    def test_changing_your_answers_starts_from_a_no_to_the_hourly_read_in_the_settings_file(self):
+        """The window's Change your answers (and reelforge channel in a terminal) started from the saved answers'
+        yes to the hourly read of your stats, while studio.toml, which the hourly job goes by, said no (one that reads,
+        or one with a mistake in it whose background_stats line says no). The review showed Yes, and changing only
+        the channel's about text turned the read, with your log-ins, on again."""
+        from studio import onboard_cli
+        from studio.__main__ import main
+
+        def change_the_about(svc: Setup) -> list[str]:
+            start = svc.onboard_start()
+            svc.onboard_change("about", "What-if videos with real science, and more.")
+            review = svc.onboard_step(len(start["steps"]) - 1)["review"]
+            with mock.patch.object(svc.loop, "run_worker"):
+                self.assertEqual(svc.onboard_create(), {"ok": True})
+            return [line for line in review.splitlines() if "every hour" in line]
+
+        for what, body in (("in a file that reads", lambda t: t.replace("background_stats = true",
+                                                                         "background_stats = false")),
+                           ("in a file with a mistake in it", lambda t: t + "background_stats = false\n")):
+            with self.subTest(what):
+                self.onboard_main()             # the answers say yes
+                P.SETTINGS.write_text(body(P.SETTINGS.read_text(encoding="utf-8")), encoding="utf-8")
+                self.assertIs(generate.background_stats(profiles.main()), False)
+                svc = Setup(Loop(out=io.StringIO()))
+                svc.start({"start": "onboard", "embedded": True})
+                self.assertEqual(change_the_about(svc), ["- **Keep reading your stats every hour, even when ReelForge "
+                                                         "is closed?** No"])
+                self.assertEqual(S.load()["channel"]["about"], "What-if videos with real science, and more.")
+                self.assertIs(S.load()["platforms"]["background_stats"], False)
+                self.assertIs(generate.background_stats(profiles.main()), False)
+        # a yes given there is a yes
+        svc = Setup(Loop(out=io.StringIO()))
+        svc.start({"start": "onboard", "embedded": True})
+        svc.onboard_start()
+        svc.onboard_change("background_stats", True)
+        with mock.patch.object(svc.loop, "run_worker"):
+            self.assertEqual(svc.onboard_create(), {"ok": True})
+        self.assertIs(generate.background_stats(profiles.main()), True)
+        # a new channel starts from what's done for the one it's made from, as it does from its answers
+        P.SETTINGS.write_text(P.SETTINGS.read_text(encoding="utf-8").replace("background_stats = true",
+                                                                             "background_stats = false"),
+                              encoding="utf-8")
+        svc = Setup(Loop(out=io.StringIO()))
+        svc.start({"start": "onboard", "new": True, "embedded": True})
+        svc.onboard_start()
+        self.assertIs(svc.answers["background_stats"], False)
+        # and so do the questions in a terminal
+        asked = []
+        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                mock.patch.object(sys.stdout, "isatty", return_value=True, create=True), \
+                mock.patch.object(onboard_cli, "ask", lambda prior: asked.append(prior) or prior), \
+                mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["channel", "--plain"]), 0)
+        self.assertIs(asked[0]["background_stats"], False)
+        self.assertIs(S.load()["platforms"]["background_stats"], False)
 
     def test_the_interview_makes_a_new_profile_from_your_answers_about_you(self):
         self.onboard_main(assistant="codex")
@@ -880,7 +958,9 @@ class Deleting(Scratch):
         self.assertEqual(sea.flag, "3")         # printed for you to run there and then, the number finds it
         with redirect_stdout(io.StringIO()):
             generate.write_guides(sea, saved_settings=True)
-        commands = {"new-episode": r"-m studio -p (.+?) new-episode <slug>", "publish": r"reelforge -p (.+?) publish",
+        # (publish: reelforge on macOS and Linux, Python straight on Windows, where reelforge.cmd drops the !)
+        commands = {"new-episode": r"-m studio -p (.+?) new-episode <slug>",
+                    "publish": r"(?:reelforge|-m studio) -p (.+?) publish",
                     "regenerate": r"-m studio -p (.+?) channel --regenerate"}
         for notes in ("CLAUDE.md", "AGENTS.md"):
             text = (sea.folder / notes).read_text(encoding="utf-8")
@@ -912,6 +992,225 @@ class Deleting(Scratch):
                                      ["reelforge", "-p", f"profiles/{name}", "channel"])
                     self.assertEqual(profiles.find(shlex.split(sea.kept_flag)[0]), sea)
                     self.assertEqual(sea.flag, "2")
+
+    def test_a_channels_notes_reach_it_with_a_bang_or_a_percent_in_its_folders_name(self):
+        """A folder renamed by hand with ! in it went into the notes' reelforge commands (publish, the channel's
+        questions) in double quotes. On Windows every terminal runs reelforge through bin/reelforge.cmd, whose delayed
+        expansion drops a ! whatever its quotes, so -p named another folder: another channel's Publish tab or
+        questions opened, or none. And a ! between double quotes is a history event in an interactive bash or zsh
+        (the Mac's), so a command pasted there failed."""
+        import re
+        import shlex
+
+        def made(name: str, folder: str) -> profiles.Profile:
+            p = profiles.create(name)
+            with redirect_stdout(io.StringIO()):
+                generate.write_all({**ANSWERS, "channel_name": name}, p)
+            return profiles.Profile(p.folder.rename(p.folder.with_name(folder)))
+
+        def through_reelforge_cmd(line: str) -> list[str]:
+            """What bin/reelforge.cmd passes on of `reelforge ...` (setlocal EnableDelayedExpansion, then %*): a
+            !NAME! becomes that variable's value, a ! left over goes, and a ^ then stands for the character after it."""
+            if "!" in line:
+                line = re.sub(r"!([^!]*)!", lambda m: os.environ.get(m.group(1), ""), line).replace("!", "")
+                line = re.sub(r"\^(.)", r"\1", line)
+            return shlex.split(line, posix=False)
+
+        self.onboard_main()
+        wow = made("Wow", "wow")
+        again = made("Wow Again", "wow!")
+        pct = made("Half Off", "50%off%")
+        windows = '"$`“”„'                     # what double quotes don't keep on Windows, which has no \ in a name
+        with mock.patch.object(P, "WINDOWS", True), mock.patch.object(profiles, "_NOT_IN_DOUBLE_QUOTES", windows), \
+                mock.patch.dict(os.environ, {"off": "OFF"}):
+            for p in (again, pct):
+                with redirect_stdout(io.StringIO()):
+                    generate.write_guides(p, saved_settings=True)
+                for notes in ("CLAUDE.md", "AGENTS.md"):
+                    text = (p.folder / notes).read_text(encoding="utf-8")
+                    with self.subTest(folder=p.folder.name, notes=notes):
+                        # no reelforge command names it: Python straight, as the rest of its notes
+                        self.assertEqual(re.findall(r"reelforge -p \S+", text), [])
+                        for pattern in (r"`(\S+ -m studio -p .+? publish)`",
+                                        r"\((\S+ -m studio -p .+? channel) from the ReelForge folder, or "):
+                            cmd = re.search(pattern, text).group(1)
+                            self.assertTrue(cmd.startswith(r".venv\Scripts\python -m studio -p "), cmd)
+                            argv = shlex.split(cmd.replace("\\", "/"))
+                            self.assertEqual(profiles.find(argv[4]), p)
+            # what reelforge.cmd would have made of the folder in double quotes: another channel, or none
+            self.assertEqual(profiles.find(through_reelforge_cmd(f"reelforge -p {again.kept_flag} publish")[2]
+                                           .strip('"')), wow)
+            self.assertIsNone(profiles.find(through_reelforge_cmd(f'reelforge -p {pct.kept_flag} publish')[2]
+                                            .strip('"').replace("%off%", "OFF")))
+        # on macOS and Linux: single quotes, where an interactive bash or zsh takes a ! as it is
+        if os.name != "nt" and shutil.which("bash"):
+            self.assertEqual(again.kept_flag, "'profiles/wow!'")
+            with redirect_stdout(io.StringIO()):
+                generate.write_guides(again, saved_settings=True)
+            text = (again.folder / "CLAUDE.md").read_text(encoding="utf-8")
+            cmd = re.search(r"`(reelforge -p .+? publish)`", text).group(1)
+            self.assertEqual(cmd, "reelforge -p 'profiles/wow!' publish")
+            shown = subprocess.run(["bash", "--norc", "--noprofile", "-i"], capture_output=True, text=True,
+                                   input=f"printf '<%s>\\n' {cmd}\nexit\n", timeout=30).stdout
+            self.assertIn("<-p>\n<profiles/wow!>\n<publish>", shown)
+
+    def test_a_channels_notes_reach_it_with_a_cmd_character_in_its_folders_name_on_windows(self):
+        """PowerShell and Git Bash hand bin/reelforge.cmd an argument with no space in it without its quotes, and cmd
+        then ends the command at an &, |, < or > and takes a ^ for the character after it: for a folder renamed by hand
+        to a&b, say, the notes' `reelforge -p "profiles/a&b" publish` opened another channel's Publish tab (profiles/a),
+        or none, and ran the rest as a command of its own. Those commands now run ReelForge's Python straight, from the
+        ReelForge folder (which the line at the top of the notes says too), and a command printed to run there and
+        then names such a channel by its number."""
+        import re
+        import shlex
+
+        def made(name: str, folder: str) -> profiles.Profile:
+            p = profiles.create(name)
+            with redirect_stdout(io.StringIO()):
+                generate.write_all({**ANSWERS, "channel_name": name}, p)
+            return profiles.Profile(p.folder.rename(p.folder.with_name(folder)))
+
+        def through_powershell_and_reelforge_cmd(line: str) -> list[str]:
+            """What `reelforge ...` typed in PowerShell reaches ReelForge as: each word without its quotes when it has
+            no space in it, then cmd's reading of them, up to an &, |, < or > outside quotes, a ^ dropped there."""
+            words = [w if w and " " not in w else f'"{w}"' for w in shlex.split(line)]
+            kept, quoted, chars = [], False, iter(" ".join(words))
+            for ch in chars:
+                if ch == '"':
+                    quoted = not quoted
+                elif not quoted and ch in "&|<>":
+                    break
+                elif not quoted and ch == "^":
+                    ch = next(chars, "")
+                kept.append(ch)
+            return shlex.split("".join(kept), posix=False)
+
+        self.onboard_main()
+        a = made("Ay", "a")
+        folders = ["a&b", "a^b"] + ([] if os.name == "nt" else ["a|b", "a<b>"])     # (Windows has no | < > in names)
+        odd = [made(f"Odd {i}", folder) for i, folder in enumerate(folders)]
+        windows = '"$`“”„'
+        with mock.patch.object(P, "WINDOWS", True), mock.patch.object(profiles, "_NOT_IN_DOUBLE_QUOTES", windows):
+            for p in odd:
+                self.assertEqual(p.kept_flag, f'"profiles/{p.folder.name}"')
+                # what reelforge.cmd would have made of it: another channel, or none
+                self.assertNotEqual(profiles.find(through_powershell_and_reelforge_cmd(
+                    f"reelforge -p {p.kept_flag} publish")[2].strip('"')), p)
+                with redirect_stdout(io.StringIO()):
+                    generate.write_guides(p, saved_settings=True)
+                for notes in ("CLAUDE.md", "AGENTS.md"):
+                    text = (p.folder / notes).read_text(encoding="utf-8")
+                    with self.subTest(folder=p.folder.name, notes=notes):
+                        self.assertEqual(re.findall(r"reelforge -p \S+", text), [])
+                        for pattern in (r"`(\S+ -m studio -p .+? publish)`",
+                                        r"\((\S+ -m studio -p .+? channel) from the ReelForge folder, or its Settings"):
+                            cmd = re.search(pattern, text).group(1)
+                            self.assertTrue(cmd.startswith(r".venv\Scripts\python -m studio -p "), cmd)
+                            self.assertEqual(profiles.find(shlex.split(cmd.replace("\\", "/"))[4]), p)
+                # printed to run there and then: its number, which finds it
+                self.assertEqual(profiles.find(p.flag), p)
+                self.assertTrue(p.flag.isdigit(), p.flag)
+            # a folder with none of them goes through reelforge as before, its first line too
+            with redirect_stdout(io.StringIO()):
+                generate.write_guides(a, saved_settings=True)
+            text = (a.folder / "CLAUDE.md").read_text(encoding="utf-8")
+            self.assertIn("(reelforge -p profiles/a channel, or its Settings in ReelForge's profile menu)", text)
+            self.assertIn("`reelforge -p profiles/a publish`", text)
+
+    def test_the_episode_commands_in_a_channels_notes_keep_its_folder_one_word(self):
+        """make_episode, compose and publish-check in another channel's notes had its folder with no quotes at all:
+        for one renamed by hand with a space in it (the copy Explorer makes), $ or a ' the command split it, or
+        changed it ($money gone, so profiles/cash/...: another channel's folder, if one has that name)."""
+        import re
+        import shlex
+
+        self.onboard_main()
+        p = profiles.create("Sea Facts")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**ANSWERS, "channel_name": "Sea Facts"}, p)
+        commands = (r"make_episode\.py (.+?) --steps", r"compose\.py (.+?) --preview",
+                    r"publish-check (.+?)(?:` runs|\n)")
+        names = ["sea facts - Copy", "cash$money", "it's mine", "back`tick"]
+        if os.name != "nt":
+            names += ['say "hi"', "trail\\", "it's $5"]
+        for name in names:
+            p = profiles.Profile(p.folder.rename(p.folder.with_name(name)))
+            with redirect_stdout(io.StringIO()):
+                generate.write_guides(p, saved_settings=True)
+            for notes in ("CLAUDE.md", "AGENTS.md"):
+                text = (p.folder / notes).read_text(encoding="utf-8")
+                for pattern in commands:
+                    with self.subTest(name=name, notes=notes, command=pattern):
+                        found = re.findall(pattern, text)
+                        self.assertTrue(found)
+                        for arg in found:
+                            words = shlex.split(arg.replace("<id>", "ep01_x"), posix=os.name != "nt")
+                            self.assertEqual(len(words), 1, arg)
+                            if os.name != "nt":
+                                self.assertEqual(words[0], f"profiles/{name}/episodes/ep01_x")
+        # the first channel's, and a folder ReelForge named, as they were
+        main_notes = (self.root / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn(f"make_episode.py episodes{os.sep}<id> --steps", main_notes)
+        p = profiles.Profile(p.folder.rename(p.folder.with_name("sea-facts")))
+        with redirect_stdout(io.StringIO()):
+            generate.write_guides(p, saved_settings=True)
+        self.assertIn(f"make_episode.py profiles{os.sep}sea-facts{os.sep}episodes{os.sep}<id> --steps",
+                      (p.folder / "CLAUDE.md").read_text(encoding="utf-8"))
+        # on Windows, with its backslashes, in the quotes the folder gets in -p
+        windows = '"$`“”„'
+        with mock.patch.object(P, "WINDOWS", True), mock.patch.object(profiles, "_NOT_IN_DOUBLE_QUOTES", windows):
+            for name, arg in (("sea facts - Copy", r'"profiles\sea facts - Copy\episodes\<id>"'),
+                              ("cash$money", r"'profiles\cash$money\episodes\<id>'")):
+                p = profiles.Profile(p.folder.rename(p.folder.with_name(name)))
+                with redirect_stdout(io.StringIO()):
+                    generate.write_guides(p, saved_settings=True)
+                text = (p.folder / "AGENTS.md").read_text(encoding="utf-8")
+                with self.subTest(windows=name):
+                    self.assertIn(rf"make_episode.py {arg} --steps", text)
+                    self.assertIn(f"publish-check {arg}` runs", text)
+
+    def test_the_next_command_new_episode_prints_keeps_the_episodes_folder_as_it_is(self):
+        """new-episode printed the command to build the new episode's scene with its folder in double quotes, so for
+        a channel whose folder was renamed by hand with a $, a backtick or a ! in it, bash or zsh changed it when it
+        was pasted: profiles/cash$money/... became profiles/cash/..., and a folder named tick`whoami` ran whoami. It
+        goes in the quotes the channel's notes put it in now, and a folder ReelForge named goes as it is."""
+        import re
+        import shlex
+
+        from studio.__main__ import main
+
+        def next_command(flag: str) -> str:
+            with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(main(["-p", flag, "new-episode", "probe"]), 0, out.getvalue())
+            return re.search(r"\n  (\S+ \S*make_episode\.py .+ --steps build,stills)\n", out.getvalue()).group(1)
+
+        def as_bash_runs_it(line: str) -> list[str]:
+            """The words bash hands the command, pasted into an interactive bash (the Mac's zsh does the same)."""
+            args = line.split(" ", 2)[2]       # what follows python pipeline/make_episode.py
+            if os.name == "nt" or not shutil.which("bash"):
+                return shlex.split(args, posix=os.name != "nt")
+            shown = subprocess.run(["bash", "--norc", "--noprofile", "-i"], capture_output=True, text=True,
+                                   input=f"printf '<%s>\\n' {args}\nexit\n", timeout=30, cwd=self.root).stdout
+            return re.findall(r"<(.*?)>\n", shown)
+
+        self.onboard_main()
+        self.assertEqual(next_command("1"), f"{P.venv_python()} {Path('pipeline') / 'make_episode.py'} "
+                                            f"{Path('episodes') / 'ep01_probe'} --steps build,stills")
+        p = profiles.create("Sea Facts")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**ANSWERS, "channel_name": "Sea Facts"}, p)
+        self.assertIn(f" {Path('profiles') / 'sea-facts' / 'episodes' / 'ep01_probe'} --steps",
+                      next_command(p.key))
+        names = ["sea facts - Copy", "cash$money", "it's mine"]
+        if os.name != "nt":
+            names += ["tick`whoami`", "wow!", 'say "hi"', "trail\\"]
+        for i, name in enumerate(names, 2):
+            with self.subTest(name=name):
+                p = profiles.Profile(p.folder.rename(p.folder.with_name(name)))
+                line = next_command(p.key)
+                want = str(Path("profiles") / name / "episodes" / f"ep{i:02d}_probe")
+                self.assertTrue((self.root / want).is_dir())
+                self.assertEqual(as_bash_runs_it(line), [want, "--steps", "build,stills"])
 
     def test_connect_with_a_mistake_in_the_settings_leaves_your_ais_notes_and_the_way_out_brings_them_back(self):
         """Connect with a typo in studio.toml wrote your AI's notes and the channel bible from the first-time answers,

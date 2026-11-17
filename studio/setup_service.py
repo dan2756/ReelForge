@@ -205,7 +205,8 @@ class Setup(Service):
 
     @rpc
     def onboard_start(self) -> dict:
-        start = saved_answers()  # the profile it was opened for (or, for a new one, from)
+        # the profile it was opened for (or, for a new one, from), with the hourly read of its stats as it's done
+        start = generate.as_read(saved_answers(), self.profile)
         if self.new:  # a new channel: only what's about you and your AI carries over
             start = {k: v for k, v in (start or {}).items() if k in CARRIED}
         self.answers = defaults_for(dict(start or {}))

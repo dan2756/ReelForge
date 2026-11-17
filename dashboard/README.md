@@ -15,7 +15,7 @@ optional browser extension, or for YouTube through its own API (see [Publish](#p
 | `reelforge 1` … `reelforge 7` | straight to the tab in that place along the top, 1 at the far left: by default 1 Overview, 2 Videos, 3 Compare, 4 Stats, 5 Accounts, 6 Settings, 7 Updates (the Settings tab's **Tab order** changes it) |
 | `reelforge videos`, `reelforge publish`, … | the same, by the tab's name (`post` and `upload` work for Publish, which is the green button at the top right and has no number, `login` for Accounts, `totals` for Stats: `reelforge stats` is the hourly job) |
 | `reelforge notifications` | the Overview with the notifications drawer open |
-| `reelforge -p "Channel name"` | ReelForge on one of your profiles (its number in the list, the start of its name, or its folder, like `profiles/cool-epic-facts`, works too; the commands ReelForge writes out for you name it by its folder, in double quotes when you've renamed the folder with a space in it, say, and in single quotes when its name has a `$`, a backtick, a `"` or a backslash in it; a command it prints for you to run there and then names it by its number instead when the folder's name has a character no quotes keep as it is in every shell, like `$`, `%` or `!`, but your AI's notes never do, as that number changes when you add or delete a channel) |
+| `reelforge -p "Channel name"` | ReelForge on one of your profiles (its number in the list, the start of its name, or its folder, like `profiles/cool-epic-facts`, works too; the commands ReelForge writes out for you name it by its folder, in double quotes when you've renamed the folder with a space in it, say, and in single quotes when its name has a `$`, a backtick, a `"` or a backslash in it, or on a Mac or Linux a `!` (an episode's folder in your AI's notes, and in the command `new-episode` gives next, goes in the same quotes, so `make_episode.py "profiles/sea facts - Copy/episodes/<id>"` stays one word); on Windows, where `reelforge` changes a `!` or a `%NAME%` whatever its quotes, and gets a name with no space in it from PowerShell or Git Bash without its quotes, so an `&`, `|`, `<`, `>` or `^` in it is cmd's, your AI's notes run ReelForge's Python straight for such a folder, `.venv\Scripts\python -m studio -p ...`, from the ReelForge folder; a command it prints for you to run there and then names it by its number instead when the folder's name has a character no quotes keep as it is in every shell, like `$`, `%`, `!` or `&`, but your AI's notes never do, as that number changes when you add or delete a channel) |
 | `reelforge --demo` | a tour on made-up numbers: nothing is read or saved |
 
 ReelForge shows only the platforms you've connected: first-time setup connects the ones you give it a handle for, and
@@ -45,7 +45,7 @@ press **p**) for the menu:
 | In the menu | |
 |---|---|
 | a profile | shows it in this window, on the tab you're on (each profile's row has its connected platforms and its unread notifications) |
-| **New profile** | first-time setup for a new channel, inside the window: your name and your AI carry over, the channel's answers start fresh, and it opens on the new profile's Accounts tab |
+| **New profile** | first-time setup for a new channel, inside the window: your name and your AI carry over, and so does your answer to the hourly stats read (No when the profile you're on says no to it, in its answers or in its `studio.toml`), the channel's other answers start fresh, and it opens on the new profile's Accounts tab |
 | **Settings for …** | the channel's questions again, for the profile you're on |
 | **Delete** (or the Delete key) | takes another profile out of ReelForge once you type its name: its folder moves whole into `backups/` |
 
@@ -61,8 +61,20 @@ A red dot on the button means another profile has unread notifications. ReelForg
 last. The first profile is the ReelForge folder's own (`my-studio/`, `dashboard/config.toml`, `dashboard/data/`, as
 always); each one you add gets a folder in `profiles/`, laid out the same way: `profiles/<name>/my-studio/`,
 `profiles/<name>/dashboard/config.toml` and `profiles/<name>/dashboard/data/`, its episodes and finished videos, and its
-own `CLAUDE.md` and `AGENTS.md`. The hourly background job reads every profile, each in turn (a profile whose
-first-time setup said no to background stats is read only while it's open).
+own `CLAUDE.md` and `AGENTS.md`. The hourly background job reads every profile, each in turn (a profile whose first-time
+setup said no to background stats, or whose `my-studio/studio.toml` says `background_stats = false`, is read only while
+it's open; writing its files again from its answers, `reelforge -p <profile> channel --regenerate`, keeps that no, and
+its questions, in its Settings in the profile menu or `reelforge -p <profile> channel`, start from it, as does that
+question for a new profile made from it (**New profile** while it's open): a yes is yours to give there. A
+`background_stats = true` written in that file against its answers' no doesn't turn the read on either: writing its
+files again puts the no back in it, says so, and keeps the copy of the file as it was in `my-studio/backups/`).
+While that `studio.toml` has a mistake in it (saved in Notepad as Unicode is one: save it as UTF-8), the job goes by the
+file's own `background_stats` lines, wherever they are and however they're written (`Background-Stats`,
+`background stats`, `background_stat`, with `=` or a colon, as `answers.json` has it), and only a yes there is a yes;
+words in a text setting or a comment are never taken for one, but for a no in a text of several lines (`"""` or `'''`):
+three quotes left open by mistake are taken to start one by any three further down, so a no between them still counts.
+A text is one whose quotes are closed, on its own line or, for one of several lines, on any line below; a quote left
+open, often the very mistake, hides nothing, so a `background_stats` line after it, on its line or below, still counts.
 
 ## Several windows
 

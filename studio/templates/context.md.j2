@@ -206,11 +206,11 @@ them on purpose, so they can't be posted. Never work round that; `new-episode` g
    `episode.json` and a `facts.md` to fill in.
 3. **Script and facts:** `title`, `lines`, `hud`, `cta`, `hashtags`, the sound cue sheet. Check every number;
    write it with its source and the second it becomes true in `facts.md`. No line appears before its fact is true.
-4. **Build the scene:** `{{ py }} pipeline{{ sep }}make_episode.py {{ here_cmd }}episodes{{ sep }}<id> --steps build,stills --stills {{ stills }}`
+4. **Build the scene:** `{{ py }} pipeline{{ sep }}make_episode.py {{ episode }} --steps build,stills --stills {{ stills }}`
    and **look at every still** in `build/stills/`. Fix and repeat until each one clears `docs/QUALITY.md`. New
    scenes go in new modules (`pipeline/blender/worlds/<name>.py`, `effects/<name>.py`); never change a module
    another episode uses in a way that changes that episode.
-5. **Check the text** without a full render: `{{ py }} pipeline{{ sep }}post{{ sep }}compose.py {{ here_cmd }}episodes{{ sep }}<id> --preview {{ preview }}`.
+5. **Check the text** without a full render: `{{ py }} pipeline{{ sep }}post{{ sep }}compose.py {{ episode }} --preview {{ preview }}`.
 6. **Render:** `--steps render` (about 15 minutes to an hour on a fast graphics card; run it in the background). It
    says how far it is and carries on where a stopped render left off. If the scene was built again since the frames
    were rendered, it stops and asks: `--rerender all`, `--rerender 12-15.5` for one shot, or `--keep-frames` when the
@@ -232,12 +232,12 @@ them on purpose, so they can't be posted. Never work round that; `new-episode` g
 
 ## Delivering to ReelForge's Publish tab
 
-ReelForge's Publish tab (`reelforge{{ pflag }} publish`) lists every `{{ here }}episodes/<id>/final/<id>.mp4`, newest first, with the post pre-filled from
+ReelForge's Publish tab (`{{ app }}{{ pflag }} publish`) lists every `{{ here }}episodes/<id>/final/<id>.mp4`, newest first, with the post pre-filled from
 `episode.json`'s `title` and the hashtag line of `final/caption.txt`. {{ Who }} posts from there, by hand (each
 platform's button opens its upload page and copies exactly the text that site needs) or with the browser extension
 or YouTube's API, if they set one up. Either way it starts with their press, never yours.
 - Keep that layout: `{{ here }}episodes/<id>/episode.json`, `final/<id>.mp4`, `final/caption.txt`, `final/cover.jpg`.
-- `{{ py }} -m studio publish-check {{ here_cmd }}episodes{{ sep }}<id>` runs the same check as `ship` at any time and prints
+- `{{ py }} -m studio publish-check {{ episode }}` runs the same check as `ship` at any time and prints
   each platform's post.
 - Never upload or post yourself, and never open the platforms' upload pages.
 
@@ -269,13 +269,13 @@ when {{ who }} asks for it, as in "Making a video".
 ## Commands (run from {% if extra %}the ReelForge folder{% else %}this folder{% endif %})
 
 ```
-{{ py }} pipeline{{ sep }}make_episode.py {{ here_cmd }}episodes{{ sep }}<id> --steps build,stills --stills 1,15,31
-{{ py }} pipeline{{ sep }}make_episode.py {{ here_cmd }}episodes{{ sep }}<id> --steps render
-{{ py }} pipeline{{ sep }}make_episode.py {{ here_cmd }}episodes{{ sep }}<id> --steps post
-{{ py }} pipeline{{ sep }}make_episode.py {{ here_cmd }}episodes{{ sep }}<id> --steps ship
-{{ py }} pipeline{{ sep }}post{{ sep }}compose.py {{ here_cmd }}episodes{{ sep }}<id> --preview {{ preview }}
+{{ py }} pipeline{{ sep }}make_episode.py {{ episode }} --steps build,stills --stills 1,15,31
+{{ py }} pipeline{{ sep }}make_episode.py {{ episode }} --steps render
+{{ py }} pipeline{{ sep }}make_episode.py {{ episode }} --steps post
+{{ py }} pipeline{{ sep }}make_episode.py {{ episode }} --steps ship
+{{ py }} pipeline{{ sep }}post{{ sep }}compose.py {{ episode }} --preview {{ preview }}
 {{ py }} -m studio{{ pflag }} new-episode <slug>        a new episode folder from the template
-{{ py }} -m studio publish-check {{ here_cmd }}episodes{{ sep }}<id>
+{{ py }} -m studio publish-check {{ episode }}
 {{ py }} -m studio doctor                    checks Blender, ffmpeg, sounds, fonts, disk space
 ```
 

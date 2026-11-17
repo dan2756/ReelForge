@@ -59,11 +59,11 @@ class Commands(Scratch):
         where = Path("profiles") / "cool-epic-facts" / "episodes" / "ep01_snowball"
         self.assertTrue((self.root / where / "episode.json").is_file())
         # it used to print episodes/ep01_snowball, the first channel's folder, where there is no such episode
-        self.assertIn(f'{Path("pipeline") / "make_episode.py"} "{where}" --steps build,stills', out)
+        self.assertIn(f'{Path("pipeline") / "make_episode.py"} {where} --steps build,stills', out)
         profiles.use(profiles.main())
         code, out = self.run_main("new-episode", "snowball")
         self.assertEqual(code, 0, out)
-        self.assertIn(f'"{Path("episodes") / "ep01_snowball"}" --steps build,stills', out)
+        self.assertIn(f'make_episode.py {Path("episodes") / "ep01_snowball"} --steps build,stills', out)
 
     def test_publish_check_on_an_episode_json_with_a_typo_is_one_fail_line(self):
         self.onboard_main()

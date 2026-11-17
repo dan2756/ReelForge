@@ -223,10 +223,63 @@ def _answered(p) -> dict | None:
     return None if problems else settings_from(a)
 
 
-# A background_stats key (S.stats_key: any case, with -, _, spaces or nothing between its words) in a studio.toml's
-# text: at the start of a line, after a dot (platforms.background_stats), or in an inline table (platforms = { ...,
-# background_stats = false }), quoted or not, with its value up to a space, a comment or the end of the inline table.
-_STATS_LINE = re.compile(r"""(?:^|[.{,])[ \t]*(["']?)background[-_ \t]*stats\1[ \t]*=[ \t]*([^\s#,}]*)""", re.I | re.M)
+# A key and its value in a studio.toml's text, as a person may write one: at the start of a line, after a dot
+# (platforms.background_stats), or in an inline table (platforms = { ..., background_stats = false }), quoted or not,
+# with = or a colon (as answers.json has it) after it, and its value up to a space, a comment or the end of the inline
+# table. _own_background_stats keeps those whose key is the setting (S.stats_key, so a key the file's error names is one
+# it goes by) and which aren't words in a text or a comment (_texts). A key without quotes starts and ends with a
+# letter, a digit, - or _, and the spaces round it are the pattern's alone: spaces that could go to either took longer
+# and longer to look through on a line of them with no = in it (3,200 took 46 seconds).
+_STATS_LINE = re.compile(r"""(?:^|(?<=[.{,]))[ \t]*"""
+                         r"""(?:(?P<q>["'])(?P<quoted>[-\w \t]*)(?P=q)|(?P<bare>[-\w](?:[-\w \t]*[-\w])?))"""
+                         r"""[ \t]*[=:][ \t]*(?P<value>[^\s#,}]*)""", re.M)
+
+
+def _texts(text: str) -> list[tuple[int, int, bool]]:
+    """Where a studio.toml's text has a string or a comment: (where it starts, where it ends, whether it's a string of
+    several lines). Only a string whose
+    quotes are closed is one: one on one line ("...", '...') closed on that line, or one of several lines
+    (\"\"\"...\"\"\", '''...''') closed by its own three quotes on any line below (with up to two quotes of its own just
+    inside them); in double quotes a backslash keeps the character after it in the string. A quote left open, which
+    is a typo, starts no string at all, so it hides neither what follows it on its line nor the lines below. A
+    comment runs from its # to the end of its line."""
+    spans, i, n = [], 0, len(text)
+    left_open: dict[str, int] = {}  # a quote of this kind was left open: so is every other one before this point
+    while i < n:
+        c = text[i]
+        if c == "#":
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            spans.append((i, j, False))
+            i = j
+            continue
+        if c not in "\"'":
+            i += 1
+            continue
+        q = c * 3 if text.startswith(c * 3, i) else c
+        if i < left_open.get(q, -1):
+            i += len(q)
+            continue
+        j, end = i + len(q), None
+        while j < n:
+            if len(q) == 1 and text[j] == "\n":
+                break
+            if c == '"' and text[j] == "\\" and (len(q) == 3 or text[j + 1:j + 2] not in ("", "\n")):
+                j += 2
+                continue
+            if text.startswith(q, j):
+                end = j + len(q)
+                while len(q) == 3 and end < min(n, j + 5) and text[end] == c:
+                    end += 1
+                break
+            j += 1
+        if end is None:     # left open: as is any other of its kind up to the end of its line (or of the file)
+            left_open[q] = j if len(q) == 1 else n
+            i += len(q)
+            continue
+        spans.append((i, end, len(q) == 3))
+        i = end
+    return spans
 
 
 def _own_background_stats(path: Path) -> bool | None:
@@ -234,12 +287,53 @@ def _own_background_stats(path: Path) -> bool | None:
     they are and however the key is written (_STATS_LINE): True or False, None when it has no such line. Only a yes
     (S.yes_no: true, yes, on, 1, in any case, quoted or not) is True: a no typed by hand in a form TOML refuses (False,
     no, off) is often the very mistake in the file, and must not leave the answers' yes to decide. Two lines that
-    disagree (one added below the other, or a no in the wrong place: itself a mistake, see S.load) are no yes."""
+    disagree (one added below the other, or a no in the wrong place: itself a mistake, see S.load) are no yes. Words
+    in a text or a comment (_texts) aren't such a line, but for a clear no (S.yes_no) in a string of several lines:
+    three quotes left open by mistake are taken to start one by any three further down, so a no typed between them is
+    still a no, and the hourly read, with your log-ins, isn't turned on against it."""
     try:
-        said = [v for _, v in _STATS_LINE.findall(path.read_text(encoding="utf-8-sig", errors="replace"))]
+        raw = path.read_bytes()
     except OSError:
         return None
+    # As UTF-8 (a byte order mark of its own, Notepad's on older Windows, set aside), or as UTF-16, Notepad's
+    # "Unicode", by its byte order mark: TOML can't read that, but its own lines are its own lines all the same
+    code = "utf-16" if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8-sig"
+    text = raw.decode(code, errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+    texts = _texts(text)
+    said = []
+    for m in _STATS_LINE.finditer(text):
+        if not S.stats_key(m["quoted"] if m["q"] else m["bare"]):
+            continue
+        inside = next((several for a, b, several in texts if a < m.start() < b), None)
+        if inside is None or (inside and S.yes_no(m["value"]) is False):
+            said.append(m["value"])
     return None if not said else all(S.yes_no(v) is True for v in said)
+
+
+def _says(path: Path) -> bool | None:
+    """What a channel's studio.toml says to the hourly read of its stats, which the hourly job goes by
+    (background_stats): under [platforms] in one that reads, else in its own background_stats lines (None: it has
+    none, or can't be read at all)."""
+    try:
+        return S.load(path)["platforms"]["background_stats"]
+    except S.SettingsError:
+        return _own_background_stats(path)
+    except OSError:
+        return None
+
+
+def _says_no(path: Path) -> bool:
+    """Whether a channel's studio.toml says no to the hourly read of its stats (_says)."""
+    return _says(path) is False
+
+
+def as_read(answers: dict | None, profile) -> dict | None:
+    """A channel's saved answers, to ask its questions again from (Change your answers, reelforge channel), with the
+    hourly read of its stats as it is: a no in its studio.toml in place of their yes, so the question shows what's
+    done, and changing another answer doesn't turn the read, with your log-ins, on again. A yes is yours to give."""
+    if answers is None or S.yes_no(answers.get("background_stats", True)) is False or not _says_no(profile.settings):
+        return answers
+    return {**answers, "background_stats": False}
 
 
 def background_stats(p, say=None) -> bool:
@@ -326,6 +420,13 @@ def context(a: dict, s: dict, assistant: str, profile=None, notes: list[str] | N
     stills = sorted({1, *(round(typical * k / 9) for k in range(1, 9)), int(typical) - 1})
     preview = [2, round(typical * 0.3), round(typical * 0.7), int(typical) - 3]
     here = "" if profile.main else f"profiles/{profile.folder.name}/"
+    # On Windows every terminal runs reelforge through bin/reelforge.cmd, which changes a !, a %NAME% or (handed them
+    # without their quotes) & | < > ^ in a folder's name whatever its quotes: a command naming such a channel runs
+    # ReelForge's Python straight, as the rest of its notes do, from the ReelForge folder (which the line at the top
+    # of its notes, read on its own, says too)
+    app = f"{P.venv_python()} -m studio" if win and not profile.main and any(
+        c in profile.key for c in profiles.NOT_THROUGH_REELFORGE_CMD) else "reelforge"
+    run_from = "" if app == "reelforge" else " from the ReelForge folder"
     channels = [] if not profile.main else [_other_channel(p, notes) for p in profiles.extra()]
     return {
         "kit": KIT_NAME, "version": KIT_VERSION, "date": dt.date.today().isoformat(),
@@ -364,13 +465,15 @@ def context(a: dict, s: dict, assistant: str, profile=None, notes: list[str] | N
         "py": P.venv_python(), "sep": sep, "win": win,
         "app_cmd": "reelforge",
         "onboard_cmd": ("reelforge channel, or " + ("channel.bat" if win else "./channel.sh")) if profile.main else
-                       f"reelforge -p {profile.kept_flag} channel, or its Settings in ReelForge's profile menu",
+                       f"{app} -p {profile.kept_flag} channel{run_from}, or its Settings in ReelForge's profile menu",
         "dims": "1080×1920",
         # another channel's notes: its files are in its folder (here), and every command runs from the ReelForge folder,
         # with -p naming it by profiles/<folder> (Profile.kept_flag): its folder's name alone can find another channel,
-        # and its number in the list changes when another channel is added or deleted
-        "extra": not profile.main, "here": here, "here_cmd": here.replace("/", sep), "main_name": profiles.main().name,
-        "pflag": "" if profile.main else f" -p {profile.kept_flag}",
+        # and its number in the list changes when another channel is added or deleted. An episode's folder in a command
+        # is one word, in the same quotes (Profile.kept_path).
+        "extra": not profile.main, "here": here, "episode": profile.kept_path("episodes", "<id>", sep=sep),
+        "main_name": profiles.main().name,
+        "pflag": "" if profile.main else f" -p {profile.kept_flag}", "app": app,
         # this channel's alone, the first one's too: without -p, --regenerate writes every channel's files again
         "only": f" -p {profile.kept_flag}",
         "channels": channels,   # the first channel's notes: the others in this folder
@@ -508,11 +611,13 @@ def write_all(answers: dict, profile=None, *, account: str = "", again: bool = F
     first-time answers back over them, nor a platform taken out of it by hand. While studio.toml has a mistake in it,
     a platform connected is kept in the channel's to-add list (_to_add), for write_guides or the next Connect to put
     in once it's fixed. again: the answers are the saved ones, written out again (reelforge channel --regenerate), not
-    answers given now: written again over a studio.toml with a mistake in it, a no to the hourly read of your stats
-    in the file's own background_stats lines, which the hourly job goes by meanwhile (background_stats), is kept, in
-    the answers too, since nobody has said yes since. say: called with a line for each file that was left as it was
-    because it has a mistake in it, or written again with one in it, or whole in place of a line at a time (and where
-    its copy is), once everything else is written."""
+    answers given now: a no to the hourly read of your stats in the studio.toml they're written over, which the
+    hourly job goes by (background_stats: under [platforms], or in the file's own background_stats lines while it
+    has a mistake in it), is kept, in the answers too, since nobody has said yes since; a yes there against the
+    answers' no isn't (the read uses your log-ins), and that's said. say: called with a line for each file that was
+    left as it was because it has a mistake in it, or written again with one in it, or whole in place of a line at a
+    time (and where its copy is), and for a no to the hourly read kept, or a yes in the file not, once everything
+    else is written."""
     w = _where(profile)
     notes = w.notes
     first = not w.settings.exists()                     # first-time setup: the channel isn't set up yet
@@ -528,18 +633,19 @@ def write_all(answers: dict, profile=None, *, account: str = "", again: bool = F
             pass
     # The answers file is often the one being read (my-studio/answers.json), with no date yet: today, then.
     a["_created"] = a.get("_created") or dt.date.today().isoformat()
-    # The hourly read uses your log-ins. "Write it again from your answers" (S.fix_it) is the way out of a mistake in
-    # studio.toml, and meanwhile the read goes by the file's own background_stats lines: a no there stays a no, or
-    # following ReelForge's own advice would turn the read on again without a word. Answers given now have the say.
-    kept_no = False
+    # The hourly read uses your log-ins, and goes by studio.toml, which invites edits by hand: a no written there stays
+    # a no when the saved answers are written out again (after a brief, an edit of the answers, or as the way out of a
+    # mistake in the file, S.fix_it), or that would turn the read on again without a word. Answers given now have the
+    # say. A yes in the file (written there by hand, or by default) against the answers' no (given, or kept from the
+    # file before) doesn't turn the read on either, but it doesn't go without a word: the file says no now too, and
+    # where its copy is (with the yes, if one was written in it) is said.
+    kept_no = kept_off = False
     if again and not account and w.settings.is_file():
-        try:
-            S.load(w.settings)
-        except S.SettingsError:
-            if _own_background_stats(w.settings) is False and bool(a.get("background_stats", True)):
-                a["background_stats"], kept_no = False, True
-        except OSError:
-            pass
+        said = _says(w.settings)
+        if said is False and a.get("background_stats", True):
+            a["background_stats"], kept_no = False, True
+        elif said is True and not a.get("background_stats", True):
+            kept_off = True     # said below, with where the file's yes is: its copy
     s = settings_from(a)
     cfg = s                     # what ReelForge's settings (config.toml) are written from
     connecting = account if a.get(f"handle_{account}") else ""
@@ -622,6 +728,11 @@ def write_all(answers: dict, profile=None, *, account: str = "", again: bool = F
                 notes.append(f"{a['channel_name'].strip()}'s settings file, {w.settings}, had a mistake in it "
                              f"({mistake.reason}), so it was written again from your answers{kept}. A copy of it as it "
                              f"was is in {copy}.")
+            if kept_off:
+                notes.append(f"{a['channel_name'].strip()}'s stats aren't read every hour while ReelForge is closed: "
+                             f"its answers say no to that, so its settings file, {w.settings}, says no now too (a copy "
+                             f"of it as it was is in {copy}). To have them read, say yes to it in its questions: "
+                             f"reelforge -p {w.profile.flag} channel")
             if edit is not None and edit.waited:
                 notes.append(_brought_in(edit.waited, a["channel_name"].strip(), w.settings, copy))
             if edit is not None and edit.text is None:      # its own layout is in the copy alone
@@ -630,6 +741,10 @@ def write_all(answers: dict, profile=None, *, account: str = "", again: bool = F
                              f"file, {w.settings}, again whole, as its layout can't be changed a line at a time: "
                              "every setting in it is kept, but its own layout and any comments in it are only in the "
                              f"copy of it as it was, {copy}.")
+    if kept_no and mistake is None:     # (the line about a file with a mistake in it says so)
+        notes.append(f"{a['channel_name'].strip()}'s stats still aren't read every hour while ReelForge is closed: its "
+                     f"settings file, {w.settings}, says no to that, so the no is kept, in your answers too. To have "
+                     f"them read, say yes to it in its questions: reelforge -p {w.profile.flag} channel")
     written: list[Path] = []
     for path, text in files:
         P.write_atomic(path, text)

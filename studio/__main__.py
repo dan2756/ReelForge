@@ -26,7 +26,8 @@
       --answers FILE.json      write everything from saved answers, no questions
       --regenerate             rebuild everything from my-studio/answers.json (after you edit it), every profile's,
                                or with -p NAME that one's alone; a studio.toml it changes is copied into backups first
-                               (and one with a mistake in it keeps a no to the hourly stats read it has)
+                               (a no to the hourly stats read in it is kept, and a yes in it against your answers'
+                               no isn't, which it says: say yes in the questions)
       --preserve-settings      with --regenerate: only CLAUDE.md / AGENTS.md again, from your settings as they are
                                (what an update runs: studio.toml and your accounts stay as you left them)
       --new                    for a new profile (with --answers too, for an AI running the interview in chat)
@@ -203,6 +204,9 @@ def onboard(argv: list[str], *, preserve_settings: bool = False, only: profiles.
             prior = json.loads(P.ANSWERS.read_text(encoding="utf-8-sig")) if P.ANSWERS.exists() else None
         except ValueError:
             prior = None        # answers that can't be read: the questions start from their defaults
+        if not isinstance(prior, dict):
+            prior = None
+        prior = generate.as_read(prior, profiles.current())   # with the hourly read of your stats as it's done
         again = S.onboarded()
         answers = onboard_cli.ask(prior)
         written = generate.write_all(answers, say=print)
@@ -475,7 +479,10 @@ def new_episode(argv: list[str]) -> int:
     (dest / "facts.md").write_text(facts, encoding="utf-8")
     print(f"Started {P.rel(dest)} from {P.rel(src.parent)}.")
     print("Next: write the title, lines, HUD, sound cues and facts.md, then build and look at the stills:")
-    print(f"  {P.venv_python()} {Path('pipeline') / 'make_episode.py'} \"{P.rel(dest)}\" --steps build,stills")
+    # the episode's folder in the quotes the channel's notes put it in (a folder renamed by hand with $, a backtick or
+    # a ! in it, which bash or zsh changes between double quotes, in single quotes; one ReelForge named, as it is)
+    folder = P.PROFILE.kept_path("episodes", ep_id, sep=os.sep)
+    print(f"  {P.venv_python()} {Path('pipeline') / 'make_episode.py'} {folder} --steps build,stills")
     return 0
 
 
