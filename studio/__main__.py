@@ -203,6 +203,9 @@ def onboard(argv: list[str], *, preserve_settings: bool = False, only: profiles.
             prior = json.loads(P.ANSWERS.read_text(encoding="utf-8-sig")) if P.ANSWERS.exists() else None
         except ValueError:
             prior = None        # answers that can't be read: the questions start from their defaults
+        if not isinstance(prior, dict):
+            prior = None
+        prior = generate.as_read(prior, profiles.current())   # with the hourly read of your stats as it's done
         again = S.onboarded()
         answers = onboard_cli.ask(prior)
         written = generate.write_all(answers, say=print)

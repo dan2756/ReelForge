@@ -211,6 +211,62 @@ class Onboarding(Scratch):
                                            "it ("), rows)
         self.assertIn("so your AI's notes go by its answers instead.", rows[0])
 
+    def test_changing_your_answers_starts_from_a_no_to_the_hourly_read_in_the_settings_file(self):
+        """The window's Change your answers (and reelforge channel in a terminal) started from the saved answers'
+        yes to the hourly read of your stats, while studio.toml, which the hourly job goes by, said no (one that reads,
+        or one with a mistake in it whose background_stats line says no). The review showed Yes, and changing only
+        the channel's about text turned the read, with your log-ins, on again."""
+        from studio import onboard_cli
+        from studio.__main__ import main
+
+        def change_the_about(svc: Setup) -> list[str]:
+            start = svc.onboard_start()
+            svc.onboard_change("about", "What-if videos with real science, and more.")
+            review = svc.onboard_step(len(start["steps"]) - 1)["review"]
+            with mock.patch.object(svc.loop, "run_worker"):
+                self.assertEqual(svc.onboard_create(), {"ok": True})
+            return [line for line in review.splitlines() if "every hour" in line]
+
+        for what, body in (("in a file that reads", lambda t: t.replace("background_stats = true",
+                                                                         "background_stats = false")),
+                           ("in a file with a mistake in it", lambda t: t + "background_stats = false\n")):
+            with self.subTest(what):
+                self.onboard_main()             # the answers say yes
+                P.SETTINGS.write_text(body(P.SETTINGS.read_text(encoding="utf-8")), encoding="utf-8")
+                self.assertIs(generate.background_stats(profiles.main()), False)
+                svc = Setup(Loop(out=io.StringIO()))
+                svc.start({"start": "onboard", "embedded": True})
+                self.assertEqual(change_the_about(svc), ["- **Keep reading your stats every hour, even when ReelForge "
+                                                         "is closed?** No"])
+                self.assertEqual(S.load()["channel"]["about"], "What-if videos with real science, and more.")
+                self.assertIs(S.load()["platforms"]["background_stats"], False)
+                self.assertIs(generate.background_stats(profiles.main()), False)
+        # a yes given there is a yes
+        svc = Setup(Loop(out=io.StringIO()))
+        svc.start({"start": "onboard", "embedded": True})
+        svc.onboard_start()
+        svc.onboard_change("background_stats", True)
+        with mock.patch.object(svc.loop, "run_worker"):
+            self.assertEqual(svc.onboard_create(), {"ok": True})
+        self.assertIs(generate.background_stats(profiles.main()), True)
+        # a new channel starts from what's done for the one it's made from, as it does from its answers
+        P.SETTINGS.write_text(P.SETTINGS.read_text(encoding="utf-8").replace("background_stats = true",
+                                                                             "background_stats = false"),
+                              encoding="utf-8")
+        svc = Setup(Loop(out=io.StringIO()))
+        svc.start({"start": "onboard", "new": True, "embedded": True})
+        svc.onboard_start()
+        self.assertIs(svc.answers["background_stats"], False)
+        # and so do the questions in a terminal
+        asked = []
+        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                mock.patch.object(sys.stdout, "isatty", return_value=True, create=True), \
+                mock.patch.object(onboard_cli, "ask", lambda prior: asked.append(prior) or prior), \
+                mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["channel", "--plain"]), 0)
+        self.assertIs(asked[0]["background_stats"], False)
+        self.assertIs(S.load()["platforms"]["background_stats"], False)
+
     def test_the_interview_makes_a_new_profile_from_your_answers_about_you(self):
         self.onboard_main(assistant="codex")
         svc = Setup(Loop(out=io.StringIO()))

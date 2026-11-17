@@ -253,6 +253,15 @@ def _says_no(path: Path) -> bool:
         return False
 
 
+def as_read(answers: dict | None, profile) -> dict | None:
+    """A channel's saved answers, to ask its questions again from (Change your answers, reelforge channel), with the
+    hourly read of its stats as it is: a no in its studio.toml in place of their yes, so the question shows what's
+    done, and changing another answer doesn't turn the read, with your log-ins, on again. A yes is yours to give."""
+    if answers is None or S.yes_no(answers.get("background_stats", True)) is False or not _says_no(profile.settings):
+        return answers
+    return {**answers, "background_stats": False}
+
+
 def background_stats(p, say=None) -> bool:
     """Whether a channel has its stats read every hour while ReelForge is closed: as its settings say. While its
     studio.toml has a mistake in it (and say gets a line about the file), as the file's own background_stats line
