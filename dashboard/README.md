@@ -15,7 +15,7 @@ optional browser extension, or for YouTube through its own API (see [Publish](#p
 | `reelforge 1` … `reelforge 7` | straight to the tab in that place along the top, 1 at the far left: by default 1 Overview, 2 Videos, 3 Compare, 4 Stats, 5 Accounts, 6 Settings, 7 Updates (the Settings tab's **Tab order** changes it) |
 | `reelforge videos`, `reelforge publish`, … | the same, by the tab's name (`post` and `upload` work for Publish, which is the green button at the top right and has no number, `login` for Accounts, `totals` for Stats: `reelforge stats` is the hourly job) |
 | `reelforge notifications` | the Overview with the notifications drawer open |
-| `reelforge -p "Channel name"` | ReelForge on one of your profiles (its number in the list, the start of its name, or its folder, like `profiles/cool-epic-facts`, works too; the commands ReelForge writes out for you name it by its folder) |
+| `reelforge -p "Channel name"` | ReelForge on one of your profiles (its number in the list, the start of its name, or its folder, like `profiles/cool-epic-facts`, works too; the commands ReelForge writes out for you name it by its folder, in double quotes when you've renamed the folder with a space in it, say, and in single quotes when its name has a `$`, a backtick, a `"` or a backslash in it; a command it prints for you to run there and then names it by its number instead when the folder's name has a character no quotes keep as it is in every shell, like `$`, `%` or `!`, but your AI's notes never do, as that number changes when you add or delete a channel) |
 | `reelforge --demo` | a tour on made-up numbers: nothing is read or saved |
 
 ReelForge shows only the platforms you've connected: first-time setup connects the ones you give it a handle for, and
@@ -250,8 +250,12 @@ video it was matters more than when it went up, so take it as a time to try rath
 | `videos_dir` | an extra folder of videos to post (default `dashboard/videos`) |
 
 First-time setup writes this file; run `reelforge channel` to change your answers, or edit it and reopen ReelForge. Connecting
-or disconnecting a platform on the Accounts tab changes your channel's answers to match, so your AI's notes cover the
-platforms you're connected to and answering the questions again keeps them.
+or disconnecting a platform on the Accounts tab changes your channel's answers to match, and that platform alone in its
+`my-studio/studio.toml` (a copy of the file as it was goes into `my-studio/backups/` first): connected, it's added to
+the platforms there, so your AI's notes cover it and answering the questions again keeps it; disconnected, only its
+handle goes. Every other platform stays as `studio.toml` has it, so one you took out of it by hand stays out of your
+AI's notes while its account is connected. Only a `studio.toml` laid out so that can't be changed a line at a time (a
+list over several lines, say) is written again whole, and ReelForge says so.
 
 ## Your data
 

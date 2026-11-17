@@ -813,6 +813,106 @@ class Deleting(Scratch):
                 self.assertEqual(cmd, [f"profiles/{p.folder.name}"])
                 self.assertEqual(profiles.find(cmd[0]), p)
 
+    def test_a_channel_whose_folder_was_renamed_by_hand_is_named_so_the_command_reaches_it_where_pasted(self):
+        """The commands ReelForge writes out put -p profiles/<folder> bare, so a channel's folder renamed by hand with
+        a space in it (the copy Explorer makes, "night-physics - Copy") split where the command was pasted, which
+        then did nothing for it."""
+        import shlex
+
+        from studio.__main__ import main
+
+        self.onboard_main()
+        a = profiles.create("Night Physics 🌙")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**ANSWERS, "channel_name": "Night Physics 🌙"}, a)
+        self.assertEqual(a.flag, "profiles/night-physics")              # a folder ReelForge named: as it was
+        copy = a.folder.with_name("night-physics - Copy")
+        shutil.copytree(a.folder, copy)
+        (copy / "profile.toml").write_text('name = "Moon Copy"\ncreated = "2099-01-01T00:00:00"\n', encoding="utf-8")
+        c = profiles.Profile(copy)
+        for f in (c.settings, c.answers):
+            f.write_text(f.read_text(encoding="utf-8").replace("Night Physics 🌙", "Moon Copy"), encoding="utf-8")
+        self.assertEqual(c.flag, '"profiles/night-physics - Copy"')     # double quotes: bash, PowerShell and cmd
+        good = c.settings.read_text(encoding="utf-8")
+        c.settings.write_text(good + "\nthis is = = a typo\n", encoding="utf-8")
+        with self.assertRaises(S.SettingsError) as raised:
+            S.load(c.settings)
+        argv = shlex.split(str(raised.exception).split("with: ", 1)[1])    # as a shell splits it where it's pasted
+        self.assertEqual(argv, ["reelforge", "-p", "profiles/night-physics - Copy", "channel", "--regenerate"])
+        before = a.settings.read_bytes()
+        with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(main(argv[1:]), 0, out.getvalue())
+        self.assertEqual(S.load(c.settings)["channel"]["name"], "Moon Copy")   # put right, and only it
+        self.assertEqual(a.settings.read_bytes(), before)
+        # A folder with a character double quotes don't keep as it is in all three shells ($ or %, say) is named by
+        # its number in the list, which finds it; one that isn't in the list keeps its folder
+        dollar = copy.rename(copy.with_name("night $physics 100%"))
+        d = profiles.Profile(dollar)
+        self.assertEqual([p.folder.name for p in profiles.every()][2], dollar.name)
+        self.assertEqual(d.flag, "3")
+        self.assertEqual(profiles.find(d.flag), d)
+        self.assertEqual(profiles.Profile(self.root / "profiles" / "not $listed").flag, "'profiles/not $listed'")
+        self.assertEqual(profiles.main().flag, "1")
+
+    def test_a_channels_own_notes_name_it_by_its_folder_never_by_its_number_in_the_list(self):
+        """A channel whose folder was renamed by hand with $, % or ! in it was named by its number in the list in its
+        own notes too (new-episode, publish, channel --regenerate). Those aren't written again when another channel is
+        added or deleted, so the number came to name another channel: your AI made this one's episodes in that one's
+        folder, and Publish opened that one's."""
+        import re
+        import shlex
+
+        from studio.__main__ import main
+
+        def made(name: str, day: int) -> profiles.Profile:
+            p = profiles.create(name)
+            with redirect_stdout(io.StringIO()):
+                generate.write_all({**ANSWERS, "channel_name": name}, p)
+            (p.folder / "profile.toml").write_text(f'name = "{name}"\ncreated = "2026-01-0{day}T00:00:00"\n',
+                                                   encoding="utf-8")
+            return p
+
+        self.onboard_main()
+        bee = made("Bee Facts", 1)
+        sea = made("Sea Facts", 2)
+        sea = profiles.Profile(sea.folder.rename(sea.folder.with_name("sea $facts 100%!")))
+        self.assertEqual(profiles.every(), [profiles.main(), bee, sea])
+        self.assertEqual(sea.flag, "3")         # printed for you to run there and then, the number finds it
+        with redirect_stdout(io.StringIO()):
+            generate.write_guides(sea, saved_settings=True)
+        commands = {"new-episode": r"-m studio -p (.+?) new-episode <slug>", "publish": r"reelforge -p (.+?) publish",
+                    "regenerate": r"-m studio -p (.+?) channel --regenerate"}
+        for notes in ("CLAUDE.md", "AGENTS.md"):
+            text = (sea.folder / notes).read_text(encoding="utf-8")
+            for what, pattern in commands.items():
+                with self.subTest(notes=notes, command=what):
+                    flags = set(re.findall(pattern, text))
+                    self.assertEqual(flags, {sea.kept_flag})
+                    self.assertEqual(shlex.split(sea.kept_flag), ["profiles/sea $facts 100%!"])
+        new_episode = re.search(r"`(\S+ -m studio -p .+? new-episode) <slug>`", text).group(1)
+        # Bee is deleted and Dee added: Sea's notes aren't written again, and Dee is third in the list now
+        with redirect_stdout(io.StringIO()):
+            profiles.delete(bee, wait=0)
+        dee = made("Dee Facts", 3)
+        self.assertEqual(profiles.every(), [profiles.main(), sea, dee])
+        self.assertEqual((sea.folder / "AGENTS.md").read_text(encoding="utf-8"), text)
+        argv = shlex.split(new_episode)[3:] + ["probe"]    # what follows python -m studio, as a shell splits it
+        with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(main(argv), 0, out.getvalue())
+        self.assertEqual([e.name for e in (sea.folder / "episodes").glob("*probe*")], ["ep01_probe"])
+        self.assertFalse(list((dee.folder / "episodes").glob("*probe*")))
+        self.assertEqual(sea.flag, "2")
+        # a backslash or a double quote in a folder's name (macOS and Linux have them; Windows doesn't): single quotes
+        # keep it as it is in bash, which a backslash in double quotes isn't; printed there and then, its number
+        if os.name != "nt":
+            for name in ("trail\\", 'say "hi"', "it's $5"):
+                with self.subTest(name=name):
+                    sea = profiles.Profile(sea.folder.rename(sea.folder.with_name(name)))
+                    self.assertEqual(shlex.split(f"reelforge -p {sea.kept_flag} channel"),
+                                     ["reelforge", "-p", f"profiles/{name}", "channel"])
+                    self.assertEqual(profiles.find(shlex.split(sea.kept_flag)[0]), sea)
+                    self.assertEqual(sea.flag, "2")
+
     def test_connect_with_a_mistake_in_the_settings_leaves_your_ais_notes_and_the_way_out_brings_them_back(self):
         """Connect with a typo in studio.toml wrote your AI's notes and the channel bible from the first-time answers,
         so what was edited by hand in studio.toml (the length here) went back in them, and nothing brought it back
@@ -884,6 +984,95 @@ class Deleting(Scratch):
         self.assertIn("TikTok @nightphysics · YouTube Shorts @npyt |", notes)
         self.assertNotIn("@np_x", notes)
         self.assertNotIn("X: the caption only", notes)
+
+    def test_connecting_or_disconnecting_another_account_leaves_a_platform_taken_out_by_hand_out(self):
+        """Connect or Disconnect for any account on the Accounts tab wrote studio.toml's platforms again from the
+        answers and every account connected, so a platform taken out of it by hand (its account still connected) was
+        back in it, and in your AI's notes with its caption rule, without a word."""
+        self.onboard_main(platforms=["tiktok", "youtube", "x"], handle_youtube="@npyt", handle_x="@np_x")
+        main = profiles.main()
+        claude = self.root / "CLAUDE.md"
+        text = main.settings.read_text(encoding="utf-8")
+        mine = text.replace('enabled = ["tiktok", "youtube", "x"]', 'enabled = ["tiktok", "youtube"]   # not X for now')
+        mine = mine.replace("[platforms]\n", "# where I post\n[platforms]\n")
+        self.assertNotEqual(mine, text)
+        main.settings.write_text(mine, encoding="utf-8")
+        generate.write_guides(main, saved_settings=True)        # an update: X stays out
+        before = sorted(main.backups.glob("studio.*"))
+        said: list[str] = []
+        generate.set_account("instagram", "@np_ig", say=said.append)     # Connect another platform
+        self.assertEqual(said, [])
+        # Instagram alone is added, and the rest of the file is as it was written, comments and all
+        self.assertEqual(main.settings.read_text(encoding="utf-8"),
+                         mine.replace('["tiktok", "youtube"]   #', '["tiktok", "youtube", "instagram"]   #')
+                         .replace('x = "@np_x"\n', 'x = "@np_x"\ninstagram = "@np_ig"\n'))
+        copies = [c.read_text(encoding="utf-8") for c in sorted(main.backups.glob("studio.*")) if c not in before]
+        self.assertEqual(copies, [mine])                         # with a copy of it as it was
+        notes = claude.read_text(encoding="utf-8")
+        self.assertIn("Instagram Reels @np_ig", notes)
+        self.assertNotIn("@np_x", notes)
+        self.assertNotIn("X: the caption only", notes)
+        self.assertEqual(dashboard_config.handles(main)["x"], "@np_x")    # and its account is still connected
+        # Disconnect, of Instagram or of X: only that account's handle goes
+        generate.set_account("instagram", "", say=said.append)
+        generate.set_account("x", "", say=said.append)
+        self.assertEqual(said, [])
+        s = S.load(main.settings)
+        self.assertEqual(s["platforms"]["enabled"], ["tiktok", "youtube", "instagram"])
+        self.assertEqual(s["platforms"]["handles"], {"tiktok": "@nightphysics", "youtube": "@npyt", "instagram": "",
+                                                     "x": ""})
+        self.assertEqual(dashboard_config.handles(main), s["platforms"]["handles"])
+        self.assertIn("# where I post\n[platforms]\n", main.settings.read_text(encoding="utf-8"))
+        self.assertNotIn("X: the caption only", claude.read_text(encoding="utf-8"))
+        # and Connect for X itself puts it back in, as the first Connect of a platform does
+        generate.set_account("x", "@np_x2", say=said.append)
+        self.assertEqual(said, [])
+        s = S.load(main.settings)
+        self.assertEqual((s["platforms"]["enabled"], s["platforms"]["handles"]["x"]),
+                         (["tiktok", "youtube", "instagram", "x"], "@np_x2"))
+        self.assertIn("X: the caption only", claude.read_text(encoding="utf-8"))
+
+    def test_connect_writes_settings_laid_out_otherwise_again_and_says_so(self):
+        """Settings that can't be changed a line at a time (a list over several lines, here) are written again whole,
+        with only that platform added, and a copy of them as they were; and the line says so. So is an account
+        connected while the file had a mistake in it, fixed by hand since, which goes in with the next Connect."""
+        self.onboard_main(platforms=["tiktok", "youtube", "x"], handle_youtube="@npyt", handle_x="@np_x")
+        main = profiles.main()
+        text = main.settings.read_text(encoding="utf-8").replace("max_seconds = 75.0", "max_seconds = 70.0")
+        mine = text.replace('enabled = ["tiktok", "youtube", "x"]', 'enabled = [\n  "tiktok",\n  "youtube",   # not X\n]')
+        main.settings.write_text(mine, encoding="utf-8")
+        before = sorted(main.backups.glob("studio.*"))
+        said: list[str] = []
+        generate.set_account("instagram", "@np_ig", say=said.append)
+        copy = next(c for c in sorted(main.backups.glob("studio.*")) if c not in before)
+        self.assertEqual(copy.read_text(encoding="utf-8"), mine)
+        self.assertEqual(said, [f"Connecting Instagram Reels wrote Night Physics's settings file, {main.settings}, "
+                                "again whole, as its layout can't be changed a line at a time: every setting in it is "
+                                "kept, but its own layout and any comments in it are only in the copy of it as it "
+                                f"was, {copy}."])
+        s = S.load(main.settings)
+        self.assertEqual((s["platforms"]["enabled"], s["video"]["max_seconds"]),
+                         (["tiktok", "youtube", "instagram"], 70.0))
+        self.assertNotIn("X: the caption only", (self.root / "CLAUDE.md").read_text(encoding="utf-8"))
+        # an account connected while the file has a mistake in it waits; fixed by hand, the next Connect brings it in
+        good = main.settings.read_text(encoding="utf-8")
+        main.settings.write_text(good + "\nthis is = = a typo\n", encoding="utf-8")
+        said = []
+        generate.set_account("x", "@np_x3", say=said.append)
+        self.assertEqual(len(said), 1, said)
+        self.assertIn("has a mistake in it (", said[0])
+        main.settings.write_text(good, encoding="utf-8")
+        before = sorted(main.backups.glob("studio.*"))
+        said = []
+        generate.set_account("youtube", "@npyt2", say=said.append)
+        copy = next(c for c in sorted(main.backups.glob("studio.*")) if c not in before)
+        self.assertEqual(copy.read_text(encoding="utf-8"), good)
+        s = S.load(main.settings)
+        self.assertEqual(s["platforms"]["handles"], {"tiktok": "@nightphysics", "youtube": "@npyt2",
+                                                     "instagram": "@np_ig", "x": "@np_x3"})
+        self.assertEqual(s["platforms"]["enabled"], ["tiktok", "youtube", "instagram", "x"])
+        self.assertEqual(said, [f"X, connected while Night Physics's settings file, {main.settings}, had a mistake in "
+                                f"it, is in it now. A copy of it as it was is in {copy}."])
 
     def test_the_commands_delete_and_restore_one(self):
         from studio.__main__ import main
