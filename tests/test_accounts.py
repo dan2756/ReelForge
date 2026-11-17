@@ -289,7 +289,9 @@ class SetAccount(Scratch):
         self.assertEqual(said, [f"Night Physics's settings file, {P.SETTINGS}, has a mistake in it (Expected '=' "
                                 f"after a key in a key/value pair (at line {line}, column 6)), so it couldn't be "
                                 "updated with this account (your answers and your AI's notes were). Fix it in a text "
-                                "editor, or write it again from your answers with: reelforge channel --regenerate"])
+                                "editor, then run reelforge -p 1 channel --regenerate --preserve-settings so your "
+                                "AI's notes follow it. Or write it again from your answers, keeping a copy of it as "
+                                "it is, with: reelforge -p 1 channel --regenerate"])
         P.SETTINGS.write_text(good, encoding="utf-8")            # the typo fixed, then Change your answers
         generate.write_all(json.loads(P.ANSWERS.read_text(encoding="utf-8")))
         self.assertEqual(self.handles()["x"], "@np_x")

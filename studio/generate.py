@@ -1,7 +1,8 @@
 """Turn onboarding answers into your studio: settings, channel bible, CLAUDE.md, AGENTS.md and the dashboard's config.
 
   python -m studio onboard --answers my-studio/answers.json     (what the AI-led interview runs)
-  python -m studio channel --regenerate                         (rebuild everything from the saved answers)
+  python -m studio channel --regenerate                         (rebuild everything from the saved answers:
+                                                                 every channel's, or with -p NAME that one's)
 
 Each profile (each channel, see studio/profiles.py) gets its own: the first profile's go where they always have, a
 new profile's into its folder in profiles/. The first profile's CLAUDE.md and AGENTS.md also list the other channels,
@@ -175,9 +176,9 @@ class Mistake(str):
 
 def typo_line(e: S.SettingsError, name: str, what: str) -> Mistake:
     """What to say when a channel's studio.toml has a mistake in it and something went ahead without it: which file,
-    what's wrong in it, what was done instead (what) and how to put it right."""
-    return Mistake(f"{name}'s settings file, {e.path}, has a mistake in it ({e.reason}), so {what}. Fix it in a text "
-                   "editor, or write it again from your answers with: reelforge channel --regenerate", Path(e.path))
+    what's wrong in it, what was done instead (what) and how to put it right, for that channel alone (S.fix_it)."""
+    return Mistake(f"{name}'s settings file, {e.path}, has a mistake in it ({e.reason}), so {what}. "
+                   f"{S.fix_it(Path(e.path))}", Path(e.path))
 
 
 def once(lines: list[str]) -> list[str]:
@@ -359,6 +360,8 @@ def context(a: dict, s: dict, assistant: str, profile=None, notes: list[str] | N
         # another channel's notes: its files are in its folder (here), and every command runs from the ReelForge folder
         "extra": not profile.main, "here": here, "here_cmd": here.replace("/", sep), "main_name": profiles.main().name,
         "pflag": "" if profile.main else f" -p {profile.folder.name}",
+        # this channel's alone, the first one's too: without -p, --regenerate writes every channel's files again
+        "only": " -p 1" if profile.main else f" -p {profile.folder.name}",
         "channels": channels,   # the first channel's notes: the others in this folder
         "notes_file": "AGENTS.md" if assistant == "codex" else "CLAUDE.md",
     }
@@ -470,13 +473,29 @@ def _keep_yours(old: str, new: str, taken_out: list[str] | None = None) -> str:
     return new
 
 
+def _undated(settings: str) -> str:
+    """A studio.toml's text without the day it was last written: written again on another day, it's no change."""
+    return re.sub(r"^updated = .*(\n|$)", "", settings.replace("\r\n", "\n"), flags=re.M)
+
+
+def _free(path: Path) -> Path:
+    """path, or the same name with -2, -3... when it's taken: a second copy made within the second keeps the first."""
+    n = 2
+    free = path
+    while free.exists():
+        free, n = path.with_name(f"{path.stem}-{n}{path.suffix}"), n + 1
+    return free
+
+
 def write_all(answers: dict, profile=None, *, account_only: bool = False, say=None) -> list[Path]:
     """Validate the answers and write every file, for a profile (the one this process works on, by default). Returns
     the paths written. Raises ValueError on bad answers, or when a file can't be made right (the message says which),
     before any file has changed. account_only: nothing but a platform's handle changed in the answers (set_account),
     so the settings on file stay as they are apart from the platforms: studio.toml invites edits by hand, and an
-    account connected on the Accounts tab must not put the first-time answers back over them. say: called with a
-    line for each file that was left as it was because it has a mistake in it, once everything else is written."""
+    account connected on the Accounts tab must not put the first-time answers back over them. A studio.toml written
+    again from the answers is copied into the channel's backups first (when it changes). say: called with a line for
+    each file that was left as it was because it has a mistake in it, or written again with one in it (and where its
+    copy is), once everything else is written."""
     w = _where(profile)
     notes = w.notes
     first = not w.settings.exists()                     # first-time setup: the channel isn't set up yet
@@ -513,9 +532,18 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, say=No
         files.append((path, text))
 
     out(w.answers, json.dumps({k: v for k, v in a.items()}, indent=2, ensure_ascii=False) + "\n")
+    settings_text, mistake = None, None
     if not keep_settings:
-        out(w.settings, "# Your studio's settings, from first-time setup. The pipeline and the dashboard read this "
-            "file.\n" + S.dump_toml(s, SETTINGS_COMMENTS))
+        settings_text = ("# Your studio's settings, from first-time setup. The pipeline and the dashboard read this "
+                         "file.\n" + S.dump_toml(s, SETTINGS_COMMENTS))
+        out(w.settings, settings_text)
+        if w.settings.is_file():
+            try:
+                S.load(w.settings)
+            except S.SettingsError as e:    # written again from the answers: said below, with where its copy is
+                mistake = e
+            except OSError:                 # (one that can't be read can't be copied either: that stops it below)
+                pass
     bible = render("channel-bible.md.j2", context(a, s, "claude", w.profile, notes))
     old = w.bible.read_text(encoding="utf-8", errors="replace") if w.bible.exists() else None
     if old is not None:
@@ -540,6 +568,17 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, say=No
     # A copy of the bible as it was, when it changes (its first lines carry today's date: that alone is no change).
     if old is not None and old.split("-->", 1)[-1] != bible.split("-->", 1)[-1]:
         P.write_atomic(w.backups / f"channel-bible.{dt.datetime.now():%Y%m%d-%H%M%S}.md", old)
+    # And of studio.toml, which invites edits by hand: written again from the answers, what was edited in it (a typo
+    # included) is in the copy. Made before anything is written, so a copy that can't be made stops it all.
+    if settings_text is not None and w.settings.is_file():
+        before_bytes = w.settings.read_bytes()
+        if _undated(before_bytes.decode("utf-8-sig", errors="replace")) != _undated(settings_text):
+            copy = _free(w.backups / f"studio.{dt.datetime.now():%Y%m%d-%H%M%S}.toml")
+            P.write_atomic(copy, before_bytes)
+            if mistake is not None:
+                notes.append(f"{a['channel_name'].strip()}'s settings file, {w.settings}, had a mistake in it "
+                             f"({mistake.reason}), so it was written again from your answers. A copy of it as it was "
+                             f"is in {copy}.")
     written: list[Path] = []
     for path, text in files:
         P.write_atomic(path, text)

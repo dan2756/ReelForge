@@ -23,7 +23,8 @@
       --plain                  the same questions as plain prompts
       --questions              the questions as JSON (for an AI running the interview in chat)
       --answers FILE.json      write everything from saved answers, no questions
-      --regenerate             rebuild everything from my-studio/answers.json (after you edit it), every profile's
+      --regenerate             rebuild everything from my-studio/answers.json (after you edit it), every profile's,
+                               or with -p NAME that one's alone; a studio.toml it changes is copied into backups first
       --preserve-settings      with --regenerate: only CLAUDE.md / AGENTS.md again, from your settings as they are
                                (what an update runs: studio.toml and your accounts stay as you left them)
       --new                    for a new profile (with --answers too, for an AI running the interview in chat)
@@ -126,7 +127,8 @@ def _interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def onboard(argv: list[str], *, preserve_settings: bool = False) -> int:
+def onboard(argv: list[str], *, preserve_settings: bool = False, only: profiles.Profile | None = None) -> int:
+    """reelforge channel. only: the profile -p named, if it was typed: --regenerate writes that one's files alone."""
     ap = argparse.ArgumentParser(prog="reelforge channel")
     ap.add_argument("--plain", action="store_true")
     ap.add_argument("--answers", type=Path)
@@ -143,7 +145,7 @@ def onboard(argv: list[str], *, preserve_settings: bool = False) -> int:
         print(json.dumps(questions.describe(), indent=2, ensure_ascii=False))
         return 0
     if args.regenerate and not args.answers:
-        return regenerate(preserve_settings=preserve_settings or args.preserve_settings)
+        return regenerate(preserve_settings=preserve_settings or args.preserve_settings, only=only)
     if args.answers or args.regenerate:
         src = args.answers or P.ANSWERS
         if not src.exists():
@@ -209,14 +211,21 @@ def onboard(argv: list[str], *, preserve_settings: bool = False) -> int:
     return first_run("onboard", new=args.new)
 
 
-def regenerate(*, preserve_settings: bool = False) -> int:
+def regenerate(*, preserve_settings: bool = False, only: profiles.Profile | None = None) -> int:
     """Every profile's files again from its saved answers (after an update, so they get the new version's
     instructions): the first one last, so its notes list the others as they are now. Updates preserve settings
-    and refresh only instructions; an explicit channel regeneration can apply edited answers."""
+    and refresh only instructions; an explicit channel regeneration can apply edited answers. only: one profile's
+    alone (reelforge -p NAME channel --regenerate, what a line about a settings file with a mistake in it gives), so
+    the other channels' settings and notes stay as they are; with preserve_settings the first one's notes follow it
+    too, since they say how often each channel posts. (Without preserve_settings, write_all does that itself.)"""
     from . import generate
 
     done, said = 0, []
-    for p in [*profiles.extra(), profiles.main()]:
+    if only is None:
+        chosen = [*profiles.extra(), profiles.main()]
+    else:
+        chosen = [only, profiles.main()] if preserve_settings and not only.main else [only]
+    for p in chosen:
         if not p.answers.exists():
             continue
         try:
@@ -227,7 +236,7 @@ def regenerate(*, preserve_settings: bool = False) -> int:
             print(f"{p.name}: {e}")
             continue
         done += 1
-        if p.main:
+        if p.main or only is not None:
             _print_written(written)
     # Said once at the end: each channel's files bring up the first one's notes again, and with them every settings
     # file with a mistake in it. Without --preserve-settings each channel's studio.toml has been written again from
@@ -571,7 +580,7 @@ def dispatch(argv: list[str] | None = None) -> int:
         # after copying new files. They must not replay old answers over hand-edited
         # settings/accounts. `channel --regenerate` still explicitly applies edited
         # answers; future updaters also pass --preserve-settings for clarity.
-        return onboard(rest, preserve_settings=cmd == "onboard" and "--regenerate" in rest)
+        return onboard(rest, preserve_settings=cmd == "onboard" and "--regenerate" in rest, only=chosen)
     if cmd == "profiles":
         return list_profiles(rest, chosen)
     if cmd == "setup":

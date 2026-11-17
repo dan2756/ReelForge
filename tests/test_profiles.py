@@ -673,7 +673,9 @@ class Deleting(Scratch):
         profiles.create("Cool Epic Facts")
         said = (f"Night Physics's settings file, {mine}, has a mistake in it (Expected '=' after a key in a key/value "
                 f"pair (at line {typo.count(chr(10))}, column 6)), so your AI's notes go by its answers instead. "
-                "Fix it in a text editor, or write it again from your answers with: reelforge channel --regenerate\n")
+                "Fix it in a text editor, then run reelforge -p 1 channel --regenerate --preserve-settings so your "
+                "AI's notes follow it. Or write it again from your answers, keeping a copy of it as it is, with: "
+                "reelforge -p 1 channel --regenerate\n")
         for argv, done in ((["profiles", "delete", "cool epic facts", "--yes"],
                             "Cool Epic Facts is deleted. It's kept whole in backups"),
                            (["profiles", "restore", "1"], "Cool Epic Facts is back")):
@@ -736,6 +738,53 @@ class Deleting(Scratch):
         self.assertNotIn("has a mistake in it", out.getvalue())
         for f in typos:
             S.load(f)                                       # written again: nothing left to say about it
+
+    def test_the_way_out_a_mistake_gives_is_for_that_channel_alone_and_keeps_a_copy(self):
+        """Every line about a channel's settings file with a mistake in it ended "write it again from your answers
+        with: reelforge channel --regenerate", which wrote every channel's studio.toml again from its answers and kept
+        no copy: what was edited by hand in the other channels went too, and the file with the mistake in it with it."""
+        import re
+
+        from studio.__main__ import main
+
+        self.onboard_main()
+        quiet = profiles.create("Quiet One")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**ANSWERS, "channel_name": "Quiet One"}, quiet)
+        mine = self.root / "my-studio" / "studio.toml"
+        for broken, other, who in ((quiet.settings, mine, "quiet-one"), (mine, quiet.settings, "1")):
+            with self.subTest(broken=broken):
+                for f in (broken, other):   # each edited by hand, which the answers don't know of
+                    f.write_text(re.sub(r"max_seconds = .*", "max_seconds = 90.0", f.read_text(encoding="utf-8")),
+                                 encoding="utf-8")
+                edited, typo = other.read_text(encoding="utf-8"), broken.read_text(encoding="utf-8") + "\nx = = 1\n"
+                broken.write_text(typo, encoding="utf-8")
+                said: list[str] = []
+                generate.write_guides(profiles.main(), saved_settings=True, say=said.append)
+                with self.assertRaises(S.SettingsError) as raised:
+                    S.load(broken)
+                for line in (said[0], str(raised.exception)):    # the two say the same, and name that channel
+                    self.assertEqual(re.findall(r"reelforge [-\w ]+", line),
+                                     [f"reelforge -p {who} channel --regenerate --preserve-settings so your AI",
+                                      f"reelforge -p {who} channel --regenerate"], line)
+                    self.assertIn("keeping a copy of it as it is", line)
+                before = {p: sorted(p.my_studio.joinpath("backups").glob("studio.*")) for p in (profiles.main(), quiet)}
+                for argv in (["-p", who, "channel", "--regenerate", "--preserve-settings"],
+                             ["-p", who, "channel", "--regenerate"]):
+                    with redirect_stdout(io.StringIO()) as out:
+                        self.assertEqual(main(argv), 0, out.getvalue())
+                    self.assertEqual(other.read_text(encoding="utf-8"), edited, argv)   # the other channel's alone
+                self.assertEqual(S.load(broken)["video"]["max_seconds"], 75.0)          # from the answers, then
+                mine_p = profiles.of(broken)
+                copies = sorted(mine_p.my_studio.joinpath("backups").glob("studio.*"))
+                self.assertEqual(len(copies), len(before[mine_p]) + 1, copies)
+                copy = next(c for c in copies if c not in before[mine_p])
+                self.assertEqual(copy.read_text(encoding="utf-8"), typo)               # as it was, mistake and all
+                self.assertIn(f"settings file, {broken}, had a mistake in it (", out.getvalue())
+                self.assertIn(f"so it was written again from your answers. A copy of it as it was is in {copy}.",
+                              out.getvalue())
+                theirs = profiles.of(other)
+                self.assertEqual(sorted(theirs.my_studio.joinpath("backups").glob("studio.*")), before[theirs])
 
     def test_the_commands_delete_and_restore_one(self):
         from studio.__main__ import main

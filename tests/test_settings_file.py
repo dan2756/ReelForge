@@ -35,7 +35,7 @@ class Loading(Scratch):
                 said = str(raised.exception)
                 self.assertTrue(said.startswith(f"{P.SETTINGS} can't be read: "), said)
                 self.assertIn(reason, said)
-                self.assertIn("reelforge channel --regenerate", said)
+                self.assertIn("reelforge -p 1 channel --regenerate", said)   # the first channel, by its number
                 self.assertIsInstance(raised.exception, ValueError)   # what callers already catch for bad settings
 
     def test_a_file_saved_by_notepad_with_a_byte_order_mark_still_reads(self):

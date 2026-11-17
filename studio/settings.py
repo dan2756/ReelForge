@@ -90,13 +90,26 @@ def _merge(base: dict, over: dict) -> dict:
     return out
 
 
+def fix_it(path: Path) -> str:
+    """How to put right a channel's studio.toml with a mistake in it: by hand, then its notes for your AI again from
+    it, or the file again from the channel's answers. Both commands name the channel (-p: 1 is the first, whose name
+    can't be read from the file meanwhile, another its folder), so the other channels' settings and notes are left as
+    they are, and the second keeps a copy of the file first (generate.write_all)."""
+    from . import profiles
+
+    p = profiles.of(path)
+    who = "1" if p.main else p.folder.name
+    return (f"Fix it in a text editor, then run reelforge -p {who} channel --regenerate --preserve-settings so your "
+            "AI's notes follow it. Or write it again from your answers, keeping a copy of it as it is, with: "
+            f"reelforge -p {who} channel --regenerate")
+
+
 class SettingsError(ValueError):
     """A studio.toml that can't be used. The message names the file, says what's wrong in it and how to put it right,
     so whoever catches it can show it as it is."""
 
     def __init__(self, path: Path, reason: str):
-        super().__init__(f"{path} can't be read: {reason}. Fix it in a text editor, or write it again from your "
-                         "answers with: reelforge channel --regenerate")
+        super().__init__(f"{path} can't be read: {reason}. {fix_it(path)}")
         self.path, self.reason = path, reason
 
 
