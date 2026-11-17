@@ -140,6 +140,8 @@ void (async () => {
       return false
     }
     const stay = async why => {
+      // A post that was stopped is over: nothing is ringed, and nobody is asked to press.
+      if (rf.stopped) return true
       // Until now the note said Post was about to be pressed for them, and the button was left alone.
       if (button) rf.outline(button)
       rf.say("Check it, then press Post", "ready", `ReelForge did not press for you: ${why}`)
@@ -148,6 +150,17 @@ void (async () => {
     }
     if (cannot) return stay(cannot)
     const grant = await rf.send({ t: "job.press" })
+    // Stopped while ReelForge was being asked: with the popup's Stop, or ended in ReelForge. Whatever the answer
+    // says, nothing is clicked and nobody is asked to press. The worker answers no to a stopped job, and its
+    // word on why comes with the stop (if the stop has not reached this page yet, the note says Stopped meanwhile).
+    if (rf.stopped || grant?.stopped) {
+      if (!rf.stopped) {
+        rf.stopped = true
+        rf.unoutline()
+        rf.say("Stopped", "bad", "")
+      }
+      return true
+    }
     // The person pressed it while ReelForge was being asked. The answer was decided before ReelForge heard of
     // that press (a yes), or because of it (already pressed): either way their press is the post's only one. A
     // click now would post the video twice, and "not pressed" would ask them for a press they made. So nothing

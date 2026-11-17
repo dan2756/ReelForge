@@ -255,8 +255,9 @@ export const tests = {
     await until("the press to be noticed", async () => (await browser.jobRecord(job.id)).pressedByPerson === true)
     await until("the row to say so", async () => (await text(row)).includes("You pressed Post. Waiting for TikTok to say it is up"))
     equal(await row.getByRole("button", { name: "Stop" }).count(), 0, "Stop buttons")
-    // A popup drawn before the press still had its Stop. The worker refuses that one.
-    equal(await popup.evaluate(id => chrome.runtime.sendMessage({ t: "ui.cancel", job: id }), job.id), { ok: false }, "Stop, asked for anyway")
+    // A popup drawn before the press still had its Stop. The worker refuses that one, and says why.
+    equal(await popup.evaluate(id => chrome.runtime.sendMessage({ t: "ui.cancel", job: id }), job.id),
+      { ok: false, message: "Post was already pressed for this one, so it can't be stopped. Look at its tab." }, "Stop, asked for anyway")
     equal([job.state, (await browser.jobRecord(job.id)).state], ["ready", "ready"], "the job, in ReelForge and here")
     ok(job.events.some(event => event.state === "ready" && event.step === "press"), `ReelForge was told of the press (${JSON.stringify(job.events.slice(-3))})`)
   },

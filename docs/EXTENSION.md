@@ -99,6 +99,12 @@ the extension clicks nothing, whatever ReelForge answers, and the note says **Yo
 own name) while it waits for the platform. It does not ask you to press again, and ReelForge is not told "not
 pressed".
 
+**Stop** in the extension's popup while it is asking ReelForge for the press wins too: the extension clicks
+nothing, whatever ReelForge answers. When the stop reached ReelForge first, the post is cancelled and nothing was
+posted. When ReelForge had already said yes to the press, it has the post as "not sure it posted", and the note
+and the popup say so, and that Post was not pressed: look at your profile, then answer on its row. Once the
+extension has pressed Post, there is no Stop any more.
+
 ## What is automatic, and what never is
 
 Automatic, once you have started a post, with **Start** in ReelForge or **Post** in the popup:
