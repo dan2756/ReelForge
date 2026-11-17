@@ -62,7 +62,9 @@ last. The first profile is the ReelForge folder's own (`my-studio/`, `dashboard/
 always); each one you add gets a folder in `profiles/`, laid out the same way: `profiles/<name>/my-studio/`,
 `profiles/<name>/dashboard/config.toml` and `profiles/<name>/dashboard/data/`, its episodes and finished videos, and its
 own `CLAUDE.md` and `AGENTS.md`. The hourly background job reads every profile, each in turn (a profile whose
-first-time setup said no to background stats is read only while it's open).
+first-time setup said no to background stats, or whose `my-studio/studio.toml` says `background_stats = false`, is read
+only while it's open; writing its files again from its answers, `reelforge -p <profile> channel --regenerate`, keeps
+that no).
 
 ## Several windows
 

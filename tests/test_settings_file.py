@@ -276,6 +276,78 @@ class Loading(Scratch):
         self.assertIs(answered(b), False)
         self.assertIs(settings.load()["platforms"]["background_stats"], True)     # the first channel's stays
 
+    def test_writing_the_files_again_from_the_answers_keeps_a_no_to_the_hourly_read_in_a_file_that_reads(self):
+        """studio.toml invites edits by hand, and the hourly read of your stats goes by its background_stats line. A
+        no written there in a file that reads was put back to the answers' yes by channel --regenerate (the notes' own
+        step after a brief, and what you run after editing your answers), without a word, so the read, with your
+        log-ins, was on again for that channel, a second one's too."""
+        import re
+        import shlex
+
+        from studio import generate
+        from studio.__main__ import apply_background_stats
+
+        def run(argv: list[str]) -> str:
+            with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(main(argv), 0, out.getvalue())
+            return " ".join(out.getvalue().split())
+
+        def answered(who) -> bool:
+            return json.loads(who.answers.read_text(encoding="utf-8"))["background_stats"]
+
+        def say_no(who) -> None:
+            text = who.settings.read_text(encoding="utf-8")
+            who.settings.write_text(text.replace("background_stats = true", "background_stats = false"),
+                                    encoding="utf-8")
+            self.assertIs(generate.background_stats(who), False)
+
+        self.onboard_main()                     # the answers say yes
+        b = profiles.create("Bee Facts")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**ANSWERS, "channel_name": "Bee Facts"}, b)
+        first = profiles.main()
+        # the brief's step in the first channel's notes: the answers edited, then this channel's files written again
+        say_no(first)
+        notes = " ".join((P.ROOT / "CLAUDE.md").read_text(encoding="utf-8").split())
+        step = re.search(r"On their OK, write them and run `(.+?)`", notes).group(1)
+        a = json.loads(P.ANSWERS.read_text(encoding="utf-8"))
+        P.ANSWERS.write_text(json.dumps({**a, "about": "What-if videos with real science, from the brief."}),
+                             encoding="utf-8")
+        printed = run(shlex.split(step)[3:])
+        self.assertIs(settings.load()["platforms"]["background_stats"], False)
+        self.assertEqual(settings.load()["channel"]["about"], "What-if videos with real science, from the brief.")
+        self.assertIs(generate.background_stats(first), False)
+        self.assertIs(answered(first), False)   # and the next time it's written from them, too
+        self.assertIn("Night Physics's stats still aren't read every hour while ReelForge is closed: its settings "
+                      f"file, {P.SETTINGS}, says no to that, so the no is kept, in your answers too. To have them read, "
+                      "say yes to it in its questions: reelforge -p 1 channel", printed)
+        # every channel's files written again (without -p), and another channel's alone
+        for argv in (["channel", "--regenerate"], ["-p", b.kept_flag, "channel", "--regenerate"]):
+            with self.subTest(argv=argv):
+                b.answers.write_text(json.dumps({**json.loads(b.answers.read_text(encoding="utf-8")),
+                                                 "background_stats": True}), encoding="utf-8")
+                say_no(b)
+                printed = run(argv)
+                for who in (first, b):
+                    self.assertIs(settings.load(who.settings)["platforms"]["background_stats"], False, who.name)
+                    self.assertIs(answered(who), False, who.name)
+                with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}):
+                    self.assertNotIn("(dry run) would run", apply_background_stats())
+                self.assertIn(f"Bee Facts's stats still aren't read every hour while ReelForge is closed: its settings "
+                              f"file, {b.settings}, says no to that", printed)
+                self.assertNotIn("Night Physics's stats", printed)      # (its answers say no already: nothing kept)
+        # a yes in the file goes by the answers as before, and so do answers given now
+        P.SETTINGS.write_text(P.SETTINGS.read_text(encoding="utf-8").replace("background_stats = false",
+                                                                             "background_stats = true"),
+                              encoding="utf-8")
+        printed = run(["channel", "--regenerate"])
+        self.assertIs(settings.load()["platforms"]["background_stats"], False)
+        self.assertNotIn("still aren't read", printed)
+        given = self.root / "given.json"
+        given.write_text(json.dumps({**ANSWERS, "background_stats": True}), encoding="utf-8")
+        run(["channel", "--answers", str(given)])
+        self.assertIs(settings.load()["platforms"]["background_stats"], True)
+
 
 class Commands(Scratch):
     def setUp(self):

@@ -26,7 +26,7 @@
       --answers FILE.json      write everything from saved answers, no questions
       --regenerate             rebuild everything from my-studio/answers.json (after you edit it), every profile's,
                                or with -p NAME that one's alone; a studio.toml it changes is copied into backups first
-                               (and one with a mistake in it keeps a no to the hourly stats read it has)
+                               (a no to the hourly stats read in it is kept: say yes in the questions)
       --preserve-settings      with --regenerate: only CLAUDE.md / AGENTS.md again, from your settings as they are
                                (what an update runs: studio.toml and your accounts stay as you left them)
       --new                    for a new profile (with --answers too, for an AI running the interview in chat)

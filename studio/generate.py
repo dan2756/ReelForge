@@ -242,6 +242,17 @@ def _own_background_stats(path: Path) -> bool | None:
     return None if not said else all(S.yes_no(v) is True for v in said)
 
 
+def _says_no(path: Path) -> bool:
+    """Whether a channel's studio.toml says no to the hourly read of its stats, which the hourly job goes by
+    (background_stats): under [platforms] in one that reads, else in its own background_stats lines."""
+    try:
+        return S.load(path)["platforms"]["background_stats"] is False
+    except S.SettingsError:
+        return _own_background_stats(path) is False
+    except OSError:
+        return False
+
+
 def background_stats(p, say=None) -> bool:
     """Whether a channel has its stats read every hour while ReelForge is closed: as its settings say. While its
     studio.toml has a mistake in it (and say gets a line about the file), as the file's own background_stats line
@@ -508,11 +519,12 @@ def write_all(answers: dict, profile=None, *, account: str = "", again: bool = F
     first-time answers back over them, nor a platform taken out of it by hand. While studio.toml has a mistake in it,
     a platform connected is kept in the channel's to-add list (_to_add), for write_guides or the next Connect to put
     in once it's fixed. again: the answers are the saved ones, written out again (reelforge channel --regenerate), not
-    answers given now: written again over a studio.toml with a mistake in it, a no to the hourly read of your stats
-    in the file's own background_stats lines, which the hourly job goes by meanwhile (background_stats), is kept, in
-    the answers too, since nobody has said yes since. say: called with a line for each file that was left as it was
-    because it has a mistake in it, or written again with one in it, or whole in place of a line at a time (and where
-    its copy is), once everything else is written."""
+    answers given now: a no to the hourly read of your stats in the studio.toml they're written over, which the
+    hourly job goes by (background_stats: under [platforms], or in the file's own background_stats lines while it
+    has a mistake in it), is kept, in the answers too, since nobody has said yes since. say: called with a line for
+    each file that was left as it was because it has a mistake in it, or written again with one in it, or whole in
+    place of a line at a time (and where its copy is), and for a no to the hourly read kept, once everything else is
+    written."""
     w = _where(profile)
     notes = w.notes
     first = not w.settings.exists()                     # first-time setup: the channel isn't set up yet
@@ -528,18 +540,14 @@ def write_all(answers: dict, profile=None, *, account: str = "", again: bool = F
             pass
     # The answers file is often the one being read (my-studio/answers.json), with no date yet: today, then.
     a["_created"] = a.get("_created") or dt.date.today().isoformat()
-    # The hourly read uses your log-ins. "Write it again from your answers" (S.fix_it) is the way out of a mistake in
-    # studio.toml, and meanwhile the read goes by the file's own background_stats lines: a no there stays a no, or
-    # following ReelForge's own advice would turn the read on again without a word. Answers given now have the say.
+    # The hourly read uses your log-ins, and goes by studio.toml, which invites edits by hand: a no written there stays
+    # a no when the saved answers are written out again (after a brief, an edit of the answers, or as the way out of a
+    # mistake in the file, S.fix_it), or that would turn the read on again without a word. Answers given now have the
+    # say.
     kept_no = False
-    if again and not account and w.settings.is_file():
-        try:
-            S.load(w.settings)
-        except S.SettingsError:
-            if _own_background_stats(w.settings) is False and bool(a.get("background_stats", True)):
-                a["background_stats"], kept_no = False, True
-        except OSError:
-            pass
+    if again and not account and w.settings.is_file() and a.get("background_stats", True) \
+            and _says_no(w.settings):
+        a["background_stats"], kept_no = False, True
     s = settings_from(a)
     cfg = s                     # what ReelForge's settings (config.toml) are written from
     connecting = account if a.get(f"handle_{account}") else ""
@@ -630,6 +638,10 @@ def write_all(answers: dict, profile=None, *, account: str = "", again: bool = F
                              f"file, {w.settings}, again whole, as its layout can't be changed a line at a time: "
                              "every setting in it is kept, but its own layout and any comments in it are only in the "
                              f"copy of it as it was, {copy}.")
+    if kept_no and mistake is None:     # (the line about a file with a mistake in it says so)
+        notes.append(f"{a['channel_name'].strip()}'s stats still aren't read every hour while ReelForge is closed: its "
+                     f"settings file, {w.settings}, says no to that, so the no is kept, in your answers too. To have "
+                     f"them read, say yes to it in its questions: reelforge -p {w.profile.flag} channel")
     written: list[Path] = []
     for path, text in files:
         P.write_atomic(path, text)
