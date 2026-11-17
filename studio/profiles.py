@@ -131,14 +131,22 @@ class Profile:
         which keep it as it is (a ' in it as bash writes it: shlex.quote). On Windows, bin/reelforge.cmd changes a ! or
         a %NAME% whatever its quotes (NOT_THROUGH_REELFORGE_CMD): a command for such a folder runs ReelForge's Python
         straight."""
+        return "1" if self.main else self.kept_path()
+
+    def kept_path(self, *parts: str, sep: str = "/") -> str:
+        """A path in its folder, profiles/<folder>/<parts> (sep between them: a backslash in a Windows command), as a
+        command written into a file that's kept passes it: one word, in the quotes kept_flag puts its folder in (parts
+        are ReelForge's own, like episodes and <id>, which your AI fills in between those quotes). The first profile's
+        paths start at the ReelForge folder: its parts alone, as they are."""
         if self.main:
-            return "1"
+            return sep.join(parts)
         key = self.key
+        path = sep.join([key.replace("/", sep), *parts])
         if _PLAIN.fullmatch(key):
-            return key
+            return path
         if any(c in key for c in _NOT_IN_DOUBLE_QUOTES):
-            return shlex.quote(key)
-        return f'"{key}"'
+            return shlex.quote(path)
+        return f'"{path}"'
 
     @property
     def name(self) -> str:

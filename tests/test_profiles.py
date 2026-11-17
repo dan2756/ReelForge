@@ -1031,6 +1031,58 @@ class Deleting(Scratch):
                                    input=f"printf '<%s>\\n' {cmd}\nexit\n", timeout=30).stdout
             self.assertIn("<-p>\n<profiles/wow!>\n<publish>", shown)
 
+    def test_the_episode_commands_in_a_channels_notes_keep_its_folder_one_word(self):
+        """make_episode, compose and publish-check in another channel's notes had its folder with no quotes at all:
+        for one renamed by hand with a space in it (the copy Explorer makes), $ or a ' the command split it, or
+        changed it ($money gone, so profiles/cash/...: another channel's folder, if one has that name)."""
+        import re
+        import shlex
+
+        self.onboard_main()
+        p = profiles.create("Sea Facts")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**ANSWERS, "channel_name": "Sea Facts"}, p)
+        commands = (r"make_episode\.py (.+?) --steps", r"compose\.py (.+?) --preview",
+                    r"publish-check (.+?)(?:` runs|\n)")
+        names = ["sea facts - Copy", "cash$money", "it's mine", "back`tick"]
+        if os.name != "nt":
+            names += ['say "hi"', "trail\\", "it's $5"]
+        for name in names:
+            p = profiles.Profile(p.folder.rename(p.folder.with_name(name)))
+            with redirect_stdout(io.StringIO()):
+                generate.write_guides(p, saved_settings=True)
+            for notes in ("CLAUDE.md", "AGENTS.md"):
+                text = (p.folder / notes).read_text(encoding="utf-8")
+                for pattern in commands:
+                    with self.subTest(name=name, notes=notes, command=pattern):
+                        found = re.findall(pattern, text)
+                        self.assertTrue(found)
+                        for arg in found:
+                            words = shlex.split(arg.replace("<id>", "ep01_x"), posix=os.name != "nt")
+                            self.assertEqual(len(words), 1, arg)
+                            if os.name != "nt":
+                                self.assertEqual(words[0], f"profiles/{name}/episodes/ep01_x")
+        # the first channel's, and a folder ReelForge named, as they were
+        main_notes = (self.root / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn(f"make_episode.py episodes{os.sep}<id> --steps", main_notes)
+        p = profiles.Profile(p.folder.rename(p.folder.with_name("sea-facts")))
+        with redirect_stdout(io.StringIO()):
+            generate.write_guides(p, saved_settings=True)
+        self.assertIn(f"make_episode.py profiles{os.sep}sea-facts{os.sep}episodes{os.sep}<id> --steps",
+                      (p.folder / "CLAUDE.md").read_text(encoding="utf-8"))
+        # on Windows, with its backslashes, in the quotes the folder gets in -p
+        windows = '"$`“”„'
+        with mock.patch.object(P, "WINDOWS", True), mock.patch.object(profiles, "_NOT_IN_DOUBLE_QUOTES", windows):
+            for name, arg in (("sea facts - Copy", r'"profiles\sea facts - Copy\episodes\<id>"'),
+                              ("cash$money", r"'profiles\cash$money\episodes\<id>'")):
+                p = profiles.Profile(p.folder.rename(p.folder.with_name(name)))
+                with redirect_stdout(io.StringIO()):
+                    generate.write_guides(p, saved_settings=True)
+                text = (p.folder / "AGENTS.md").read_text(encoding="utf-8")
+                with self.subTest(windows=name):
+                    self.assertIn(rf"make_episode.py {arg} --steps", text)
+                    self.assertIn(f"publish-check {arg}` runs", text)
+
     def test_connect_with_a_mistake_in_the_settings_leaves_your_ais_notes_and_the_way_out_brings_them_back(self):
         """Connect with a typo in studio.toml wrote your AI's notes and the channel bible from the first-time answers,
         so what was edited by hand in studio.toml (the length here) went back in them, and nothing brought it back

@@ -421,8 +421,10 @@ def context(a: dict, s: dict, assistant: str, profile=None, notes: list[str] | N
         "dims": "1080×1920",
         # another channel's notes: its files are in its folder (here), and every command runs from the ReelForge folder,
         # with -p naming it by profiles/<folder> (Profile.kept_flag): its folder's name alone can find another channel,
-        # and its number in the list changes when another channel is added or deleted
-        "extra": not profile.main, "here": here, "here_cmd": here.replace("/", sep), "main_name": profiles.main().name,
+        # and its number in the list changes when another channel is added or deleted. An episode's folder in a command
+        # is one word, in the same quotes (Profile.kept_path).
+        "extra": not profile.main, "here": here, "episode": profile.kept_path("episodes", "<id>", sep=sep),
+        "main_name": profiles.main().name,
         "pflag": "" if profile.main else f" -p {profile.kept_flag}", "app": app,
         # this channel's alone, the first one's too: without -p, --regenerate writes every channel's files again
         "only": f" -p {profile.kept_flag}",
