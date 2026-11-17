@@ -11,6 +11,7 @@ import re
 import shutil
 import time
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest import mock
 
 from studio import generate, profiles, reset
@@ -287,9 +288,22 @@ class FactoryReset(ResetScratch):
 
     def test_a_file_where_a_folder_goes_isnt_waited_for(self):
         (self.root / "dashboard" / "data2").write_text("a file", encoding="utf-8")
+
+        def said(folder: Path) -> str:   # what this system says when that folder can't be made (its own words)
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                return e.strerror or str(e)
+            self.fail(f"{folder} could be made")
+
         started = time.monotonic()
-        self.assertEqual(REAL_MOVE(self.root / "research", self.root / "dashboard/data2/research"), "File exists")
-        self.assertEqual(REAL_MOVE(self.root / "research", self.root / "dashboard/data2/x/research"), "Not a directory")
+        self.assertEqual(REAL_MOVE(self.root / "research", self.root / "dashboard/data2/research"),
+                         said(self.root / "dashboard/data2"))
+        self.assertEqual(REAL_MOVE(self.root / "research", self.root / "dashboard/data2/x/research"),
+                         said(self.root / "dashboard/data2/x"))
+        if os.name != "nt":   # (Windows says "Cannot create a file when that file already exists" for both)
+            self.assertEqual(said(self.root / "dashboard/data2"), "File exists")
+            self.assertEqual(said(self.root / "dashboard/data2/x"), "Not a directory")
         self.assertLess(time.monotonic() - started, 5)   # (it waits ten seconds for a file in use)
         self.assertTrue((self.root / "research" / "ideas.md").is_file())
 

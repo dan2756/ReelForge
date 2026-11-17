@@ -391,7 +391,9 @@ class AfterTest(unittest.TestCase):
             summary = update._finish(root, "", "1.0.0", "1.1.0", lambda *a: None, logged.append)
         notes = json.loads((root / "dashboard" / "data" / "updated.json").read_text(encoding="utf-8"))["notes"]
         self.assertEqual(len(notes), 1, notes)
-        self.assertTrue(notes[0].startswith(f"Night Physics's settings file, {mine}, has a mistake in it ("), notes)
+        # (The file as the update found it: on macOS the temporary folder is /private/var/..., not /var/....)
+        self.assertTrue(notes[0].startswith(f"Night Physics's settings file, {mine.resolve()}, has a mistake in it ("),
+                        notes)
         self.assertIn("so your AI's notes go by its answers instead", notes[0])
         self.assertEqual(summary, f"Updated ReelForge from 1.0.0 to 1.1.0. {notes[0]}")
         self.assertEqual(logged, [])
