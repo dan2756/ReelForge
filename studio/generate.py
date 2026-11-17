@@ -517,12 +517,15 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, say=No
         try:
             saved = S.load(w.settings)
         except S.SettingsError as e:
-            # A typo in it: written again, what was edited by hand in it would be lost, so it stays as it is. The rest
-            # still gets the handle, the answers above all: "Change your answers" writes config.toml from them, so
+            # A typo in it: written again, what was edited by hand in it would be lost, so it stays as it is, and so
+            # do your AI's notes and the channel bible, which follow it: written from the answers, every setting
+            # edited by hand would go back to the first-time answers in them. The answers and ReelForge's settings
+            # still get the handle, the answers above all: "Change your answers" writes config.toml from them, so
             # an account they didn't have would be disconnected then without a word.
             keep_settings = True
-            notes.append(typo_line(e, a["channel_name"].strip(), "it couldn't be updated with this account (your "
-                                                                 "answers and your AI's notes were)"))
+            notes.append(typo_line(e, a["channel_name"].strip(), "it and your AI's notes couldn't be updated with "
+                                   "this account and stay as they were (your answers and ReelForge's settings have "
+                                   "it)"))
         else:
             s = {**saved, "platforms": {**saved["platforms"], "enabled": s["platforms"]["enabled"],
                                         "handles": s["platforms"]["handles"]}}
@@ -544,17 +547,19 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, say=No
                 mistake = e
             except OSError:                 # (one that can't be read can't be copied either: that stops it below)
                 pass
-    bible = render("channel-bible.md.j2", context(a, s, "claude", w.profile, notes))
-    old = w.bible.read_text(encoding="utf-8", errors="replace") if w.bible.exists() else None
-    if old is not None:
-        try:    # studio.toml isn't written again yet, so it still lists the ideas of the answers before these
-            before = S.load(w.settings)["format"]["subjects"]
-        except (OSError, ValueError):
-            before = []
-        taken_out = [x for x in before if x not in s["format"]["subjects"]] if isinstance(before, list) else []
-        bible = _keep_yours(old, bible, taken_out)
-    out(w.bible, bible)
-    _guides(a, s, w, out)
+    bible = old = None
+    if not keep_settings:
+        bible = render("channel-bible.md.j2", context(a, s, "claude", w.profile, notes))
+        old = w.bible.read_text(encoding="utf-8", errors="replace") if w.bible.exists() else None
+        if old is not None:
+            try:    # studio.toml isn't written again yet, so it still lists the ideas of the answers before these
+                before = S.load(w.settings)["format"]["subjects"]
+            except (OSError, ValueError):
+                before = []
+            taken_out = [x for x in before if x not in s["format"]["subjects"]] if isinstance(before, list) else []
+            bible = _keep_yours(old, bible, taken_out)
+        out(w.bible, bible)
+        _guides(a, s, w, out)
     log = w.completed / "production-log.md"
     if not log.exists():
         out(log, render("production-log.md.j2", context(a, s, "claude", w.profile, notes)))
@@ -590,8 +595,8 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, say=No
     if config:
         P.write_atomic(*config)
         written.append(config[0])
-    if not w.profile.main:
-        # the first channel's notes list this one
+    if not w.profile.main and not keep_settings:
+        # the first channel's notes list this one (and how often it posts, which a handle alone doesn't change)
         written += write_guides(profiles.main(), saved_settings=True, say=notes.append)
     _say_once(say, notes)
     return written
@@ -631,6 +636,11 @@ def write_guides(profile=None, *, saved_settings: bool = False, say=None) -> lis
         handles = dashboard_config.handles(w.profile)
         if handles is not None:
             s["platforms"]["handles"] = handles
+            # A platform connected on the Accounts tab is one you post to (Connect puts it in your answers' "Where
+            # will you post?"), also while studio.toml doesn't list it: Connect couldn't write it there through a
+            # mistake in the file, which you've fixed by hand since.
+            enabled = list(s["platforms"]["enabled"])
+            s["platforms"]["enabled"] = enabled + [p for p in S.PLATFORMS if handles.get(p) and p not in enabled]
     _guides(a, s, w, out)
     _say_once(say, notes)
     return written

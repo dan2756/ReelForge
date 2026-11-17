@@ -786,6 +786,49 @@ class Deleting(Scratch):
                 theirs = profiles.of(other)
                 self.assertEqual(sorted(theirs.my_studio.joinpath("backups").glob("studio.*")), before[theirs])
 
+    def test_connect_with_a_mistake_in_the_settings_leaves_your_ais_notes_and_the_way_out_brings_them_back(self):
+        """Connect with a typo in studio.toml wrote your AI's notes and the channel bible from the first-time answers,
+        so what was edited by hand in studio.toml (the length here) went back in them, and nothing brought it back
+        once the file was fixed by hand, as the line said to."""
+        import re
+
+        from studio.__main__ import main
+
+        def lengths(f: Path) -> list[str]:
+            return sorted(set(re.findall(r"\b61[–-]\d+ ?s\b", f.read_text(encoding="utf-8"))))
+
+        self.onboard_main()
+        quiet = profiles.create("Quiet One")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**ANSWERS, "channel_name": "Quiet One"}, quiet)
+        for p, who in ((profiles.main(), "1"), (quiet, "quiet-one")):
+            with self.subTest(channel=p.name):
+                profiles.use(p)
+                good = p.settings.read_text(encoding="utf-8").replace("max_seconds = 75.0", "max_seconds = 90.0")
+                p.settings.write_text(good, encoding="utf-8")
+                generate.write_guides(p, saved_settings=True)          # as an update does: they follow the file
+                claude = p.folder / "CLAUDE.md"
+                self.assertEqual(lengths(claude), ["61-90 s"])
+                p.settings.write_text(good + "\nthis is = = a typo\n", encoding="utf-8")
+                kept = {f: f.read_text(encoding="utf-8") for f in (claude, p.folder / "AGENTS.md", p.bible,
+                                                                      self.root / "CLAUDE.md")}
+                said: list[str] = []
+                generate.set_account("x", "@np_x", say=said.append)   # Connect, for a platform not ticked before
+                self.assertEqual({f: f.read_text(encoding="utf-8") for f in kept}, kept)
+                self.assertEqual(len(said), 1, said)
+                self.assertIn(", so it and your AI's notes couldn't be updated with this account and stay as they "
+                              "were (your answers and ReelForge's settings have it). Fix it in a text editor, then "
+                              f"run reelforge -p {who} channel --regenerate --preserve-settings so your AI's notes "
+                              "follow it.", said[0])
+                p.settings.write_text(good, encoding="utf-8")         # fixed by hand, then the line's command
+                with redirect_stdout(io.StringIO()) as out:
+                    self.assertEqual(main(["-p", who, "channel", "--regenerate", "--preserve-settings"]), 0,
+                                     out.getvalue())
+                self.assertNotIn("has a mistake in it", out.getvalue())
+                self.assertEqual(lengths(claude), ["61-90 s"])
+                self.assertIn("X @np_x", claude.read_text(encoding="utf-8"))   # and they have the account
+                self.assertEqual(p.settings.read_text(encoding="utf-8"), good)
+
     def test_the_commands_delete_and_restore_one(self):
         from studio.__main__ import main
 

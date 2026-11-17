@@ -551,9 +551,11 @@ class WindowTest(unittest.TestCase):
         every = self.real_platforms({"tiktok": "@mine"})
         save = config.save_handle
         line = ("Night Physics's settings file, my-studio/studio.toml, has a mistake in it (Expected '=' after a key "
-                "in a key/value pair (at line 68, column 6)), so it couldn't be updated with this account (your "
-                "answers and your AI's notes were). Fix it in a text editor, or write it again from your answers "
-                "with: reelforge channel --regenerate")
+                "in a key/value pair (at line 68, column 6)), so it and your AI's notes couldn't be updated with this "
+                "account and stay as they were (your answers and ReelForge's settings have it). Fix it in a text "
+                "editor, then run reelforge -p 1 channel --regenerate --preserve-settings so your AI's notes follow "
+                "it. Or write it again from your answers, keeping a copy of it as it is, with: reelforge -p 1 channel "
+                "--regenerate")
 
         def with_a_mistake(key: str, handle: str) -> list[str]:
             save(key, handle)
