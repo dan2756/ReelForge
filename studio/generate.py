@@ -490,15 +490,16 @@ def _free(path: Path) -> Path:
     return free
 
 
-def write_all(answers: dict, profile=None, *, account_only: bool = False, say=None) -> list[Path]:
+def write_all(answers: dict, profile=None, *, account_only: bool = False, connecting: str = "", say=None) -> list[Path]:
     """Validate the answers and write every file, for a profile (the one this process works on, by default). Returns
     the paths written. Raises ValueError on bad answers, or when a file can't be made right (the message says which),
     before any file has changed. account_only: nothing but a platform's handle changed in the answers (set_account),
     so the settings on file stay as they are apart from the platforms: studio.toml invites edits by hand, and an
     account connected on the Accounts tab must not put the first-time answers back over them. A studio.toml written
-    again from the answers is copied into the channel's backups first (when it changes). say: called with a line for
-    each file that was left as it was because it has a mistake in it, or written again with one in it (and where its
-    copy is), once everything else is written."""
+    again from the answers is copied into the channel's backups first (when it changes). connecting: the platform
+    set_account connects, kept in the channel's to-add list (_to_add) while studio.toml has a mistake in it, for
+    write_guides to put in once it's fixed. say: called with a line for each file that was left as it was because it
+    has a mistake in it, or written again with one in it (and where its copy is), once everything else is written."""
     w = _where(profile)
     notes = w.notes
     first = not w.settings.exists()                     # first-time setup: the channel isn't set up yet
@@ -598,11 +599,65 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, say=No
     if config:
         P.write_atomic(*config)
         written.append(config[0])
+    if keep_settings:
+        if connecting:
+            _to_add(w.profile, [*_to_add(w.profile), connecting])
+    else:   # studio.toml is written from the answers, which have every platform connected since: none left to add
+        _to_add(w.profile, [])
     if not w.profile.main and not keep_settings:
         # the first channel's notes list this one (and how often it posts, which a handle alone doesn't change)
         written += write_guides(profiles.main(), saved_settings=True, say=notes.append)
     _say_once(say, notes)
     return written
+
+
+def _to_add(profile, platforms: list[str] | None = None) -> list[str]:
+    """A channel's platforms connected on the Accounts tab while its studio.toml had a mistake in it, which Connect
+    couldn't write there (kept in its dashboard/data/platforms-to-add.json). With platforms: keeps those instead (none:
+    the file goes). Only these go into studio.toml once it reads (_add_connected): a platform taken out of it by hand
+    while its account stays connected stays out."""
+    f = profile.data / "platforms-to-add.json"
+    if platforms is None:
+        try:
+            got = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        return [p for p in S.PLATFORMS if isinstance(got, list) and p in got]
+    try:
+        if platforms:
+            P.write_atomic(f, json.dumps([p for p in S.PLATFORMS if p in platforms]) + "\n")
+        else:
+            f.unlink(missing_ok=True)
+    except OSError:     # (without it, the platform waits for Connect again: the line about the file says it's not in)
+        pass
+    return platforms
+
+
+def _add_connected(a: dict, s: dict, w: SimpleNamespace, handles: dict, out, notes: list[str]) -> None:
+    """The platforms connected while studio.toml had a mistake in it (_to_add), into it now it reads again, as Connect
+    would have put them, with a copy of it as it was kept first: and so into your AI's notes, which follow it. One
+    disconnected since is left out. Nothing is written when a copy can't be kept: the notes still list it, and it
+    waits for the next time."""
+    waiting = _to_add(w.profile)
+    if not waiting:
+        return
+    enabled = s["platforms"]["enabled"]
+    adding = [p for p in waiting if handles.get(p) and p not in enabled]
+    s["platforms"]["enabled"] = [*enabled, *adding]
+    if adding:
+        try:
+            before = w.settings.read_bytes()
+            copy = _free(w.backups / f"studio.{dt.datetime.now():%Y%m%d-%H%M%S}.toml")
+            P.write_atomic(copy, before)
+            out(w.settings, "# Your studio's settings, from first-time setup. The pipeline and the dashboard read this "
+                            "file.\n" + S.dump_toml(s, SETTINGS_COMMENTS))
+        except OSError:
+            return
+        names = " and ".join(S.PLATFORM_NAMES[p] for p in adding)
+        notes.append(f"{names}, connected while {a['channel_name'].strip()}'s settings file, {w.settings}, had a "
+                     f"mistake in it, {'is' if len(adding) == 1 else 'are'} in it now. A copy of it as it was is in "
+                     f"{copy}.")
+    _to_add(w.profile, [])
 
 
 def write_guides(profile=None, *, saved_settings: bool = False, say=None) -> list[Path]:
@@ -625,9 +680,10 @@ def write_guides(profile=None, *, saved_settings: bool = False, say=None) -> lis
 
     notes = w.notes
     s = settings_from(a)
+    read = False    # studio.toml read as it is
     if saved_settings and w.settings.is_file():
         try:
-            s = S.load(w.settings)
+            s, read = S.load(w.settings), True
         except S.SettingsError as e:
             # A channel added, deleted or restored writes the first one's notes again (they list every channel): a
             # typo in its settings must not stop, or seem to stop, what was done to the other channel.
@@ -639,11 +695,8 @@ def write_guides(profile=None, *, saved_settings: bool = False, say=None) -> lis
         handles = dashboard_config.handles(w.profile)
         if handles is not None:
             s["platforms"]["handles"] = handles
-            # A platform connected on the Accounts tab is one you post to (Connect puts it in your answers' "Where
-            # will you post?"), also while studio.toml doesn't list it: Connect couldn't write it there through a
-            # mistake in the file, which you've fixed by hand since.
-            enabled = list(s["platforms"]["enabled"])
-            s["platforms"]["enabled"] = enabled + [p for p in S.PLATFORMS if handles.get(p) and p not in enabled]
+            if read:
+                _add_connected(a, s, w, handles, out, notes)
     _guides(a, s, w, out)
     _say_once(say, notes)
     return written
@@ -680,7 +733,7 @@ def set_account(platform: str, handle: str, say=None) -> list[Path]:
         else:
             a.pop(f"handle_{p}", None)
     try:
-        return write_all(a, account_only=True, say=say)
+        return write_all(a, account_only=True, connecting=platform if handle else "", say=say)
     except ValueError as e:
         # Answers first-time setup would ask about again, or notes too long for Codex: nothing was written. The
         # handle still goes into ReelForge's settings and your answers ("Change your answers" writes the settings

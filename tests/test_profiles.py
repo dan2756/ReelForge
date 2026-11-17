@@ -848,13 +848,42 @@ class Deleting(Scratch):
                               f"run reelforge -p {who} channel --regenerate --preserve-settings so your AI's notes "
                               "follow it.", said[0])
                 p.settings.write_text(good, encoding="utf-8")         # fixed by hand, then the line's command
+                before = sorted(p.backups.glob("studio.*"))
                 with redirect_stdout(io.StringIO()) as out:
                     self.assertEqual(main(["-p", who, "channel", "--regenerate", "--preserve-settings"]), 0,
                                      out.getvalue())
                 self.assertNotIn("has a mistake in it", out.getvalue())
                 self.assertEqual(lengths(claude), ["61-90 s"])
                 self.assertIn("X @np_x", claude.read_text(encoding="utf-8"))   # and they have the account
-                self.assertEqual(p.settings.read_text(encoding="utf-8"), good)
+                # and so does studio.toml now, as Connect would have written it, with what was edited by hand in it
+                saved = S.load(p.settings)
+                self.assertEqual((saved["platforms"]["enabled"], saved["video"]["max_seconds"]),
+                                 (["tiktok", "youtube", "x"], 90.0))
+                copy = next(c for c in sorted(p.backups.glob("studio.*")) if c not in before)
+                self.assertEqual(copy.read_text(encoding="utf-8"), good)
+                self.assertIn(f"X, connected while {p.name}'s settings file, {p.settings}, had a mistake in it, is in "
+                              f"it now. A copy of it as it was is in {copy}.", out.getvalue())
+                # which it then follows: X taken out of it by hand, with its account still connected, stays out
+                p.settings.write_text(p.settings.read_text(encoding="utf-8").replace(
+                    'enabled = ["tiktok", "youtube", "x"]', 'enabled = ["tiktok", "youtube"]'), encoding="utf-8")
+                generate.write_guides(p, saved_settings=True)
+                self.assertNotIn("@np_x", claude.read_text(encoding="utf-8"))
+
+    def test_a_platform_taken_out_of_the_settings_by_hand_stays_out_of_your_ais_notes(self):
+        """Since your AI's notes listed every platform connected on the Accounts tab as one you post to, an update put
+        one you'd taken out of studio.toml by hand (its account still connected) back in them, with its caption
+        rule."""
+        self.onboard_main(platforms=["tiktok", "youtube", "x"], handle_youtube="@npyt", handle_x="@np_x")
+        main = profiles.main()
+        text = main.settings.read_text(encoding="utf-8")
+        self.assertIn('enabled = ["tiktok", "youtube", "x"]', text)
+        main.settings.write_text(text.replace('enabled = ["tiktok", "youtube", "x"]', 'enabled = ["tiktok", "youtube"]'),
+                                 encoding="utf-8")
+        generate.write_guides(main, saved_settings=True)        # what an update runs
+        notes = (self.root / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("TikTok @nightphysics · YouTube Shorts @npyt |", notes)
+        self.assertNotIn("@np_x", notes)
+        self.assertNotIn("X: the caption only", notes)
 
     def test_the_commands_delete_and_restore_one(self):
         from studio.__main__ import main
