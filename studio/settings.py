@@ -125,16 +125,58 @@ class SettingsError(ValueError):
         self.path, self.reason = path, reason
 
 
+def stats_key(key) -> bool:
+    """A key that is background_stats once case and - or _ are set aside (Background-Stats, say): how a person may
+    write the setting for the hourly read of their stats."""
+    return isinstance(key, str) and key.casefold().replace("-", "_") == "background_stats"
+
+
+def _stray_stats(data, table: tuple[str, ...] = ()) -> tuple[tuple[str, ...], str] | None:
+    """The first background_stats key (stats_key) in a parsed studio.toml anywhere but under [platforms] as
+    background_stats: (the table it's in, the key as written), else None."""
+    items = data.items() if isinstance(data, dict) else enumerate(data) if isinstance(data, list) else ()
+    for key, value in items:
+        here = table if isinstance(data, list) else (*table, str(key))
+        if isinstance(data, dict) and stats_key(key) and (table, key) != (("platforms",), "background_stats"):
+            return table, key
+        found = _stray_stats(value, here)
+        if found:
+            return found
+    return None
+
+
 def load(path: Path | None = None) -> dict:
     """Settings as a plain dict: the defaults with studio.toml laid over them (missing file = defaults). The file
     invites hand edits, so one with a typo in it raises SettingsError, which says where."""
     path = path or paths.SETTINGS
-    data: dict = {}
+    text = ""
     if path.exists():
         try:    # utf-8-sig: Notepad on older Windows saves a hand edit with a byte-order mark, which TOML refuses
-            data = tomllib.loads(path.read_text(encoding="utf-8-sig"))
-        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
+            text = path.read_text(encoding="utf-8-sig")
+        except UnicodeDecodeError as e:
             raise SettingsError(path, str(e)) from None
+    return parse(text, path)
+
+
+def parse(text: str, path: Path | None = None) -> dict:
+    """load for a studio.toml's text (path: the file it's for, which a SettingsError names)."""
+    path = path or paths.SETTINGS
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise SettingsError(path, str(e)) from None
+    # The hourly read uses your log-ins, so a background_stats line it wouldn't go by (added at the end of the file,
+    # where it's under the last table, or spelled Background-Stats) is a mistake that says where it belongs, never left
+    # out without a word while the yes under [platforms], or the default yes, turns the read on. Meanwhile
+    # generate.background_stats goes by every such line, as it does with any mistake in the file.
+    stray = _stray_stats(data)
+    if stray:
+        table, key = stray
+        spelled = "" if key == "background_stats" else ", written background_stats"
+        if table == ("platforms",):
+            raise SettingsError(path, f"{key} under [platforms] should be written background_stats")
+        where = f"under [{'.'.join(table)}]" if table else "at the top of the file"
+        raise SettingsError(path, f"{key} {where} belongs under [platforms]{spelled}")
     s = _merge(DEFAULTS, data)
     # `captions = 3` parses, and would stop whoever reads a key of it, somewhere far from this file
     for name in (*DEFAULTS, "platforms.handles"):

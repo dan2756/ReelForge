@@ -221,15 +221,20 @@ def _answered(p) -> dict | None:
     return None if problems else settings_from(a)
 
 
+# A background_stats key (S.stats_key: any case, - or _) in a studio.toml's text: at the start of a line, after a dot
+# (platforms.background_stats), or in an inline table (platforms = { ..., background_stats = false }), quoted or not,
+# with its value up to a space, a comment or the end of the inline table.
+_STATS_LINE = re.compile(r"""(?:^|[.{,])[ \t]*(["']?)background[-_]stats\1[ \t]*=[ \t]*([^\s#,}]*)""", re.I | re.M)
+
+
 def _own_background_stats(path: Path) -> bool | None:
-    """What a studio.toml that can't be read says about the hourly read in its own background_stats line: True or
-    False, None when it has no such line. Only a yes (S.yes_no: true, yes, on, 1, in any case, quoted or not) is True:
-    a no typed by hand in a form TOML refuses (False, no, off) is often the very mistake in the file, and must not
-    leave the answers' yes to decide. Two lines that disagree (one added below the other: itself a mistake TOML
-    refuses) are no yes."""
+    """What a studio.toml that can't be read says about the hourly read in its own background_stats lines, wherever
+    they are and however the key is written (_STATS_LINE): True or False, None when it has no such line. Only a yes
+    (S.yes_no: true, yes, on, 1, in any case, quoted or not) is True: a no typed by hand in a form TOML refuses (False,
+    no, off) is often the very mistake in the file, and must not leave the answers' yes to decide. Two lines that
+    disagree (one added below the other, or a no in the wrong place: itself a mistake, see S.load) are no yes."""
     try:
-        said = re.findall(r"^[ \t]*background_stats[ \t]*=[ \t]*([^\s#]*)",
-                          path.read_text(encoding="utf-8-sig", errors="replace"), re.M)
+        said = [v for _, v in _STATS_LINE.findall(path.read_text(encoding="utf-8-sig", errors="replace"))]
     except OSError:
         return None
     return None if not said else all(S.yes_no(v) is True for v in said)
