@@ -16,6 +16,7 @@ import os
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest import mock
 
 from dashboard import db, posting, posting_tab, youtube_api_tab
@@ -116,6 +117,13 @@ class ApiPosting(PostingTest):
 
 
 class View(ApiPosting):
+    def test_the_guide_names_everything_the_window_gets_in_the_view(self):
+        # docs/YOUTUBE-API.md's "What the window gets and calls" is where someone changing the window looks.
+        guide = (Path(__file__).resolve().parents[2] / "docs" / "YOUTUBE-API.md").read_text("utf-8")
+        (row,) = [line for line in guide.splitlines() if line.startswith("| view `youtube_api` |")]
+        view = self.window().view("youtube_api")
+        self.assertEqual([key for key in view if f"`{key}`" not in row], [])
+
     def test_not_connected_it_says_what_this_is_and_offers_nothing_on_the_row(self):
         w = self.window(api=False)
         view = w.view("youtube_api")
