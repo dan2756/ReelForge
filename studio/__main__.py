@@ -479,7 +479,10 @@ def new_episode(argv: list[str]) -> int:
     (dest / "facts.md").write_text(facts, encoding="utf-8")
     print(f"Started {P.rel(dest)} from {P.rel(src.parent)}.")
     print("Next: write the title, lines, HUD, sound cues and facts.md, then build and look at the stills:")
-    print(f"  {P.venv_python()} {Path('pipeline') / 'make_episode.py'} \"{P.rel(dest)}\" --steps build,stills")
+    # the episode's folder in the quotes the channel's notes put it in (a folder renamed by hand with $, a backtick or
+    # a ! in it, which bash or zsh changes between double quotes, in single quotes; one ReelForge named, as it is)
+    folder = P.PROFILE.kept_path("episodes", ep_id, sep=os.sep)
+    print(f"  {P.venv_python()} {Path('pipeline') / 'make_episode.py'} {folder} --steps build,stills")
     return 0
 
 

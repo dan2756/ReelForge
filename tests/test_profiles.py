@@ -1105,6 +1105,49 @@ class Deleting(Scratch):
                     self.assertIn(rf"make_episode.py {arg} --steps", text)
                     self.assertIn(f"publish-check {arg}` runs", text)
 
+    def test_the_next_command_new_episode_prints_keeps_the_episodes_folder_as_it_is(self):
+        """new-episode printed the command to build the new episode's scene with its folder in double quotes, so for
+        a channel whose folder was renamed by hand with a $, a backtick or a ! in it, bash or zsh changed it when it
+        was pasted: profiles/cash$money/... became profiles/cash/..., and a folder named tick`whoami` ran whoami. It
+        goes in the quotes the channel's notes put it in now, and a folder ReelForge named goes as it is."""
+        import re
+        import shlex
+
+        from studio.__main__ import main
+
+        def next_command(flag: str) -> str:
+            with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}), redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(main(["-p", flag, "new-episode", "probe"]), 0, out.getvalue())
+            return re.search(r"\n  (\S+ \S*make_episode\.py .+ --steps build,stills)\n", out.getvalue()).group(1)
+
+        def as_bash_runs_it(line: str) -> list[str]:
+            """The words bash hands the command, pasted into an interactive bash (the Mac's zsh does the same)."""
+            args = line.split(" ", 2)[2]       # what follows python pipeline/make_episode.py
+            if os.name == "nt" or not shutil.which("bash"):
+                return shlex.split(args, posix=os.name != "nt")
+            shown = subprocess.run(["bash", "--norc", "--noprofile", "-i"], capture_output=True, text=True,
+                                   input=f"printf '<%s>\\n' {args}\nexit\n", timeout=30, cwd=self.root).stdout
+            return re.findall(r"<(.*?)>\n", shown)
+
+        self.onboard_main()
+        self.assertEqual(next_command("1"), f"{P.venv_python()} {Path('pipeline') / 'make_episode.py'} "
+                                            f"{Path('episodes') / 'ep01_probe'} --steps build,stills")
+        p = profiles.create("Sea Facts")
+        with redirect_stdout(io.StringIO()):
+            generate.write_all({**ANSWERS, "channel_name": "Sea Facts"}, p)
+        self.assertIn(f" {Path('profiles') / 'sea-facts' / 'episodes' / 'ep01_probe'} --steps",
+                      next_command(p.key))
+        names = ["sea facts - Copy", "cash$money", "it's mine"]
+        if os.name != "nt":
+            names += ["tick`whoami`", "wow!", 'say "hi"', "trail\\"]
+        for i, name in enumerate(names, 2):
+            with self.subTest(name=name):
+                p = profiles.Profile(p.folder.rename(p.folder.with_name(name)))
+                line = next_command(p.key)
+                want = str(Path("profiles") / name / "episodes" / f"ep{i:02d}_probe")
+                self.assertTrue((self.root / want).is_dir())
+                self.assertEqual(as_bash_runs_it(line), [want, "--steps", "build,stills"])
+
     def test_connect_with_a_mistake_in_the_settings_leaves_your_ais_notes_and_the_way_out_brings_them_back(self):
         """Connect with a typo in studio.toml wrote your AI's notes and the channel bible from the first-time answers,
         so what was edited by hand in studio.toml (the length here) went back in them, and nothing brought it back
