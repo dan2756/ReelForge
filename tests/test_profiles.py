@@ -398,12 +398,47 @@ class Job(Scratch):
         with mock.patch.object(subprocess, "call", lambda cmd, cwd=None, env=None, timeout=None:
                                calls.append(env[profiles.ENV]) or 0), redirect_stdout(io.StringIO()) as out:
             self.assertEqual(dash.refresh_profiles(), 0)
-        self.assertEqual(calls, [".", a.key])       # Quiet One's answers still say no
+        self.assertEqual(calls, [".", a.key])       # Quiet One's own line still says no
         said = out.getvalue()
         self.assertEqual(said.count("has a mistake in it"), 2, said)
         for name, f in (("Night Physics", mine), ("Quiet One", b.settings)):
             self.assertIn(f"{name}'s settings file, {f}, has a mistake in it (", said)
-        self.assertIn("so whether its stats are read every hour goes by its answers.", said)
+        self.assertIn("so whether its stats are read every hour goes by its background_stats line.", said)
+
+    def test_a_mistake_in_a_channels_settings_never_turns_the_hourly_read_on_without_a_yes(self):
+        """With a typo anywhere in studio.toml, whether the hourly read was on went by the answers, and by yes when
+        they couldn't be read either: a no written in the file by hand (it invites that), or answers that couldn't be
+        read, turned the read of your stats with your log-ins on every hour."""
+        from studio.__main__ import apply_background_stats
+
+        main = profiles.main()
+        typo = '\nsubjects_extra = "a snowball\n'
+
+        def check(text: str, on: bool, what: str, name: str = "Night Physics"):
+            main.settings.write_text(text + typo, encoding="utf-8")
+            said: list[str] = []
+            self.assertIs(generate.background_stats(main, say=said.append), on, text)
+            self.assertEqual(len(said), 1, said)
+            self.assertTrue(said[0].startswith(f"{name}'s settings file, {main.settings}, has a mistake in it ("),
+                            said)
+            self.assertIn(f", so {what}.", said[0])
+            with mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": "1"}):
+                self.assertEqual("(dry run) would run" in apply_background_stats(), on, text)
+
+        self.onboard_main()                         # the answers say yes (as they do unless you say no)
+        text = main.settings.read_text(encoding="utf-8")
+        self.assertIn("background_stats = true", text)
+        check(text.replace("background_stats = true", "background_stats = false"), False,
+              "whether its stats are read every hour goes by its background_stats line")
+        check(text, True, "whether its stats are read every hour goes by its background_stats line")
+        # a no added below the yes: two lines for one thing, which is itself what TOML refuses
+        check(text.replace("background_stats = true", "background_stats = true\nbackground_stats = false"), False,
+              "whether its stats are read every hour goes by its background_stats line")
+        without = text.replace("background_stats = true\n", "")
+        check(without, True, "whether its stats are read every hour goes by its answers")
+        main.answers.write_text(main.answers.read_text(encoding="utf-8").rstrip().rstrip("}") + ",}\n",
+                                encoding="utf-8")   # and answers that can't be read either: no yes to go by
+        check(without, False, "its stats aren't read every hour until it's put right", name="My channel")
 
     def test_a_mistake_in_the_first_channels_settings_still_sets_up_the_hourly_read_for_a_new_one(self):
         """One hourly job reads every channel. With a typo in the first channel's studio.toml, setting it up for a

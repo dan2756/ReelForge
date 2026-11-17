@@ -220,18 +220,39 @@ def _answered(p) -> dict | None:
     return None if problems else settings_from(a)
 
 
+def _own_background_stats(path: Path) -> bool | None:
+    """What a studio.toml that can't be read says about the hourly read in its own background_stats line: True or
+    False, None when it has no such line. Two lines that disagree (one added below the other: itself a mistake TOML
+    refuses) are no yes."""
+    try:
+        said = set(re.findall(r"^[ \t]*background_stats[ \t]*=[ \t]*(true|false)[ \t]*(?:#.*)?$",
+                              path.read_text(encoding="utf-8-sig", errors="replace"), re.M))
+    except OSError:
+        return None
+    return None if not said else said == {"true"}
+
+
 def background_stats(p, say=None) -> bool:
-    """Whether a channel has its stats read every hour while ReelForge is closed: as its settings say, or, while its
-    studio.toml has a mistake in it, as its answers say (and say gets a line about the file). One job reads every
-    channel, so a typo in one channel's settings must not stop the read of the others, or the job's setting up."""
+    """Whether a channel has its stats read every hour while ReelForge is closed: as its settings say. While its
+    studio.toml has a mistake in it (and say gets a line about the file), as the file's own background_stats line
+    says, else as its answers say, else not: the read uses your log-ins, so it's only ever on for a yes that can be
+    read. One job reads every channel, so a typo in one channel's settings must not stop the read of the others, or
+    the job's setting up."""
     try:
         return bool(S.load(p.settings)["platforms"].get("background_stats", True))
     except S.SettingsError as e:
         s = _answered(p)    # (its name too: the profile's own comes from the file that can't be read)
+        own = _own_background_stats(p.settings)
+        if own is not None:
+            on, what = own, "whether its stats are read every hour goes by its background_stats line"
+        elif s is not None:
+            on, what = bool(s["platforms"].get("background_stats", True)), \
+                "whether its stats are read every hour goes by its answers"
+        else:   # its answers can't be read either: no yes to go by
+            on, what = False, "its stats aren't read every hour until it's put right"
         if say is not None:
-            say(typo_line(e, s["channel"]["name"] if s else p.name,
-                          "whether its stats are read every hour goes by its answers"))
-        return True if s is None else bool(s["platforms"].get("background_stats", True))
+            say(typo_line(e, s["channel"]["name"] if s else p.name, what))
+        return on
 
 
 def _other_channel(p, notes: list[str] | None = None) -> dict:

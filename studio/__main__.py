@@ -111,7 +111,8 @@ def apply_background_stats() -> str:
     profile that wants it, so it's on while any of them does."""
     from . import generate, stats_schedule
     try:
-        # (a channel's studio.toml with a typo in it goes by its answers: what was written has said so already)
+        # (a channel's studio.toml with a typo in it goes by its own background_stats line, else its answers, else
+        # it's off: what was written has said so already)
         if any(generate.background_stats(p) for p in profiles.every()):
             return stats_schedule.enable()
         if stats_schedule.status() == "on":
