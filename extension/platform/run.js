@@ -295,9 +295,12 @@ void (async () => {
       if (pressed) {
         throw new rf.Stop("unknown_outcome", `Post was pressed on ${P} and no confirmation was seen. Check your profile before you post again.`, { state: "unknown" })
       }
-      // The page before this one was asking ReelForge for the press, and this one can't know the answer: ReelForge
-      // may have said yes, and then it has the post as "not sure". (Nothing clicked for it: the page that asked is gone.)
-      if (job.pressAsked) throw new rf.Stop("tab_closed", `${P}'s upload page was left while ReelForge was being asked to press Post. Post was not pressed.`)
+      // The page before this one was asking ReelForge for the press, and no answer had come back when it went (or the
+      // one that came was lost on the way): ReelForge may have said yes, and then it has the post as "not sure". (Nothing
+      // clicked for it: the page that asked is gone.) A press ReelForge had refused before then was not being asked for.
+      if (job.pressAsked && job.pressAnswer !== "refused") {
+        throw new rf.Stop("tab_closed", `${P}'s upload page was left while ReelForge was being asked to press Post. Post was not pressed.`)
+      }
       throw new rf.Stop("tab_closed", `${P}'s upload page was left ${job.state === "ready" ? "before Post was pressed" : "before the post was ready"}. Nothing was posted.`)
     }
     await signSeen()

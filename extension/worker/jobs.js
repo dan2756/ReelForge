@@ -513,6 +513,8 @@ export async function tabHello(tabId, url) {
       id: job.id, platform: job.platform, name: platformName(job.platform), text: job.text, video: job.video, handle: job.handle,
       state: job.state, attached: job.attached === true, accountOk: job.accountOk === true,
       pressedByPerson: job.pressedByPerson === true, pressAsked: job.pressAsked === true,
+      // ReelForge's answer to the press, once one came back here: "granted", "refused" or "lost" (it never arrived).
+      pressAnswer: job.pressAnswer || null,
       // Press for me needs all of: the person switched it on here, switched "stop before posting" off for
       // this post, said yes to it for this batch in this browser, and it is not X. The app still has the last
       // word when the press is asked for. (The yes may still come while the page is being filled in, so it
