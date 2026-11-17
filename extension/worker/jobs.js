@@ -213,15 +213,22 @@ const wasPressed = job => job.state === "posting" || job.pressedByPerson === tru
 // The job's tab is showing something the script cannot run on.
 function leftPage(job, code, message) {
   if (wasPressed(job)) return unsure(job)
+  if (pressOpen(job)) return finish(job.id, "failed", "tab_closed", `The upload page was left${askingWords(job)}`)
   if (job.state === "ready") return finish(job.id, "failed", "tab_closed", "The upload page was left before Post was pressed. Nothing was posted.")
   return finish(job.id, "failed", code, message)
 }
 
 function tabGone(job) {
   if (wasPressed(job)) return unsure(job)
+  if (pressOpen(job)) return finish(job.id, "failed", "tab_closed", `The tab was closed${askingWords(job)}`)
   const when = job.state === "ready" ? "before Post was pressed" : "before the post was ready"
   return finish(job.id, "failed", "tab_closed", `The tab was closed ${when}. Nothing was posted.`)
 }
+
+// The end of the words for a job whose page went while ReelForge was being asked for the press. ReelForge may have
+// said yes, and then it takes the ending as "not sure" and keeps these words on its row: so they say only what is
+// true either way, that Post was not pressed.
+const askingWords = job => ` while ReelForge was being asked to press Post on ${platformName(job.platform)}. Post was not pressed.`
 
 // Post was pressed and the page never said it worked. This is never tried again: only the person can tell.
 const unsureWords = job => `Post was pressed on ${platformName(job.platform)} and no confirmation was seen. Check your profile before you post again.`

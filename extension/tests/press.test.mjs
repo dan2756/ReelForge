@@ -300,6 +300,36 @@ export const tests = {
     }
   },
 
+  async "the tab closed, or taken to another site, while ReelForge is asked for the press after it said yes: ReelForge's row says Post was not pressed, never that nothing was posted"({ app, site, browser, video }) {
+    // ReelForge says yes at once and its answer takes a moment to come back. Its row keeps the first words it is
+    // given for an ending, so those must already be true when ReelForge has the press as given.
+    await switchOn(browser, app, "tiktok")
+    for (const [how, words] of [
+      ["closed", "The tab was closed while ReelForge was being asked to press Post on TikTok. Post was not pressed."],
+      ["taken to X", "The upload page was left while ReelForge was being asked to press Post on TikTok. Post was not pressed."],
+    ]) {
+      const held = holdPress(app, { decided: true })
+      const made = app.createBatch(video(), ["tiktok"], { press: true })
+      await browser.post(app, made.batch, { yes: true })
+      const tab = await browser.tab("www.tiktok.com")
+      const job = made.jobs[0]
+      await until(() => `the press request (it is ${job.state} ${job.step})`, () => held.arrived, 30000)
+      await until(() => `ReelForge to say yes (it is ${job.state})`, () => job.state === "posting")
+      if (how === "closed") await tab.close()
+      else await tab.goto("https://x.com/compose/post")
+      await until(() => `the job to end (it is ${job.state})`, () => job.state === "unknown", 20000)
+      held.release()
+      await sleep(1000)
+      equal([job.error_code, job.error_message], ["tab_closed", words], `ReelForge's row, ${how}`)
+      const kept = await browser.jobRecord(job.id)
+      ok(kept.state === "unknown" && !kept.error_message.includes("Nothing was posted"), `the extension's own record, ${how} (${kept.state}: ${kept.error_message})`)
+      equal(presses(app).length, 1, `press requests, ${how}`)
+      delete app.handle  // (holdPress's own, for the next round)
+      app.log.length = 0
+      if (how !== "closed") await tab.close()
+    }
+  },
+
   async "ReelForge slow to answer the press (its database busy for six seconds) is waited for, and asked once"({ app, site, browser, video }) {
     await switchOn(browser, app, "tiktok")
     const held = holdPress(app, { decided: false })
