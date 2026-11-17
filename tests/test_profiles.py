@@ -885,6 +885,95 @@ class Deleting(Scratch):
         self.assertNotIn("@np_x", notes)
         self.assertNotIn("X: the caption only", notes)
 
+    def test_connecting_or_disconnecting_another_account_leaves_a_platform_taken_out_by_hand_out(self):
+        """Connect or Disconnect for any account on the Accounts tab wrote studio.toml's platforms again from the
+        answers and every account connected, so a platform taken out of it by hand (its account still connected) was
+        back in it, and in your AI's notes with its caption rule, without a word."""
+        self.onboard_main(platforms=["tiktok", "youtube", "x"], handle_youtube="@npyt", handle_x="@np_x")
+        main = profiles.main()
+        claude = self.root / "CLAUDE.md"
+        text = main.settings.read_text(encoding="utf-8")
+        mine = text.replace('enabled = ["tiktok", "youtube", "x"]', 'enabled = ["tiktok", "youtube"]   # not X for now')
+        mine = mine.replace("[platforms]\n", "# where I post\n[platforms]\n")
+        self.assertNotEqual(mine, text)
+        main.settings.write_text(mine, encoding="utf-8")
+        generate.write_guides(main, saved_settings=True)        # an update: X stays out
+        before = sorted(main.backups.glob("studio.*"))
+        said: list[str] = []
+        generate.set_account("instagram", "@np_ig", say=said.append)     # Connect another platform
+        self.assertEqual(said, [])
+        # Instagram alone is added, and the rest of the file is as it was written, comments and all
+        self.assertEqual(main.settings.read_text(encoding="utf-8"),
+                         mine.replace('["tiktok", "youtube"]   #', '["tiktok", "youtube", "instagram"]   #')
+                         .replace('x = "@np_x"\n', 'x = "@np_x"\ninstagram = "@np_ig"\n'))
+        copies = [c.read_text(encoding="utf-8") for c in sorted(main.backups.glob("studio.*")) if c not in before]
+        self.assertEqual(copies, [mine])                         # with a copy of it as it was
+        notes = claude.read_text(encoding="utf-8")
+        self.assertIn("Instagram Reels @np_ig", notes)
+        self.assertNotIn("@np_x", notes)
+        self.assertNotIn("X: the caption only", notes)
+        self.assertEqual(dashboard_config.handles(main)["x"], "@np_x")    # and its account is still connected
+        # Disconnect, of Instagram or of X: only that account's handle goes
+        generate.set_account("instagram", "", say=said.append)
+        generate.set_account("x", "", say=said.append)
+        self.assertEqual(said, [])
+        s = S.load(main.settings)
+        self.assertEqual(s["platforms"]["enabled"], ["tiktok", "youtube", "instagram"])
+        self.assertEqual(s["platforms"]["handles"], {"tiktok": "@nightphysics", "youtube": "@npyt", "instagram": "",
+                                                     "x": ""})
+        self.assertEqual(dashboard_config.handles(main), s["platforms"]["handles"])
+        self.assertIn("# where I post\n[platforms]\n", main.settings.read_text(encoding="utf-8"))
+        self.assertNotIn("X: the caption only", claude.read_text(encoding="utf-8"))
+        # and Connect for X itself puts it back in, as the first Connect of a platform does
+        generate.set_account("x", "@np_x2", say=said.append)
+        self.assertEqual(said, [])
+        s = S.load(main.settings)
+        self.assertEqual((s["platforms"]["enabled"], s["platforms"]["handles"]["x"]),
+                         (["tiktok", "youtube", "instagram", "x"], "@np_x2"))
+        self.assertIn("X: the caption only", claude.read_text(encoding="utf-8"))
+
+    def test_connect_writes_settings_laid_out_otherwise_again_and_says_so(self):
+        """Settings that can't be changed a line at a time (a list over several lines, here) are written again whole,
+        with only that platform added, and a copy of them as they were; and the line says so. So is an account
+        connected while the file had a mistake in it, fixed by hand since, which goes in with the next Connect."""
+        self.onboard_main(platforms=["tiktok", "youtube", "x"], handle_youtube="@npyt", handle_x="@np_x")
+        main = profiles.main()
+        text = main.settings.read_text(encoding="utf-8").replace("max_seconds = 75.0", "max_seconds = 70.0")
+        mine = text.replace('enabled = ["tiktok", "youtube", "x"]', 'enabled = [\n  "tiktok",\n  "youtube",   # not X\n]')
+        main.settings.write_text(mine, encoding="utf-8")
+        before = sorted(main.backups.glob("studio.*"))
+        said: list[str] = []
+        generate.set_account("instagram", "@np_ig", say=said.append)
+        copy = next(c for c in sorted(main.backups.glob("studio.*")) if c not in before)
+        self.assertEqual(copy.read_text(encoding="utf-8"), mine)
+        self.assertEqual(said, [f"Connecting Instagram Reels wrote Night Physics's settings file, {main.settings}, "
+                                "again whole, as its layout can't be changed a line at a time: every setting in it is "
+                                "kept, but its own layout and any comments in it are only in the copy of it as it "
+                                f"was, {copy}."])
+        s = S.load(main.settings)
+        self.assertEqual((s["platforms"]["enabled"], s["video"]["max_seconds"]),
+                         (["tiktok", "youtube", "instagram"], 70.0))
+        self.assertNotIn("X: the caption only", (self.root / "CLAUDE.md").read_text(encoding="utf-8"))
+        # an account connected while the file has a mistake in it waits; fixed by hand, the next Connect brings it in
+        good = main.settings.read_text(encoding="utf-8")
+        main.settings.write_text(good + "\nthis is = = a typo\n", encoding="utf-8")
+        said = []
+        generate.set_account("x", "@np_x3", say=said.append)
+        self.assertEqual(len(said), 1, said)
+        self.assertIn("has a mistake in it (", said[0])
+        main.settings.write_text(good, encoding="utf-8")
+        before = sorted(main.backups.glob("studio.*"))
+        said = []
+        generate.set_account("youtube", "@npyt2", say=said.append)
+        copy = next(c for c in sorted(main.backups.glob("studio.*")) if c not in before)
+        self.assertEqual(copy.read_text(encoding="utf-8"), good)
+        s = S.load(main.settings)
+        self.assertEqual(s["platforms"]["handles"], {"tiktok": "@nightphysics", "youtube": "@npyt2",
+                                                     "instagram": "@np_ig", "x": "@np_x3"})
+        self.assertEqual(s["platforms"]["enabled"], ["tiktok", "youtube", "instagram", "x"])
+        self.assertEqual(said, [f"X, connected while Night Physics's settings file, {main.settings}, had a mistake in "
+                                f"it, is in it now. A copy of it as it was is in {copy}."])
+
     def test_the_commands_delete_and_restore_one(self):
         from studio.__main__ import main
 

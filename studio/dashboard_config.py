@@ -55,10 +55,10 @@ def _value(v) -> str:
     return json.dumps(str(v), ensure_ascii=False)
 
 
-def set_keys(text: str, values: dict[str, dict]) -> str:
+def set_keys(text: str, values: dict[str, dict], reword: bool = True) -> str:
     """values = {"": {top-level key: value}, "section": {key: value}}. Replaces existing keys in place (keeping
     their comments) and adds missing ones at the end of their section (adding the section if needed). Notes from an
-    older version come out in today's words (REWORDED)."""
+    older version come out in today's words (REWORDED), unless reword is False (a file other than config.toml)."""
     lines = text.splitlines()
     pending = {sec: dict(kv) for sec, kv in values.items()}
     out: list[str] = []
@@ -95,7 +95,7 @@ def set_keys(text: str, values: dict[str, dict]) -> str:
             for k, v in kv.items():
                 out.append(f"{k} = {_value(v)}")
     text = "\n".join(out) + "\n"
-    for old, new in REWORDED:
+    for old, new in REWORDED if reword else ():
         text = text.replace(old, new)
     return text
 

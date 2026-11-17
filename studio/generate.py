@@ -11,10 +11,12 @@ so your AI knows where each one's notes are.
 
 from __future__ import annotations
 
+import copy as _copy
 import datetime as dt
 import json
 import re
 import shutil
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -495,16 +497,18 @@ def _free(path: Path) -> Path:
     return free
 
 
-def write_all(answers: dict, profile=None, *, account_only: bool = False, connecting: str = "", say=None) -> list[Path]:
+def write_all(answers: dict, profile=None, *, account: str = "", say=None) -> list[Path]:
     """Validate the answers and write every file, for a profile (the one this process works on, by default). Returns
     the paths written. Raises ValueError on bad answers, or when a file can't be made right (the message says which),
-    before any file has changed. account_only: nothing but a platform's handle changed in the answers (set_account),
-    so the settings on file stay as they are apart from the platforms: studio.toml invites edits by hand, and an
-    account connected on the Accounts tab must not put the first-time answers back over them. A studio.toml written
-    again from the answers is copied into the channel's backups first (when it changes). connecting: the platform
-    set_account connects, kept in the channel's to-add list (_to_add) while studio.toml has a mistake in it, for
-    write_guides to put in once it's fixed. say: called with a line for each file that was left as it was because it
-    has a mistake in it, or written again with one in it (and where its copy is), once everything else is written."""
+    before any file has changed. A studio.toml written again is copied into the channel's backups first (when it
+    changes). account: the platform set_account connects (its handle in the answers) or disconnects (none), when
+    nothing but that changed in the answers. The settings on file then stay as they are apart from that platform
+    (_for_account): studio.toml invites edits by hand, and an account connected on the Accounts tab must not put the
+    first-time answers back over them, nor a platform taken out of it by hand. While studio.toml has a mistake in it,
+    a platform connected is kept in the channel's to-add list (_to_add), for write_guides or the next Connect to put
+    in once it's fixed. say: called with a line for each file that was left as it was because it has a mistake in it,
+    or written again with one in it, or whole in place of a line at a time (and where its copy is), once everything
+    else is written."""
     w = _where(profile)
     notes = w.notes
     first = not w.settings.exists()                     # first-time setup: the channel isn't set up yet
@@ -521,8 +525,11 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, connec
     # The answers file is often the one being read (my-studio/answers.json), with no date yet: today, then.
     a["_created"] = a.get("_created") or dt.date.today().isoformat()
     s = settings_from(a)
+    cfg = s                     # what ReelForge's settings (config.toml) are written from
+    connecting = account if a.get(f"handle_{account}") else ""
     keep_settings = False
-    if account_only and w.settings.is_file():
+    edit = None                 # the account's change to a studio.toml that reads (_for_account)
+    if account and w.settings.is_file():
         try:
             saved = S.load(w.settings)
         except S.SettingsError as e:
@@ -536,8 +543,11 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, connec
                                    "this account and stay as they were (your answers and ReelForge's settings have "
                                    "it)"))
         else:
-            s = {**saved, "platforms": {**saved["platforms"], "enabled": s["platforms"]["enabled"],
-                                        "handles": s["platforms"]["handles"]}}
+            edit = _for_account(w, saved, s["platforms"], account, connecting)
+            # ReelForge's settings keep every account connected (the answers have them all), also one whose platform
+            # was taken out of studio.toml by hand; your AI's notes go by studio.toml, with the handles connected.
+            cfg = {**edit.settings, "platforms": s["platforms"]}
+            s = {**edit.settings, "platforms": {**edit.settings["platforms"], "handles": s["platforms"]["handles"]}}
     files: list[tuple[Path, str]] = []
 
     def out(path: Path, text: str):
@@ -546,8 +556,9 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, connec
     out(w.answers, json.dumps({k: v for k, v in a.items()}, indent=2, ensure_ascii=False) + "\n")
     settings_text, mistake = None, None
     if not keep_settings:
-        settings_text = ("# Your studio's settings, from first-time setup. The pipeline and the dashboard read this "
-                         "file.\n" + S.dump_toml(s, SETTINGS_COMMENTS))
+        settings_text = edit.text if edit is not None and edit.text is not None else (
+            "# Your studio's settings, from first-time setup. The pipeline and the dashboard read this file.\n"
+            + S.dump_toml(edit.settings if edit is not None else s, SETTINGS_COMMENTS))
         out(w.settings, settings_text)
         if w.settings.is_file():
             try:
@@ -575,7 +586,7 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, connec
     from . import dashboard_config
     # With studio.toml left as it is, the settings here are the answers': the handles are all that changed, and
     # anything else they'd put in config.toml (the hashtags for new videos, say) could undo an edit made by hand.
-    config = dashboard_config.rendered(s, w.profile, only=S.PLATFORMS if keep_settings else None)
+    config = dashboard_config.rendered(cfg, w.profile, only=S.PLATFORMS if keep_settings else None)
     # Every file is rendered and checked by now, so whatever stops this (answers to fix, a typo in the dashboard's
     # config.toml, notes too long for Codex) has stopped it above, with every file still as it was.
 
@@ -593,6 +604,14 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, connec
                 notes.append(f"{a['channel_name'].strip()}'s settings file, {w.settings}, had a mistake in it "
                              f"({mistake.reason}), so it was written again from your answers. A copy of it as it was "
                              f"is in {copy}.")
+            if edit is not None and edit.waited:
+                notes.append(_brought_in(edit.waited, a["channel_name"].strip(), w.settings, copy))
+            if edit is not None and edit.text is None:      # its own layout is in the copy alone
+                doing = "Connecting" if connecting else "Disconnecting"
+                notes.append(f"{doing} {S.PLATFORM_NAMES[account]} wrote {a['channel_name'].strip()}'s settings "
+                             f"file, {w.settings}, again whole, as its layout can't be changed a line at a time: "
+                             "every setting in it is kept, but its own layout and any comments in it are only in the "
+                             f"copy of it as it was, {copy}.")
     written: list[Path] = []
     for path, text in files:
         P.write_atomic(path, text)
@@ -607,7 +626,7 @@ def write_all(answers: dict, profile=None, *, account_only: bool = False, connec
     if keep_settings:
         if connecting:
             _to_add(w.profile, [*_to_add(w.profile), connecting])
-    else:   # studio.toml is written from the answers, which have every platform connected since: none left to add
+    else:   # studio.toml has every platform connected since: from the answers, or put in by _for_account
         _to_add(w.profile, [])
     if not w.profile.main and not keep_settings:
         # the first channel's notes list this one (and how often it posts, which a handle alone doesn't change)
@@ -658,11 +677,64 @@ def _add_connected(a: dict, s: dict, w: SimpleNamespace, handles: dict, out, not
                             "file.\n" + S.dump_toml(s, SETTINGS_COMMENTS))
         except OSError:
             return
-        names = " and ".join(S.PLATFORM_NAMES[p] for p in adding)
-        notes.append(f"{names}, connected while {a['channel_name'].strip()}'s settings file, {w.settings}, had a "
-                     f"mistake in it, {'is' if len(adding) == 1 else 'are'} in it now. A copy of it as it was is in "
-                     f"{copy}.")
+        notes.append(_brought_in(adding, a["channel_name"].strip(), w.settings, copy))
     _to_add(w.profile, [])
+
+
+def _brought_in(platforms: list[str], channel: str, settings: Path, copy: Path) -> str:
+    """The line about platforms connected while a channel's studio.toml had a mistake in it, put in it since."""
+    names = " and ".join(S.PLATFORM_NAMES[p] for p in platforms)
+    return (f"{names}, connected while {channel}'s settings file, {settings}, had a mistake in it, "
+            f"{'is' if len(platforms) == 1 else 'are'} in it now. A copy of it as it was is in {copy}.")
+
+
+def _for_account(w: SimpleNamespace, saved: dict, answered: dict, account: str, connecting: str) -> SimpleNamespace:
+    """What Connect or Disconnect on the Accounts tab changes in a studio.toml that reads (saved): that platform
+    alone, and every other one stays as the file has it, one taken out of it by hand included. Connecting adds it to
+    the file's platforms (enabled) and puts its handle in; disconnecting takes its handle out, and the platform stays
+    (its captions are still written). Platforms connected while the file had a mistake in it (_to_add) go in too.
+    answered: the answers' platforms, which have the handle of every account connected. Returns settings: the file's
+    settings with that change; text: the file's own text with it, a line at a time, everything else as it was written
+    (None when its layout doesn't allow that: the file is then written again whole from settings); waited: the
+    platforms from the to-add list put in."""
+    enabled = saved["platforms"]["enabled"]
+    waiting = [p for p in _to_add(w.profile) if answered["handles"].get(p)]
+    adding = [p for p in dict.fromkeys([*waiting, connecting]) if p and p not in enabled]
+    want = _copy.deepcopy(saved)
+    want["platforms"]["enabled"] = [*enabled, *adding]
+    want["platforms"]["handles"].update({p: answered["handles"].get(p, "") for p in S.PLATFORMS
+                                         if p == account or p in waiting})
+    try:
+        text = _a_line_at_a_time(w.settings.read_text(encoding="utf-8-sig"), saved, want, w.settings)
+    except (OSError, UnicodeDecodeError):
+        text = None
+    return SimpleNamespace(settings=want, text=text, waited=[p for p in waiting if p in adding])
+
+
+def _a_line_at_a_time(text: str, saved: dict, want: dict, path: Path) -> str | None:
+    """A studio.toml's text (saved, as it reads) with what want changes in its platforms put in a line at a time:
+    [platforms] enabled as it's written, with the platforms want adds after it, and each handle that changes on its
+    own line under [platforms.handles]; everything else in it, comments and all, as it was written. None when the
+    file's layout doesn't allow that (a list over several lines, an inline table...): what comes out must read as
+    want, or it isn't used."""
+    from . import dashboard_config
+
+    values: dict[str, dict] = {}
+    old, new = saved["platforms"]["enabled"], want["platforms"]["enabled"]
+    if new != old:
+        table = tomllib.loads(text).get("platforms")
+        written = table.get("enabled") if isinstance(table, dict) else None
+        values["platforms"] = {"enabled": [*(written if isinstance(written, list) else old), *new[len(old):]]}
+    handles = {p: h for p, h in want["platforms"]["handles"].items() if saved["platforms"]["handles"].get(p) != h}
+    if handles:
+        values["platforms.handles"] = handles
+    if not values:
+        return text
+    changed = dashboard_config.set_keys(text, values, reword=False)
+    try:
+        return changed if S.parse(changed, path) == want else None
+    except S.SettingsError:
+        return None
 
 
 def write_guides(profile=None, *, saved_settings: bool = False, say=None) -> list[Path]:
@@ -709,11 +781,13 @@ def write_guides(profile=None, *, saved_settings: bool = False, say=None) -> lis
 
 def set_account(platform: str, handle: str, say=None) -> list[Path]:
     """Connect a platform ("@name") or disconnect it (""), as the ReelForge window's Accounts tab does. Its handle goes
-    into the dashboard's settings and, once you've been through onboarding, into your answers too, and everything
-    onboarding writes follows: your AI's notes and caption rules then cover the platforms you're connected to, and
-    running onboarding again keeps them. Disconnecting keeps the platform in "Where will you post?" (your AI still
-    writes its captions) and only forgets the handle. Returns the paths written. say: called with a line for what
-    couldn't follow, and why (a studio.toml with a mistake in it, answers to fix first), for the window to show."""
+    into the dashboard's settings and, once you've been through onboarding, into your answers too, and studio.toml
+    gets that platform alone (write_all): connected, it's one you post to, so your AI's notes and caption rules cover
+    it, and running onboarding again keeps it. Every other platform stays as studio.toml has it: one taken out of it
+    by hand stays out while its account is connected. Disconnecting keeps the platform in "Where will you post?" and
+    in studio.toml (your AI still writes its captions) and only forgets the handle. Returns the paths written. say:
+    called with a line for what couldn't follow, and why (a studio.toml with a mistake in it, answers to fix first),
+    or for a studio.toml written again whole, for the window to show."""
     from . import dashboard_config
 
     if not P.ANSWERS.exists():
@@ -738,7 +812,7 @@ def set_account(platform: str, handle: str, say=None) -> list[Path]:
         else:
             a.pop(f"handle_{p}", None)
     try:
-        return write_all(a, account_only=True, connecting=platform if handle else "", say=say)
+        return write_all(a, account=platform, say=say)
     except ValueError as e:
         # Answers first-time setup would ask about again, or notes too long for Codex: nothing was written. The
         # handle still goes into ReelForge's settings and your answers ("Change your answers" writes the settings
