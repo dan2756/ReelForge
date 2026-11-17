@@ -763,8 +763,9 @@ async function askPress(job, asked, line = null) {
     // "Not ready" is also ReelForge's no to a post cancelled in its window, and here it can't say how it has the post:
     // its no did not carry it, and it can't be asked now (closed straight after, say). Post is not ringed, and the person
     // is not asked to press it as if all were well: a press of a cancelled post would put it up with ReelForge calling
-    // it over, free to be posted again.
-    if (res.data?.error === "not_ready" && !theirs) return no("refused_unreachable", REFUSED_UNREACHABLE)
+    // it over, free to be posted again. A no whose words were cut off on the way (its why can't be read) may be that
+    // one too, and is taken the same way.
+    if (!theirs && (res.data?.error === "not_ready" || typeof res.data?.error !== "string")) return no("refused_unreachable", REFUSED_UNREACHABLE)
     return no(String(res.data?.error || "press_not_allowed"), String(res.data?.message || "ReelForge did not allow the press."))
   })
 }

@@ -89,8 +89,8 @@ If you still want it, it takes all of these:
   nothing is clicked, Post is not ringed, and the note on the page says **Stopped** at once, before ReelForge has
   taken the stop. **Cancel** on the post's row in ReelForge then works the same way: ReelForge says no, and the note
   says the post was ended in ReelForge, even when ReelForge is closed straight after (its no says how it has the
-  post). If an older ReelForge says no without that and can't be reached afterwards, Post is not ringed, and the
-  note says not to press it if you cancelled the post;
+  post). If an older ReelForge says no without that, or the no is cut off on its way back, and ReelForge can't be
+  reached afterwards, Post is not ringed, and the note says not to press it if you cancelled the post;
 - you have not pressed the button yourself already. Your own press, even one made while the video is still going
   up or while ReelForge is being asked for the press, is the post's press: the extension then clicks nothing, and
   ReelForge would refuse another.
