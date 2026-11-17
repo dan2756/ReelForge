@@ -645,6 +645,7 @@ export async function tabPress(tabId) {
 
 // (ReelForge was asked, and can't be reached now: its answer may be late, cut off, or it may have been closed.)
 const LOST = "its answer did not come back, and it is not answering now (it may have been closed), so nothing was clicked."
+const REFUSED_UNREACHABLE = "ReelForge said no to pressing Post, and it can't be reached now to say why. If you cancelled this post in ReelForge, don't press Post. Otherwise check it, then press Post yourself."
 
 // The page asking for the press holds a line open to the worker while it asks (platform/run.js), by tab. The browser
 // closes that line when the page goes: reloaded, taken to another page, put away in the back-forward cache, or its
@@ -695,8 +696,12 @@ async function askPress(job, asked, line = null) {
     lost = true
   }
   let granted = res?.ok === true && res.data?.ok === true
-  // ReelForge's own record of the post, read when its answer is anything but a yes.
-  const theirs = lost || (res && !granted) ? await theirJob(job) : null
+  // ReelForge's own record of the post, when its answer is anything but a yes. Its no carries the post as it stands
+  // there, so nothing more has to be asked (ReelForge may be closed straight after it, by the person who cancelled the
+  // post in its window). It is read from ReelForge when that no is from an older ReelForge, and when the answer was
+  // lost.
+  const told = res && !granted && res.data?.job?.id === job.id && typeof res.data.job.state === "string" ? res.data.job : null
+  const theirs = told || (lost || (res && !granted) ? await theirJob(job) : null)
   if (lost) {
     // The request is never sent again. ReelForge's own record of the post says whether it said yes: "posting" is
     // the press it granted, and nothing else puts a post there.
@@ -750,6 +755,11 @@ async function askPress(job, asked, line = null) {
     if (res.data?.error === "already_pressed" && !fresh.pressedByPerson) {
       return no("already_pressed", `ReelForge has Post as pressed for this one already, though nothing was clicked here. Look at your ${platformName(job.platform)} profile before you press it.`)
     }
+    // "Not ready" is also ReelForge's no to a post cancelled in its window, and here it can't say how it has the post:
+    // its no did not carry it, and it can't be asked now (closed straight after, say). Post is not ringed, and the person
+    // is not asked to press it as if all were well: a press of a cancelled post would put it up with ReelForge calling
+    // it over, free to be posted again.
+    if (res.data?.error === "not_ready" && !theirs) return no("refused_unreachable", REFUSED_UNREACHABLE)
     return no(String(res.data?.error || "press_not_allowed"), String(res.data?.message || "ReelForge did not allow the press."))
   })
 }
@@ -760,7 +770,8 @@ function base64(bytes) {
   return btoa(text)
 }
 
-// The video goes to the tab one piece per request, over a Port. The tab asks for a piece by its offset, so a
+// A job's page opens two kinds of Port: the line it holds while it asks for the press (pressLine), and the one the
+// video comes over. The video goes to the tab one piece per request. The tab asks for a piece by its offset, so a
 // worker that was restarted in the middle simply answers the next request.
 export function onConnect(port) {
   if (port.sender?.id !== chrome.runtime.id || !port.sender.tab) return

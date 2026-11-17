@@ -154,11 +154,15 @@ void (async () => {
     const stay = async (why, code) => {
       // A post that was stopped is over: nothing is ringed, and nobody is asked to press.
       if (rf.stopped) return true
+      // ReelForge said no and can't be asked why, and that no is also what a post cancelled in its window gets: Post
+      // is not ringed, and the words (the worker's own) say not to press it if the post was cancelled.
+      const unclear = code === "refused_unreachable"
       // Until now the note said Post was about to be pressed for them, and the button was left alone.
-      if (button) rf.outline(button)
+      if (button && !unclear) rf.outline(button)
       // ReelForge has Post as pressed already, though nothing was clicked here (an answer that never came back):
       // the person looks first, and is not simply asked to press.
       if (code === "already_pressed") rf.say("Look at your profile first", "warn", why + unchecked())
+      else if (unclear) rf.say("ReelForge said no", "warn", why + unchecked())
       else rf.say("Check it, then press Post", "ready", `ReelForge did not press for you: ${why}${unchecked()}`)
       // (A sentence of its own: ReelForge's page and the popup show it as it is.)
       await rf.report({ step: "ready", detail: `Not pressed: ${why}` })

@@ -977,7 +977,13 @@ class Handler(BaseHTTPRequestHandler):
             except posting.Refused as r:
                 if r.code == "not_found":
                     raise
-                self.reply(409, {"ok": False, "error": r.code, "message": r.message})
+                # The post as it stands comes with the no (without its text), so this one answer tells the extension
+                # when the post was ended here, cancelled in the window say, even if ReelForge is closed right after:
+                # it must not then ask you to press Post.
+                refused = {"ok": False, "error": r.code, "message": r.message}
+                if r.job is not None:
+                    refused["job"] = {k: v for k, v in posting.job_json(r.job, handles).items() if k != "text"}
+                self.reply(409, refused)
                 return
             self.reply(200, {"ok": True})
         else:  # event

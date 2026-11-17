@@ -85,6 +85,16 @@ function closeAfterReady(app, job, port) {
   }
 }
 
+// ReelForge is closed as soon as its answer to the press request has gone out: the extension's next request finds
+// nobody.
+function closeAfterPress(app) {
+  const handle = app.handle.bind(app)
+  app.handle = async (request, response) => {
+    if (request.method === "POST" && /\/press$/.test(request.url)) response.once("finish", () => app.stop())
+    return handle(request, response)
+  }
+}
+
 // Every ring Post is given on the page from now on, kept in the page as window.rings.
 const watchRings = tab => tab.evaluate(() => {
   const button = document.querySelector("[data-e2e=post_video_button]")
@@ -730,6 +740,62 @@ export const tests = {
     equal(await tab.evaluate(() => [window.rings.filter(Boolean), fixture.clicks, fixture.trustedClicks]), [[], 0, 0], "rings round Post, and presses the page saw")
     equal([job.state, (await browser.jobRecord(job.id)).state], ["cancelled", "cancelled"], "the job, in ReelForge and here")
     equal(app.requests("POST", /\/event$/).filter(entry => entry.status !== 200).map(entry => [entry.status, entry.body.state, entry.body.detail]), [], "reports ReelForge turned down")
+  },
+
+  async "Cancel in ReelForge while the extension asks it for the press, and ReelForge closed right after its no: the page says it was ended there, and asks for no press"({ app, browser, video }) {
+    // ReelForge refuses the press (the post is cancelled there), and is closed as soon as it has answered: the
+    // extension can't ask it anything more. Its no says how it has the post, and that is enough.
+    await switchOn(browser, app, "tiktok")
+    closeAfterPress(app)
+    const held = holdPress(app, { decided: false })
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("www.tiktok.com")
+    const job = made.jobs[0]
+    await until(() => `the press request (it is ${job.state} ${job.step})`, () => held.arrived, 30000)
+    await watchRings(tab)
+    Object.assign(job, { state: "cancelled", detail: "cancelled in ReelForge" })
+    held.release()
+    await until("the refusal", () => presses(app).some(entry => entry.status === 409))
+    await until("the note to say so", async () => (await note(tab)).line !== "Pressing Post for you", 10000)
+    await sleep(1000)
+    equal(await note(tab), { tone: "bad", line: "Stopped", more: "This post was ended in ReelForge." }, "the note")
+    equal(await tab.evaluate(() => [window.rings.filter(Boolean), fixture.clicks, fixture.trustedClicks]), [[], 0, 0], "rings round Post, and presses the page saw")
+    await until("ReelForge to be closed", () => app.server === null)
+    const kept = await browser.jobRecord(job.id)
+    equal([kept.state, kept.detail], ["cancelled", "cancelled in ReelForge"], "the job here")
+    ok(!job.events.some(event => String(event.detail).startsWith("Not pressed")), `what the app was told (${job.events.map(event => event.detail)})`)
+  },
+
+  async "Cancel in an older ReelForge, whose no to the press does not say how it has the post, closed right after: Post is not ringed, and the page says not to press it if the post was cancelled"({ app, browser, video }) {
+    // As above, with a ReelForge whose no carries nothing more: the extension can't learn that the post was ended
+    // there. It does not ask for a press as if all were well.
+    app.pressRows = false
+    await switchOn(browser, app, "tiktok")
+    closeAfterPress(app)
+    const held = holdPress(app, { decided: false })
+    const made = app.createBatch(video(), ["tiktok"], { press: true })
+    await browser.post(app, made.batch, { yes: true })
+    const tab = await browser.tab("www.tiktok.com")
+    const job = made.jobs[0]
+    await until(() => `the press request (it is ${job.state} ${job.step})`, () => held.arrived, 30000)
+    await watchRings(tab)
+    Object.assign(job, { state: "cancelled", detail: "cancelled in ReelForge" })
+    held.release()
+    await until("the refusal", () => presses(app).some(entry => entry.status === 409))
+    await until("the note to say so", async () => (await note(tab)).line !== "Pressing Post for you", 15000)
+    await sleep(1000)
+    const said = "ReelForge said no to pressing Post, and it can't be reached now to say why. If you cancelled this post in ReelForge, don't press Post. Otherwise check it, then press Post yourself."
+    equal(await note(tab), { tone: "warn", line: "ReelForge said no", more: `${said}${LOOK}` }, "the note")
+    equal(await tab.evaluate(() => [window.rings.filter(Boolean), fixture.clicks, fixture.trustedClicks]), [[], 0, 0], "rings round Post, and presses the page saw")
+    equal((await browser.jobRecord(job.id)).pressAnswer, "refused", "what the extension keeps of the press")
+    // ReelForge is opened again, and the extension's next look takes its ending (the open popup makes it sooner).
+    await until("ReelForge to be closed", () => app.server === null)
+    await app.start(app.port)
+    const popup = await browser.popup()
+    await until("the page to hear of it", async () => (await note(tab))?.more === "This post was ended in ReelForge.", 40000)
+    await popup.close()
+    equal([(await browser.jobRecord(job.id)).state, await tab.evaluate(() => fixture.clicks)], ["cancelled", 0], "the job here, and presses the page saw")
   },
 
   async "a newer list that moves YouTube's error hook does not get a press past YouTube's own error"({ app, site, browser, video }) {
