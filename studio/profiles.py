@@ -49,11 +49,16 @@ WINDOWS = "windows"         # in a profile's dashboard/data/: a lock for each Re
 READ_LOCK = "stats.refresh.lock"  # ... and the one a ReelForge holds while it reads its stats (dashboard/sync.py)
 _STAMP = re.compile(r"-(\d{4}-\d{2}-\d{2}-\d{6})(?: \d+)?$")  # the date at the end of a deleted profile's backup
 _PLAIN = re.compile(r"[A-Za-z0-9._/-]+")  # a folder ReelForge named (slug_for): Profile.flag writes it bare
-# What bash or PowerShell changes between double quotes (PowerShell takes curly quotes for straight ones; a backslash
-# where a folder's name can have one, not on Windows, where it's what separates folders and double quotes keep it),
-# and what cmd changes too (reelforge.cmd drops a ! whatever its quotes): Profile.kept_flag, Profile.flag
-_NOT_IN_DOUBLE_QUOTES = '"$`“”„' + ("" if os.sep == "\\" else "\\")
+# What bash or PowerShell changes between double quotes (PowerShell takes curly quotes for straight ones; on macOS and
+# Linux a backslash, which a folder's name can have there, and a !, which an interactive bash or zsh, the Mac's, takes
+# for a history event; on Windows a backslash is what separates folders, and double quotes keep it), and what cmd
+# changes too (a %NAME%, and through reelforge.cmd a ! whatever its quotes): Profile.kept_flag, Profile.flag
+_NOT_IN_DOUBLE_QUOTES = '"$`“”„' + ("" if os.sep == "\\" else "\\!")
 _UNQUOTABLE = _NOT_IN_DOUBLE_QUOTES + "%!"
+# What bin/reelforge.cmd, which every Windows terminal runs reelforge through (Git Bash's too), changes in what it's
+# given whatever its quotes: a ! (its delayed expansion), and a %NAME% (cmd /c, which PowerShell and Git Bash run it
+# with). generate.context: a channel's notes then run ReelForge's Python straight.
+NOT_THROUGH_REELFORGE_CMD = "!%"
 
 
 def _same(a: Path, b: Path) -> bool:
@@ -120,9 +125,12 @@ class Profile:
         which another channel added or deleted changes without those notes being written again. A folder ReelForge
         named (slug_for) goes as it is. One renamed by hand with another character in it (a space: "night-physics -
         Copy", the copy Explorer makes) goes in double quotes, which keep it one word in bash, PowerShell and cmd
-        alike, a % or ! included, as your AI runs them. One with a character in it that bash or PowerShell changes in
-        double quotes (" $ `, a backslash on macOS or Linux, and the curly quotes PowerShell takes for straight ones)
-        goes in single quotes, which both keep as it is (a ' in it as bash writes it: shlex.quote)."""
+        alike, a % (and on Windows a !) included, as your AI runs them. One with a character in it that bash or
+        PowerShell changes in double quotes (" $ `, on macOS or Linux a backslash, and a ! that an interactive bash or
+        zsh takes for a history event, and the curly quotes PowerShell takes for straight ones) goes in single quotes,
+        which keep it as it is (a ' in it as bash writes it: shlex.quote). On Windows, bin/reelforge.cmd changes a ! or
+        a %NAME% whatever its quotes (NOT_THROUGH_REELFORGE_CMD): a command for such a folder runs ReelForge's Python
+        straight."""
         if self.main:
             return "1"
         key = self.key

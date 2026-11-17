@@ -936,7 +936,9 @@ class Deleting(Scratch):
         self.assertEqual(sea.flag, "3")         # printed for you to run there and then, the number finds it
         with redirect_stdout(io.StringIO()):
             generate.write_guides(sea, saved_settings=True)
-        commands = {"new-episode": r"-m studio -p (.+?) new-episode <slug>", "publish": r"reelforge -p (.+?) publish",
+        # (publish: reelforge on macOS and Linux, Python straight on Windows, where reelforge.cmd drops the !)
+        commands = {"new-episode": r"-m studio -p (.+?) new-episode <slug>",
+                    "publish": r"(?:reelforge|-m studio) -p (.+?) publish",
                     "regenerate": r"-m studio -p (.+?) channel --regenerate"}
         for notes in ("CLAUDE.md", "AGENTS.md"):
             text = (sea.folder / notes).read_text(encoding="utf-8")
@@ -968,6 +970,66 @@ class Deleting(Scratch):
                                      ["reelforge", "-p", f"profiles/{name}", "channel"])
                     self.assertEqual(profiles.find(shlex.split(sea.kept_flag)[0]), sea)
                     self.assertEqual(sea.flag, "2")
+
+    def test_a_channels_notes_reach_it_with_a_bang_or_a_percent_in_its_folders_name(self):
+        """A folder renamed by hand with ! in it went into the notes' reelforge commands (publish, the channel's
+        questions) in double quotes. On Windows every terminal runs reelforge through bin/reelforge.cmd, whose delayed
+        expansion drops a ! whatever its quotes, so -p named another folder: another channel's Publish tab or
+        questions opened, or none. And a ! between double quotes is a history event in an interactive bash or zsh
+        (the Mac's), so a command pasted there failed."""
+        import re
+        import shlex
+
+        def made(name: str, folder: str) -> profiles.Profile:
+            p = profiles.create(name)
+            with redirect_stdout(io.StringIO()):
+                generate.write_all({**ANSWERS, "channel_name": name}, p)
+            return profiles.Profile(p.folder.rename(p.folder.with_name(folder)))
+
+        def through_reelforge_cmd(line: str) -> list[str]:
+            """What bin/reelforge.cmd passes on of `reelforge ...` (setlocal EnableDelayedExpansion, then %*): a
+            !NAME! becomes that variable's value, a ! left over goes, and a ^ then stands for the character after it."""
+            if "!" in line:
+                line = re.sub(r"!([^!]*)!", lambda m: os.environ.get(m.group(1), ""), line).replace("!", "")
+                line = re.sub(r"\^(.)", r"\1", line)
+            return shlex.split(line, posix=False)
+
+        self.onboard_main()
+        wow = made("Wow", "wow")
+        again = made("Wow Again", "wow!")
+        pct = made("Half Off", "50%off%")
+        windows = '"$`“”„'                     # what double quotes don't keep on Windows, which has no \ in a name
+        with mock.patch.object(P, "WINDOWS", True), mock.patch.object(profiles, "_NOT_IN_DOUBLE_QUOTES", windows), \
+                mock.patch.dict(os.environ, {"off": "OFF"}):
+            for p in (again, pct):
+                with redirect_stdout(io.StringIO()):
+                    generate.write_guides(p, saved_settings=True)
+                for notes in ("CLAUDE.md", "AGENTS.md"):
+                    text = (p.folder / notes).read_text(encoding="utf-8")
+                    with self.subTest(folder=p.folder.name, notes=notes):
+                        # no reelforge command names it: Python straight, as the rest of its notes
+                        self.assertEqual(re.findall(r"reelforge -p \S+", text), [])
+                        for pattern in (r"`(\S+ -m studio -p .+? publish)`", r"\((\S+ -m studio -p .+? channel), or "):
+                            cmd = re.search(pattern, text).group(1)
+                            self.assertTrue(cmd.startswith(r".venv\Scripts\python -m studio -p "), cmd)
+                            argv = shlex.split(cmd.replace("\\", "/"))
+                            self.assertEqual(profiles.find(argv[4]), p)
+            # what reelforge.cmd would have made of the folder in double quotes: another channel, or none
+            self.assertEqual(profiles.find(through_reelforge_cmd(f"reelforge -p {again.kept_flag} publish")[2]
+                                           .strip('"')), wow)
+            self.assertIsNone(profiles.find(through_reelforge_cmd(f'reelforge -p {pct.kept_flag} publish')[2]
+                                            .strip('"').replace("%off%", "OFF")))
+        # on macOS and Linux: single quotes, where an interactive bash or zsh takes a ! as it is
+        if os.name != "nt" and shutil.which("bash"):
+            self.assertEqual(again.kept_flag, "'profiles/wow!'")
+            with redirect_stdout(io.StringIO()):
+                generate.write_guides(again, saved_settings=True)
+            text = (again.folder / "CLAUDE.md").read_text(encoding="utf-8")
+            cmd = re.search(r"`(reelforge -p .+? publish)`", text).group(1)
+            self.assertEqual(cmd, "reelforge -p 'profiles/wow!' publish")
+            shown = subprocess.run(["bash", "--norc", "--noprofile", "-i"], capture_output=True, text=True,
+                                   input=f"printf '<%s>\\n' {cmd}\nexit\n", timeout=30).stdout
+            self.assertIn("<-p>\n<profiles/wow!>\n<publish>", shown)
 
     def test_connect_with_a_mistake_in_the_settings_leaves_your_ais_notes_and_the_way_out_brings_them_back(self):
         """Connect with a typo in studio.toml wrote your AI's notes and the channel bible from the first-time answers,
