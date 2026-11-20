@@ -98,16 +98,115 @@ def _merge(base: dict, over: dict) -> dict:
     return out
 
 
+def fix_it(path: Path) -> str:
+    """How to put right a channel's studio.toml with a mistake in it: by hand, then its notes for your AI again from
+    it, or the file again from the channel's answers. Both commands name the channel (-p: Profile.flag, 1 for the
+    first, whose name can't be read from the file meanwhile, profiles/<folder> for another, which no other channel
+    answers to), so the other channels' settings and notes are left as they are, and the second keeps a copy of the
+    file first (generate.write_all)."""
+    from . import profiles
+
+    who = profiles.of(path).flag
+    return (f"Fix it in a text editor, then run reelforge -p {who} channel --regenerate --preserve-settings so your "
+            "AI's notes follow it. Or write it again from your answers, keeping a copy of it as it is, with: "
+            f"reelforge -p {who} channel --regenerate")
+
+
+def yes_no(value) -> bool | None:
+    """A yes or no in any form a person types it (true, "yes", on, 1, False, "no", off, 0: the words the questions
+    take), else None. A no in quotes is a word to TOML, and any word is a yes to bool(), so a hand edit of
+    `background_stats = "false"` turned the hourly read of your stats on."""
+    if isinstance(value, bool):
+        return value
+    if not isinstance(value, (str, int)):
+        return None
+    v = str(value).strip().strip("\"'").strip().lower()
+    return True if v in ("y", "yes", "true", "1", "on") else False if v in ("n", "no", "false", "0", "off") else None
+
+
+class SettingsError(ValueError):
+    """A studio.toml that can't be used. The message names the file, says what's wrong in it and how to put it right,
+    so whoever catches it can show it as it is."""
+
+    def __init__(self, path: Path, reason: str):
+        super().__init__(f"{path} can't be read: {reason}. {fix_it(path)}")
+        self.path, self.reason = path, reason
+
+
+def stats_key(key) -> bool:
+    """A key that is background_stats once case, and any -, _, spaces or tabs in it, are set aside (Background-Stats,
+    "background stats", backgroundstats, _background_stats, say), or its singular, background_stat: how a person may
+    write the setting for the hourly read of their stats."""
+    return isinstance(key, str) and re.sub(r"[-_ \t]", "", key.casefold()) in ("backgroundstats", "backgroundstat")
+
+
+def _stray_stats(data, table: tuple[str, ...] = ()) -> tuple[tuple[str, ...], str] | None:
+    """The first background_stats key (stats_key) in a parsed studio.toml anywhere but under [platforms] as
+    background_stats: (the table it's in, the key as written), else None."""
+    items = data.items() if isinstance(data, dict) else enumerate(data) if isinstance(data, list) else ()
+    for key, value in items:
+        here = table if isinstance(data, list) else (*table, str(key))
+        if isinstance(data, dict) and stats_key(key) and (table, key) != (("platforms",), "background_stats"):
+            return table, key
+        found = _stray_stats(value, here)
+        if found:
+            return found
+    return None
+
+
 def load(path: Path | None = None) -> dict:
-    """Settings as a plain dict: the defaults with studio.toml laid over them (missing file = defaults)."""
+    """Settings as a plain dict: the defaults with studio.toml laid over them (missing file = defaults). The file
+    invites hand edits, so one with a typo in it raises SettingsError, which says where."""
     path = path or paths.SETTINGS
-    data: dict = {}
+    text = ""
     if path.exists():
-        with path.open("rb") as f:
-            data = tomllib.load(f)
+        try:    # utf-8-sig: Notepad on older Windows saves a hand edit with a byte-order mark, which TOML refuses
+            text = path.read_text(encoding="utf-8-sig")
+        except UnicodeDecodeError as e:
+            raise SettingsError(path, str(e)) from None
+    return parse(text, path)
+
+
+def parse(text: str, path: Path | None = None) -> dict:
+    """load for a studio.toml's text (path: the file it's for, which a SettingsError names)."""
+    path = path or paths.SETTINGS
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise SettingsError(path, str(e)) from None
+    # The hourly read uses your log-ins, so a background_stats line it wouldn't go by (added at the end of the file,
+    # where it's under the last table, or spelled Background-Stats) is a mistake that says where it belongs, never left
+    # out without a word while the yes under [platforms], or the default yes, turns the read on. Meanwhile
+    # generate.background_stats goes by every such line, as it does with any mistake in the file.
+    stray = _stray_stats(data)
+    if stray:
+        table, key = stray
+        spelled = "" if key == "background_stats" else ", written background_stats"
+        if table == ("platforms",):
+            raise SettingsError(path, f"{key} under [platforms] should be written background_stats")
+        where = f"under [{'.'.join(table)}]" if table else "at the top of the file"
+        raise SettingsError(path, f"{key} {where} belongs under [platforms]{spelled}")
     s = _merge(DEFAULTS, data)
+    # `captions = 3` parses, and would stop whoever reads a key of it, somewhere far from this file
+    for name in (*DEFAULTS, "platforms.handles"):
+        table = s
+        for part in name.split("."):
+            table = table[part]
+        if not isinstance(table, dict):
+            raise SettingsError(path, f"[{name}] should be a table of settings, not one value")
+    if not isinstance(s["platforms"]["enabled"], list):
+        raise SettingsError(path, 'enabled under [platforms] should be a list, like ["tiktok", "youtube"]')
     s["platforms"]["enabled"] = [p for p in s["platforms"]["enabled"] if p in PLATFORMS] or list(PLATFORMS)
-    s["captions"]["max_hashtags"] = max(0, int(s["captions"]["max_hashtags"]))
+    # the hourly read uses your log-ins: a yes or no typed as a word is read as meant, anything else is a mistake that
+    # says where (and generate.background_stats then goes by the line as written, where only a yes is a yes)
+    stats = yes_no(s["platforms"]["background_stats"])
+    if stats is None:
+        raise SettingsError(path, "background_stats under [platforms] should be true or false")
+    s["platforms"]["background_stats"] = stats
+    try:
+        s["captions"]["max_hashtags"] = max(0, int(s["captions"]["max_hashtags"]))
+    except (TypeError, ValueError):
+        raise SettingsError(path, "max_hashtags under [captions] should be a whole number") from None
     s["captions"]["tiktok_first_tag"] = str(s["captions"]["tiktok_first_tag"]).lstrip("#").strip()
     s["ai"]["assistant"] = assistants(s["ai"]["assistant"])
     return s
@@ -116,7 +215,7 @@ def load(path: Path | None = None) -> dict:
 def assistants(value) -> list[str]:
     """The AIs that make a channel's videos, from studio.toml's [ai] assistant: a list of claude and codex, one or both,
     in that order. Versions before 2.2.0 wrote one word, "claude", "codex" or "both"; anything else is Claude Code."""
-    words = [value] if isinstance(value, str) else list(value or [])
+    words = [value] if isinstance(value, str) else list(value) if isinstance(value, (list, tuple)) else []
     return [a for a in AIS if a in words or "both" in words] or ["claude"]
 
 

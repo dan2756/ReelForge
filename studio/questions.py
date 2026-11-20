@@ -252,22 +252,29 @@ def coerce(q: Q, value):
         return out
     if q.kind == "handle":
         return signup.handle_from("" if value is None else str(value))  # "@name", from a link too
+    if isinstance(value, (list, tuple)):   # a JSON array, the natural way to write "one per line" in an answers file
+        return ("\n" if q.kind == "long" else " ").join(s for s in (str(v).strip() for v in value) if s)
     return str(value).strip() if value is not None else ""
 
 
 def validate(answers: dict) -> tuple[dict, list[str]]:
-    """(clean answers with defaults filled, problems). Unknown keys are kept but ignored."""
-    a = defaults_for(answers)
+    """(clean answers with defaults filled, problems). Unknown keys are kept but ignored. An answer written as null
+    counts as not given, so its default applies. Every answer comes out as its question's type, also one to a
+    question that doesn't apply (the format's description while the format isn't custom): only a problem with one
+    that does apply is reported."""
+    a = defaults_for({k: v for k, v in answers.items() if v is not None})
     problems = []
     for q in QUESTIONS:
-        if not q.visible(a):
-            continue
+        asked = q.visible(a)
         if q.key in a:
             try:
                 a[q.key] = coerce(q, a[q.key])
             except ValueError as e:
-                problems.append(f"{q.key}: {e}")
+                if asked:
+                    problems.append(f"{q.key}: {e}")
                 continue
+        if not asked:
+            continue
         empty = a.get(q.key) in (None, "", [])
         if q.required and empty:
             problems.append(f"{q.key}: {q.prompt} (required)")

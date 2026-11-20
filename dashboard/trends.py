@@ -37,6 +37,10 @@ FIT_STEPS = {
 # Readings further apart than this (or than one bucket, whichever is longer) leave a gap: no bar is drawn for it.
 GAP = timedelta(minutes=95)
 STALE = timedelta(hours=2)  # a platform not read for this long doesn't count towards "now X/h"
+# How far apart db.compact leaves old account readings: the newest of each 3 hours once they're 14 days old, of each
+# day after 26 days and of each week after 72. Readings two of those blocks apart are thinned history, not a gap.
+THINNED = ((timedelta(days=72), timedelta(weeks=1)), (timedelta(days=26), timedelta(days=1)),
+           (timedelta(days=14), timedelta(hours=3)))
 
 Points = list[tuple[datetime, float]]  # (UTC time, running highest value), oldest first
 
@@ -74,6 +78,14 @@ class Frame:
         """The bucket a moment falls in, or None if it's outside the frame."""
         i = bisect_right(self.starts, t) - 1
         return i if 0 <= i < self.n and t < self.ends[i] else None
+
+
+def spaced(t0: datetime, step: timedelta, now: datetime) -> timedelta:
+    """How long after a reading at t0 the next one can come before the stretch between them is a gap: GAP, a bucket,
+    or two of thinned history's blocks at t0's age, whichever is longest."""
+    age = now - t0
+    thin = next((2 * block for older, block in THINNED if age >= older), timedelta(0))
+    return max(GAP, step, thin)
 
 
 def frame(key: str, now: datetime | None = None) -> Frame:
@@ -178,7 +190,6 @@ def bucket(pts: Points, fr: Frame, estimate: bool = False) -> Bucketed:
     gains: list[float | None] = [None] * n
     gaps = [False] * n
     est = [0.0] * n
-    longest = max(GAP, fr.step)  # 30-day buckets don't count once-a-day readings (old history is thinned) as gaps
     f0, f1 = fr.starts[0], fr.ends[-1]
 
     def add(i: int, amount: float) -> None:
@@ -191,7 +202,9 @@ def bucket(pts: Points, fr: Frame, estimate: bool = False) -> Bucketed:
         if t1 <= f0:
             continue
         span = (t1 - t0).total_seconds()
-        gap = t1 - t0 > longest
+        # Old history is thinned to a reading a day (see THINNED): two of those are a day apart give or take the
+        # seconds a read takes, which isn't a gap, though it's often a little over one daily bucket.
+        gap = t1 - t0 > spaced(t0, fr.step, fr.now)
         if gap:
             i = fr.index(max(t0, f0))
             while i is not None and i < n and fr.starts[i] < t1:

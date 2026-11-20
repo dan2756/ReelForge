@@ -128,19 +128,27 @@ def stills(ep: Path, secs: list[float]) -> list[Path]:
     return written
 
 
+FRAMES_STAMP = "stamp.txt"      # in build/frames: what those frames were drawn from (frames_stamp)
+
+
+def frames_stamp(ep: Path, spec: dict) -> str:
+    """One hash of what a 2D episode's picture depends on: the spec's keys the page reads (the sound cues don't
+    count), the scene, the voiceover's timeline and the runtime. `spec` is the episode's as config.load_spec gives it."""
+    import hashlib
+    scene = ep / spec.get("scene", "scene.js")
+    tl = ep / "build" / "voice" / "timeline.json"
+    drawn = json.dumps({k: spec.get(k) for k in ("title", "captions", "duration", "render_until", "fps", "scene")},
+                       sort_keys=True).encode()
+    return hashlib.sha1(drawn + b"".join(p.read_bytes() for p in (scene, tl, HERE / "runtime.js")
+                                         if p.exists())).hexdigest()
+
+
 def frames(ep: Path) -> int:
     """Every frame up to render_until (the whole video, unless the spec says otherwise). Skips frames already
     there, so a stopped render carries on; delete build/frames after changing the scene or the script."""
     out = ep / "build" / "frames"
-    import hashlib
-    spec = config.load_spec(ep)
-    scene = ep / spec.get("scene", "scene.js")
-    tl = ep / "build" / "voice" / "timeline.json"
-    drawn = json.dumps({k: spec.get(k) for k in ("title", "captions", "duration", "render_until", "fps", "scene")},
-                       sort_keys=True).encode()      # what the picture depends on (the sound cues don't count)
-    stamp = hashlib.sha1(drawn + b"".join(p.read_bytes() for p in (scene, tl, HERE / "runtime.js")
-                                          if p.exists())).hexdigest()
-    mark = out / "stamp.txt"
+    stamp = frames_stamp(ep, config.load_spec(ep))
+    mark = out / FRAMES_STAMP
     if out.exists() and (not mark.exists() or mark.read_text(encoding="utf-8").strip() != stamp):
         old = list(out.glob("f_*.jpg"))
         for f in old:          # the scene, the script or the spec changed: the frames drawn before are out of date

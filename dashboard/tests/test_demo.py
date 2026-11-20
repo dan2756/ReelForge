@@ -11,7 +11,7 @@ from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
-from dashboard import analytics, db, demo, notify, trends
+from dashboard import analytics, config, db, demo, notify, trends
 from dashboard.tests.window import Window, plain
 
 
@@ -24,6 +24,23 @@ class DemoTest(unittest.TestCase):
         self.addCleanup(setattr, db, "_path", db._path)
         db.init(Path(tmp.name) / "demo.db")
         demo.seed()
+
+    def test_the_demo_keeps_no_backups(self):
+        """reelforge --demo saves nothing: its made-up stats used to get a daily backup among the real ones."""
+        from dashboard.__main__ import load_platforms
+
+        folder = Path(db._path).parent
+        self.addCleanup(setattr, db, "_demo", False)
+        with mock.patch.object(config, "DATA_DIR", folder), \
+                mock.patch.object(config, "CONFIG_PATH", folder / "config.toml"):
+            load_platforms(demo=True)
+        self.assertEqual(db._path, folder / "demo.db")
+        db.compact(min_hours=0)
+        self.assertIsNotNone(db.get_meta("compacted_at"))  # tidied as usual
+        self.assertFalse((folder / "backups").exists())
+        db.init(folder / "stats.db")  # a real store still gets its backup
+        db.compact(min_hours=0)
+        self.assertEqual(len(list((folder / "backups").glob("stats-*.db"))), 1)
 
     def test_totals_add_up(self):
         posts = db.posts_latest()

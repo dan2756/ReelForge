@@ -25,6 +25,8 @@ export interface Row {
 export interface TableData {
   columns: Column[]
   rows: Row[]
+  /** What to say under the headings while there are no rows: what goes here, and what to do to get one. */
+  empty?: string
 }
 
 /** A thin one-column scrollbar: `visible` of `total` lines shown, from `offset`. */
@@ -91,12 +93,16 @@ export interface TableProps {
   stretch?: string
 }
 
-/** The columns, the stretching one widened to take whatever room the others leave. */
+const NARROWEST = 24 // columns the stretching column keeps in a table too narrow for all of its columns
+
+/** The columns, the stretching one widened to take whatever room the others leave. In a table too narrow for them
+ * all it gives way instead, down to NARROWEST columns, so more of the numbers after it show before the table's edge
+ * cuts them off. */
 export function stretched(columns: Column[], width: number, key: string): Column[] {
   const used = columns.reduce((n, c) => n + c.width + 2, 0) + 1 // 1: the scrollbar
   const extra = width - used
-  if (extra <= 0 || !columns.some((c) => c.key === key)) return columns
-  return columns.map((c) => (c.key === key ? { ...c, width: c.width + extra } : c))
+  if (!width || !extra) return columns
+  return columns.map((c) => (c.key === key ? { ...c, width: extra > 0 ? c.width + extra : Math.max(c.width + extra, Math.min(c.width, NARROWEST)) } : c))
 }
 
 export function Table(props: TableProps) {
@@ -114,7 +120,10 @@ export function Table(props: TableProps) {
     const key = rows[i]?.key ?? null
     if (key !== null) props.onSelect?.(key)
   }
+  // A table with nothing to pick, or nothing in it, is no stop for Tab: the keyboard would sit on it and do nothing.
+  const idle = !rows.length || (!props.onSelect && !props.onActivate)
   const { ref, focused, focus } = useFocus(props.id, {
+    disabled: idle,
     onKey: (key) => {
       if (isEnter(key) && index >= 0 && props.selected) {
         props.onActivate?.(props.selected)
@@ -126,15 +135,32 @@ export function Table(props: TableProps) {
       return true
     },
   })
-  // keep the highlighted row in view
+  // The keyboard arrives (Tab) on a table with no row highlighted yet: its first row is, so it shows where it is.
+  useEffect(() => {
+    if (focused && index < 0) select(rows.findIndex((r) => r.key !== null))
+  }, [focused])
+  // keep the highlighted row in view (once the table knows its height: before that every row but the first looks
+  // out of view, and a table drawn again would scroll its highlighted row up to the top)
   const view = useRef({ offset, shown })
   view.current = { offset, shown }
+  const measured = Boolean(props.rowsShown ?? height)
   useEffect(() => {
-    if (index < 0) return
+    if (index < 0 || !measured) return
     const { offset: o, shown: s } = view.current
     if (index < o) setOffset(index)
     else if (index >= o + s) setOffset(index - s + 1)
-  }, [index])
+  }, [index, measured])
+  // ... and when the table gets shorter under it: a line of badges comes in below the table for the video a Page
+  // Down highlighted, or the window is made smaller. A highlighted row that was in view stays in view. (One the
+  // wheel had scrolled away from is left where it is.)
+  const before = useRef(shown)
+  useEffect(() => {
+    const was = before.current
+    before.current = shown
+    if (index < 0 || !measured || shown >= was) return
+    const o = view.current.offset
+    if (index >= o && index < o + was && index >= o + shown) setOffset(index - shown + 1)
+  }, [shown])
   useEffect(() => {
     const most = Math.max(rows.length - shown, 0)
     if (offset > most) setOffset(most)
@@ -165,7 +191,7 @@ export function Table(props: TableProps) {
       onSizeChange={function (this: Renderable) {
         setTableWidth(this.width)
       }}
-      onMouseDown={() => focus()}
+      onMouseDown={() => !idle && focus()}
       onMouseScroll={(e) => {
         const d = e.scroll?.direction === "up" ? -3 : e.scroll?.direction === "down" ? 3 : 0
         setOffset((o) => Math.min(Math.max(o + d, 0), Math.max(rows.length - shown, 0)))
@@ -182,6 +208,13 @@ export function Table(props: TableProps) {
         }}
       >
         <box flexDirection="column" flexGrow={1}>
+          {!rows.length && props.data?.empty ? (
+            <box flexDirection="row" paddingLeft={1} paddingRight={1} flexShrink={0}>
+              <text fg={theme.muted} wrapMode="word" flexGrow={1} flexShrink={1}>
+                {props.data.empty}
+              </text>
+            </box>
+          ) : null}
           {visible.map((row, i) => {
             const at = offset + i
             const here = at === index && (focused || props.cursor !== false)
@@ -223,6 +256,8 @@ export interface OptionListProps {
   selected?: string | null
   onSelect?: (id: string) => void
   onActivate?: (id: string) => void
+  /** One click on an option opens it (a notification); otherwise the first click highlights it and a second opens. */
+  clickOpens?: boolean
   onMenu?: (id: string) => void
   /** Drawn at the right of each option, in the middle of its height (a notification's ×). */
   aside?: (item: Option, lines: number) => ReactNode
@@ -236,6 +271,10 @@ export interface OptionListProps {
   /** No row backgrounds: only the lit edge marks the highlighted one. */
   flat?: boolean
   empty?: ReactNode
+  /** It has the keyboard as soon as it shows (a dialog's list). */
+  autoFocus?: boolean
+  /** The stop Tab reaches right after this list, when rows alone would put the list in the middle of it (focus.tsx). */
+  before?: string
 }
 
 export function OptionList(props: OptionListProps) {
@@ -262,12 +301,15 @@ export function OptionList(props: OptionListProps) {
     if (it && !it.disabled) props.onSelect?.(it.id)
   }
   const { ref, focused, focus } = useFocus(props.id, {
+    disabled: !items.length, // (an empty list is no stop for Tab)
+    autoFocus: props.autoFocus,
+    before: props.before,
     onKey: (key) => {
       if (isEnter(key) && props.selected) {
         props.onActivate?.(props.selected)
         return true
       }
-      if (key.name === "delete" && props.selected && props.onDelete) {
+      if ((key.name === "delete" || key.name === "backspace") && props.selected && props.onDelete) { // (a Mac's delete is backspace)
         props.onDelete(props.selected)
         return true
       }
@@ -303,7 +345,10 @@ export function OptionList(props: OptionListProps) {
       onMouseDown={() => focus()}
       onMouseScroll={(e) => {
         const d = e.scroll?.direction === "up" ? -1 : e.scroll?.direction === "down" ? 1 : 0
-        setOffset((o) => Math.min(Math.max(o + d, 0), Math.max(items.length - 1, 0)))
+        const next = Math.min(Math.max(offset + d, 0), Math.max(items.length - 1, 0))
+        // While the list itself has further to go, the wheel is its own: a page it sits in stays where it is.
+        if (next !== offset && totalLines > height) e.stopPropagation()
+        setOffset(next)
       }}
       onSizeChange={function (this: Renderable) {
         setHeight(this.height)
@@ -330,8 +375,8 @@ export function OptionList(props: OptionListProps) {
                   return
                 }
                 if (e.button !== 0) return
-                if (it.id === props.selected) props.onActivate?.(it.id)
-                else pick(at)
+                if (it.id !== props.selected) pick(at)
+                if (it.id === props.selected || props.clickOpens) props.onActivate?.(it.id)
               }}
             >
               <box flexDirection="row" backgroundColor={bg}>

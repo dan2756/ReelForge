@@ -18,20 +18,68 @@ from . import paths as P
 from . import profiles
 from .paths import ROOT
 
-# The latest of these is the verdict. "NOT APPROVED" has to be tried before "APPROVED", and the words have to be
-# whole, so a review that says DISAPPROVED or "not approved" is not an approval.
-_VERDICT = re.compile(r"\b(NOT\s+APPROVED|APPROVED|REJECTED)\b")
+# A review's verdict. An approval is the whole word APPROVED in capitals, as the guides ask for it. A rejection is
+# "rejected" or "not ... approved" however it's written. Prose after the verdict ("what to fix before this is
+# approved", "the shots approved before") is not a verdict, and DISAPPROVED or pre-approved is not an approval.
+_APPROVAL = re.compile(r"(?<![\w-])APPROVED(?![\w-])")
+_REJECTION = re.compile(r"\b(?:rejected|not\s+(?:\w+\s+){0,2}approved)\b", re.IGNORECASE)
+_RECEIPT = re.compile(r"^Review-SHA256:\s*([0-9a-f]{64})\s*$", re.MULTILINE)
 
 
-def review_approved(review: Path) -> bool:
+def _verdict(text: str) -> str:
+    """approved, rejected, or "" when the review gives no verdict. The latest one wins: an approval stands only
+    if no rejection comes after it."""
+    rejections = [m.span() for m in _REJECTION.finditer(text)]
+    approvals = [m.start() for m in _APPROVAL.finditer(text)
+                 if not any(a <= m.start() < b for a, b in rejections)]
+    if approvals and not any(a > approvals[-1] for a, _ in rejections):
+        return "approved"
+    return "rejected" if rejections else ""
+
+
+def review_approved(review: Path, fingerprint: str | None = None) -> bool:
     """True if build/qa/review.md's latest verdict is APPROVED (a later REJECTED wins over an earlier APPROVED).
 
-    Only the whole words count: DISAPPROVED is not an approval, and "NOT APPROVED" is a rejection."""
+    Only the whole word in capitals counts: DISAPPROVED is not an approval, "NOT APPROVED" is a rejection, and so is
+    a review that says REJECTED and then mentions "approved" in a later sentence. With a fingerprint, the review must
+    also carry it as its last "Review-SHA256: <fingerprint>" line."""
     if not review.exists():
         return False
-    text = review.read_text(encoding="utf-8", errors="replace").upper()
-    found = _VERDICT.findall(text)
-    return bool(found) and found[-1] == "APPROVED"
+    text = review.read_text(encoding="utf-8", errors="replace")
+    if _verdict(text) != "approved":
+        return False
+    if fingerprint is None:
+        return True
+    found = _RECEIPT.findall(text)
+    return bool(found) and found[-1] == fingerprint
+
+
+def review_state(ep_dir: Path) -> str:
+    """Where an episode's review stands for the video that's in final/ now:
+
+    approved    its latest verdict is APPROVED, and it was written after this cut was made
+    stale       it says APPROVED, but the video is newer than the review: it reviewed an earlier cut
+    rejected    its latest verdict is a rejection
+    unreviewed  there's no review, or it gives no verdict yet
+    """
+    ep_dir = Path(ep_dir)
+    review = ep_dir / "build" / "qa" / "review.md"
+    try:
+        text = review.read_text(encoding="utf-8", errors="replace")
+        written = review.stat().st_mtime
+    except OSError:
+        return "unreviewed"
+    verdict = _verdict(text)
+    if verdict != "approved":
+        return verdict or "unreviewed"
+    newest = 0.0
+    for video in (ep_dir / "final").glob("*.mp4"):
+        try:
+            newest = max(newest, video.stat().st_mtime)
+        except OSError:
+            pass
+    # the same second counts as after: some drives keep times to the second (or two)
+    return "stale" if newest > written + 2 else "approved"
 
 
 def _dashboard_listing():
@@ -59,7 +107,12 @@ def check(ep_dir: Path) -> tuple[bool, str]:
     spec_file = ep_dir / "episode.json"
     if not spec_file.exists():
         return False, f"  FAIL  no episode.json in {ep_dir}"
-    spec = json.loads(spec_file.read_text(encoding="utf-8"))
+    try:
+        spec = json.loads(spec_file.read_text(encoding="utf-8"))
+        if not isinstance(spec, dict) or not spec.get("id"):
+            raise ValueError('it has no "id"')
+    except ValueError as e:     # a typo from an edit by hand: one FAIL line, like every other problem here
+        return False, f"  FAIL  {spec_file} can't be read: {e}"
     video = ep_dir / "final" / f"{spec['id']}.mp4"
     cap = ep_dir / "final" / "caption.txt"
     qa = ep_dir / "build" / "qa" / "qa.json"

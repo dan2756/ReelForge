@@ -1,5 +1,5 @@
-"""ReelForge's window, the Python side: stats for TikTok, YouTube, Instagram and X, help posting by hand,
-notifications and updates.
+"""ReelForge's window, the Python side: stats for TikTok, YouTube, Instagram and X, help posting (by hand, with
+the browser extension, or for YouTube through its API), notifications and updates.
 
 The window itself is the OpenTUI app in ui/ (ui/src/dashboard/); this is what it shows and what its buttons do. It
 runs in studio/bridge.py's loop: the window calls the @rpc methods, and each update_* method sends one piece of the
@@ -20,14 +20,16 @@ from statistics import mean, median
 
 from studio.bridge import Loop, Service, rpc
 
-from . import analytics, badges, besttime, config, db, desktop, notify, sync, tabs, trends, videos
+from . import analytics, badges, besttime, config, db, desktop, notify, posting, sync, tabs, trends, videos
 from .analytics import fmt_age, fmt_ago, fmt_clock, fmt_delta, fmt_hours, fmt_num, fmt_pct
-from .platforms import Platform, PlatformError, PublishItem, browser, connected
+from .platforms import Platform, PlatformError, PublishItem, browser, connected, detail
+from .posting_tab import AMBER, BRIEF, PostingTab, flag_style, numbers, standing, upload_note
 from .settings_tab import SettingsTab
 from .stats_tab import StatsTab
+from .youtube_api_tab import YouTubeApiTab
 from .platforms.base import Account, Post
-from .view import (BAD, GOOD, MARK, MUTED, SHORT, TYPICAL, Text, act, change_text, chip, chips, js, legend, num,
-                   parts, score_text, tag)
+from .view import (BAD, GOOD, MARK, MUTED, SHORT, TYPICAL, Text, act, cell_len, change_text, chip, chips, js, legend,
+                   num, parts, score_text, tag)
 
 try:  # the ReelForge folder's own package: its version and the updater
     from studio import KIT_VERSION
@@ -85,6 +87,7 @@ COPIES = {"tiktok": [("copy-tiktok", "Copy TikTok text")],
           "youtube": [("copy-youtube-caption", "Copy caption"), ("copy-youtube", "Copy YouTube hashtags")],
           "instagram": [("copy-instagram", "Copy Instagram text")], "x": [("copy-caption", "Copy caption")]}
 NOTHING_CONNECTED = "Connect an account on the Accounts tab to see your stats here."
+LIST_WIDTH = 40  # cells a line of the Publish tab's video list can count on, in the narrowest window it's drawn in
 # The help: (title, what it says), and for a tab its id as well: the window puts the tabs in the order you see them
 # along the top, each with the number that opens it, then Publish (the green button at the right) with its key.
 HELP = [
@@ -103,9 +106,20 @@ HELP = [
     ("Compare", "The platform scoreboard, or pick an episode to see the same video on every platform, each against "
                 "that platform's typical video. Newest, Oldest and Most views beside Episodes sort the list (Most "
                 "views adds up each episode's views on every platform).", "compare"),
-    ("Publish", "The green button at the top right opens it. Pick a video, check the caption, then open each upload "
-                f"page: ReelForge copies the right text, shows the file in {desktop.FILES}, and checks for the new "
-                "post 10 and 30 minutes later. Remove (or a right-click) hides a video or moves it to the "
+    ("Publish", "The green button at the top right opens it. Pick a video and check the caption. Under POST, a row "
+                "for each platform says where its post stands. Post… shows each platform's exact text and asks, "
+                "then opens each upload page in your browser, where ReelForge's browser extension attaches the "
+                "video and fills in the text: you check it and press Post there. Its row shows the post when the "
+                "extension reports it, or when a refresh finds it. The extension is optional, and "
+                "it is tested against copies of the upload pages, not yet on the live sites. YouTube has a second "
+                "way, its own API: YouTube API… above Post… takes the client file of a Google Cloud project you "
+                "make yourself (docs/YOUTUBE-API.md has the steps) and connects. Each window connects again when "
+                "it opens, because ReelForge never keeps that sign-in in a file. Post with API… on the YouTube row "
+                "then asks with exactly what it will send, and ReelForge uploads the video itself. That way is "
+                "optional too, and tested against a stand-in for Google, never against Google itself. Under BY "
+                f"HAND, each platform's button opens its upload page, copies the right text and shows the file in "
+                f"{desktop.FILES}, and ReelForge checks for the new post 10 and 30 minutes later. Remove "
+                "(or a right-click) hides a video or moves it to the "
                 f"{desktop.BIN}; Show hidden brings hidden ones back. Under the videos, Best time to post shows each "
                 "platform's part of the day whose videos got the most views in their first day, and when it next "
                 "comes round; it needs 2 videos a day old in each of 2 parts of the day, with one clearly "
@@ -115,7 +129,10 @@ HELP = [
                  "Sign up opens the platform's own sign-up page (with more than one profile, in a private window of "
                  "your browser, so your other channel stays logged in), and Disconnect hides one again (its stats "
                  "stay saved). Each panel says where that platform's stats come from and when they were last read; "
-                 "Type in stats lets you enter the numbers by hand for one ReelForge can't read yet.", "accounts"),
+                 "Type in stats lets you enter the numbers by hand for one ReelForge can't read yet, and Log out "
+                 "logs ReelForge's own browser out of Instagram or X. The line above the panels is the browser "
+                 "extension for Post…: it works in your everyday browser, whose sign-ins are apart from these "
+                 "accounts.", "accounts"),
     ("Updates", "Your version, what's new in the next one, and Update and restart: one click downloads it, puts it in "
                 "place (your channel, videos and stats stay as they are) and opens ReelForge again.", "updates"),
     ("Settings", "This channel's answers from first-time setup (Change your answers asks the questions again, and Copy "
@@ -135,11 +152,11 @@ HELP = [
               "each chart: every platform's number now, what it gained over the range and its share of the total. A "
               "stretch the computer was off for is filled in with an estimate, hatched, and the totals start once "
               "every platform you count has a first reading.", "totals"),
-    ("Notifications", "The bell at the top right opens the drawer: updates, milestones, badges, finished videos and "
+    ("Notifications", "The bell at the top right (or n) opens the drawer: updates, milestones, badges, finished videos and "
                       "log-ins that need you. A red dot on the bell means something's unread; click one to go "
-                      "to it, or the × at its right to delete it (Delete deletes the highlighted one), and Clear "
-                      "all deletes them all. The hourly background job (reelforge stats on) adds them while "
-                      "ReelForge is closed."),
+                      "to it (with the keyboard: the arrows, then Enter), or the × at its right to delete it "
+                      "(Delete or Backspace deletes the highlighted one), and Clear all deletes them all. The "
+                      "hourly background job (reelforge stats on) adds them while ReelForge is closed."),
     ("Profiles", "One profile for each channel you run, each with its own accounts, log-ins, stats, notifications, "
                  "Publish list and settings. The button with your channel's name at the top left switches between "
                  "them (a red dot on it: another profile has unread notifications), adds a new one (the same short "
@@ -155,11 +172,19 @@ HELP = [
                         "instead of starting another."),
     ("Badges", "Badges only ever compare you with yourself, from the numbers ReelForge has stored. Percentages need "
                "at least 10 videos or days to compare, and ties count against you, so a badge is always true."),
+    ("Small windows", "ReelForge fits a window of 80 columns by 24 rows. A tab that doesn't fit scrolls (the mouse "
+                      "wheel, or Page Up and Page Down), and on Publish the videos go above the form. In a narrow "
+                      "window Refresh, Help and Quit are the signs ↻ ? × at the top; narrower than 80 columns, ‹ or "
+                      "› at an end of the tabs means more of them are that way: click it, or press a tab's "
+                      "number."),
 ]
 KEYS = [("1-7", "switch tabs"), ("u", "open Publish (the green button at the top right)"),
         ("r / R", "refresh / force refresh"),
+        ("n", "open or close the notifications (the bell at the top right)"),
         ("p", "profiles: switch, add, change or delete one"),
-        ("Tab", "move between buttons, lists and fields (Enter presses, the arrows move through a list)"),
+        ("Tab", "move between buttons, lists and fields (Shift+Tab goes back, Enter presses, the arrows move "
+                "through a list); what it lands on scrolls into view"),
+        ("PgUp/PgDn", "scroll a tab or a dialog that is longer than the window"),
         ("Esc", "close the drawer or a dialog, or leave a text field"), ("Ctrl+Q", "quit")]
 
 
@@ -210,21 +235,23 @@ class Running:
 
 
 def table(columns: list[tuple[str, str, int]], rows: list[tuple[str | None, list]], sort: tuple | None = None,
-          bold_sorted_only: bool = False) -> dict:
+          bold_sorted_only: bool = False, empty: str = "") -> dict:
     """A table for the window: its columns (the sorted one with ▲ or ▼) and rows of cells, each row with the key the
-    window hands back when you pick it ("<platform>|<post id>")."""
+    window hands back when you pick it ("<platform>|<post id>"). empty: what the window says under the headings
+    while there are no rows (what goes here, and what to do to get one)."""
     cols = []
     for key, label, width in columns:
         arrow = (" ▼" if sort[1] else " ▲") if sort and key == sort[0] else ""
         style = "bold" if arrow or not bold_sorted_only else ""
         cols.append({"key": key, "label": Text(label + arrow, style).json(), "width": width,
                      "right": key in RIGHT})
-    return {"columns": cols, "rows": [{"key": k, "cells": [c if isinstance(c, list) else
-                                                             (c.json() if isinstance(c, Text) else Text(str(c)).json())
-                                                             for c in cells]} for k, cells in rows]}
+    return {"columns": cols, "empty": empty,
+            "rows": [{"key": k, "cells": [c if isinstance(c, list) else
+                                          (c.json() if isinstance(c, Text) else Text(str(c)).json())
+                                          for c in cells]} for k, cells in rows]}
 
 
-class Dashboard(StatsTab, SettingsTab, Service):
+class Dashboard(StatsTab, SettingsTab, YouTubeApiTab, PostingTab, Service):
     def __init__(self, loop: Loop):
         super().__init__(loop)
         self.cfg: dict = {}
@@ -277,13 +304,15 @@ class Dashboard(StatsTab, SettingsTab, Service):
         self.window_lock = None  # held while this window shows its profile (see hold_profile)
         self.deleted_sizes: dict[str, str] = {}  # each deleted profile's backup: how big it is (measure_deleted)
         self.toggling = threading.Lock()  # the Settings tab's On this computer panel changes one thing at a time
+        self.is_started = False  # started() has run: the first views are sent and the timers are going
 
     # --- starting ---------------------------------------------------------------------------
 
     def start(self, options: dict) -> dict:
         """options: tab, drawer, demo, screenshots (the README's pictures: the demo as a set-up account looks),
         only_demos (the Publish tab lists just the kit's demo videos), unconnected (demo platforms left unconnected),
-        switched (the window switched to this profile: Accounts, while it has nothing connected)."""
+        switched (the window switched to this profile: Accounts, while it has nothing connected), ready (the window
+        calls ready() once it is listening, and nothing is sent before that)."""
         from .__main__ import load_platforms
 
         cfg, every = load_platforms(bool(options.get("demo")), options.get("only_demos", False),
@@ -316,7 +345,8 @@ class Dashboard(StatsTab, SettingsTab, Service):
         if profiles and not self.demo:
             profiles.remember(self.profile)  # ReelForge opens on it next time
             self.hold_profile()
-        self.loop.call_soon(self.started)
+        if not options.get("ready"):  # a window that doesn't say when it's listening: everything is sent right away
+            self.loop.call_soon(self.started)
         return self.init_view(options)
 
     def init_view(self, options: dict) -> dict:
@@ -511,11 +541,13 @@ class Dashboard(StatsTab, SettingsTab, Service):
         if problem:
             self.loop.call_soon(lambda: self.notify(problem, title="Not deleted", severity="error", timeout=12))
             return
-        self.write_guides()  # your AI's notes no longer list it
+        undone = self.write_guides()  # your AI's notes no longer list it
 
         def done() -> None:
             self.notify(f"{name} is kept whole in {gone.where}. Restore on the Settings tab brings it back.",
                         title="Profile deleted", timeout=12)
+            for line in undone:
+                self.notify(line, severity="warning", timeout=20)
             self.update_profile()
             if self.tab == "settings":
                 self.update_settings()
@@ -523,14 +555,18 @@ class Dashboard(StatsTab, SettingsTab, Service):
         self.loop.call_soon(done)
 
     @staticmethod
-    def write_guides() -> None:
-        """The first channel's notes for your AI list every channel: write them again once one goes or comes back."""
+    def write_guides() -> list[str]:
+        """The first channel's notes for your AI list every channel: write them again once one goes or comes back.
+        Returns a line for each channel's settings that have a mistake in them, for the window to say."""
+        said: list[str] = []
         try:
             from studio import generate
 
-            generate.write_guides(profiles.main())
+            # (from the settings as they are on file: studio.toml is yours to edit by hand)
+            generate.write_guides(profiles.main(), saved_settings=True, say=said.append)
         except Exception:
             pass  # notes for your AI, which `reelforge channel --regenerate` writes again too
+        return said
 
     @rpc
     def restore_profile(self, backup: str) -> bool:
@@ -547,9 +583,11 @@ class Dashboard(StatsTab, SettingsTab, Service):
             self.notify(str(e), title="Not restored", severity="error", timeout=12)
             self.update_settings()
             return False
-        self.write_guides()
+        undone = self.write_guides()
         self.notify(f"{p.name} is back, as it was. Switch to it with the button at the top left (p).",
                     title="Profile restored", timeout=10)
+        for line in undone:
+            self.notify(line, severity="warning", timeout=20)
         self.update_profile()
         self.update_settings()
         return True
@@ -610,7 +648,17 @@ class Dashboard(StatsTab, SettingsTab, Service):
 
         self.deleted_sizes = {d.backup.name: fmt_size(profiles.size(d.backup)) for d in profiles.deleted()}
 
+    @rpc
+    def ready(self) -> None:
+        """The window has drawn itself and is listening (it asked to say so, with the start option "ready"). What
+        started() sends is more than views the window keeps: the picked video's caption for the Publish form and the
+        "Updated" and "Moved" pop-ups are heard only by a window that is already listening, and the Python side is
+        quick enough to send them before it is."""
+        if not self.is_started:
+            self.started()
+
     def started(self) -> None:
+        self.is_started = True
         self.update_profile()
         self.show_platforms()
         self.reload()
@@ -630,10 +678,15 @@ class Dashboard(StatsTab, SettingsTab, Service):
         self.loop.set_interval(WATCH_EVERY, self.keep_in_step)
         # Say what changed while ReelForge was closed once the first refresh is in (or after a while without one).
         self.loop.set_timer(45, self.welcome_back)
+        # Last, so that nothing about the browser extension, which nobody needs, can keep the window from starting:
+        # the first refresh is under way and every timer is set by now.
+        self.serve_extension()
+        self.mind_the_jobs()
 
     def stop(self) -> None:
-        for w in self.loop.workers.values():
+        for w in self.loop.live():
             w.is_cancelled = True
+        self.stop_serving()
         self.let_go_of_profile()
 
     def show_platforms(self) -> None:
@@ -718,6 +771,7 @@ class Dashboard(StatsTab, SettingsTab, Service):
         starts."""
         self.update_header()
         self.update_profile()
+        self.mind_the_jobs()
         if self.trend_frame is not None and analytics.now() >= self.trend_frame.ends[-1]:
             self.update_trends()
             self.update_cards()
@@ -742,15 +796,23 @@ class Dashboard(StatsTab, SettingsTab, Service):
                 # Crunch the numbers here, off the loop's thread, so the window never stalls.
                 data = self.load_data() if result.done else None
             except Exception as e:  # the database was busy, say: report it, keep running
-                result, data = sync.Result(errors=[f"{type(e).__name__}: {e}"]), None
+                result, data = sync.broke(e), None
+            sync.log(["error: " + d for d in result.details])  # what went wrong in its own words: the window sums up
             if result.busy and worker.is_cancelled:
                 return  # it stopped waiting: a newer refresh took over, or ReelForge is closing
             self.loop.call_soon(self.after_refresh, result, manual, data)
 
+    refresh_said = ""  # what the last refresh's pop-up said went wrong ("" when nothing did)
+
     def after_refresh(self, result: sync.Result, manual: bool, data: dict | None) -> None:
         self.set_status("")
-        for e in result.errors:
-            self.notify(e, title="Refresh failed", severity="error", timeout=10)
+        # One pop-up for the whole refresh, in plain words (each platform's own reason is on its Accounts panel, the
+        # errors themselves in data/refresh.log). An automatic refresh doesn't say the same thing every half hour.
+        said = sync.sum_up(result)
+        if said and (manual or said != self.refresh_said):
+            self.notify(said, title="Refresh failed", severity="error", timeout=10)
+        if result.done or result.errors:  # (a refresh with nothing due says nothing either way)
+            self.refresh_said = said
         if result.done:
             self.show_new_data(result.changes, data)
         else:
@@ -775,6 +837,9 @@ class Dashboard(StatsTab, SettingsTab, Service):
         the notifications they bring and, the first time, how much changed since you last looked."""
         self.changes = max(self.changes, changes or 0)
         self.reload(data)
+        if self.tab == "publish":
+            self.scan_files()  # a video this read found posted, or one another window hid or posted
+        self.settle_jobs()
         self.celebrate()
         self.show_new_notes()
         if self.last_seen is not None:
@@ -788,11 +853,14 @@ class Dashboard(StatsTab, SettingsTab, Service):
         too, and so do its notifications and errors."""
         self.follow_config()  # a platform another window connected or disconnected
         self.follow_tab_order()  # a tab another window moved
+        self.follow_extension()  # a browser the extension connected in, or said hello from
         try:
             with db.connect() as c:  # one quick look at the store
-                state, changes, notes = sync.shared(c), db.changes(c), notify.signature(c)
+                state, changes, notes, jobs = sync.shared(c), db.changes(c), notify.signature(c), posting.signature(c)
         except sqlite3.Error:
             return  # busy: the next look
+        if jobs != self.jobs_seen:  # a post moved on, through the extension or in another window
+            self.jobs_changed()
         run = sync.reading_elsewhere(state)
         elsewhere = f"refreshing {run['what']}…" if run else ""
         header = elsewhere != self.elsewhere
@@ -827,8 +895,6 @@ class Dashboard(StatsTab, SettingsTab, Service):
         self.catching_up = False
         if data is not None and changes > self.changes:  # not older than what this window shows
             self.show_new_data(changes, data)
-            if self.tab == "publish":
-                self.scan_files()  # a video another window hid, or posted
 
     def compact_db(self) -> None:
         try:
@@ -890,6 +956,7 @@ class Dashboard(StatsTab, SettingsTab, Service):
         self.update_active_tab()
         if tab == "publish":
             self.scan_files()
+            self.update_posting(fresh=True)  # the pipeline may have checked or reviewed the picked video since
         elif tab == "settings":
             self.update_settings()
 
@@ -1076,7 +1143,11 @@ class Dashboard(StatsTab, SettingsTab, Service):
         cells = [(f"{p['platform']}|{p['post_id']}",
                   [tag(self.platforms[p["platform"]]), Text(name), Text(fmt_age(p["age_h"])), num(p["views"]),
                    _after(p, 12), score_text(p["score"])]) for name, p in rows]
-        self.emit("top", {"title": parts(title), **table([("platform", "", 4), *TOP_COLUMNS], cells, self.top_sort)})
+        empty = NOTHING_CONNECTED if not self.platforms else (
+            "No video is ranked yet. One shows up here once it has 50 views and ReelForge has read enough of your "
+            "videos to score it against your typical one.")
+        self.emit("top", {"title": parts(title),
+                          **table([("platform", "", 4), *TOP_COLUMNS], cells, self.top_sort, empty=empty)})
 
     def update_latest(self) -> None:
         """The newest video on every platform: how it's doing so far."""
@@ -1158,7 +1229,15 @@ class Dashboard(StatsTab, SettingsTab, Service):
             self.video_key = select
         elif self.video_key not in keys:
             self.video_key = keys[0] if keys else None
-        self.emit("videos", {"hint": parts(hint), **table(VIDEO_COLUMNS, cells, self.sort, bold_sorted_only=True),
+        if not self.platforms:
+            empty = NOTHING_CONNECTED
+        elif self.filter:
+            empty = f"No videos read on {self.platforms[self.filter].name} yet. All shows the other platforms' videos."
+        else:
+            empty = ("No videos read yet. Post one from the Publish tab (u), and it shows up here at the next "
+                     "refresh (r).")
+        self.emit("videos", {"hint": parts(hint),
+                             **table(VIDEO_COLUMNS, cells, self.sort, bold_sorted_only=True, empty=empty),
                              "select": self.video_key, "focus": select is not None})
         self.update_video_detail()
 
@@ -1234,8 +1313,11 @@ class Dashboard(StatsTab, SettingsTab, Service):
         post = self._post_for(self.video_key)
         self.update_video_badges(post)
         if not post:
-            self.emit("detail", {"key": None, "title": Text("VIEWS SINCE POSTING", "bold").json(),
-                                 "empty": "Pick a video above to see its views against your typical video's."})
+            # (with no video in the table there is nothing to pick: say what will be here instead)
+            empty = ("Pick a video above to see its views against your typical video's." if self.posts else
+                     "A video's views since it went up show here, against your typical video's, once there is one "
+                     "above.")
+            self.emit("detail", {"key": None, "title": Text("VIEWS SINCE POSTING", "bold").json(), "empty": empty})
             return
         p = self.platforms[post["platform"]]
         xs, ys = analytics.post_curve(post, self.parsed)
@@ -1379,8 +1461,9 @@ class Dashboard(StatsTab, SettingsTab, Service):
         for p in ps:
             xs, ys = curves[p.key]
             series = [{"key": p.key, "name": p.name, "color": p.color, "xs": xs, "ys": ys, "style": "area"}]
-            heading = Text.assemble((p.name + "  ", f"bold {p.color}"),
-                                    (f"typical video, first {fmt_age(horizon)}", MUTED))
+            # Each piece with the separator before it: where the chart is too narrow for all of them, the window
+            # leaves out whole pieces from the end (whole() in ui/src/lib/fit.ts), never leaving a "·" at the end.
+            heading = Text.assemble((p.name, f"bold {p.color}"), (f"  typical video, first {fmt_age(horizon)}", MUTED))
             if ys:
                 heading.append(f" · {fmt_num(ys[-1])} views by {fmt_age(xs[-1])}", MUTED)
             charts.append(self.compare_chart(p, heading, series, horizon, "Needs a few videos with some history."))
@@ -1397,6 +1480,9 @@ class Dashboard(StatsTab, SettingsTab, Service):
                    ("median", "Median", 8), ("likes", "Likes", 6), ("share", "Share", 6), ("title", "Best video", 34)]
         self.emit("compare", {"heading": Text.assemble(("PLATFORM SCOREBOARD  ", "bold"),
                                                        ("which platform is working", MUTED)).json(),
+                              # With no platform connected the three bars are headings with nothing under them:
+                              # the tab says what the other tabs say there.
+                              "empty": "" if self.platforms else NOTHING_CONNECTED,
                               "bars": bars, "charts": charts, "table": table(columns, rows)})
 
     def compare_episode(self, episode_id: int) -> None:
@@ -1423,10 +1509,11 @@ class Dashboard(StatsTab, SettingsTab, Service):
             txs, tys = analytics.typical_curve(self.posts, self.parsed, p.key, span, exclude=q)
             series = [{"key": p.key, "name": "this", "color": p.color, "xs": xs, "ys": ys, "style": "area"},
                       {"key": "typical", "name": "typical", "color": TYPICAL, "xs": txs, "ys": tys, "style": "line"}]
-            heading = Text.assemble((p.name + "  ", f"bold {p.color}"), (f"{fmt_num(q['views'])} views", "bold"),
-                                    (f" · {fmt_num(q['likes'])} likes · ", MUTED))
-            heading.append_text(score_text(q["score"]))
-            heading.append(" typical", MUTED)
+            # (In whole pieces, each with the separator before it, as the typical video's above: " · 249 likes ·"
+            # was one piece, and the window, short of room, kept it without the score it led to.)
+            score = score_text(q["score"]).json()[0]
+            heading = Text.assemble((p.name, f"bold {p.color}"), (f"  {fmt_num(q['views'])} views", "bold"),
+                                    (f" · {fmt_num(q['likes'])} likes", MUTED), (f" · {score[0]} typical", score[1]))
             charts.append(self.compare_chart(p, heading, series, span, "No snapshots for this post yet."))
         rows = []
         for p in ps:
@@ -1462,6 +1549,7 @@ class Dashboard(StatsTab, SettingsTab, Service):
         every = videos.find(self.cfg)
         files = [f for f in every if db.video_file(f.name).name.lower() not in hidden_names]
         posted = self.posted_platforms()
+        jobs = self._safe(lambda: posting.for_files(files), {})
         items = []
         for f in files:
             try:
@@ -1469,14 +1557,23 @@ class Dashboard(StatsTab, SettingsTab, Service):
             except OSError:
                 continue  # moved or deleted since the folder was listed
             on = posted.get(db.video_file(f.name).name.lower(), set())
-            label = Text("✓ " if on else "  ", GOOD)
+            mine = jobs.get(f, {})
+            label = Text("✓ " if on or any(j["state"] == "posted" for j in mine.values()) else "  ", GOOD)
             label.append(f.name)
+            # Each connected platform's two letters: a post under way there has the say, then a post a read found,
+            # then a try that ended without one (flag_style has the colours).
+            flags = Text()
+            for p in self.platforms.values():
+                job = mine.get(p.key)
+                state = job["state"] if job and (job["state"] in posting.LIVE or p.key not in on) else \
+                    "spotted" if p.key in on else "none"
+                flags.append(" " if flags.segs else "")
+                flags.append(SHORT[p.key], flag_style(p.color, state))
             source = "pipeline" if videos.from_pipeline(f) else _short(f.parent.name, 22)
             ago = fmt_ago(datetime.fromtimestamp(st.st_mtime).astimezone().isoformat())
-            info = Text(f"   {source} · {st.st_size / 1024 / 1024:.1f} MB · {ago}  ", MUTED)
-            for p in self.platforms.values():
-                info.append(SHORT[p.key] + " ", f"bold {p.color}" if p.key in on else "#3a4049")
-            items.append({"id": str(f), "lines": [label.json(), info.json()]})
+            info = Text("   " + _file_info(source, f"{st.st_size / 1024 / 1024:.1f} MB", ago,
+                                           LIST_WIDTH - 5 - flags.cell_len) + "  ", MUTED)
+            items.append({"id": str(f), "lines": [label.json(), (info + flags).json()]})
         empty = None
         if not items:
             empty = [Text("No videos yet.", MUTED).json(), Text("Put finished .mp4 files in", MUTED).json(),
@@ -1535,6 +1632,9 @@ class Dashboard(StatsTab, SettingsTab, Service):
             db.set_meta("hidden_videos", sorted({*hidden, str(path)}))
             self.notify(f"{path.name} hidden. Show hidden (top of the list) brings it back.")
         elif choice == "recycle":
+            if self.demo:  # the demo lists your real videos beside its made-up stats: they stay where they are
+                self.notify(f"Demo mode: {path.name} stays where it is.", timeout=4)
+                return
             sidecar = path.with_suffix(".json")
             if not desktop.recycle(path):
                 self.notify(f"Couldn't move {path.name} to the {desktop.BIN} (is it open somewhere?).", severity="error")
@@ -1580,8 +1680,9 @@ class Dashboard(StatsTab, SettingsTab, Service):
     @rpc
     def form_changed(self, caption: str, tags: str) -> None:
         """Show exactly what each platform will get, and the caption/hashtag limits."""
+        self.form_text = (caption or "", tags or "")
         item = self.form_item(caption, tags)
-        caption_len = len(item.text_for("x"))
+        caption_len = len(videos.strip_hashtags(item.caption))  # the caption alone, whatever X gets after it
         n = len(videos.tag_list(item.tags))
         label = Text("Hashtags  ")
         label.append(f"{n}/{videos.MAX_TAGS}", BAD if n > videos.MAX_TAGS else MUTED)
@@ -1601,28 +1702,33 @@ class Dashboard(StatsTab, SettingsTab, Service):
         self.emit("preview", {"caption": cap.json(), "tags": label.json(), "rows": preview})
 
     def update_posted(self) -> None:
-        """Where the picked video is already up, so you know which upload pages are left."""
+        """Where the picked video is already up, or on its way with the extension, so you know which upload pages
+        are left. done: up there (the platform's button gets its ✓). states: each platform's standing, see
+        posting.standing."""
         out = Text()
         video = self.selected_file
-        episode = db.episode_for_video(video.name) if video else None
-        by = {}
+        states = {}
         if video:
             out.append("POSTED  ", f"bold {MUTED}")
-            if episode:
-                for q in sorted((q for q in self.posts if q["episode_id"] == episode["id"]),
-                                key=lambda q: q["published_at"]):
-                    by.setdefault(q["platform"], q)
+            by = self.spotted_posts(video)
+            jobs = self._safe(lambda: posting.for_files([video]).get(video, {}), {})
             for p in self.platforms.values():
                 q = by.get(p.key)
-                if q:
+                state = states[p.key] = standing(jobs.get(p.key), q)
+                if state in ("spotted", "posted"):
                     out.append(f"✓ {p.name}", f"bold {p.color}")
-                    out.append(f" {fmt_num(q['views'])} views, {fmt_ago(q['published_at'])}    ", MUTED)
+                    out.append(f" {numbers(q)}    " if q else " posted, not in your stats yet    ", MUTED)
+                elif state in BRIEF:
+                    out.append(("× " if state == "failed" else "● ") + p.name,
+                               f"bold {BAD if state == 'failed' else AMBER}")
+                    out.append(f" {BRIEF[state]}    ", MUTED)
                 else:
                     out.append(f"○ {p.name}    ", "#5c6370")
-            if not by:
+            if not by and not jobs:
                 out.append("(ReelForge spots each post at its next refresh)", MUTED)
-        done = {p.key: p.key in by for p in self.platforms.values()}
-        self.emit("posted", {"line": out.json(), "done": done})
+        done = {p.key: states.get(p.key) in ("spotted", "posted") for p in self.platforms.values()}
+        self.emit("posted", {"line": out.json(), "done": done, "states": states})
+        self.update_posting()  # the same video's rows, for posting with the extension
 
     def update_best_time(self) -> None:
         """Under the videos: each platform's best part of the day so far, and when it next comes round (besttime)."""
@@ -1661,7 +1767,13 @@ class Dashboard(StatsTab, SettingsTab, Service):
         else:
             self.notify(f"The caption is empty, so nothing was copied for {p.name}.", severity="warning")
         desktop.reveal(item.video)
-        desktop.open_upload_page(p.key)
+        if not desktop.open_upload_page(p.key):
+            # Nothing is noted: an upload page that never opened would later claim some other post for this video.
+            self.notify(f"ReelForge couldn't open your browser. Open {desktop.UPLOAD_PAGES[p.key]} yourself"
+                        + (f": the {what} is copied" if text else "") + f", and {item.video.name} is showing in "
+                        f"{desktop.FILES_WINDOW}.", title=f"{p.name}'s upload page didn't open", severity="warning",
+                        timeout=20)
+            return
         tip = {
             "youtube": " For the description, use Copy YouTube hashtags.",
             "instagram": " Click + Create, then Post/Reel.",
@@ -1679,17 +1791,24 @@ class Dashboard(StatsTab, SettingsTab, Service):
         first = "tiktok" if "tiktok" in self.platforms else None
         self.copy_text(item.text_for(first) if first else item.title)
         desktop.reveal(item.video)
-        for p in self.platforms.values():
-            desktop.open_upload_page(p.key)
-        self.record_manual(list(self.platforms.values()), item)
+        opened = [p for p in self.platforms.values() if desktop.open_upload_page(p.key)]
+        if len(opened) < len(self.platforms):
+            missing = [p for p in self.platforms.values() if p not in opened]
+            self.notify("ReelForge couldn't open your browser for " + ", ".join(p.name for p in missing) + ". Open "
+                        + ", ".join(desktop.UPLOAD_PAGES[p.key] for p in missing) + " yourself.",
+                        title="Upload pages didn't open" if len(missing) > 1 else
+                        f"{missing[0].name}'s upload page didn't open", severity="warning", timeout=20)
+        if not opened:
+            return
+        self.record_manual(opened, item)
         self.notify(f"{'TikTok text' if first else 'Caption'} copied. For the others use the Copy buttons. "
-                    "On Instagram click + Create.", title=f"{len(self.platforms)} upload pages opened", timeout=15)
+                    "On Instagram click + Create.", title=f"{len(opened)} upload pages opened"
+                    if len(opened) > 1 else "Upload page opened", timeout=15)
 
     @db_safe
     def record_manual(self, platforms: list[Platform], item: PublishItem) -> None:
         """Note a manual upload, so the video gets its ✓ and its posts can be matched to the episode."""
-        if not db.episode_for_video(item.video.name):
-            db.create_episode(item.title or item.video.stem, str(item.video))
+        db.adopt_episode(item.title or item.video.stem, str(item.video))
         for p in platforms:
             db.log_upload(p.key, item.video.name, "manual", message="opened the upload page")
         self.tell_others()
@@ -1728,30 +1847,44 @@ class Dashboard(StatsTab, SettingsTab, Service):
             desktop.reveal(self.selected_file)
 
     def update_uploads(self) -> None:
-        """Upload pages you opened, and whether the post has turned up since."""
+        """Upload pages you opened and posts you started with the extension, and whether each post has turned up
+        since."""
         episodes = {db.video_file(e["video"]).name.lower(): e["id"] for e in self.episodes if e["video"]}
         found = {}
         for q in self.posts:
             if q["episode_id"]:
                 found.setdefault((q["episode_id"], q["platform"]), q)
+        # A job is written to the upload log in the same second it is made, with the same platform and file name.
+        jobs = {(j["platform"], j["video"].lower(), j["created_at"]): j for j in self._safe(posting.recent, [])}
         rows = []
         for u in db.uploads():
             when = db.parse(u["ts"]).astimezone()
             p = self.platforms.get(u["platform"])
             q = found.get((episodes.get((u["video"] or "").lower()), u["platform"]))
-            if q:
+            job = jobs.get((u["platform"], (u["video"] or "").lower(), u["ts"]))
+            # Its job knows more than the stats: while it is under way or not sure, and for as long as the stats
+            # have the post without a number (the job filed it; no read has seen it yet, so "live" isn't known).
+            if job and (not q or q["views"] is None or job["state"] in (*posting.IN_FLIGHT, "unknown")):
+                mark, note = upload_note(job, p.name if p else u["platform"])
+            elif q:
                 mark, note = Text("✓", GOOD), Text(f"live · {fmt_num(q['views'])} views · {q['url'] or ''}")
             elif u["status"] == "manual":
                 mark, note = Text("→", MUTED), Text("opened the upload page · not spotted yet", MUTED)
+            elif u["status"] in ("extension", "api"):  # a start so far back that its job isn't among the recent ones
+                mark, note = Text("→", MUTED), Text(f"{u['message']} · not spotted yet", MUTED)
             else:
                 mark, note = Text("✓" if u["status"] == "ok" else "×", GOOD if u["status"] == "ok" else BAD), \
                     Text(u["url"] or u["message"] or "")
             rows.append((None, [Text(fmt_clock(when) if when.date() == datetime.now().date()
                                      else when.strftime("%m/%d")), tag(p) if p else Text(u["platform"]),
                                 Text(u["video"] or ""), mark, note]))
-        columns = [("when", "When", 8), ("platform", "", 4), ("title", "Video", 26), ("mark", "", 2),
+        # The Post column says where each post stands: it takes the room there is, and the file's name gives way
+        # first. (With the name at 26 and the room going to it, Post was one letter wide in a window 100 columns wide.)
+        columns = [("when", "When", 8), ("platform", "", 4), ("title", "Video", 16), ("mark", "", 2),
                    ("note", "Post", 64)]
-        self.emit("uploads", {"heading": Text("RECENT UPLOADS", "bold").json(), **table(columns, rows)})
+        empty = ("Nothing yet. A post you start, with Post… or a platform's button under BY HAND, is listed here "
+                 "with where it stands.")
+        self.emit("uploads", {"heading": Text("RECENT UPLOADS", "bold").json(), **table(columns, rows, empty=empty)})
 
     # --- accounts -------------------------------------------------------------------------
 
@@ -1778,11 +1911,15 @@ class Dashboard(StatsTab, SettingsTab, Service):
                 then = "" if p.public_stats else ", then log in once in ReelForge's own browser window"
                 if private is None:
                     private = signup.private_name(others) if signup is not None and others else ""
+                body = Text()
+                if p.refused_handle:  # a handle typed into config.toml that isn't one: say so, not just "off"
+                    body.append(f"config.toml has {p.refused_handle[:60]} as your {p.name} handle, which isn't one "
+                                "ReelForge can use, so it counts as none. ", TYPICAL)
+                body.append(f"Type your @handle and press Connect to see {p.name} in ReelForge{then}. No account "
+                            "yet? Sign up makes one" + (f", in a private {private} window." if private else "."),
+                            MUTED)
                 panel.update(
-                    status=Text("○ not connected", f"bold {MUTED}").json(), status_short=None,
-                    body=Text(f"Type your @handle and press Connect to see {p.name} in ReelForge{then}. No account "
-                              "yet? Sign up makes one" + (f", in a private {private} window." if private else "."),
-                              MUTED).json(),
+                    status=Text("○ not connected", f"bold {MUTED}").json(), status_short=None, body=body.json(),
                     note=Text(p.setup_note, MUTED).json(), signup=signup is not None)
                 panels.append(panel)
                 continue
@@ -1829,14 +1966,24 @@ class Dashboard(StatsTab, SettingsTab, Service):
                     if rows:
                         since = db.parse(rows[0]["ts"]).astimezone().strftime("%b %d").replace(" 0", " ")
                         body.append(f" · history since {since}", MUTED)
+            warning = sync.last_warnings.get(p.key)
             if error:
                 body.append(f"\n\nlast read failed: {error[1]}" if state == "login" else
                             f"\nlast read failed: {error[1]}", BAD)
+            elif warning:  # read, but not all of it (TikTok's totals without its videos)
+                body.append(f"\n{warning[1]}", TYPICAL)
+            # Stats from before the handle changed to what looks like another account: the window asks which to
+            # keep (handle_change_info), and this line is there until you've said.
+            was = [] if self.demo else self._safe(lambda: db.old_handles(p.key), [])
+            if was:
+                body.append(f"\nAlso holds stats read as {sync.listed(was)}, from before the handle changed.", TYPICAL)
             note = "Demo data, made up on this PC." if self.demo and not pretend else p.setup_note
             panel.update(
                 status=status.json(), status_short=short.json() if short else None, body=body.json(),
                 note=Text(note, MUTED).json(), logs_in=logs_in,
                 login_label="Log in again" if source == "browser" else "Log in",
+                # Log out (logout_info, logout): only while ReelForge's browser is logged in to it.
+                logs_out=p.browser_stats and p.logged_in and not self.demo, old_handles=was,
                 profile_disabled=not p.public_handle and not pretend, refresh_disabled=self.demo and not pretend,
                 show_log=not p.has_stats, chart=self.followers_chart(p, rows) if state == "on" else None)
             panels.append(panel)
@@ -1849,8 +1996,9 @@ class Dashboard(StatsTab, SettingsTab, Service):
                 (chip("Make a Gmail first", act("gmail")), 0),
                 (Text("  it's your YouTube login, and the others can sign up with the same email.", MUTED), 2)])
         elif missing:
-            hint = parts([(Text(f"Only connected platforms show up in ReelForge. Connect {_either(missing)} here any "
-                                "time.", MUTED), 0)])
+            # (in two parts: where the second doesn't fit it is left out whole, not cut off after "Instagram or")
+            hint = parts([(Text("Only connected platforms show up in ReelForge.", MUTED), 0),
+                          (Text(f" Connect {_either(missing)} here any time.", MUTED), 1)])
         self.emit("accounts", {"panels": panels, "hint": hint})
 
     def followers_chart(self, p: Platform, rows: list) -> dict | None:
@@ -1868,8 +2016,7 @@ class Dashboard(StatsTab, SettingsTab, Service):
         ys = [v for v in b.totals if v is not None]
         if not ys:
             return None
-        longest = max(trends.GAP, fr.step)
-        holes = [(t0, t1) for (t0, _), (t1, _) in zip(pts, pts[1:]) if t1 - t0 > longest]
+        holes = [(t0, t1) for (t0, _), (t1, _) in zip(pts, pts[1:]) if t1 - t0 > trends.spaced(t0, fr.step, fr.now)]
         guessed = [any(t0 < a + (z - a) / 2 < t1 for t0, t1 in holes) for a, z in zip(fr.starts, fr.ends)]
         est: list[list[int]] = []
         for i, guess in enumerate(guessed):
@@ -1878,21 +2025,28 @@ class Dashboard(StatsTab, SettingsTab, Service):
             elif guess:
                 est.append([i, i + 1])
         first = pts[0][0].astimezone()  # the first reading, not the start of its hour, so the date matches the panel
-        heading = Text.assemble(("FOLLOWERS  ", "bold"),
-                                (f"since {first:%b} {first.day}  " if days < 30 else "last 30 days  ", MUTED),
-                                (fmt_num(pts[-1][1]), "bold"))
-        heading.append("  ")
-        heading.append_text(change_text(pts[-1][1] - (ys[0] if len(ys) > 1 else pts[0][1])))
+        # Each piece with the space before it, so that where the panel is too narrow for all of them the window
+        # leaves out whole pieces from the end (whole() in ui/src/lib/fit.ts), and no space stands in for one.
+        change = change_text(pts[-1][1] - (ys[0] if len(ys) > 1 else pts[0][1])).json()
+        heading = Text.assemble(("FOLLOWERS", "bold"),
+                                (f"  since {first:%b} {first.day}" if days < 30 else "  last 30 days", MUTED),
+                                (f"  {fmt_num(pts[-1][1])}", "bold"), *[(f"  {s[0]}", s[1]) for s in change])
         return {"heading": heading.json(), "n": fr.n, "step_h": fr.step.total_seconds() / 3600,
                 "slots": slot_info(fr), "values": b.totals, "guessed": guessed,
                 "series": [{"key": p.key, "name": p.name, "color": p.color, "xs": xs, "ys": ys, "style": "area",
                             "est": est}]}
+
+    logging_in = ""  # the platform whose log-in window is open ("" for none): ReelForge's browser has one window
 
     @rpc
     def login(self, key: str) -> None:
         p = self.every[key]
         if not p.public_handle:
             self.notify(f"Connect {p.name} with your @handle first.", severity="warning")
+            return
+        if self.logging_in:  # a second press would only queue another window behind the open one
+            self.notify(f"ReelForge's browser window is already open for {self.every[self.logging_in].name}. Finish "
+                        "there, or close that window first.", severity="warning", timeout=8)
             return
         self.loop.run_worker(self._browser_login, p, group="login")
 
@@ -1915,17 +2069,67 @@ class Dashboard(StatsTab, SettingsTab, Service):
     def _browser_login(self, p: Platform) -> None:
         window = f"{'An' if browser.NAME == 'Edge' else 'A'} {browser.NAME} window"
         self.loop.call_soon(self.notify, f"{window} is opening (if ReelForge is reading stats right now, as soon as "
-                                         f"that's done). Log in to {p.name} there; ReelForge carries on by itself "
-                                         "once you're in.", f"Log in to {p.name}", "information", 15)
+                                         f"that's done). Log in to {p.name} there, or do what it asks; ReelForge "
+                                         "carries on by itself once you're in, or when you close the window.",
+                            f"Log in to {p.name}", "information", 15)
+        self.logging_in = p.key
         try:
             browser.login(p.key)
         except Exception as e:
-            msg = str(e) if isinstance(e, PlatformError) else f"{type(e).__name__}: {e}"
-            self.loop.call_soon(self.notify, msg, f"{p.name} not logged in", "error", 15)
+            self.loop.call_soon(self.notify, self._browser_trouble(e, "log-in"), f"{p.name} not logged in", "error", 15)
             return
+        finally:
+            self.logging_in = ""
         self.loop.call_soon(self.notify, f"Logged in to {p.name}. Reading your stats now…")
         self.loop.call_soon(self.follow_connections)  # connected now, if it was waiting for this
         self.loop.call_soon(self.run_refresh, True, True, p.key)
+
+    @staticmethod
+    def _browser_trouble(error: Exception, what: str) -> str:
+        """Why a log-in or log-out in ReelForge's browser didn't happen, in a sentence: the browser module's own
+        when it gave one, else that it didn't work, with the error's own words kept in data/refresh.log."""
+        if isinstance(error, PlatformError):
+            return str(error)
+        sync.log([f"error: the {what} in ReelForge's browser: {detail(error)}"])
+        return (f"ReelForge's browser window didn't work for the {what}. Try again in a moment; data/refresh.log "
+                "says what stopped it.")
+
+    @rpc
+    def logout_info(self, key: str) -> dict | None:
+        """Are you sure? What the Log out dialog says: what goes (the log-in ReelForge's own browser keeps on this
+        computer) and what stays (the platform, connected, with its stats)."""
+        p = self.every.get(key)
+        if p is None or not p.browser_stats or not p.logged_in:
+            return None
+        if self.demo:
+            self.notify("Demo mode: nothing is changed.", timeout=4)
+            return None
+        note = Text()
+        note.append(f"{p.name}  ", f"bold {p.color}")
+        note.append(p.handle, "bold")
+        note.append(f"\n\nReelForge's own browser is logged out of {p.name}: the log-in it keeps on this computer, in "
+                    "ReelForge's data folder, is removed. Your normal browser and your phone stay logged in.", MUTED)
+        note.append(f"\n\n{p.name} stays connected, with everything read so far. ReelForge can't read it again until "
+                    "you press Log in on this tab.", MUTED)
+        return {"key": key, "title": f"LOG OUT OF {p.name.upper()}?", "note": note.json(), "button": "Log out"}
+
+    @rpc
+    def logout(self, key: str) -> None:
+        """Log ReelForge's browser out of a platform (Instagram, X): see logout_info."""
+        p = self.every.get(key)
+        if p is not None and p.browser_stats and not self.demo:
+            self.loop.run_worker(self._browser_logout, p, group="login")
+
+    def _browser_logout(self, p: Platform) -> None:
+        try:
+            browser.logout(p.key)
+        except Exception as e:
+            self.loop.call_soon(self.notify, self._browser_trouble(e, "log-out"), f"{p.name} still logged in",
+                                "error", 15)
+            return
+        self.loop.call_soon(self.notify, f"ReelForge's browser is logged out of {p.name}. Its stats so far stay; "
+                                         "press Log in to read it again.", f"{p.name} logged out", "information", 10)
+        self.loop.call_soon(self.follow_connections)
 
     # --- connecting and disconnecting -------------------------------------------------------
 
@@ -1987,26 +2191,128 @@ class Dashboard(StatsTab, SettingsTab, Service):
         note.append(f"{p.name}  ", f"bold {p.color}")
         note.append(p.handle, "bold")
         note.append(f"\n\nReelForge stops reading {p.name}, and its cards, charts, columns, filters, upload buttons and "
-                    "notifications leave every tab. Everything it has read so far stays saved, so connecting it again "
-                    "(on this tab, with the same @handle) brings it all back.", MUTED)
-        if p.browser_stats:
-            note.append(f"\nYou stay logged in to {p.name} in ReelForge's browser.", MUTED)
-        return {"key": key, "title": f"DISCONNECT {p.name.upper()}?", "note": note.json()}
+                    "notifications leave every tab. Everything it has read so far stays saved, so connecting it "
+                    # (no brackets: the window's word wrap ends a row right after an opening one)
+                    "again, on this tab with the same @handle, brings it all back.", MUTED)
+        logged_in = p.browser_stats and p.logged_in
+        if logged_in:
+            note.append(f"\nReelForge's own browser stays logged in to {p.name}: that log-in is kept on this computer, "
+                        "in ReelForge's data folder, until you log out of it.", MUTED)
+        # logged_in: the window can offer to log out too (disconnect with logout=True).
+        return {"key": key, "title": f"DISCONNECT {p.name.upper()}?", "note": note.json(), "logged_in": logged_in}
 
     @rpc
-    def disconnect(self, key: str) -> None:
+    def disconnect(self, key: str, logout: bool = False) -> None:
+        """Disconnect a platform. logout: also log ReelForge's browser out of it (see logout_info)."""
         p = self.every.get(key)
         if p is not None and p.public_handle and not self.demo:
+            if logout and p.browser_stats and p.logged_in:
+                self.loop.run_worker(self._browser_logout, p, group="login")
             self.loop.run_worker(self._save_account, p, "", group="accounts")
+
+    # --- a handle that changed to another account -----------------------------------------------
+
+    @rpc
+    def handle_change_info(self, key: str) -> dict | None:
+        """The dialog for a platform whose stats were read under another @handle before (a panel with old_handles):
+        what's there from before, and the two ways out of it, forget_handle_stats and keep_handle_stats."""
+        p = self.every.get(key)
+        found = None if p is None or self.demo else self._safe(lambda: db.handle_change(key), None)
+        if not found:
+            return None
+        old, now = sync.listed(found["old"]), found["now"]
+        first, last = (db.parse(found[k]).astimezone() for k in ("first", "last"))
+        days = f"on {first:%b} {first.day}" if first.date() == last.date() else \
+            f"from {first:%b} {first.day} to {last:%b} {last.day}"
+        readings, videos = len(found["rows"]), len(found["posts"])
+        # (Old readings of the account are thinned out with time, down to none: the videos stay until you say.)
+        here = f"{readings} reading{'' if readings == 1 else 's'} of the account and " if readings else ""
+        note = Text()
+        note.append(f"{p.name}  ", f"bold {p.color}")
+        note.append(now, "bold")
+        note.append(f"\n\nBefore, ReelForge read {p.name} as {old} ({days}). What it read then is still here: "
+                    f"{here}{videos} video{'' if videos == 1 else 's'} "
+                    f"that {now} doesn't have. They're on the Videos tab and count in {p.name}'s totals and "
+                    "charts.", MUTED)
+        note.append(f"\n\nIf {old} was a typo or someone else's account, forget its stats: ", MUTED)
+        note.append("those readings and videos are removed", "bold")
+        note.append(f", after ReelForge saves a copy of the whole stats database beside it. {now}'s own stats, and "
+                    "every other platform's, stay as they are.", MUTED)
+        note.append(f"\n\nIf you renamed the account, keep them: they're {now}'s too.", MUTED)
+        return {"key": key, "title": f"{p.name.upper()} WAS {old.upper()} BEFORE", "note": note.json(),
+                "forget": f"Forget {old}'s stats", "keep": "Keep them"}
+
+    @rpc
+    def forget_handle_stats(self, key: str) -> None:
+        """The dialog's Forget: db.forget_old_handle, which saves a copy of the store first. Only ever from this
+        button: nothing is forgotten by itself."""
+        p = self.every.get(key)
+        if p is not None and not self.demo:
+            self.loop.run_worker(self._forget_handle, p, group="accounts")
+
+    def _forget_handle(self, p: Platform) -> None:
+        try:
+            gone = db.forget_old_handle(p.key)
+        except Exception as e:
+            sync.log([f"error: forgetting {p.name}'s old stats: {detail(e)}"])
+            self.loop.call_soon(self.notify, "Nothing was forgotten: the stats database was busy or couldn't be "
+                                             "copied first. Try again in a moment.", "", "error", 12)
+            return
+        self.loop.call_soon(self.handle_forgotten, p, gone)
+
+    def handle_forgotten(self, p: Platform, gone: dict | None) -> None:
+        if gone:
+            went = [f"{n} {what}{'' if n == 1 else 's'}" for n, what in ((gone["posts"], "video"),
+                                                                         (gone["readings"], "reading")) if n]
+            self.notify(f"Removed: {sync.listed(went or ['nothing'])}. The copy from before is "
+                        f"{gone['backup'].name}, in {gone['backup'].parent}.",
+                        title=f"Forgot {sync.listed(gone['old'])}'s {p.name} stats", timeout=15)
+            self.tell_others()
+        self.reload()
+        self.update_notes()
+
+    @rpc
+    @db_safe
+    def keep_handle_stats(self, key: str) -> None:
+        """The dialog's Keep: the stats from before the handle changed are this account's too."""
+        p = self.every.get(key)
+        if p is None or self.demo:
+            return
+        if db.keep_old_handle(key):
+            notify.release(f"handle:{key}:{p.public_handle.lower()}")  # settled: a later change is news again
+            self.notify(f"Kept: they count as {p.handle}'s from now on.", title=f"{p.name}'s earlier stats", timeout=8)
+            self.tell_others()
+        self.update_accounts()
 
     def _save_account(self, p: Platform, handle: str) -> None:
         """Connect a platform with its handle, or disconnect it (""): your settings change (config.save_handle), then
         it shows up everywhere, or leaves, straight away."""
         try:
-            config.save_handle(p.key, handle)
+            undone = config.save_handle(p.key, handle)
         except Exception as e:
-            self.loop.call_soon(self.notify, f"Couldn't save {p.name}'s handle: {e}", "", "error", 12)
+            sync.log([f"error: saving {p.name}'s handle: {detail(e)}"])
+            # The handle goes into several files in turn, config.toml among the last (studio.generate.set_account),
+            # so which one failed isn't known here, and some may have been written. config.toml is the one
+            # ReelForge goes by: what it holds now says whether the handle was saved.
+            try:
+                kept = str((config.load_config().get(p.key) or {}).get("handle", ""))
+            except Exception:
+                kept = None
+            done, not_done = (f"{p.name}'s handle is saved", f"{p.name}'s handle wasn't saved") if handle else \
+                (f"{p.name} is disconnected", f"{p.name} wasn't disconnected")
+            if kept == handle:
+                self.loop.call_soon(self.notify, f"{done}, but ReelForge couldn't finish updating your channel's "
+                                                 "other files (your AI's notes among them). data/refresh.log says "
+                                                 "what stopped it.", "", "warning", 12)
+                self.loop.call_soon(self.account_saved, p, handle)
+                return
+            why = str(e) if isinstance(e, config.ConfigError) else \
+                "ReelForge couldn't write your settings; data/refresh.log says what stopped it."
+            self.loop.call_soon(self.notify, f"{not_done}. {why}", "", "error", 12)
             return
+        if undone:  # a settings file with a mistake in it, left as it was: said, never passed over
+            done = f"{p.name}'s handle is saved" if handle else f"{p.name} is disconnected"
+            self.loop.call_soon(self.notify, f"{done}. " + " ".join(undone), "", "warning", 20)
         self.loop.call_soon(self.account_saved, p, handle)
 
     def account_saved(self, p: Platform, handle: str) -> None:
@@ -2084,9 +2390,11 @@ class Dashboard(StatsTab, SettingsTab, Service):
         return {"platforms": [{"key": p.key, "name": p.name} for p in manual], "start": start, "episodes": episodes,
                 "last": last}
 
+    lower_asked: tuple | None = None  # the Save that was asked about a number going down: (platform, its numbers)
+
     @rpc
     def save_logged_stats(self, key: str, followers_text: str, views_text: dict) -> str | None:
-        """The dialog's Save: None once saved, or what to fix."""
+        """The dialog's Save: None once saved, or what to fix, or what to confirm by pressing Save again."""
         from .platforms.public import parse_count
 
         def number(text: str) -> int | None:
@@ -2105,13 +2413,29 @@ class Dashboard(StatsTab, SettingsTab, Service):
             return "Whole numbers only, please (like 1234, 3,400 or 1.2K)."
         if followers is None and not views:
             return "Nothing to save yet."
+        # A number lower than the one saved for that video replaces it, in the readings it was saved in too
+        # (db._correct_typed): fine for a slip being put right, but the lower one may be the slip (3400 for 34000).
+        # So it's said first, and stored that way only when Save is pressed again with the same numbers.
+        saved = {q["episode_id"]: q["views"] for q in self.posts
+                 if q["platform"] == key and q["post_id"].startswith(db.TYPED) and q["views"] is not None}
+        lower = [(n, saved[e]) for e, n in views.items() if n < saved.get(e, 0)]
+        asked = (key, sorted(views.items()))
+        if lower and self.lower_asked != asked:
+            self.lower_asked = asked
+            if len(lower) > 1:
+                return (f"{len(lower)} numbers are lower than the ones saved before. Press Save again if they're "
+                        "right: they replace those.")
+            n, was = lower[0]
+            return (f"{n:,} is lower than the {was:,} saved before. Press Save again if {n:,} is right: it "
+                    f"replaces the {was:,}.")
         try:
-            self._save_logged(key, followers, views)
-        except sqlite3.OperationalError as e:
+            self._save_logged(key, followers, views, put_right=bool(lower))
+        except sqlite3.OperationalError as e:  # (what you said about a lower number still stands for the next try)
             return f"The stats database is busy ({e}). Try again in a moment."
+        self.lower_asked = None
         return None
 
-    def _save_logged(self, key: str, followers: int | None, views: dict[int, int]) -> None:
+    def _save_logged(self, key: str, followers: int | None, views: dict[int, int], put_right: bool = False) -> None:
         p = self.every[key]
         episodes = {e["id"]: e for e in db.episodes()}
         posts = []
@@ -2129,7 +2453,7 @@ class Dashboard(StatsTab, SettingsTab, Service):
                                   likes=None, comments=None, shares=None))
         if followers is None and self.latest.get(key):
             followers = self.latest[key]["followers"]
-        db.record_snapshot(key, Account(handle=p.handle, followers=followers), posts)
+        db.record_snapshot(key, Account(handle=p.handle, followers=followers), posts, put_right=put_right)
         self.tell_others()
         self.notify(f"{p.name} stats saved.", timeout=3)
         self.reload()
@@ -2296,12 +2620,13 @@ class Dashboard(StatsTab, SettingsTab, Service):
         done = move.take_marker()
         if not done:
             return
+        again = f" {done['extension']}" if done.get("extension") else ""   # a connected browser loads it anew
         self.notify(f"ReelForge is in {done.get('to')} now. If you open it in Claude Code or Codex, open this folder "
                     "from now on." + (" Some things couldn't follow it: run setup there." if done.get("problems")
-                                      else ""), title="Moved", timeout=20)
+                                      else "") + again, title="Moved", timeout=20)
         self._safe(lambda: notify.add("move", "ReelForge moved into its own folder",
-                                      f"From {done.get('from')} to {done.get('to')}.", key=f"moved:{done.get('ts')}",
-                                      tab="settings", read=True), False)
+                                      f"From {done.get('from')} to {done.get('to')}.{again}",
+                                      key=f"moved:{done.get('ts')}", tab="settings", read=True), False)
 
     # --- updates ------------------------------------------------------------------------------
 
@@ -2320,11 +2645,16 @@ class Dashboard(StatsTab, SettingsTab, Service):
             return
         done = kit_update.take_marker()
         if done:
-            self.notify(f"You're on ReelForge {done.get('to')} now (from {done.get('from')}).", title="Updated",
-                        timeout=15)
+            # What else the update had to say (a sound of yours kept by a name the new version also uses): the
+            # summary that said it first was up for a moment before the restart.
+            notes = done.get("notes") if isinstance(done.get("notes"), list) else []
+            notes = " ".join(str(n) for n in notes if n)
+            said = f"You're on ReelForge {done.get('to')} now (from {done.get('from')})."
+            self.notify(f"{said} {notes}".strip(), title="Updated", severity="warning" if notes else "information",
+                        timeout=30 if notes else 15)
             self._safe(lambda: notify.add("update", f"Updated to ReelForge {done.get('to')}",
-                                          f"From {done.get('from')}. See what's new on the Updates tab.",
-                                          key=f"updated:{done.get('to')}", read=True), False)
+                                          f"From {done.get('from')}. {notes + ' ' if notes else ''}See what's new on "
+                                          "the Updates tab.", key=f"updated:{done.get('to')}", read=not notes), False)
         self.update_info = self._safe(lambda: db.get_meta("update_check"), None)
         self.show_update()
         info = self.update_info
@@ -2333,18 +2663,29 @@ class Dashboard(StatsTab, SettingsTab, Service):
             self.loop.run_worker(self._update_check, False, group="update-check", exclusive=True)
 
     def _update_check(self, manual: bool) -> None:
-        info = kit_update.check()
-        info["checked"] = db.now_iso()
         try:
-            db.set_meta("update_check", info)
-            if info["newer"]:
-                notify.update_available(info["latest"])
-        except sqlite3.Error:
-            pass
+            info = kit_update.check()
+            info["checked"] = db.now_iso()
+            try:
+                db.set_meta("update_check", info)
+                if info["newer"]:
+                    notify.update_available(info["latest"])
+            except sqlite3.Error:
+                pass
+        except Exception:  # the check answers its own failures, so this is a surprise: "Checking…" still has to go
+            self.loop.call_soon(self.clear_update_step)
+            raise
         self.loop.call_soon(self.after_update_check, info, manual)
+
+    def clear_update_step(self) -> None:
+        """Take "Checking…" off the Updates tab so the check's answer shows. An update being put in place keeps its
+        progress line."""
+        if not self.updating:
+            self.emit("update_step", {})
 
     def after_update_check(self, info: dict, manual: bool) -> None:
         self.update_info = info
+        self.clear_update_step()
         self.show_update()
         self.show_new_notes()
         if manual and not info["error"] and not info["newer"]:
@@ -2395,7 +2736,8 @@ class Dashboard(StatsTab, SettingsTab, Service):
             "git": "A git copy: an update runs git pull.",
         }.get(kind, "")
         if how:
-            view["how"] = Text(how + "  Your channel, videos, stats and settings are never touched.", MUTED).json()
+            view["how"] = Text(how + "  Your channel, videos, stats and settings are never touched: only your AI's "
+                               "notes (CLAUDE.md, AGENTS.md) are written again, for the new version.", MUTED).json()
         self.emit("update", {**view, "status": out.json()})
 
     @rpc
@@ -2432,10 +2774,10 @@ class Dashboard(StatsTab, SettingsTab, Service):
         try:
             message = kit_update.apply(kit_update.release_from(self.update_info), progress, log)
         except kit_update.UpdateError as e:
-            self.loop.call_soon(self.update_failed, str(e))
+            self.loop.call_soon(self.update_failed, str(e), not getattr(e, "partial", False))
             return
-        except Exception as e:
-            self.loop.call_soon(self.update_failed, f"{type(e).__name__}: {e}")
+        except Exception as e:   # anywhere in the update, so some of the new files may be in place already
+            self.loop.call_soon(self.update_failed, f"{type(e).__name__}: {e}. Update again to finish it.", False)
             return
         self.loop.call_soon(self.update_done, message)
 
@@ -2449,11 +2791,14 @@ class Dashboard(StatsTab, SettingsTab, Service):
                                   "progress": {"done": 1, "total": 1}, "done": True})
         self.loop.set_timer(1.5, lambda: self.exit(kit_update.RESTART))
 
-    def update_failed(self, message: str) -> None:
+    def update_failed(self, message: str, untouched: bool = True) -> None:
+        """untouched: nothing in the ReelForge folder changed (the download or its check failed), so the version you
+        have is whole. Otherwise some of the new version is in place, and the message itself says how to finish."""
         self.updating = False
         self.show_update()
-        self.emit("update_step", {"step": Text(f"The update didn't finish: {message}\nThe version you have keeps "
-                                               "working.", BAD).json(), "progress": None, "failed": True})
+        still = "\nThe version you have keeps working." if untouched else ""
+        self.emit("update_step", {"step": Text(f"The update didn't finish: {message}{still}", BAD).json(),
+                                  "progress": None, "failed": True})
 
     # --- shared actions -------------------------------------------------------------------
 
@@ -2523,6 +2868,17 @@ def _hours_since(ts: str | None) -> float:
 
 def _short(text: str, width: int) -> str:
     return text if len(text) <= width else text[:width - 1].rstrip(" -_") + "…"
+
+
+def _file_info(source: str, size: str, ago: str, room: int) -> str:
+    """What goes under a video's name on the Publish list, in the room left beside its platform flags: where it is
+    from, its size and its age. What doesn't fit goes, the source first (shortened while that leaves enough of it to
+    read) and the age last, so the flags are never the part that is cut off."""
+    rest = f"{size} · {ago}"
+    left = room - cell_len(rest) - 3
+    if left >= min(len(source), 10):
+        return f"{_short(source, left)} · {rest}"
+    return rest if cell_len(rest) <= room else ago if cell_len(ago) <= room else ""
 
 
 def _cell(text: str | None) -> str:

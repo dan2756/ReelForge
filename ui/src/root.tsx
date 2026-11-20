@@ -11,6 +11,10 @@ import type { Init } from "./dashboard/types"
 import { SetupApp, type SetupInit } from "./setup/App"
 import { toasts } from "./ui/Panels"
 
+/** How the terminal is drawn on (main.tsx). Ctrl+C is the window's own key, nothing takes the keyboard by itself, and
+ * an error is never OpenTUI's developer console over the window: what failed says so in a pop-up (Bridge.failed). */
+export const RENDERER = { exitOnCtrlC: false, autoFocus: false, targetFps: 30, openConsoleOnError: false } as const
+
 /** The Python sides the window has started: the one it shows, and earlier ones still finishing a read. */
 export class Sides {
   active: Bridge | null = null
@@ -25,12 +29,15 @@ export class Sides {
     private log?: string,
   ) {}
 
-  /** Start a Python side for a screen ("dashboard" or "setup"), on a profile (undefined: the launcher's). */
+  /** Start a Python side for a screen ("dashboard" or "setup"), on a profile (undefined: the launcher's). The
+   * dashboard's sends nothing until the window says it is listening (DashboardApp calls ready): it is quick enough
+   * to send the picked video's caption and its first pop-ups before the window has drawn itself, and those are
+   * heard only by a window that is already listening. */
   async open<T>(screen: string, opts: object, profile?: string): Promise<{ bridge: Bridge; init: T }> {
     const env = { ...this.env, ...(profile !== undefined ? { REELFORGE_PROFILE: profile } : {}) }
     const bridge = new Bridge({ env, log: this.log })
     try {
-      const init = await bridge.start<T>(screen, opts)
+      const init = await bridge.start<T>(screen, screen === "dashboard" ? { ...opts, ready: true } : opts)
       return { bridge, init }
     } catch (e) {
       bridge.kill()
@@ -88,6 +95,8 @@ export function Root({ sides, first, quit }: { sides: Sides; first: View; quit: 
   const nav: Nav = useMemo(
     () => ({
       profile: async (key: string, tab?: string) => {
+        // (a Python side takes a moment to start: say that the click was heard)
+        toasts.add({ body: "Opening that profile…", timeout: 2 })
         try {
           const next = await sides.open<Init>("dashboard", { tab, switched: true }, key)
           sides.adopt(next.bridge)
@@ -100,6 +109,7 @@ export function Root({ sides, first, quit }: { sides: Sides; first: View; quit: 
         if (view.kind !== "dashboard") return
         const here = view.init.profile.key
         const opts = { start: "onboard", new: mode === "new", embedded: true }
+        toasts.add({ body: "Opening the channel's questions…", timeout: 2 })
         try {
           const next = await sides.open<SetupInit>("setup", opts, here)
           sides.adopt(next.bridge)

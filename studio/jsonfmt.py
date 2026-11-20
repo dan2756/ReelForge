@@ -27,6 +27,6 @@ def dumps(obj, indent: int = 0) -> str:
 
 
 def write(path, obj) -> None:
-    from pathlib import Path
+    from .paths import write_atomic
 
-    Path(path).write_text(dumps(obj) + "\n", encoding="utf-8", newline="\n")
+    write_atomic(path, dumps(obj) + "\n")

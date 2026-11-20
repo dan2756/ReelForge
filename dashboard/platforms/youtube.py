@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sqlite3
+
+from .. import db
 from . import public
 from .base import Account, Platform, Post
 
@@ -16,4 +19,8 @@ class YouTube(Platform):
                   "likes of your latest 15 videos. No login needed.")
 
     def fetch(self) -> tuple[Account, list[Post]]:
-        return public.youtube(self.public_handle)
+        try:  # when each video was last read: the ones read longest ago get their turn first
+            last_read = db.last_read(self.key)
+        except sqlite3.Error:
+            last_read = {}
+        return public.youtube(self.public_handle, last_read)

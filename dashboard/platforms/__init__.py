@@ -1,4 +1,4 @@
-from .base import Account, Platform, PlatformError, Post, PublishItem
+from .base import AGAIN, KINDS, Account, Platform, PlatformError, Post, PublishItem, detail, explain, kind_of
 from .instagram import Instagram
 from .tiktok import TikTok
 from .x import X
@@ -16,4 +16,5 @@ def connected(every: dict[str, Platform], stored=frozenset()) -> dict[str, Platf
     return {key: p for key, p in every.items() if p.connected(stored)}
 
 
-__all__ = ["Account", "Platform", "PlatformError", "Post", "PublishItem", "ORDER", "build", "connected"]
+__all__ = ["AGAIN", "KINDS", "Account", "Platform", "PlatformError", "Post", "PublishItem", "ORDER", "build",
+           "connected", "detail", "explain", "kind_of"]

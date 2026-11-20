@@ -6,7 +6,7 @@ import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testin
 import { createRoot } from "@opentui/react"
 import type { Bridge } from "../src/bridge"
 import type { Init } from "../src/dashboard/types"
-import { Root, Sides } from "../src/root"
+import { RENDERER, Root, Sides } from "../src/root"
 import { SetupApp, type SetupInit } from "../src/setup/App"
 
 export interface Headless {
@@ -27,11 +27,47 @@ export async function headless(
   height: number,
   env: Record<string, string> = {},
 ): Promise<Headless> {
-  const sides = new Sides({ STUDIO_DRY_SYSTEM: "1", ...env }, "")
+  // Nothing on this computer changes, and the window doesn't listen for the browser extension unless `env` asks
+  // (REELFORGE_EXTENSION_PORT: "0", any free port). Both are said here, so a test's window is the same whatever the
+  // two variables are where the tests run: with the port set outside, every window of a set-up channel listened.
+  const sides = new Sides({ STUDIO_DRY_SYSTEM: "1", REELFORGE_EXTENSION_PORT: "off", ...env }, "")
   const opened = await sides.open<Init | SetupInit>(screen, options)
   const bridge = opened.bridge
   sides.adopt(bridge)
-  const t = await createTestRenderer({ width, height })
+  const t = await createTestRenderer({ ...RENDERER, width, height }) // as the real window's: Ctrl+C is a key, not the end
+  // A frame read while the renderer is writing the next one out is refused (OutputBusy, once in many runs on GitHub's
+  // machines). Waiting for it can't be done here: the renderer finishes on the event loop, which a read blocks (reading
+  // again for 200 ms still failed). The screen still shows the frame before then, so that is the one given: the last
+  // one read, at least as new as the end of the last settle(). Anything else it throws is the test's to see.
+  const busy = (e: unknown) => String((e as Error)?.message ?? e).includes("OutputBusy")
+  const chars = t.captureCharFrame
+  const spans = t.captureSpans
+  let lastChars: string | undefined
+  let lastSpans: ReturnType<typeof spans> | undefined
+  t.captureCharFrame = () => {
+    try {
+      return (lastChars = chars())
+    } catch (e) {
+      if (lastChars === undefined || !busy(e)) throw e
+      return lastChars
+    }
+  }
+  t.captureSpans = () => {
+    try {
+      return (lastSpans = spans())
+    } catch (e) {
+      if (lastSpans === undefined || !busy(e)) throw e
+      return lastSpans
+    }
+  }
+  const remember = () => {
+    try {
+      lastChars = chars()
+      lastSpans = spans()
+    } catch (e) {
+      if (!busy(e)) throw e
+    }
+  }
   const exits: { code: number; result?: object }[] = []
   const quit = (code = 0, result?: object) => void exits.push({ code, result })
   const root = createRoot(t.renderer)
@@ -41,6 +77,7 @@ export async function headless(
     for (let i = 0; i < 3; i++) await t.renderOnce()
     await Bun.sleep(ms)
     for (let i = 0; i < 3; i++) await t.renderOnce()
+    remember()
   }
   return {
     t,

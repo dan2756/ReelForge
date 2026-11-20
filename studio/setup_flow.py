@@ -73,12 +73,13 @@ def plan() -> list[Item]:
         items.append(Item("blender", f"Blender {BLENDER_VERSION}", why3d, False, note, 400, default=want_blender))
 
     ffmpeg = tools.find_ffmpeg()
-    if ffmpeg:
+    if ffmpeg and tools.has_ffprobe(ffmpeg):
         items.append(Item("ffmpeg", "ffmpeg", "turns the frames and sound into your video", True, _where(ffmpeg)))
-    else:
+    else:   # also an ffmpeg without its ffprobe (a setup that stopped between the two): setup gets both again
         source, mb = tools.ffmpeg_source()
         items.append(Item("ffmpeg", "ffmpeg", "turns the frames and sound into your video", False,
-                          f"about {mb} MB from {source}", mb))
+                          f"about {mb} MB from {source}" + (" (the ffmpeg here has no ffprobe)" if ffmpeg else ""),
+                          mb))
 
     gone = [n for n, m in sounds.missing() if m["source"] == "mixkit"]
     total = sounds.mixkit_count()
@@ -126,6 +127,7 @@ def apply(item: Item, progress=None) -> str:
     if item.key == "ffmpeg":
         return f"ffmpeg ready ({P.rel(tools.install_ffmpeg(progress))})"
     if item.key == "sounds":
+        sounds.note_kit_list()
         failed = sounds.fetch_mixkit(progress=progress)
         if failed:
             raise RuntimeError(f"{len(failed)} sounds didn't download ({', '.join(failed[:3])}). Run setup again "

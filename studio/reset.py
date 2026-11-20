@@ -28,6 +28,10 @@ there. It renames the folder into the Recycle Bin and writes the bin's record of
 delete calls quietly delete a folder too big for the bin for good. A test copy (TEST-COPY.txt) or STUDIO_DRY_SYSTEM=1
 leaves the computer's settings alone; a git copy of ReelForge (one you work on) can't be uninstalled from inside.
 
+Neither can reach into your browser. With a browser connected to the extension (docs/EXTENSION.md), each says the
+one thing that leaves for you to do there, before and after: connect it again after a reset, remove the extension
+yourself after an uninstall.
+
 Standard library only.
 """
 
@@ -57,6 +61,15 @@ BIN = "Recycle Bin" if P.WINDOWS else "Trash"
 BOOTSTRAP_MARK = "reelforge-bootstrap"       # the same as studio.generate.BOOTSTRAP_MARK: first-time setup's to replace
 INNO_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{39D29FF3-A243-4140-8CD2-E69CC877A496}_is1"
 EMPTY = {".gitkeep", "README.md"}            # what a fresh download's episodes/, completed videos/ and research/ hold
+# With a browser connected to the extension: what a reset and an uninstall leave for you to do in it, as each says
+# it before and after (and only then: browsers_connected).
+EXTENSION_RESET = (" The browser extension stays in your browser, and has to be connected again afterwards.",
+                   "Your browser is no longer connected to the extension: connect it again on Publish, or with "
+                   "reelforge extension pair.")
+EXTENSION_UNINSTALL = (" Uninstalling can't take the extension out of your browser: remove it yourself, on your "
+                       "browser's extensions page.",
+                       "Uninstalling didn't take the extension out of your browser: remove it yourself, on your "
+                       "browser's extensions page.")
 
 
 def _same(a: Path, b: Path) -> bool:
@@ -104,12 +117,16 @@ def fmt_size(n: int) -> str:
 def _move(src: Path, dst: Path, wait: float = 10) -> str | None:
     """Rename src to dst (the same drive, so nothing is copied), trying again for a few seconds while something has
     it open. Returns what went wrong, or None."""
-    dst.parent.mkdir(parents=True, exist_ok=True)
     end = time.monotonic() + wait
     while True:
         try:
+            # (Making the folder it goes into is part of the move: "backups" being a file is an answer like any
+            # other, not a traceback that leaves a reset half started.)
+            dst.parent.mkdir(parents=True, exist_ok=True)
             os.rename(src, dst)
             return None
+        except (FileExistsError, NotADirectoryError) as e:   # a file where a folder goes: no wait changes that
+            return e.strerror or str(e)
         except OSError as e:
             if time.monotonic() >= end:
                 return e.strerror or str(e)
@@ -125,22 +142,44 @@ def _prune(folder: Path) -> None:
             pass
 
 
-def _move_all(moves: list[tuple[Path, Path]], made: Path) -> tuple[list[str], bool]:
+def _put_back(moved: list[tuple[Path, Path]], made: Path) -> list[str]:
+    """Move back each (from, to) that was moved, the last first, taking it out of moved once it's back, and remove the
+    empty folders made for them under `made`. Returns what couldn't be put back."""
+    problems = []
+    for back, now in reversed(list(moved)):
+        if _move(now, back, wait=30):
+            problems.append(f"{P.rel(back)} couldn't be put back: it's in {now}")
+        else:
+            moved.remove((back, now))
+    _prune(made)
+    return problems
+
+
+def _move_all(moves: list[tuple[Path, Path]], made: Path,
+              moved: list[tuple[Path, Path]] | None = None) -> tuple[list[str], bool]:
     """Rename each (from, to) in turn, all or nothing: when one can't be done, the ones already done go back where
     they were and the empty folders made for them under `made` are removed. Returns (what went wrong, whether
-    everything is where it was before)."""
-    done: list[tuple[Path, Path]] = []
-    for src, dst in moves:
-        err = _move(src, dst)
-        if err is None:
-            done.append((src, dst))
-            continue
-        problems = [f"{P.rel(src)} is in use ({err})"]
-        for back, now in reversed(done):
-            if _move(now, back, wait=30):
-                problems.append(f"{P.rel(back)} couldn't be put back: it's in {now}")
-        _prune(made)
-        return problems, len(problems) == 1
+    everything is where it was before). moved: kept up to date with what is moved now. Stopped part way (Ctrl+C
+    while it waits for a file in use, or a fault of its own), it puts back what it had moved before it lets the
+    stop go on, and moved then holds what couldn't be put back, for the caller to go by."""
+    done = moved if moved is not None else []
+    current: tuple[Path, Path] | None = None
+    try:
+        for src, dst in moves:
+            current = (src, dst)
+            err = _move(src, dst)
+            if err is None:
+                done.append((src, dst))     # recorded before it stops being current: a stop between the two
+                current = None              # still finds it in one or the other
+                continue
+            current = None
+            problems = [f"{P.rel(src)} is in use ({err})", *_put_back(done, made)]
+            return problems, len(problems) == 1
+    except BaseException:
+        if current and current not in done and not os.path.lexists(current[0]) and os.path.lexists(current[1]):
+            done.append(current)   # stopped just as that one moved
+        _put_back(done, made)
+        raise
     return [], True
 
 
@@ -162,6 +201,18 @@ def _stamp() -> str:
 def git_copy() -> bool:
     """A git copy of ReelForge (one being worked on): uninstall refuses, so nobody loses their work."""
     return (ROOT / ".git").exists()
+
+
+def browsers_connected() -> int:
+    """How many browsers are connected to the extension, counted as dashboard/extension_api.py counts them: the
+    entries under "paired" in dashboard/data/extension.json, one file for every channel of this folder. 0 while
+    there is no such file or it can't be read. Only the number is used: nothing in the file is ever shown."""
+    try:
+        store = json.loads((ROOT / "dashboard" / "data" / "extension.json").read_text(encoding="utf-8"))
+    except Exception:   # whatever is wrong with it (brackets nested too deep is a RecursionError, not a ValueError):
+        return 0        # a move, a reset and an uninstall count the browsers before anything else, and must go on
+    listed = store.get("paired") if isinstance(store, dict) else None
+    return len([b for b in listed if isinstance(b, dict)]) if isinstance(listed, list) else 0
 
 
 def confirm_word(profile: profiles.Profile | None = None) -> str:
@@ -202,10 +253,11 @@ def reset_items() -> list[tuple[Path, str]]:
 def reset_keeps() -> tuple[str, str]:
     """What a factory reset leaves where it is, the dialog's and the command's last word on it: (the gist, the rest)."""
     rest = " (episodes and completed videos), and so do Blender, ffmpeg and the sounds, so nothing is downloaded again."
+    again = EXTENSION_RESET[0] if browsers_connected() else ""   # its connections go into the backup with the stats
     if profiles.extra():
         return "Your first channel's videos stay where they are", rest + (" Your other channels go into the backup "
-                                                                          "whole, videos included.")
-    return "Your videos stay where they are", rest
+                                                                          "whole, videos included.") + again
+    return "Your videos stay where they are", rest + again
 
 
 def bootstrap_note(when: str, backup: str) -> str:
@@ -214,8 +266,9 @@ def bootstrap_note(when: str, backup: str) -> str:
             f"# {KIT_NAME} (reset, not set up yet)\n\n"
             f"This folder is **{KIT_NAME}**, a kit for making faceless short-form videos: 2D videos drawn in code with "
             "a voiceover and captions (the default), or 3D videos Blender builds and renders. Python mixes the sound, "
-            f"ffmpeg encodes, an automatic QA gate checks every video, and the {KIT_NAME} window (type `reelforge` in a terminal) is where the person you're working "
-            "with sees their stats and posts from, by hand.\n\n"
+            f"ffmpeg encodes, an automatic QA gate checks every video, and the {KIT_NAME} window (type `reelforge` in "
+            "a terminal) is where the person you're working with sees their stats and posts from. Never post, upload "
+            "or send anything yourself, and never start a post for them.\n\n"
             f"It was reset to brand-new on {when}, and first-time setup hasn't run again yet. Ask them to open "
             f"{KIT_NAME} (type `reelforge`) and answer first-time setup's questions. Or run the interview here in "
             "chat: `reelforge channel --questions` lists the questions as JSON; write their answers to a file and "
@@ -261,6 +314,18 @@ def _wait_for_reads(say, wait: float = 120) -> None:
         time.sleep(1)
 
 
+def _stats_on_again() -> bool:
+    """Put the hourly stats read back on after a reset or a move that took it off and then didn't happen. False: it
+    couldn't be."""
+    from . import stats_schedule
+
+    try:
+        stats_schedule.enable()
+        return stats_schedule.status() == "on"
+    except Exception:
+        return False
+
+
 @dataclass
 class Done:
     """What a factory reset or an uninstall did, for the window's notice or the terminal."""
@@ -268,6 +333,7 @@ class Done:
     problems: list[str] = field(default_factory=list)
     where: Path | None = None   # the backup (reset) or the kept videos (uninstall)
     unchanged: bool = False     # it stopped before changing anything (or put back what it had moved)
+    in_use: bool = True         # what stopped it is a file in use: closing the other windows is what to do
 
 
 def factory_reset(say=print) -> Done:
@@ -275,16 +341,69 @@ def factory_reset(say=print) -> Done:
     off the hourly stats read (first-time setup turns it on again). The first channel's videos stay."""
     done = Done()
     items = reset_items()
+    browsers = browsers_connected()   # counted now: the file that lists them is about to go into the backup
     dest = _free(BACKUPS, f"factory-reset-{_stamp()}")
+    # Where the backup goes, made (or found) before anything changes, the hourly read included. "backups" being a
+    # file was found item by item, after ten seconds of trying, and said to be the first item "in use", with
+    # closing the other windows as what to do.
+    try:
+        if items:
+            BACKUPS.mkdir(exist_ok=True)
+    except FileExistsError:
+        done.problems = [f'"backups" in the {KIT_NAME} folder is a file, not a folder, and the reset keeps what it '
+                         "moves in a folder by that name. Rename that file or move it somewhere else, then try again."]
+    except OSError as e:
+        done.problems = ['The folder "backups", where the reset keeps what it moves, couldn\'t be made in the '
+                         f"{KIT_NAME} folder ({e.strerror or e})."]
+    if done.problems:
+        done.unchanged, done.in_use = True, False
+        return done
     for path, what in items:
         say(f"  {P.rel(path)}: {what}")
-    _wait_for_reads(say)
-    done.problems, done.unchanged = _move_all([(p, dest / p.relative_to(ROOT)) for p, _ in items], dest)
+    # The hourly stats read goes off before anything moves, and a read it has just started is stopped with it: one
+    # starting up as the stats go into the backup would make a new, empty store where they were.
+    job_was_on, unchecked, moved = False, "", []
+    try:
+        try:
+            from . import stats_schedule
+
+            if stats_schedule.status() == "on":
+                job_was_on = True
+                say("  " + stats_schedule.disable())
+        except Exception as e:  # the scheduler isn't there: nothing to turn off
+            unchecked = f"The hourly stats read couldn't be checked ({e})."
+        _wait_for_reads(say)
+        done.problems, done.unchanged = _move_all([(p, dest / p.relative_to(ROOT)) for p, _ in items], dest, moved)
+    except BaseException:
+        # Stopped in between (Ctrl+C while it waited for a stats read to finish or for a file in use, or a fault of
+        # its own): _move_all has put back what it had moved. With all of it back, the reset didn't happen, and the
+        # hourly read is not left off with nothing said. With some of it still in the backup, the read stays off: run
+        # over a folder half reset, it could make a new, empty stats store. The backup's README says what is there.
+        if job_was_on and not moved:
+            _stats_on_again()
+        if moved:
+            _readme(dest, [(src, what) for src, what in items if any(src == m for m, _ in moved)], stopped=True,
+                    read_was_on=job_was_on)
+        try:
+            BACKUPS.rmdir()   # when this made it for the backup, and it's empty again
+        except OSError:
+            pass
+        raise
     if done.problems:
         try:
             BACKUPS.rmdir()   # when this made it for the backup, and it's empty again
         except OSError:
             pass
+        if moved:   # some of it couldn't be put back: the read stays off, as above
+            _readme(dest, [(src, what) for src, what in items if any(src == m for m, _ in moved)], stopped=True,
+                    read_was_on=job_was_on)
+            if job_was_on:
+                done.problems.append("the hourly stats read stays off until those are back: reelforge stats on turns "
+                                     "it on again")
+        elif job_was_on and not _stats_on_again():   # nothing was reset, so the hourly read goes on as it did
+            done.problems.append("the hourly stats read is off now, and couldn't be turned on again: reelforge stats "
+                                 "on does it")
+            done.unchanged = False
         return done
     done.where = dest
     if any(p.name in ("CLAUDE.md", "AGENTS.md") for p, _ in items):
@@ -292,22 +411,34 @@ def factory_reset(say=print) -> Done:
         for name in ("CLAUDE.md", "AGENTS.md"):
             if not (ROOT / name).exists():
                 (ROOT / name).write_text(note, encoding="utf-8", newline="\n")
-    if dest.is_dir():
-        (dest / "README.txt").write_text(
-            f"{KIT_NAME}'s factory reset moved these here on {datetime.now():%d %B %Y at %H:%M}:\n\n"
-            + "".join(f"  {p.relative_to(ROOT)}  ({what})\n" for p, what in items)
-            + f"\nTo undo it, close {KIT_NAME} and move them back into the {KIT_NAME} folder, to the same places.\n"
-              "The log-ins in dashboard/data/browser are your own: delete this folder once you're sure you don't "
-              "need it.\n", encoding="utf-8")
-    try:
-        from . import stats_schedule
-
-        if stats_schedule.status() == "on":
-            say("  " + stats_schedule.disable())
-    except Exception as e:  # the scheduler isn't there: nothing to turn off
-        done.lines.append(f"The hourly stats read couldn't be checked ({e}).")
+    _readme(dest, items)
+    if unchecked:
+        done.lines.append(unchecked)
     done.lines.append(f"Everything it cleared is in {P.rel(dest)}." if items else "There was nothing to clear.")
+    if browsers:
+        done.lines.append(EXTENSION_RESET[1])
     return done
+
+
+def _readme(dest: Path, items: list[tuple[Path, str]], stopped: bool = False, read_was_on: bool = False) -> None:
+    """The backup's README.txt: what is in it, and how to undo the reset. stopped: the reset was stopped part way,
+    and these are what couldn't be put back. read_was_on: the hourly stats read was on before the reset (which left
+    it off): only then does undoing it turn the read on again, never one you had off."""
+    if not dest.is_dir():
+        return
+    head = (f"{KIT_NAME}'s factory reset was stopped part way on {datetime.now():%d %B %Y at %H:%M}, and couldn't "
+            "put these back:" if stopped else
+            f"{KIT_NAME}'s factory reset moved these here on {datetime.now():%d %B %Y at %H:%M}:")
+    try:
+        (dest / "README.txt").write_text(
+            head + "\n\n" + "".join(f"  {p.relative_to(ROOT)}  ({what})\n" for p, what in items)
+            + f"\nTo undo it, close {KIT_NAME} and move them back into the {KIT_NAME} folder, to the same places.\n"
+            + (("Then turn the hourly stats read on again with: reelforge stats on\n" if read_was_on else "")
+               if stopped else
+               "The log-ins in dashboard/data/browser are your own: delete this folder once you're sure you don't "
+               "need it.\n"), encoding="utf-8")
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------- uninstall: what goes, and what's kept
@@ -408,7 +539,8 @@ def uninstall_info() -> dict:
     plan = keep_plan()
     return {
         "root": str(ROOT), "bin": BIN, "keep_to": str(keep_folder()), "git": git_copy(),
-        "test": P.test_copy(), "system": system_sentence(),
+        # (the extension in a connected browser is one more thing outside the folder, and the one left to you)
+        "test": P.test_copy(), "system": system_sentence() + (EXTENSION_UNINSTALL[0] if browsers_connected() else ""),
         "videos": sum(k.files for k in plan), "videos_size": fmt_size(sum(k.bytes for k in plan)),
         "outside": [str(f) for k in plan for f in k.outside],
         "channels": [{"name": k.profile.name, "folders": [P.rel(f) for f in k.folders]} for k in plan if k.folders],
@@ -627,6 +759,7 @@ def uninstall(keep: bool = True, say=print) -> Done:
     """Everything uninstall does, in order: the videos you're keeping (when they can't all be moved out, it stops
     there and nothing has changed), the computer's settings, then the folder."""
     done = Done()
+    browsers = browsers_connected()   # counted now: the file that lists them goes to the bin with the folder
     if keep:
         say("Keeping your videos and channels...")
         kept = keep_videos(say)
@@ -638,9 +771,12 @@ def uninstall(keep: bool = True, say=print) -> Done:
     off, binned = system_items()
     say(f"Turning off {_and(off)}, and putting {_and(binned)} in the {BIN}...")
     done.problems += system_off(say)
+    _wait_for_reads(say)   # the hourly read is off now; one still under way finishes before its folder goes
     err = bin_folder(done.where, say)
     if err:
         done.problems.append(err)
+    elif browsers:
+        done.lines.append(EXTENSION_UNINSTALL[1])
     return done
 
 
@@ -697,7 +833,7 @@ def _report(done: Done, title: str) -> None:
         print(f"\n{title} didn't finish:")
     for p in done.problems:
         print(f"  {p}")
-    if done.unchanged:
+    if done.unchanged and done.in_use:
         print(f"Close every other {KIT_NAME} window (and wait for a stats read to finish), then try again.")
 
 
@@ -772,7 +908,8 @@ def reset_main(argv: list[str]) -> int:
         if not _ask(confirm_word()):
             print("Nothing was changed.")
             return 1
-    done = factory_reset(say=lambda line: None)   # the list above says what moves
+    # The list above says what moves. A wait for a stats read to finish is said: it can take two minutes.
+    done = factory_reset(say=lambda line: print(line.strip()) if "Waiting for a stats read" in line else None)
     _report(done, "The factory reset")
     if done.problems:
         return 1

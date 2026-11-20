@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 from pathlib import Path
 
 from . import BLENDER_VERSION, KIT_NAME, KIT_VERSION
@@ -84,6 +85,65 @@ def window_check(r: Report, fix: str) -> None:
         r.add(FAIL, "Window", f"Bun {version}, but OpenTUI isn't installed: {fix}")
 
 
+def extension_check(r: Report) -> None:
+    """The browser extension that fills in upload pages (docs/EXTENSION.md): its folder is here with the id
+    ReelForge lets in, and the file of connected browsers can be read. It is optional, so the worst this row ever
+    is, is a warning."""
+    try:
+        from dashboard import extension_api
+
+        fine, said = extension_api.check()
+        r.add(OK if fine else WARN, "Browser extension", said)
+    except Exception as e:  # the window's own packages are missing, say: the rows above have that
+        r.add(WARN, "Browser extension", f"couldn't be checked ({type(e).__name__}: {e})")
+
+
+def youtube_api_check(r: Report) -> None:
+    """Posting to YouTube through its own API (docs/YOUTUBE-API.md): which channels have given ReelForge the client
+    file of their Google Cloud project. The row says that and nothing from the file: not a value, and not the words
+    of an error that might carry one. It is optional, so no client anywhere is a pass, and the worst this row ever
+    is, is a warning."""
+    try:
+        from dashboard.platforms import youtube_api
+
+        from . import profiles
+
+        every = profiles.every()
+        have, without, unread = [], [], []
+        for p in every:
+            path = p.data / "youtube_api.json"   # each channel's own (youtube_api.store_path)
+            try:
+                store = json.loads(path.read_text("utf-8"))
+                if not isinstance(store, dict):
+                    raise ValueError
+            except FileNotFoundError:
+                without.append(p.name)
+                continue
+            except (OSError, ValueError):
+                unread.append(p)
+                continue
+            client = all(youtube_api._usable(store.get(key)) for key in ("client_id", "client_secret"))
+            (have if client else without).append(p.name)
+        if unread:
+            # With several channels the command says whose file it means (-p): left to itself it works on the
+            # first channel, and would give that one a client it never asked for.
+            files = ", ".join(P.rel(p.data / "youtube_api.json") for p in unread)
+            again = " and ".join(f"reelforge{'' if len(every) == 1 else f' -p {p.flag}'} youtube-api client FILE"
+                                 for p in unread)
+            r.add(WARN, "YouTube API", f"{files} can't be read, so ReelForge has no client there. Give it the client "
+                                       f"file again: {again}")
+        elif not have:
+            r.add(OK, "YouTube API", "not set up (optional: docs/YOUTUBE-API.md)")
+        else:
+            whose = "" if len(every) == 1 else f" for {', '.join(have)}"
+            rest = f" (not set up for {', '.join(without)})" if without else ""
+            # (the guide beside it: it is where the window's side of this is said, as far as it has got)
+            r.add(OK, "YouTube API", f"client on file{whose}{rest}. You connect in ReelForge's window each time it "
+                                     "opens (docs/YOUTUBE-API.md)")
+    except Exception as e:  # the window's own packages are missing, say: the rows above have that
+        r.add(WARN, "YouTube API", f"couldn't be checked ({type(e).__name__})")
+
+
 def checks(render_test: bool = False, quiet: bool = False) -> Report:
     """Every check, as a Report (printed line by line unless quiet)."""
     r = Report(quiet)
@@ -130,13 +190,12 @@ def checks(render_test: bool = False, quiet: bool = False) -> Report:
     if not ffmpeg:
         r.add(FAIL, "ffmpeg", f"not found: {fix}, or set STUDIO_FFMPEG")
     else:
-        probe = tools.ffprobe_for(ffmpeg)
         try:
             out = subprocess.run([ffmpeg, "-version"], capture_output=True, text=True, timeout=30).stdout
             ver = out.split("\n", 1)[0].replace("ffmpeg version ", "").split(" ")[0]
-            has_probe = Path(probe).exists() or shutil.which("ffprobe")
+            has_probe = tools.has_ffprobe(ffmpeg)
             r.add(OK if has_probe else FAIL, "ffmpeg", f"{ver} ({P.rel(Path(ffmpeg))})" +
-                  ("" if has_probe else "; ffprobe is missing next to it"))
+                  ("" if has_probe else f"; ffprobe is missing next to it: {fix}"))
         except (OSError, subprocess.SubprocessError) as e:
             r.add(FAIL, "ffmpeg", f"won't run: {e}")
 
@@ -175,8 +234,11 @@ def checks(render_test: bool = False, quiet: bool = False) -> Report:
           " (keep 10 GB free: a render needs about 1 GB per video until it is shipped)"))
 
     if S.onboarded():
-        s = S.load()
-        r.add(OK, "First-time setup", f"done for {s['channel']['name']} (my-studio/studio.toml)")
+        try:
+            s = S.load()
+            r.add(OK, "First-time setup", f"done for {s['channel']['name']} (my-studio/studio.toml)")
+        except S.SettingsError as e:     # a hand edit with a typo in it: every command that reads it stops there
+            r.add(FAIL, "Settings", str(e))
         for name in ("CLAUDE.md", "AGENTS.md"):
             f = P.ROOT / name
             gen = f.exists() and "generated by" in f.read_text(encoding="utf-8", errors="replace")[:400]
@@ -186,18 +248,38 @@ def checks(render_test: bool = False, quiet: bool = False) -> Report:
         r.add(WARN, "First-time setup", "not done yet: run reelforge channel (or channel" +
               (".bat)" if P.WINDOWS else ".sh)"))
 
+    def window_settings(cfg: Path) -> bool:
+        """A profile's config.toml reads (or isn't there yet). One with a typo stops ReelForge's window from opening
+        on that profile, so it's a failed check that names the file."""
+        try:
+            if cfg.exists():
+                tomllib.loads(cfg.read_text(encoding="utf-8"))
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
+            r.add(FAIL, "Settings", f"{cfg} has a typo ({e}): ReelForge can't open until it's fixed in a text editor")
+            return False
+        return True
+
     dash_cfg = P.DASHBOARD / "config.toml"
-    if P.DASHBOARD.exists():
+    if P.DASHBOARD.exists() and window_settings(dash_cfg):
         r.add(OK if dash_cfg.exists() else WARN, "Dashboard", "configured" if dash_cfg.exists() else
               "not configured yet (first-time setup writes dashboard/config.toml)")
     from . import profiles
 
     more = profiles.extra()
+    for p in more:
+        try:
+            S.load(p.settings)
+        except S.SettingsError as e:
+            r.add(FAIL, "Settings", str(e))
+        window_settings(p.config)
     if more:  # the other channels, each set up in its own folder (studio/profiles.py)
         unset = [p.name for p in more if not p.onboarded]
         r.add(WARN if unset else OK, "Profiles", f"{len(more) + 1} channels: " +
               ", ".join(p.name for p in profiles.every()) +
               (f" ({', '.join(unset)} not set up yet: its Settings in the profile menu)" if unset else ""))
+
+    extension_check(r)
+    youtube_api_check(r)
 
     if render_test and not r.failed:
         if "2d" in kinds:
@@ -264,7 +346,16 @@ def render_check(r: Report) -> None:
                                      f"(my-studio/render-test.jpg)")
         else:
             log = tmp / "build" / "build.log"
-            tail = log.read_text(encoding="utf-8", errors="replace")[-600:] if log.exists() else res.stdout[-600:]
-            r.add(FAIL, "Render test", "Blender couldn't build or render the example:\n" + tail)
+            built = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
+            if res.returncode and "[build_scene] saved" in built:
+                # Blender did its part. What stopped is in the command's own output: the check of episode.json
+                # (its FAIL rows), the still, or the text drawn over it (a failed step prints the end of its log).
+                said = (res.stdout or "") + (res.stderr or "")
+                rows = [line for line in said.splitlines() if "[FAIL]" in line]
+                r.add(FAIL, "Render test", "Blender built the example, then a later step stopped:\n" +
+                      ("\n".join(rows) or said[-1500:]))
+            else:
+                r.add(FAIL, "Render test", "Blender couldn't build or render the example:\n" +
+                      (built or res.stdout)[-600:])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

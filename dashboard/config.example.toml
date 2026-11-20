@@ -8,6 +8,9 @@ refresh_minutes = 30           # how often ReelForge re-reads your stats while i
 default_tags = ""              # up to 5 hashtags for new videos, e.g. "#cooking #recipe #easyrecipe";
                                # (first-time setup fills this in; the caption rules come from my-studio/studio.toml)
 
+# A folder somewhere else on a Windows PC is written with forward slashes: videos_dir = "C:/Users/you/Videos"
+# (a backslash inside "double quotes" means something else in this file). Save this file as UTF-8.
+
 # Where the video pipeline's finished videos are: ReelForge lists <episodes_dir>/<id>/final/<id>.mp4 and
 # <completed_dir>/<folder>/<video>.mp4 on the Publish tab, and fills the caption in from each episode's episode.json.
 # episodes_dir = "../episodes"

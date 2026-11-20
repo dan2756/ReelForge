@@ -8,6 +8,7 @@ them on screen is tested in ui/test/settings.test.tsx."""
 from __future__ import annotations
 
 import io
+import sqlite3
 import tempfile
 import unittest
 from contextlib import ExitStack, redirect_stdout
@@ -103,6 +104,51 @@ class RowsTest(unittest.TestCase):
         self.assertEqual((row["label"], row["on"], row["switch"], row["value"]), ("Background refresh", True, True, ON))
 
 
+class KeptNoteTest(unittest.TestCase):
+    """Beside Background refresh's "on" or "off": how the hourly job's last read of this channel's stats went, and
+    their daily backup (SettingsTab.kept_note: what went wrong, what went fine). Neither has a window of its own, so
+    this is where a problem with either shows."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(setattr, db, "_path", db._path)
+        db.init(Path(tmp.name) / "stats.db")
+
+    def test_it_says_when_the_job_last_read_and_when_the_stats_were_backed_up(self):
+        self.assertEqual(SettingsTab.kept_note(), ([], []))  # neither has happened yet: nothing to say
+        db.set_meta("job", {"at": db.now_iso(), "read": "TikTok, YouTube", "problems": 0})
+        db.compact(min_hours=0)
+        self.assertEqual(SettingsTab.kept_note(), ([], ["read 0m ago", "backed up 0m ago"]))
+
+    def test_a_read_with_a_problem_and_a_failed_backup_show(self):
+        db.set_meta("job", {"at": db.now_iso(), "read": "TikTok", "problems": 2})
+        db.compact(min_hours=0)
+        self.assertEqual(SettingsTab.kept_note(), (["its last read, 0m ago, had a problem (see data/refresh.log)"],
+                                                   ["backed up 0m ago"]))
+        db.set_meta("job", {"at": db.now_iso(), "read": "TikTok", "problems": 0})
+        with mock.patch.object(Path, "mkdir", side_effect=OSError(28, "No space left on device")):
+            self.assertIsNone(db.daily_backup())
+        self.assertEqual(SettingsTab.kept_note(), (["the daily backup failed 0m ago (No space left on device)"],
+                                                   ["read 0m ago"]))
+        self.assertTrue(db.last_backup()["ok"])  # the last good one is still known
+        db.daily_backup()  # it works again
+        self.assertEqual(SettingsTab.kept_note(), ([], ["read 0m ago", "backed up 0m ago"]))
+
+    def test_a_job_thats_switched_off_has_nothing_to_say(self):
+        """Its last read stayed on the row, "had a problem" and all, for as long as Background refresh was off.
+        The backup is the window's doing as well, so that is still said."""
+        db.set_meta("job", {"at": db.now_iso(), "read": "TikTok", "problems": 2})
+        db.compact(min_hours=0)
+        self.assertEqual(SettingsTab.kept_note(job_on=False), ([], ["backed up 0m ago"]))
+        db.set_meta("job", {"at": db.now_iso(), "read": "TikTok", "problems": 0})
+        self.assertEqual(SettingsTab.kept_note(job_on=False), ([], ["backed up 0m ago"]))
+
+    def test_nothing_when_the_stats_cant_be_looked_at(self):
+        with mock.patch.object(db, "get_meta", side_effect=sqlite3.OperationalError("database is locked")):
+            self.assertEqual(SettingsTab.kept_note(), ([], []))
+
+
 class ToggleTest(unittest.TestCase):
     def test_the_switch_asks_for_on_or_off_and_a_button_for_the_other_one(self):
         done = []
@@ -156,12 +202,35 @@ class WindowTest(unittest.TestCase):
             w.call("settings_toggle", "stats", False)
             self.assertTrue(w.until(lambda: (self.stats_row() or {}).get("on") is False, 10), w.sent("settings"))
             self.assertFalse(job["on"])
-            self.assertEqual(self.stats_row()["value"], OFF)
+            # (the sentence comes first; after it, that the stats were backed up when this window opened)
+            self.assertTrue(self.stats_row()["value"].startswith(OFF), self.stats_row()["value"])
             self.assertIn("Background stats are off.", w.toasts())
             w.call("settings_toggle", "stats", True)
             self.assertTrue(w.until(lambda: (self.stats_row() or {}).get("on") is True, 10), w.sent("settings"))
             self.assertTrue(job["on"])
-            self.assertEqual(self.stats_row()["value"], ON)
+            self.assertTrue(self.stats_row()["value"].startswith(ON), self.stats_row()["value"])
+            self.assertFalse(self.stats_row()["problem"])
+            # Once the hourly job has read and the stats have been backed up, the row says so after "on". A backup
+            # that failed comes first, where a narrow panel can't cut it off.
+            db.set_meta("job", {"at": db.now_iso(), "read": "TikTok", "problems": 0})
+            db.set_meta("backup", {"ok": db.now_iso()})
+            w.call("update_settings")
+            self.assertTrue(w.until(lambda: (self.stats_row() or {}).get("value", "").endswith("ago"), 10))
+            self.assertEqual(self.stats_row()["value"], f"{ON} · read 0m ago · backed up 0m ago")
+            db.set_meta("backup", {"ok": db.now_iso(), "failed": db.now_iso(), "why": "Permission denied"})
+            w.call("update_settings")
+            self.assertTrue(w.until(lambda: (self.stats_row() or {}).get("problem"), 10))
+            self.assertEqual(self.stats_row()["value"],
+                             f"the daily backup failed 0m ago (Permission denied) · {ON} · read 0m ago")
+            # ... in the row that was there, not one of its own: the tab is as tall as it was.
+            self.assertEqual([r["key"] for r in w.view("settings")["computer"]], ["stats", "command", "icon", "folder"])
+            # Switched off after a read that had a problem: the row says it's off, not what the job last did.
+            db.set_meta("job", {"at": db.now_iso(), "read": "TikTok", "problems": 1})
+            db.set_meta("backup", {"ok": db.now_iso()})
+            w.call("settings_toggle", "stats", False)
+            self.assertTrue(w.until(lambda: (self.stats_row() or {}).get("on") is False, 10), w.sent("settings"))
+            self.assertEqual((self.stats_row()["value"], self.stats_row()["problem"]),
+                             (f"{OFF} · backed up 0m ago", False))
 
     def test_copy_prompt_for_your_ai_copies_the_prompt_first_time_setup_gave_you(self):
         with mock.patch.object(desktop, "copy", return_value=True) as copy:

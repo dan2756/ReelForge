@@ -16,7 +16,7 @@
 import { createCliRenderer, type CliRenderer } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import { writeFileSync } from "node:fs"
-import { Sides, Root, type View } from "./root"
+import { RENDERER, Sides, Root, type View } from "./root"
 import type { Init } from "./dashboard/types"
 import { SetupApp, type SetupInit } from "./setup/App"
 import type { Bridge } from "./bridge"
@@ -69,7 +69,7 @@ async function main(): Promise<void> {
     fail(sides.active, e)
     return
   }
-  renderer = await createCliRenderer({ exitOnCtrlC: false, autoFocus: false, targetFps: 30 })
+  renderer = await createCliRenderer({ ...RENDERER })
   sides.onFailed = (bridge) => {
     if (leaving) return
     renderer?.destroy()

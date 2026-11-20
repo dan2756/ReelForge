@@ -31,6 +31,7 @@ import errno
 import json
 import os
 import re
+import shlex
 import time
 import tomllib
 import unicodedata
@@ -47,6 +48,20 @@ DELETED = "deleted-profile"  # in backups/: deleted-profile-<its folder>-<date>/
 WINDOWS = "windows"         # in a profile's dashboard/data/: a lock for each ReelForge window showing it
 READ_LOCK = "stats.refresh.lock"  # ... and the one a ReelForge holds while it reads its stats (dashboard/sync.py)
 _STAMP = re.compile(r"-(\d{4}-\d{2}-\d{2}-\d{6})(?: \d+)?$")  # the date at the end of a deleted profile's backup
+_PLAIN = re.compile(r"[A-Za-z0-9._/-]+")  # a folder ReelForge named (slug_for): Profile.flag writes it bare
+# What bash or PowerShell changes between double quotes (PowerShell takes curly quotes for straight ones; on macOS and
+# Linux a backslash, which a folder's name can have there, and a !, which an interactive bash or zsh, the Mac's, takes
+# for a history event; on Windows a backslash is what separates folders, and double quotes keep it): Profile.kept_flag
+_NOT_IN_DOUBLE_QUOTES = '"$`“”„' + ("" if os.sep == "\\" else "\\!")
+# What bin/reelforge.cmd, which every Windows terminal runs reelforge through (Git Bash's too), changes in what it's
+# given whatever its quotes: a ! (its delayed expansion), a %NAME% (cmd /c, which PowerShell and Git Bash run it with),
+# and, as PowerShell and Git Bash hand it a word with no space in it without its quotes, an &, |, < or >, which ends
+# the command there, and a ^, which cmd takes for the character after it (a ( or ) in a word is cmd's as it is).
+# generate.context: a channel's notes then run ReelForge's Python straight.
+NOT_THROUGH_REELFORGE_CMD = "!%&|<>^"
+# What a command printed for you to run there and then can't name a folder with in every shell, those included:
+# Profile.flag names it by its number in the list instead
+_UNQUOTABLE = _NOT_IN_DOUBLE_QUOTES + NOT_THROUGH_REELFORGE_CMD
 
 
 def _same(a: Path, b: Path) -> bool:
@@ -57,7 +72,7 @@ def _toml(path: Path) -> dict:
     try:
         with path.open("rb") as f:
             data = tomllib.load(f)
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):     # (one saved as UTF-16: Notepad's "Unicode")
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -84,6 +99,58 @@ class Profile:
     def slug(self) -> str:
         """The short name typed after -p: its folder's name ("cool-epic-facts"), or the first one's name as one."""
         return slug_for(self.name) if self.main else self.folder.name
+
+    @property
+    def flag(self) -> str:
+        """What a command ReelForge prints for you or your AI to run now puts after -p: 1 for the first profile (always
+        first in the list), another's key, profiles/<folder> (as kept_flag writes it). Its folder's name alone can
+        find another profile (find): all digits it is a number in the list (-p 3 is the third, whatever its folder),
+        and "Night Physics 🌙"'s folder, night-physics, is the short name of a first channel called "Night Physics",
+        which comes first; the first one can be renamed so after its notes are written, too. A word with a / in it is
+        only ever a folder. A folder with a character in it that quotes don't keep as it is in every shell (" $ ` % !,
+        a backslash on macOS or Linux, and the curly quotes PowerShell takes for straight ones; reelforge.cmd drops a !
+        whatever its quotes, and gets & | < > ^ without them from PowerShell: NOT_THROUGH_REELFORGE_CMD) goes by its
+        number in the list, while that finds it: a number is only right as long as no channel is added or deleted, so
+        it's never written into a file that's kept (kept_flag)."""
+        if self.main:
+            return "1"
+        key = self.key
+        if any(c in key for c in _UNQUOTABLE):
+            n = next((i for i, p in enumerate(every(), 1) if _same(p.folder, self.folder)), 0)
+            found = find(str(n)) if n else None
+            if found is not None and _same(found.folder, self.folder):
+                return str(n)
+        return self.kept_flag
+
+    @property
+    def kept_flag(self) -> str:
+        """What -p gets in a command written into a file that's kept, the channel's notes for your AI above all: 1 for
+        the first profile, which is always first, and another's folder, profiles/<folder>, never its number in the list,
+        which another channel added or deleted changes without those notes being written again. A folder ReelForge
+        named (slug_for) goes as it is. One renamed by hand with another character in it (a space: "night-physics -
+        Copy", the copy Explorer makes) goes in double quotes, which keep it one word in bash, PowerShell and cmd
+        alike, a % (and on Windows a !) included, as your AI runs them. One with a character in it that bash or
+        PowerShell changes in double quotes (" $ `, on macOS or Linux a backslash, and a ! that an interactive bash or
+        zsh takes for a history event, and the curly quotes PowerShell takes for straight ones) goes in single quotes,
+        which keep it as it is (a ' in it as bash writes it: shlex.quote). On Windows, bin/reelforge.cmd changes a !, a
+        %NAME%, and (handed them without their quotes) & | < > ^, whatever its quotes (NOT_THROUGH_REELFORGE_CMD): a
+        command for such a folder runs ReelForge's Python straight."""
+        return "1" if self.main else self.kept_path()
+
+    def kept_path(self, *parts: str, sep: str = "/") -> str:
+        """A path in its folder, profiles/<folder>/<parts> (sep between them: a backslash in a Windows command), as a
+        command written into a file that's kept passes it: one word, in the quotes kept_flag puts its folder in (parts
+        are ReelForge's own, like episodes and <id>, which your AI fills in between those quotes). The first profile's
+        paths start at the ReelForge folder: its parts alone, as they are."""
+        if self.main:
+            return sep.join(parts)
+        key = self.key
+        path = sep.join([key.replace("/", sep), *parts])
+        if _PLAIN.fullmatch(key):
+            return path
+        if any(c in key for c in _NOT_IN_DOUBLE_QUOTES):
+            return shlex.quote(path)
+        return f'"{path}"'
 
     @property
     def name(self) -> str:
@@ -189,19 +256,23 @@ def others(*besides: Profile | None) -> list[str]:
 
 
 def get(key: str | os.PathLike | None) -> Profile | None:
-    """The profile a key (".", "profiles/<name>" or a folder's full path) names, if there's one there."""
-    key = str(key or "").strip()
+    """The profile a key (".", "profiles/<name>" or a folder's full path) names, if there's one there: as given first
+    (on macOS and Linux a folder renamed by hand can end in a space, "sea " beside a "sea"), else without the spaces
+    round it."""
+    given = str(key or "")
+    key = given.strip()
     if not key:
         return None
     if key in (".", "./", ".\\"):
         return main()
-    path = Path(key)
-    if not path.is_absolute():
-        path = ROOT / path
-    if _same(path, ROOT):
-        return main()
-    if (path / MARK).is_file():
-        return Profile(path)
+    for k in dict.fromkeys((given, key)):
+        path = Path(k)
+        if not path.is_absolute():
+            path = ROOT / path
+        if _same(path, ROOT):
+            return main()
+        if (path / MARK).is_file():
+            return Profile(path)
     return None
 
 
@@ -218,7 +289,8 @@ def use(profile: Profile) -> None:
 def find(word: str) -> Profile | None:
     """The profile typed after -p: its number in the list (1 is the first), its name or short name (any case), the
     start of either when only one profile starts that way, or its folder."""
-    word = (word or "").strip()
+    given = word or ""
+    word = given.strip()
     if not word:
         return None
     every_ = every()
@@ -226,7 +298,7 @@ def find(word: str) -> Profile | None:
         n = int(word)
         return every_[n - 1] if 1 <= n <= len(every_) else None
     if word in (".", "./", ".\\") or "/" in word or "\\" in word:
-        return get(word)
+        return get(given)       # (as typed first: a folder's name can end in a space)
     low = word.casefold()
     for p in every_:
         if low in (p.name.casefold(), p.slug.casefold()):
@@ -250,7 +322,7 @@ def of(path: str | os.PathLike) -> Profile:
 def last() -> Profile:
     """The profile the window showed last (the one it opens on), else the first."""
     try:
-        key = (FOLDER / LAST).read_text(encoding="utf-8").strip()
+        key = (FOLDER / LAST).read_text(encoding="utf-8").strip("\r\n")    # (a folder's name can end in a space)
     except OSError:
         return main()
     return get(key) or main()

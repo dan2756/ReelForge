@@ -14,7 +14,8 @@ type Fmt = (n: number | null | undefined) => string
 
 /** A card's three lines. As the card narrows, the margin goes first, then the " 24h" after each change, then the
  * changes get shorter (+1.03K -> +1K), then the totals (12.9K -> 13K), then the lining up, then the changes, then the
- * labels. */
+ * labels: first of the line they don't fit on ("followers", the longest: a tile's first number is its followers, as
+ * its big number is), then of them all. */
 export function cardLines(
   values: Record<string, number | null | undefined>,
   changes: Record<string, number | null | undefined>,
@@ -53,7 +54,8 @@ export function cardLines(
     const lines = build(...step)
     if (lines.every((l) => segsLen(l) <= width)) return lines
   }
-  return build(shortNum, null, "", 0, false, false).map((l) => (segsLen(l) <= width ? l : []))
+  const labelled = build(shortNum, null, "", 0, false)
+  return build(shortNum, null, "", 0, false, false).map((bare, i) => (segsLen(labelled[i]!) <= width ? labelled[i]! : segsLen(bare) <= width ? bare : []))
 }
 
 /** Each line of the text, wrapped at spaces to fit the width (a word too long for it is left out). */

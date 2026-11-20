@@ -35,6 +35,8 @@ class Window:
     def __init__(self, cfg: dict, platforms: dict, **options) -> None:
         self.loop = Recorder()
         self.svc = Dashboard(self.loop)
+        # No test listens on the ports your own ReelForge and browser use: none at all, unless it asks (0: any).
+        self.svc.extension_ports = options.pop("extension_ports", ())
         self.init = self.svc.open(cfg, platforms, {"demo": True, **options})
         self.pump(0.3)
 

@@ -26,12 +26,12 @@ ReelForge folder.
 | Kokoro voice (2D videos) | `tools/kokoro` (setup downloads the model) and the `kokoro-onnx` package (`requirements-voice.txt`) | |
 | A browser (2D videos and stats) | Edge, Chrome or Chromium (`studio/browsers.py`) | |
 | ffmpeg + ffprobe | `tools/ffmpeg` (setup downloads it: gyan.dev on Windows, Martin Riedl's builds on macOS, BtbN's on Linux), or winget, Homebrew or PATH | env `STUDIO_FFMPEG` |
-| Python 3.11+ with numpy, Pillow, Jinja2 | the kit's `.venv` (setup makes it, on macOS/Linux from `tools/python` if there was no recent Python) | |
+| Python 3.11+ with numpy, Pillow, Jinja2 | the kit's `.venv` (setup makes it, on macOS/Linux from `tools/python` if there was no Python 3.11.4 or newer) | |
 | Bun, for ReelForge's window (OpenTUI, `ui/`) | `tools/bun` (setup downloads it from Bun's GitHub releases), or a Bun of your own on the PATH | env `REELFORGE_BUN` |
 | Fonts | Georgia + Consolas on Windows; Georgia + JetBrains Mono on macOS; DejaVu serif + JetBrains Mono on Linux | env `STUDIO_FONTS_DIR` |
 
-`python -m studio doctor` checks all of them. Eevee renders about 1.5-4 frames a second at 1080×1920 on a fast
-GPU (an RTX 3090 does a 67 s video in 10-25 minutes); slower GPUs take longer. On a Mac, Blender renders with Metal:
+`python -m studio doctor` checks all of them. A render takes about 15 minutes to an hour on a fast graphics card,
+depending on the scene, and the render step says how long is left as it goes. On a Mac, Blender renders with Metal:
 Apple Silicon is quick, an Intel Mac much slower.
 
 ## Make an episode
@@ -49,9 +49,9 @@ From the kit folder:
 
 | Step | What it does | Output |
 |---|---|---|
-| `build` | Blender builds the world and applies the effect from the spec | `build/scene.blend`, `build/series.json`, `build/build.log` |
-| `stills` | renders preview frames (`--stills 1,15,31`, in seconds) | `build/stills/s_####.jpg` |
-| `render` | renders every frame up to `render_until` (resumable: rerun to continue) | `build/frames/f_####.jpg` |
+| `build` | Blender builds the world and applies the effect from the spec, then the spec is linted (see below) | `build/scene.blend`, `build/series.json`, `build/scene.json`, `build/build.log` |
+| `stills` | renders preview frames afresh (`--stills 1,15,31`, in seconds, or `--stills lines`), then draws the text and HUD over them | `build/stills/s_####.jpg`, `build/preview/p_*.jpg` and `sheet_N.jpg` |
+| `render` | renders every frame up to `render_until`, saying how far it is (rerun to continue; see below) | `build/frames/f_####.jpg`, `build/render.log` |
 | `post` | `audio` + `video` + `cover` + `caption` + `qa` | `final/<id>.mp4`, `final/cover.jpg`, `final/caption*.txt`, `build/qa/` |
 | `qa` | `pipeline/qa.py` checks the **final mp4** (see below). Fails the run on any FAIL | `build/qa/report.md`, `qa.json`, `sheet_*.jpg` |
 | `ship` | `deliver` + `clean` + `check` | |
@@ -59,12 +59,57 @@ From the kit folder:
 | `clean` | deletes `build/frames`, `stills`, `preview` (about 0.6 GB a video) once delivered | |
 | `check` | confirms ReelForge's Publish tab lists the video with the right caption and hashtags, and prints each platform's post (same as `python -m studio publish-check episodes\<id>`) | |
 
-**If you change the world or the effect, delete `build/frames` before rendering again.** Rendering skips frames
-that already exist.
+Where an episode stands, one line each for the scene, the frames, the mix, the video, QA, the review and the
+delivered copy: `.venv\Scripts\python pipeline\make_episode.py episodes\<id> --status`.
 
-Check the text and HUD at chosen seconds without rendering the whole video (needs `build/frames` for those
-seconds, or shows black behind the text):
-`.venv\Scripts\python pipeline\post\compose.py episodes\<id> --preview 2,19,47,64` -> `build/preview/`.
+### Frames and stills belong to a scene
+
+Blender skips a picture that is already on disk. So the build step writes a stamp of the scene it built
+(`build/scene.json`): the `episode.json` keys the world and the effect read, the scene code, and the Blender that
+ran it. Story lines, the HUD, sound cues and captions are not in it, so changing those never costs a render. The
+pipeline uses the stamp so that **nothing needs deleting by hand**:
+
+- **Stills** are rendered afresh every time, and stills of an older scene are removed.
+- **Render** keeps the frames that are there, which is how a stopped render carries on, but only while they are
+  this scene's. If the scene was built again since, it stops, names what changed, and asks:
+  `--rerender all` renders every frame again, `--rerender 12-15.5,31-33` renders only those seconds and keeps the
+  rest (also the way to redo one shot), and `--keep-frames` keeps them all when the change did not touch the
+  picture. A re-render that is stopped carries on as well: run the same command again, and what it has rendered
+  since is not deleted a second time.
+- The frames a killed render leaves empty or cut off are deleted before a render and before the video step.
+- While it renders, a line every 20 seconds gives the frames done, the seconds a frame takes and the time left.
+  When Blender exits, the step checks that every frame is there, goes back once for any that are missing, and
+  fails by naming them if they still are. It does not go back when the scene was built again while it rendered,
+  or for frames that were deleted while it rendered: it names them and leaves them to the next run.
+  `build/render.log` keeps every run, and a step that fails prints the end of its log.
+- `stills` and `render` stop when `episode.json` or the scene code changed after the last build, because Blender
+  would show the scene as it was. Build first. To carry on a render with the scene as it was built, because a
+  module it shares with another episode is being edited or the kit was updated, add `--as-built`: it says what
+  changed, and the frames on disk are still checked against that scene. They also stop after a build that did not
+  finish: `build/scene.blend` is then an older scene, whatever is in the folders beside it.
+- The video and cover steps refuse frames of an older scene, and name the frames that are missing before ffmpeg
+  starts. The video is written beside the last one and replaces it only when it is whole, so a failed step leaves
+  the earlier video as it was.
+
+### Check before the render
+
+- **The lint.** The build ends with it and the render starts with it
+  (`.venv\Scripts\python pipeline\qa.py episodes\<id> --lint`): the placeholder title, story lines that overlap,
+  are too short, run past the end or wrap past 2 rows, gaps in the HUD's chapters, a HUD number the scene does not
+  give, a sound that is not in the manifest, a cover frame past `render_until`, the caption rules, and a warning
+  for each line that is on screen across a cut. A FAIL stops the build. Before the render every row is shown, and
+  only the two that the frames depend on stop it (the HUD's numbers and the cover frame): text and sound can be
+  worked on while it renders.
+- **The lines against their shots.** `--steps stills --stills lines` renders the seconds where a line most often
+  ends up over the wrong shot: each line just after it fades in and just before it goes, both sides of each cut,
+  and the cover's frame. `build/preview/sheet_N.jpg` shows them with the text on, 12 to a sheet, each labelled with
+  its second and its line.
+- **Any second.** `.venv\Scripts\python pipeline\post\compose.py episodes\<id> --preview 2,19,47,64` draws the
+  text and HUD over the rendered frame, or the still of that frame, or grey when there is neither, into
+  `build/preview/`.
+- **The sound.** The audio step ends with the sound checks on `build/audio.wav`
+  (`pipeline\qa.py episodes\<id> --audio`), so a mix that would fail QA stops `post` before the video is made.
+  A WARN, such as a key hit that cannot be heard on its cue, does not stop it: the last line of the check names it.
 
 ### What QA checks
 
@@ -72,10 +117,18 @@ Streams (h264 1080×1920 30 fps yuv420p, AAC stereo 48 kHz), duration inside the
 no unintended black or frozen frames, the seamless loop (last frame = first frame) when `loop_to_start` is set,
 no clipping, loudness (integrated, loudest 3 s, true peak) against the channel's target, no unintended silence,
 no static or hiss, no loudness blasts as heard (A-weighted), no long sample piled on itself, key sound hits
-audible on cue, story lines (no overlaps, no line under 1.2 s, none wrapping past 2 lines), the HUD covering the
-timeline and readable on every background (4.5:1 contrast), and the caption rules. Intended exceptions come from
-the spec (`blackout`, glitches with `stutter`, the rewind hold) or an optional
-`"qa": {"black_ok": [[t0, t1]], "frozen_ok": [...], "silent_ok": [...]}` block.
+audible on cue, the title (not new-episode's placeholder), story lines (no overlaps, no line under 1.2 s, none
+wrapping past 2 lines), the cover frame inside the render, the HUD covering the timeline and readable on every
+background (4.5:1 contrast), and the caption rules. Intended exceptions come from the spec (`blackout`, glitches
+with `stutter`, the rewind hold) or an optional
+`"qa": {"black_ok": [[t0, t1]], "frozen_ok": [...], "silent_ok": [...], "pop_ok": [...]}` block.
+
+Three checks only warn, to say where your review should look: frames that pop (one to four frames unlike the
+frames either side of them), a story line on screen across a cut, and the subject mostly behind the HUD or a line.
+
+`deliver` also refuses when the video is newer than `build/qa/review.md`: that review is of an earlier cut.
+`clean` refuses while the copy in `completed videos` is an earlier cut than `final/<id>.mp4`, as it is for a remake
+that is not delivered yet: the frames on disk are then the new cut's.
 
 ## Captions
 
@@ -146,8 +199,7 @@ display), `subjects` (growable subjects), `space` (Earth, Moon, a shattering Moo
 angular size), `crowd` (instanced crowds of tens of thousands with poses and reactions) and `globe` (the real
 Earth from 50 m to 30,000 km, city lights, and `population_within()` for "how many people live within X km").
 
-Every module's docstring lists its spec keys and the series and events it returns. `--steps stills` skips stills
-that already exist, so delete `build/stills` before re-rendering stills after a change.
+Every module's docstring lists its spec keys and the series and events it returns.
 
 ## Adding a new scene
 
@@ -173,5 +225,7 @@ in `assets/sfx/<source>/`, add a manifest entry with its licence, then use its n
 ## Publishing
 
 ReelForge lists every `episodes/<id>/final/<id>.mp4` on its Publish tab (`reelforge publish`), newest first,
-with the post pre-filled from `episode.json`'s `title` and the hashtag line of `final/caption.txt`. You post by
-hand from there; nothing in the kit posts for you.
+with the post pre-filled from `episode.json`'s `title` and the hashtag line of `final/caption.txt`. You post from
+there, and every post starts with your own press: by hand, with the browser extension ([EXTENSION.md](EXTENSION.md))
+or, for YouTube, through its own API ([YOUTUBE-API.md](YOUTUBE-API.md)). Nothing in the pipeline posts, and no
+command does.

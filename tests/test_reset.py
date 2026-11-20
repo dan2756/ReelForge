@@ -1,14 +1,17 @@
 """Factory reset and uninstall (studio/reset.py), in a scratch ReelForge folder: what each moves and where, that videos
 are kept and nothing is deleted, that something in use leaves everything as it was, the name you type, a git copy
-refusing to uninstall, and the window asking for either (the launcher does it at once, or never). The Settings tab
-itself is tested in ui/test/settings.test.tsx."""
+refusing to uninstall, the window asking for either (the launcher does it at once, or never), and what each says
+about the browser extension while a browser is connected. The Settings tab itself is tested in
+ui/test/settings.test.tsx."""
 
 import io
 import json
 import os
 import re
+import shutil
 import time
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest import mock
 
 from studio import generate, profiles, reset
@@ -83,6 +86,38 @@ class FactoryReset(ResetScratch):
         self.assertFalse(profiles.main().onboarded)
         self.assertEqual(profiles.every(), [profiles.main()])
 
+    def test_the_browsers_connected_to_the_extension_go_to_the_backup_with_the_stats(self):
+        from dashboard import extension_api
+
+        store = extension_api.store_path()
+        self.assertEqual(store, self.root / "dashboard" / "data" / "extension.json")
+        extension_api.change_store(lambda s: s["paired"].append({"install": "chrome", "name": "Chrome"}))
+        kept = store.read_text(encoding="utf-8")
+        done = self.quiet(reset.factory_reset)
+        self.assertEqual((done.where / "dashboard/data/extension.json").read_text(encoding="utf-8"), kept)
+        self.assertFalse(store.exists())
+        self.assertEqual(extension_api.read_store(), {})  # brand-new: no browser is connected, until one connects again
+
+    def test_each_channels_connection_to_youtubes_api_goes_to_the_backup_too(self):
+        from dashboard import db
+        from dashboard.platforms import youtube_api
+
+        with mock.patch.object(db, "_path", None):  # no stats open: the profile says whose file it is
+            first = youtube_api.store_path()
+            youtube_api.set_defaults("unlisted")
+            profiles.use(self.second)
+            second = youtube_api.store_path()
+            youtube_api.set_defaults("public")
+            profiles.use(profiles.main())
+            self.assertEqual((first, second), (self.root / "dashboard/data/youtube_api.json",
+                                               self.root / "profiles/cool-epic-facts/dashboard/data/youtube_api.json"))
+            done = self.quiet(reset.factory_reset)
+            for rel, privacy in (("dashboard/data/youtube_api.json", "unlisted"),
+                                 ("profiles/cool-epic-facts/dashboard/data/youtube_api.json", "public")):
+                self.assertEqual(json.loads((done.where / rel).read_text(encoding="utf-8")), {"privacy": privacy})
+            self.assertFalse(first.exists() or second.exists())
+            self.assertEqual(youtube_api.status()["state"], "off")  # brand-new: nothing is connected
+
     def test_a_second_reset_leaves_the_bootstrap_notes_where_they_are(self):
         self.quiet(reset.factory_reset)
         items = [p.name for p, _ in reset.reset_items()]
@@ -110,6 +145,260 @@ class FactoryReset(ResetScratch):
         self.assertFalse((self.root / "backups").exists())
         self.assertTrue(profiles.main().onboarded)
         self.assertIsNone(reset.pending())   # it isn't tried again by surprise the next time ReelForge opens
+
+    def with_the_hourly_read(self, move=None, on_again=("on", "on")):
+        """A factory reset of a folder whose hourly stats read is on, with a stand-in for the scheduler. Returns
+        what the scheduler was asked in turn, each with whether the stats were still in place, and the reset."""
+        asked = []
+
+        def note(what, answer):
+            asked.append((what, (self.root / "dashboard/data/stats.db").is_file()))
+            return answer
+
+        with mock.patch("studio.stats_schedule.status", side_effect=on_again), \
+                mock.patch("studio.stats_schedule.disable", lambda: note("off", "Background stats are off.")), \
+                mock.patch("studio.stats_schedule.enable", lambda: note("on", "on again")), \
+                mock.patch.object(reset, "_wait_for_reads", lambda say: note("wait", None)), \
+                mock.patch.object(reset, "_move", side_effect=move or REAL_MOVE):
+            done = self.quiet(reset.factory_reset)
+        return asked, done
+
+    def test_the_hourly_read_goes_off_before_anything_moves(self):
+        """Turned off only afterwards, a read the scheduler started in between opened the stats as they went into
+        the backup, or made a new, empty store where they had been."""
+        asked, done = self.with_the_hourly_read()
+        self.assertEqual(asked, [("off", True), ("wait", True)])   # and it stays off: first-time setup turns it on
+        self.assertEqual(done.problems, [])
+        self.assertFalse((self.root / "dashboard/data").exists())
+
+    def test_one_that_changed_nothing_puts_the_hourly_read_back(self):
+        asked, done = self.with_the_hourly_read(move=in_use("dashboard/data"))
+        self.assertEqual(asked, [("off", True), ("wait", True), ("on", True)])
+        self.assertEqual((len(done.problems), done.unchanged), (1, True))
+        asked, done = self.with_the_hourly_read(move=in_use("dashboard/data"), on_again=("on", "off"))
+        self.assertIn("the hourly stats read is off now", done.problems[-1])   # it couldn't be: that is a change
+        self.assertFalse(done.unchanged)
+
+    def test_one_stopped_while_it_waited_for_a_stats_read_puts_the_hourly_read_back(self):
+        """Ctrl+C in the two minutes a read under way is given. The job was off already, nothing had been reset, and
+        nothing said so."""
+        asked = []
+
+        def stopped(say):
+            asked.append("wait")
+            raise KeyboardInterrupt
+
+        with mock.patch("studio.stats_schedule.status", return_value="on"), \
+                mock.patch("studio.stats_schedule.disable", lambda: asked.append("off") or "Background stats are off."), \
+                mock.patch("studio.stats_schedule.enable", lambda: asked.append("on") or "on again"), \
+                mock.patch.object(reset, "_wait_for_reads", stopped), self.assertRaises(KeyboardInterrupt):
+            self.quiet(reset.factory_reset)
+        self.assertEqual(asked, ["off", "wait", "on"])
+        self.assertTrue((self.root / "dashboard/data/stats.db").is_file())
+        self.assertFalse((self.root / "backups").exists())
+
+    def test_one_stopped_while_it_waited_for_a_file_in_use_puts_back_what_moved_then_the_hourly_read(self):
+        """Ctrl+C in the seconds the reset waits for a file another program has open, with the first items moved
+        already: they stayed in the backup, without its README, and the hourly read went on again over a folder half
+        reset (a read then could make a new, empty stats store)."""
+        before = sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob("*"))
+        asked, renames, real_rename = [], [], os.rename
+
+        def rename(src, dst):
+            renames.append(src)
+            if len(renames) == 2:   # the second item is open in another program...
+                raise PermissionError(13, "in use")
+            return real_rename(src, dst)
+
+        def sleep(seconds):         # ... and Ctrl+C comes as the reset waits for it
+            raise KeyboardInterrupt
+
+        with mock.patch("studio.stats_schedule.status", return_value="on"), \
+                mock.patch("studio.stats_schedule.disable", lambda: asked.append("off") or "off"), \
+                mock.patch("studio.stats_schedule.enable", lambda: asked.append("on") or "on"), \
+                mock.patch.object(reset, "_wait_for_reads", lambda say: asked.append("wait")), \
+                mock.patch.object(reset.os, "rename", rename), mock.patch.object(reset.time, "sleep", sleep), \
+                self.assertRaises(KeyboardInterrupt):
+            self.quiet(reset.factory_reset)
+        self.assertEqual(len(renames), 3)   # the first item, the second, and the first back
+        self.assertEqual(sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob("*")), before)
+        self.assertEqual(asked, ["off", "wait", "on"])   # nothing was reset: the read is back on
+
+    def test_a_ctrl_c_anywhere_in_the_moves_leaves_nothing_moved_unrecorded(self):
+        """Ctrl+C lands between any two steps. Between the end of a move and its being recorded, the folder it had
+        moved was neither put back nor in what the reset goes by: no README, and the hourly read back on over a
+        half-reset folder."""
+        import inspect
+        import sys
+
+        code = reset._move_all.__code__
+        lines, first = inspect.getsourcelines(reset._move_all)
+        start = first + next(i for i, ln in enumerate(lines) if ln.strip() == "try:")
+        stop = first + next(i for i, ln in enumerate(lines) if ln.strip().startswith("except BaseException"))
+        n = 0
+        while True:     # the n-th step of the moves (not of putting things back) is where Ctrl+C lands
+            n += 1
+            folder = self.root / f"try-{n}"
+            a, b = folder / "my-studio", folder / "research.md"
+            a.mkdir(parents=True)
+            (a / "answers.json").write_text("{}", encoding="utf-8")
+            b.write_text("notes", encoding="utf-8")
+            dest = folder / "backups" / "factory-reset-x"
+            moves, moved, seen = [(a, dest / "my-studio"), (b, dest / "research.md")], [], [0]
+
+            def local(frame, event, arg):
+                if event == "line" and start < frame.f_lineno < stop:
+                    seen[0] += 1
+                    if seen[0] == n:
+                        raise KeyboardInterrupt
+                return local
+
+            before = sys.gettrace()
+            sys.settrace(lambda frame, event, arg: local if frame.f_code is code else None)
+            try:
+                reset._move_all(moves, dest, moved)
+                stopped = False
+            except KeyboardInterrupt:
+                stopped = True
+            finally:
+                sys.settrace(before)
+            for src, dst in moves:      # each one where it was, or in what the reset goes by
+                self.assertEqual((src, dst) in moved, not os.path.lexists(src), (n, src, moved))
+                self.assertEqual(os.path.lexists(dst), not os.path.lexists(src), (n, src))
+            self.assertEqual(len(moved), len(set(moved)), moved)
+            if not stopped:             # every step has had its Ctrl+C
+                break
+        self.assertGreater(n, 6)
+
+    def test_one_stopped_part_way_that_cant_put_everything_back_leaves_the_hourly_read_off_and_says_why(self):
+        asked, tries = [], []
+        first = reset.reset_items()[0][0]
+
+        def move(src, dst, wait=10):
+            tries.append(src)
+            if len(tries) == 1:
+                return REAL_MOVE(src, dst, wait=0)
+            if len(tries) == 2:
+                raise KeyboardInterrupt
+            return "in use"   # the first item, on its way back
+
+        with mock.patch("studio.stats_schedule.status", return_value="on"), \
+                mock.patch("studio.stats_schedule.disable", lambda: asked.append("off") or "off"), \
+                mock.patch("studio.stats_schedule.enable", lambda: asked.append("on") or "on"), \
+                mock.patch.object(reset, "_wait_for_reads", lambda say: asked.append("wait")), \
+                mock.patch.object(reset, "_move", move), self.assertRaises(KeyboardInterrupt):
+            self.quiet(reset.factory_reset)
+        self.assertEqual(asked, ["off", "wait"])   # it stays off
+        [backup] = (self.root / "backups").iterdir()
+        readme = (backup / "README.txt").read_text(encoding="utf-8")
+        self.assertIn("factory reset was stopped part way on ", readme)
+        self.assertIn(f"  {first.relative_to(self.root)}  (", readme)
+        self.assertIn("reelforge stats on", readme)
+        # Said the same way when the reset stops on a file in use and one it moved can't go back.
+        shutil.move(str(backup / first.relative_to(self.root)), str(first))
+        shutil.rmtree(self.root / "backups")
+        tries.clear()
+
+        def stuck(src, dst, wait=10):
+            tries.append(src)
+            return REAL_MOVE(src, dst, wait=0) if len(tries) == 1 else "in use"
+
+        asked, done = self.with_the_hourly_read(move=stuck)
+        self.assertEqual([what for what, _ in asked], ["off", "wait"])
+        self.assertFalse(done.unchanged)
+        self.assertIn(f"{P.rel(first)} couldn't be put back", done.problems[1])
+        self.assertEqual(done.problems[-1], "the hourly stats read stays off until those are back: reelforge stats "
+                                            "on turns it on again")
+        [backup] = (self.root / "backups").iterdir()
+        self.assertIn("stopped part way", (backup / "README.txt").read_text(encoding="utf-8"))
+
+    def test_one_stopped_part_way_with_the_hourly_read_off_never_says_to_turn_it_on(self):
+        """The backup's README said "Then turn the hourly stats read on again with: reelforge stats on" whether the
+        read had been on or not: undoing the reset as it said turned on a read of your stats you had off."""
+        first = reset.reset_items()[0][0]
+        for stop in ("Ctrl+C", "a file in use"):
+            with self.subTest(stop=stop):
+                tries = []
+
+                def move(src, dst, wait=10):
+                    tries.append(src)
+                    if len(tries) == 1:
+                        return REAL_MOVE(src, dst, wait=0)
+                    if len(tries) == 2 and stop == "Ctrl+C":
+                        raise KeyboardInterrupt
+                    return "in use"     # the next item, or the first on its way back
+
+                asked, done = [], None
+                with mock.patch("studio.stats_schedule.status", return_value="off"), \
+                        mock.patch("studio.stats_schedule.disable", lambda: asked.append("off") or "off"), \
+                        mock.patch("studio.stats_schedule.enable", lambda: asked.append("on") or "on"), \
+                        mock.patch.object(reset, "_wait_for_reads", lambda say: None), \
+                        mock.patch.object(reset, "_move", move):
+                    try:
+                        done = self.quiet(reset.factory_reset)
+                    except KeyboardInterrupt:
+                        pass
+                [backup] = (self.root / "backups").iterdir()
+                readme = (backup / "README.txt").read_text(encoding="utf-8")
+                shutil.move(str(backup / first.relative_to(self.root)), str(first))   # as it was, for the next
+                shutil.rmtree(self.root / "backups")
+                self.assertEqual(asked, [])                 # off it was, and off it stays, with nothing said of it
+                if done is not None:
+                    self.assertFalse([p for p in done.problems if "hourly" in p], done.problems)
+                self.assertIn("factory reset was stopped part way on ", readme)
+                self.assertIn(f"  {first.relative_to(self.root)}  (", readme)
+                self.assertNotIn("stats", readme)
+
+    def test_backups_being_a_file_is_said_as_it_is_before_anything_changes(self):
+        """It was found item by item, after ten seconds of trying, and said to be the first item "in use", with
+        closing the other windows as what to do (and the hourly read was taken off and put back meanwhile)."""
+        (self.root / "backups").write_text("not a folder", encoding="utf-8")
+        before = sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob("*"))
+        tries = []
+        asked, done = self.with_the_hourly_read(move=lambda src, dst, wait=10: tries.append(src) or "in use")
+        self.assertEqual((asked, tries), ([], []))
+        self.assertEqual((done.problems, done.unchanged, done.in_use),
+                         (['"backups" in the ReelForge folder is a file, not a folder, and the reset keeps what it '
+                           "moves in a folder by that name. Rename that file or move it somewhere else, then try "
+                           "again."], True, False))
+        self.assertEqual(sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob("*")), before)
+        out = io.StringIO()
+        with mock.patch.object(reset, "_interactive", lambda: False), redirect_stdout(out):
+            self.assertEqual(reset.reset_main(["--yes"]), 1)
+        self.assertIn("The factory reset didn't happen, and nothing was changed:\n  \"backups\" in the ReelForge "
+                      "folder is a file", out.getvalue())
+        self.assertNotIn("Close every other ReelForge window (and wait", out.getvalue())
+
+    def test_a_file_where_a_folder_goes_isnt_waited_for(self):
+        (self.root / "dashboard" / "data2").write_text("a file", encoding="utf-8")
+
+        def said(folder: Path) -> str:   # what this system says when that folder can't be made (its own words)
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                return e.strerror or str(e)
+            self.fail(f"{folder} could be made")
+
+        started = time.monotonic()
+        self.assertEqual(REAL_MOVE(self.root / "research", self.root / "dashboard/data2/research"),
+                         said(self.root / "dashboard/data2"))
+        self.assertEqual(REAL_MOVE(self.root / "research", self.root / "dashboard/data2/x/research"),
+                         said(self.root / "dashboard/data2/x"))
+        if os.name != "nt":   # (Windows says "Cannot create a file when that file already exists" for both)
+            self.assertEqual(said(self.root / "dashboard/data2"), "File exists")
+            self.assertEqual(said(self.root / "dashboard/data2/x"), "Not a directory")
+        self.assertLess(time.monotonic() - started, 5)   # (it waits ten seconds for a file in use)
+        self.assertTrue((self.root / "research" / "ideas.md").is_file())
+
+    def test_from_the_command_line_a_wait_for_a_stats_read_is_said(self):
+        def waits(say):
+            say("  Waiting for a stats read to finish (at most 2 minutes)...")
+
+        out = io.StringIO()
+        with mock.patch.object(reset, "_wait_for_reads", waits), mock.patch.object(reset, "_interactive", lambda: False), \
+                redirect_stdout(out):
+            self.assertEqual(reset.reset_main(["--yes"]), 0)
+        self.assertIn("\nWaiting for a stats read to finish (at most 2 minutes)...\n", out.getvalue())
 
     def test_in_a_terminal_reelforge_opens_again_on_settings_after_one_that_changed_nothing(self):
         reset.request("reset")
@@ -157,6 +446,86 @@ class FactoryReset(ResetScratch):
         self.assertFalse(reset.matches(""))
 
 
+class WithABrowserConnected(ResetScratch):
+    """Neither can reach into the browser, so with a browser connected to the extension each says the one thing
+    left for you to do there, before and after. With none connected, neither says a word about it."""
+
+    HASH = "ab" * 32   # what the connections file keeps of a browser's token: never shown
+
+    def connect(self) -> None:
+        from dashboard import extension_api
+
+        extension_api.change_store(lambda s: s["paired"].append({"install": "chrome", "name": "Chrome on this PC",
+                                                                 "token_sha256": self.HASH}))
+
+    def said(self, fn, *args) -> str:
+        with redirect_stdout(io.StringIO()) as out:
+            fn(*args)
+        self.assertNotIn(self.HASH, out.getvalue())
+        return out.getvalue()
+
+    def reset_command(self) -> str:
+        with mock.patch.object(reset, "_interactive", return_value=False):
+            return self.said(reset.reset_main, ["--yes"])
+
+    def uninstall_command(self, binned: str | None = None) -> str:
+        keep = reset.keep_folder()
+        self.addCleanup(lambda: __import__("shutil").rmtree(keep, ignore_errors=True))
+        with mock.patch.object(reset, "system_off", return_value=[]), \
+                mock.patch.object(reset, "bin_folder", return_value=binned):
+            return self.said(reset.uninstall_main, ["--yes"])
+
+    def test_a_reset_says_to_connect_it_again(self):
+        self.assertEqual(reset.browsers_connected(), 0)
+        self.connect()
+        self.assertEqual(reset.browsers_connected(), 1)
+        before = " The browser extension stays in your browser, and has to be connected again afterwards."
+        self.assertTrue("".join(reset.reset_keeps()).endswith(before))   # the dialog's and the command's last word
+        said = self.reset_command()
+        self.assertIn(f"videos included.{before} Close every other ReelForge window first.\n", said)
+        self.assertIn("\nYour browser is no longer connected to the extension: connect it again on Publish, or with "
+                      "reelforge extension pair.\n", said)
+        self.assertEqual(reset.browsers_connected(), 0)   # its file went into the backup with the stats
+
+    def test_a_reset_that_changed_nothing_leaves_the_browser_connected_and_says_nothing_after(self):
+        self.connect()
+        with mock.patch.object(reset, "_move", side_effect=in_use("dashboard/data")):
+            said = self.reset_command()
+        self.assertIn("didn't happen, and nothing was changed", said)
+        self.assertNotIn("no longer connected", said)
+        self.assertEqual(reset.browsers_connected(), 1)
+
+    def test_an_uninstall_says_to_remove_the_extension_yourself(self):
+        self.connect()
+        before = (" Uninstalling can't take the extension out of your browser: remove it yourself, on your browser's "
+                  "extensions page.")
+        self.assertTrue(reset.uninstall_info()["system"].endswith(f"are left alone.{before}"))   # (STUDIO_DRY_SYSTEM)
+        said = self.uninstall_command()
+        self.assertIn(before + "\n", said)
+        self.assertTrue(said.endswith("\nUninstalling didn't take the extension out of your browser: remove it "
+                                      "yourself, on your browser's extensions page.\n"))
+
+    def test_an_uninstall_that_didnt_finish_doesnt_say_it_is_over(self):
+        self.connect()
+        said = self.uninstall_command(binned="couldn't move it to the Trash")
+        self.assertIn("Uninstalling didn't finish:", said)
+        self.assertNotIn("didn't take the extension out", said)
+
+    def test_with_no_browser_connected_neither_mentions_the_extension(self):
+        self.assertNotIn("extension", "".join(reset.reset_keeps()))
+        self.assertNotIn("extension", reset.uninstall_info()["system"])
+        self.assertNotIn("extension", self.uninstall_command())
+        self.assertNotIn("extension", self.reset_command())
+        # ... and a connections file with nobody in it, or one that can't be read, connects nothing
+        store = self.root / "dashboard" / "data" / "extension.json"
+        # (brackets nested too deep for json to follow raise a RecursionError, which stopped all three commands)
+        for text in ('{"app_id": "x", "paired": []}', '{"paired": "chrome"}', "[]", "{not json", "[" * 200_000):
+            store.parent.mkdir(parents=True, exist_ok=True)
+            store.write_text(text, encoding="utf-8")
+            self.assertEqual(reset.browsers_connected(), 0, text[:40])
+        self.assertNotIn("extension", reset.uninstall_info()["system"])
+
+
 class Uninstall(ResetScratch):
     def test_it_says_what_goes_and_where_the_videos_go(self):
         info = reset.uninstall_info()
@@ -185,6 +554,16 @@ class Uninstall(ResetScratch):
         self.assertTrue((keep / "README.txt").is_file())
         self.assertFalse((self.root / "episodes/ep01_duck").exists())
         self.assertTrue((self.root / "dashboard/data/stats.db").is_file())   # goes to the bin with the folder
+
+    def test_a_read_under_way_finishes_before_the_folder_goes(self):
+        """The hourly read is off by then (which stops one it had just started); a read still under way, a window's
+        last one say, has the stats open and works by the folder's name."""
+        order = []
+        with mock.patch.object(reset, "system_off", side_effect=lambda say=print: order.append("off") or []), \
+                mock.patch.object(reset, "_wait_for_reads", side_effect=lambda say: order.append("wait")), \
+                mock.patch.object(reset, "bin_folder", side_effect=lambda kept, say=print: order.append("bin")):
+            self.quiet(reset.uninstall, False)
+        self.assertEqual(order, ["off", "wait", "bin"])
 
     def test_a_video_that_cant_be_moved_out_stops_it_and_changes_nothing(self):
         binned, turned_off = [], []

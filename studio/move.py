@@ -11,10 +11,16 @@ folder that syncs) moves there in one step on the same drive, so nothing is copi
      full first, so they still name the same folders afterwards.
   2. The folder is renamed. A running program's folder can't be renamed on Windows, so there a small window does it
      once ReelForge has closed, waiting while anything still has a file in it open; elsewhere it's done at once, and
-     the .venv's links to a Python inside the folder (setup's private one in tools/python) follow it.
+     the .venv's links to a Python inside the folder (setup's private one in tools/python) follow it. There the
+     hourly stats read is taken off the computer's schedule first, and a read it has just started is stopped: one
+     starting up in the old folder as it is renamed would put a stub of that folder back.
   3. What named the old place follows it (`reelforge move --finish`, run from the new place): the reelforge command,
      ReelForge's icon, Windows Terminal's ReelForge profile and the hourly stats read, each only if it was this
      folder's. The window that opens next says where ReelForge is now.
+
+One thing can't follow it: the browser extension (docs/EXTENSION.md), which your browser loads from the folder by
+its old place. With a browser connected, the move says before and after that the extension has to be loaded again
+from the new folder.
 
 It doesn't move a test copy (TEST-COPY.txt: it never changes the computer), a git copy (one being worked on), a copy
 the old Windows installer made (Windows' list of apps knows it by its folder), one on another drive (that would mean
@@ -45,6 +51,9 @@ STATE = ".reelforge-moving.json"   # in the folder while it moves: where to, and
 MARKER = Path("dashboard") / "data" / "moved.json"   # once it has moved: the next window says so, once
 KEYS = ("videos_dir", "episodes_dir", "completed_dir")   # dashboard/config.toml's folders (see dashboard/config.py)
 STALE = 86400   # seconds after which the note of a move that never happened is tidied away
+# With a browser connected to the extension, what the move leaves for you to do in it, as it is said beforehand.
+EXTENSION_BEFORE = ("After the move, load the browser extension again from the new folder, and connect it again if it "
+                    "then says it isn't connected.")
 
 
 def home() -> Path:
@@ -153,12 +162,16 @@ class Plan:
     configs: list[tuple[Path, dict[str, str]]] = field(default_factory=list)  # config.toml -> {key: its full path}
     outside: list[Path] = field(default_factory=list)   # the folders the Publish tab reads outside ReelForge (stay)
     system: dict[str, bool] = field(default_factory=dict)
+    browsers: int = 0   # connected to the extension: each has to load it again from the new folder
+    was: list[tuple[Path, str]] = field(default_factory=list)   # each config.toml prepare() rewrote, as it was before
 
 
 def plan(target: Path | None = None) -> Plan:
     """The move to target (its own folder, by default)."""
+    from . import reset
+
     target = Path(os.path.abspath(str(target or home())))
-    out = Plan(ROOT, target, system=_system())
+    out = Plan(ROOT, target, system=_system(), browsers=reset.browsers_connected())
     for p in profiles.every():
         cfg, change = _toml(p.config), {}
         for key in KEYS:
@@ -203,7 +216,16 @@ def summary(p: Plan) -> list[str]:
     if p.outside:
         lines.append("The Publish tab's folders outside ReelForge stay where they are:")
         lines += [f"  {f}" for f in p.outside]
+    if p.browsers:
+        lines.append(EXTENSION_BEFORE)
     return lines
+
+
+def extension_again(new: Path) -> str:
+    """After a move with a browser connected to the extension: the one thing left for you to do, with the folder to
+    pick."""
+    return (f"Load the browser extension again from {new / 'extension'} (Load unpacked on your browser's extensions "
+            "page), and connect it again if it then says it isn't connected.")
 
 
 # ---------------------------------------------------------------- doing it
@@ -227,11 +249,11 @@ def _write_configs(p: Plan) -> list[str]:
     problems = []
     for path, change in p.configs:
         try:
-            text = dashboard_config.set_keys(path.read_text(encoding="utf-8"), {"": change})
+            before = path.read_text(encoding="utf-8")
+            text = dashboard_config.set_keys(before, {"": change})
             tomllib.loads(text)    # never write a config the dashboard can't read
-            tmp = path.with_suffix(".tmp")
-            tmp.write_text(text, encoding="utf-8", newline="\n")
-            tmp.replace(path)
+            P.write_atomic(path, text)
+            p.was.append((path, before))
         except (OSError, tomllib.TOMLDecodeError) as e:
             problems.append(f"{P.rel(path)} couldn't be written ({e})")
     return problems
@@ -253,7 +275,14 @@ def prepare(p: Plan, reopen: bool = False) -> list[str]:
     return []
 
 
-def _undo() -> None:
+def _undo(p: Plan | None = None) -> None:
+    """Take back what prepare() did for a move that then didn't happen: each config.toml as it was (a folder written
+    in full inside ReelForge had been pointed at the new place already, where nothing is), and the note."""
+    for path, before in (p.was if p else []):
+        try:
+            P.write_atomic(path, before)
+        except OSError:
+            pass
     try:
         (ROOT / STATE).unlink()
     except OSError:
@@ -274,6 +303,25 @@ def rename(p: Plan, wait: float = 10) -> str | None:
             if time.monotonic() >= end:
                 return e.strerror or str(e)
             time.sleep(0.5)
+
+
+def _stats_off(p: Plan, say=print) -> bool:
+    """Just before the rename (macOS, Linux): take this folder's hourly stats read off the computer's schedule, which
+    also stops a read it has just started, then give a read that is under way its time to finish. finish() puts the
+    job on again from the new place. Without this a read the schedule starts in these moments runs from the old
+    folder by name (its Python, its script, where it keeps its log), and makes that folder again once it has been
+    renamed. Returns whether there was a job to take off. Never in a test copy or with STUDIO_DRY_SYSTEM: plan()
+    finds no job of this folder's there."""
+    if not p.system.get("stats"):
+        return False
+    from . import reset, stats_schedule
+
+    try:
+        stats_schedule.disable()
+    except Exception:   # no scheduler to ask any more: there's nothing left to stop
+        pass
+    reset._wait_for_reads(say)
+    return True
 
 
 def repair_venv(old: Path, new: Path) -> None:
@@ -400,13 +448,13 @@ def go(p: Plan, reopen: bool = False, pause: bool = True, say=print) -> tuple[in
     reopen ReelForge opens there in place of this process. Returns (the exit code, whether the folder has moved)."""
     problems = prepare(p, reopen)
     if problems:
-        _undo()
+        _undo(p)
         say(f"{KIT_NAME} didn't move, and nothing else changed: {'; '.join(problems)}.")
         return 1, False
     if P.WINDOWS:
         err = _window(p, reopen, pause)
         if err:
-            _undo()
+            _undo(p)
             say(f"{KIT_NAME} didn't move: {err}.")
             return 1, False
         say(f"A small window moves {KIT_NAME} as soon as it has closed (it waits while anything still has a file in "
@@ -414,10 +462,29 @@ def go(p: Plan, reopen: bool = False, pause: bool = True, say=print) -> tuple[in
             + (" and opens ReelForge again." if reopen else "."))
         return 0, False
     os.chdir(p.target.parent)   # not inside the folder that's moving
-    err = rename(p)
+    try:
+        stats = _stats_off(p, say)
+        err = rename(p)
+    except BaseException:
+        # Stopped in between (Ctrl+C while it waited for a stats read to finish, or for a file in use): the folder
+        # hasn't moved, so its note goes and the hourly read goes back on, where it was. Stopped just as the rename
+        # was done, it has moved: the note goes along, and the next start finishes the move from the new place
+        # (finish_leftover), the hourly read with it. Put back on here, the read would run from a folder gone.
+        if os.path.lexists(p.source) or not p.target.is_dir():
+            _undo(p)
+            if p.system.get("stats"):
+                from . import reset
+
+                reset._stats_on_again()
+        raise
     if err:
-        _undo()
+        _undo(p)
         say(f"{KIT_NAME} didn't move ({err}), and nothing else changed.")
+        if stats:   # it goes back on, where it was
+            from . import reset
+
+            if not reset._stats_on_again():
+                say("The hourly stats read is off now, and couldn't be turned on again: reelforge stats on does it.")
         return 1, False
     repair_venv(p.source, p.target)
     code = subprocess.run([str(p.target / ".venv" / "bin" / "python"), str(p.target / "bin" / "reelforge.py"), "move",
@@ -466,11 +533,16 @@ def finish(say=print) -> int:
                     problems.append(f"{name} ({e})")
     if problems:
         say("These couldn't follow it: " + "; ".join(problems) + ". Run setup in the new folder to fix them.")
+    from . import reset
+
+    again = extension_again(new) if reset.browsers_connected() else ""   # (the file that lists them moved along)
+    if again:
+        say(again)
     try:
         marker = ROOT / MARKER
         marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(json.dumps({"from": str(old), "to": str(new), "ts": time.time(), "problems": problems}),
-                          encoding="utf-8")
+        marker.write_text(json.dumps({"from": str(old), "to": str(new), "ts": time.time(), "problems": problems,
+                                      "extension": again}), encoding="utf-8")
         state.unlink()
     except OSError:
         pass
@@ -478,7 +550,8 @@ def finish(say=print) -> int:
 
 
 def take_marker(root: Path | None = None) -> dict | None:
-    """Where the last move took ReelForge ({from, to, problems}), once: the next window says so."""
+    """Where the last move took ReelForge ({from, to, problems, extension}), once: the next window says so.
+    extension: the sentence about loading the extension again, "" when no browser is connected."""
     marker = (root or ROOT) / MARKER
     try:
         data = json.loads(marker.read_text(encoding="utf-8"))

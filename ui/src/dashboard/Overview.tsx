@@ -15,7 +15,7 @@ import { BigNumber, faceWidth, Sparkline, StackedSparkline } from "../ui/Graphic
 import { BadgeLine, Fitted, Line, Lines } from "../ui/Line"
 import { Table } from "../ui/Lists"
 import { useTween } from "../ui/Motion"
-import { Panel, Scroll } from "../ui/Panels"
+import { Panel, Reading, Scroll } from "../ui/Panels"
 import { cardLines, wrapLines } from "./cards"
 import { useDash } from "./state"
 import { metricTitle, pickVariant } from "./titles"
@@ -37,8 +37,10 @@ export function Overview() {
   const side = width >= SIDE_BY_SIDE
   // Every tile fits its numbers to the narrowest one, so they all show the big numbers or none do.
   const tileW = all.length ? Math.floor((width - (side ? 0 : 1) - (all.length - 1)) / all.length) : 0 // 1: the scrollbar
-  const pad = tileW < 24 ? 1 : 2
-  const room = Math.max(tileW - 2 * pad, 0) // the left edge and the padding
+  // An 80-column window's tiles are 14 columns: without their one column of padding they have the 13 that
+  // "13K followers" takes, where a column less leaves three bare numbers.
+  const pad = tileW < 16 ? 0 : tileW < 24 ? 1 : 2
+  const room = Math.max(tileW - Math.max(2 * pad, 1), 0) // the left edge and the padding
   const tiles = (
     <box flexDirection="row" height={TILE_ROWS} marginTop={1} flexShrink={0} gap={1}>
       {all.map((c) => (
@@ -47,6 +49,7 @@ export function Overview() {
     </box>
   )
   const badge = badges?.line?.length ? <BadgeLine parts={badges.line} how={s.init.badges_how} bg={DASH.surface} fg={DASH.muted} marginTop={1} /> : null
+  if (!cards) return <Reading what="your stats" />
   return (
     <box
       flexDirection="column"
@@ -108,8 +111,10 @@ function Tile({ card, picked, others, room, pad }: { card: CardView; picked: boo
   const likes = useTween(values?.likes ?? NaN, { from: 0, ms: 900, delay: 120 })
   const shown = { followers: values?.followers == null ? null : followers, views: values?.views == null ? null : views, likes: values?.likes == null ? null : likes }
   const big = values ? [sigNum(shown.followers), fmtNum(shown.followers)].find((t) => faceWidth(t) <= inner) : undefined
-  const delta = changes.followers ? `${changes.followers > 0 ? "▲" : "▼"} ${fmtDelta(changes.followers)}` : ""
-  const name = card.titles.find((t) => cellLen(t) + 2 + (delta ? cellLen(delta) + 2 : 0) <= inner) ?? card.titles[card.titles.length - 1] ?? ""
+  const change = changes.followers ? `${changes.followers > 0 ? "▲" : "▼"} ${fmtDelta(changes.followers)}` : ""
+  const name = card.titles.find((t) => cellLen(t) + 2 + (change ? cellLen(change) + 2 : 0) <= inner) ?? card.titles[card.titles.length - 1] ?? ""
+  // the day's change beside even the shortest name only with a column between them (it ran into the name)
+  const delta = cellLen(name) + 2 + cellLen(change) + 1 <= inner ? change : ""
   const spark = card.gains.some(Boolean)
   const stacks = others.filter((c) => c.id !== "total" && c.gains.some(Boolean)).map((c) => ({ color: c.color, values: c.gains.map((g) => g ?? 0) }))
   const grow = useTween(spark ? 1 : 0, { from: 0, ms: 800, delay: 150, ease: "outCirc" })

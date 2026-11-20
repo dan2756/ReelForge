@@ -7,7 +7,7 @@
 
 import { TextAttributes } from "@opentui/core"
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { headless, type Headless } from "../scripts/headless"
@@ -15,6 +15,7 @@ import { clickText, find } from "../scripts/shots"
 import { ROOT } from "../src/bridge"
 import { typedMatches } from "../src/dashboard/Settings"
 import { TAB_NAMES } from "../src/dashboard/state"
+import { DASH } from "../src/theme"
 import { toasts } from "../src/ui/Panels"
 
 const PRELOAD = { REELFORGE_BRIDGE_PRELOAD: join(ROOT, "scripts", "shots_preload.py") }
@@ -23,7 +24,7 @@ const FILES = process.platform === "win32" ? "Explorer" : process.platform === "
 setDefaultTimeout(30_000)
 let open: Headless | null = null
 
-async function window(size: [number, number] = [150, 76]): Promise<Headless> {
+async function window(size: [number, number] = [150, 80]): Promise<Headless> {
   open = await headless("dashboard", { demo: true, only_demos: true, tab: "settings" }, size[0], size[1], PRELOAD)
   await open.settle(3000)
   return open
@@ -84,6 +85,28 @@ describe("the Settings tab", () => {
     }
   })
 
+  test("in an 80-column window what a row under On this computer says wraps, where it was cut off at its button", async () => {
+    const h = await window([80, 90])
+    expect(frame(h)).toContain("ON THIS COMPUTER")
+    // what the rows say, without the switch or button at the right of each. Where those begin is read off the Restart
+    // row: the buttons are as wide as the widest of them, which is "Open in the file manager" on Linux, "Move to the
+    // Recycle Bin" on Windows and the shorter "Move to the Trash" on a Mac. (It was taken to be column 46 everywhere,
+    // which cut what a Mac's wider rows say: "… without typing a comm".)
+    const buttons = [...frame(h).split("\n").find((r) => r.includes("Restart ReelForge"))!].indexOf("▐")
+    expect(buttons).toBeGreaterThan(40)
+    const said = frame(h).split("\n").map((r) => [...r].slice(2, buttons).join("").trim()).join(" ").replace(/\s+/g, " ")
+    expect(said).toContain("on: your stats update every hour, even with ReelForge closed") // (it ended "... even with R")
+    expect(said).toContain("open ReelForge without typing a command")
+    expect(frame(h)).toContain("Turn off") // its button, still in full beside it
+    // however many lines a row takes, it has a line of space over it and its button beside its name
+    const lines = frame(h).split("\n")
+    for (const name of ["The reelforge command", "ReelForge's icon", "ReelForge's folder", "Restart ReelForge"]) {
+      const y = lines.findIndex((r) => r.includes(name))
+      expect(lines[y - 1]!.replace(/[┃\s]/g, "")).toBe("")
+      expect(lines[y]).toMatch(/▐.+▌/)
+    }
+  })
+
   test("Settings and Updates are the last two tabs, so 6 opens it and 7 Updates", async () => {
     open = await headless("dashboard", { demo: true, only_demos: true, tab: "overview" }, 150, 72, PRELOAD)
     await open.settle(2500)
@@ -124,9 +147,10 @@ describe("the Settings tab", () => {
     f = frame(h)
     expect(f).not.toContain("After that, make today's videos")
     expect(f).toContain("▾ Does ReelForge post for me?")
-    expect(f).toContain("ReelForge never posts, uploads or sends anything")
+    expect(f).toContain("Not by itself, and never without your press.")
+    expect(f).toContain("Two optional things can do more of it: the browser extension")
     await clickText(h, "Does ReelForge post for me?", 3)
-    expect(frame(h)).not.toContain("never posts, uploads")
+    expect(frame(h)).not.toContain("never without your press")
     expect(frame(h)).toContain("▸ Does ReelForge post for me?")
   })
 
@@ -239,7 +263,7 @@ describe("the tab order", () => {
     expect(help.indexOf("Accounts (2)")).toBeLessThan(help.indexOf("Videos (3)"))
     expect(help).not.toContain("Publish (")
     const [x, y] = find(h, "Overview (1)")! // down the help to Publish, after the tabs, with its key
-    for (let i = 0; i < 30 && !frame(h).includes("The green button at the top right opens it."); i++) {
+    for (let i = 0; i < 80 && !frame(h).includes("The green button at the top right opens it."); i++) {
       await h.t.mockMouse.scroll(x + 2, y + 2, "down")
       await h.settle(100)
     }
@@ -355,7 +379,7 @@ describe("the danger zone on a channel that's set up", () => {
 
   async function settings(): Promise<Headless> {
     tmp = mkdtempSync(join(tmpdir(), "reelforge-settings-"))
-    open = await headless("dashboard", { tab: "settings" }, 150, 68, {
+    open = await headless("dashboard", { tab: "settings" }, 150, 72, {
       REELFORGE_BRIDGE_PRELOAD: join(ROOT, "ui", "test", "settings_preload.py"),
       REELFORGE_TEST_ROOT: tmp,
     })
@@ -410,6 +434,23 @@ describe("the danger zone on a channel that's set up", () => {
     expect(existsSync(join(tmp, "my-studio", "answers.json"))).toBe(true) // nothing moved by the window itself
   })
 
+  test("in a window 24 or 25 rows tall, uninstall's one choice has a row of its own", async () => {
+    // The dialog's height was nine tenths of the window's as a fraction (21.6 rows of 24), and its rows were laid
+    // out on it: Keep them and its switch were drawn under the sentence that follows them.
+    const h = await settings()
+    await clickText(h, "Uninstall…")
+    await until(h, "UNINSTALL REELFORGE")
+    for (const [w, rows] of [[80, 24], [80, 25], [120, 24], [150, 24], [80, 26]] as const) {
+      h.t.resize(w, rows)
+      await h.settle(500)
+      const lines = frame(h).split("\n")
+      const at = lines.findIndex((r) => r.includes("Keep them"))
+      expect(lines[at]).toMatch(/│ +Keep them +━+▐█▌ Yes +│/) // the switch and nothing else, inside the dialog
+      expect(lines[at + 1]).toContain("Moved first to")
+      expect(lines.find((r) => r.includes("▐ Uninstall ReelForge ▌"))).toMatch(/▐ Cancel ▌ ▐ Uninstall ReelForge ▌ +│/)
+    }
+  })
+
   test("uninstall says where the videos go, can let them go too, and asks once the name is typed", async () => {
     const h = await settings()
     await clickText(h, "Uninstall…")
@@ -455,6 +496,54 @@ describe("the danger zone on a channel that's set up", () => {
     expect(asked()?.to).toMatch(/-home[\\/]ReelForge$/)
     expect(h.exits.map((e) => e.code)).toEqual([75]) // the launcher starts the move as it starts ReelForge again
     expect(existsSync(join(tmp, "my-studio", "answers.json"))).toBe(true) // nothing moved by the window itself
+  })
+
+  test("Move's question opens on Cancel: Enter twice on Move… moves nothing", async () => {
+    const h = await settings()
+    const underlined = () => h.t.captureSpans().lines.flatMap((l) => l.spans.filter((sp) => sp.attributes & TextAttributes.UNDERLINE).map((sp) => sp.text.trim())).filter(Boolean)
+    for (let i = 0; i < 80 && !underlined().includes("Move…"); i++) {
+      h.t.mockInput.pressKey("TAB")
+      await h.settle(100)
+    }
+    expect(underlined()).toContain("Move…")
+    h.t.mockInput.pressKey("RETURN")
+    await until(h, "MOVE REELFORGE")
+    expect(underlined()).toEqual(["Cancel"]) // the way out has the keyboard, not the button that moves
+    h.t.mockInput.pressKey("RETURN") // a second Enter
+    await h.settle(800)
+    expect(frame(h)).not.toContain("MOVE REELFORGE")
+    expect(asked()).toBeNull()
+    expect(h.exits).toEqual([])
+  })
+
+  test("with a browser connected to the extension, each dialog says the one thing that leaves for you to do in it", async () => {
+    const h = await settings()
+    /** What a dialog says: the words inside its box, as one line. */
+    const said = async (button: string, title: string) => {
+      await clickText(h, button)
+      await until(h, title)
+      const rows = frame(h).split("\n").map((r) => [...r])
+      const top = rows.findIndex((r, y) => y > 3 && r.includes("╭")) // (the header has the Publish button's box)
+      const [left, right] = [rows[top]!.indexOf("╭"), rows[top]!.lastIndexOf("╮")]
+      const bottom = rows.findIndex((r, y) => y > top && r[left] === "╰")
+      await clickText(h, "Cancel")
+      await h.settle(500)
+      return rows.slice(top + 1, bottom).map((r) => r.slice(left + 1, right).join("")).join(" ").replace(/\s+/g, " ")
+    }
+    // Nobody connected: not a word about it (the dialogs are long enough).
+    for (const [button, title] of [["Move…", "MOVE REELFORGE"], ["Factory reset…", "FACTORY RESET"], ["Uninstall…", "UNINSTALL REELFORGE"]] as const)
+      expect(await said(button, title)).not.toContain("extension")
+    // (Each dialog shows all it says. Uninstall's indented lines were counted a row short, and its last row went
+    // under a scrollbar: "... and ReelForge in your app menu are left alone.")
+    expect(await said("Uninstall…", "UNINSTALL REELFORGE")).toContain("are left alone. Your videos and channels")
+    // A browser connects (dashboard/extension_api.py's file, as it writes one; only its SHA-256 of the token is kept).
+    mkdirSync(join(tmp, "dashboard", "data"), { recursive: true })
+    writeFileSync(join(tmp, "dashboard", "data", "extension.json"), JSON.stringify({ app_id: "a", extension_ids: [], paired: [{ install: "chrome", name: "Chrome on this PC", token_sha256: "ab".repeat(32) }] }))
+    expect(await said("Move…", "MOVE REELFORGE")).toContain("After the move, load the browser extension again from the new folder, and connect it again if it then says it isn't connected.")
+    expect(await said("Factory reset…", "FACTORY RESET")).toContain("The browser extension stays in your browser, and has to be connected again afterwards.")
+    const uninstall = await said("Uninstall…", "UNINSTALL REELFORGE")
+    expect(uninstall).toContain("Uninstalling can't take the extension out of your browser: remove it yourself, on your browser's extensions page.")
+    expect(uninstall).not.toContain("abab")
   })
 
   test(`Open in ${FILES} beside ReelForge's folder opens that folder`, async () => {
@@ -510,6 +599,40 @@ describe("Background refresh on a channel that's set up", () => {
     await until(h, "on: your stats update every hour, even with ReelForge closed")
     expect(job()).toBe("on")
     expect(frame(h)).not.toContain("turning it")
+  })
+
+  test("a problem with the hourly job's last read is drawn as a warning, and can be read to its end", async () => {
+    // (ui/test/job_preload.py: the made-up job, which is on, with its last read marked as having had a problem. A
+    // window that leaves the computer alone, as the other tests' windows do, has no job that is on, and nothing is
+    // said about the last read of a job that's off.)
+    tmp = mkdtempSync(join(tmpdir(), "reelforge-job-"))
+    const h = (open = await headless("dashboard", { tab: "settings" }, 100, 72, {
+      REELFORGE_BRIDGE_PRELOAD: join(ROOT, "ui", "test", "job_preload.py"),
+      REELFORGE_TEST_ROOT: tmp,
+      REELFORGE_TEST_JOB: "problem",
+    }))
+    await until(h, "had a problem (see data/refresh.log)")
+    const hex = (c: { toInts(): [number, number, number, number] }) => "#" + c.toInts().slice(0, 3).map((v) => v.toString(16).padStart(2, "0")).join("")
+    /** The colour of the text on the row that has these words. */
+    const colour = (words: string) => {
+      const y = find(h, words)![1]
+      return hex(h.t.captureSpans().lines[y]!.spans.find((sp) => sp.text.includes(words.slice(0, 12)))!.fg)
+    }
+    expect(colour("its last read, 0m ago, had a problem")).toBe(DASH.warn)
+    expect(colour("closes ReelForge and opens it again")).toBe(DASH.muted) // a row with nothing wrong
+    // In a window too narrow for it, the warning goes on under itself instead of being cut at the panel's edge.
+    const rows = frame(h).split("\n")
+    const y = find(h, "its last read, 0m ago, had a problem (see data/refresh.log)")![1]
+    expect(rows[y - 1]).toContain("Background refresh")
+    expect(rows[y + 1]).toContain("ReelForge closed") // the end of "on: your stats update …", on the next row
+    expect(colour("ReelForge closed")).toBe(DASH.warn)
+    // Switched off, the row says it's off and nothing about what the job last did.
+    const [sx, sy] = find(h, "━━━▐█▌ On")!
+    await h.t.mockMouse.click(sx + 4, sy)
+    await until(h, "off: your stats update only while ReelForge is open")
+    expect(job()).toBe("off")
+    expect(frame(h)).not.toContain("had a problem")
+    expect(colour("off: your stats update only")).toBe(DASH.muted)
   })
 })
 

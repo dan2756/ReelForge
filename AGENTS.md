@@ -5,7 +5,7 @@ This folder is **ReelForge**, a kit for making faceless short-form videos with y
 make **2D videos**: you write the script and draw the scenes in code, a free offline voice reads it, and big
 word-by-word captions follow the voice. A channel can make **3D videos** instead, which Blender builds and renders.
 Python mixes the sound, ffmpeg encodes, an automatic QA gate checks every video, and the **ReelForge** window
-(type `reelforge` in a terminal) is where the person you're working with sees their stats and posts from, by hand.
+(type `reelforge` in a terminal) is where the person you're working with sees their stats and posts from.
 
 It hasn't been set up for their channel yet. First-time setup replaces this file with a full AGENTS.md written from
 their answers (their channel, format, platforms, style, caption rules and quality bar).
@@ -18,7 +18,7 @@ their answers (their channel, format, platforms, style, caption rules and qualit
    `./setup.sh --yes` downloads the voice for 2D videos (about 420 MB), Blender 4.5 for 3D videos (about 400 MB;
    only once a channel makes 3D videos), ffmpeg (60-150 MB), the sound effects (about 55 MB)
    and Bun with the ReelForge window's packages (about 60 MB) into this folder (on macOS/Linux also a private Python
-   if theirs is older than 3.11, and Chromium if they have no Chrome or Edge), adds the `reelforge` command to their PATH and ReelForge's icon (a desktop shortcut on
+   if theirs is older than 3.11.4, and Chromium if they have no Chrome or Edge), adds the `reelforge` command to their PATH and ReelForge's icon (a desktop shortcut on
    Windows, ReelForge in Applications on macOS, an app-menu entry on Linux).
 2. **Their channel.** Either they run `channel.bat` / `./channel.sh` (a few questions in a full-screen box), or you
    interview them in the chat:
@@ -49,6 +49,17 @@ their answers (their channel, format, platforms, style, caption rules and qualit
 
 ## Always
 
-- Never post, upload or send anything. Finished videos go to ReelForge's Publish tab, and they post by hand.
+- Never post, upload or send anything. Finished videos go to ReelForge's Publish tab, and they post from there:
+  by hand, with the browser extension (`docs/EXTENSION.md`), or for YouTube through its API. Every post starts with
+  their own press.
+- Never start a post for them or get round that press: not through the window's back end
+  (`python -m studio.bridge`, `post_with_extension`, `post_action`), not through the extension's local server
+  (`reelforge extension serve`, `reelforge extension pair`, anything on `127.0.0.1` ports 47821 to 47830), and not
+  by changing the extension, its local pages or its connections (`extension/`, `dashboard/web/`,
+  `dashboard/data/extension.json`). Connecting a browser and switching on Press Post for me are theirs to do.
+- That covers posting to YouTube through its API (`docs/YOUTUBE-API.md`) too: connecting and posting are theirs
+  to press in ReelForge's window. Never open Google's consent page for them, drive the window's back end
+  (`python -m studio.bridge`) to connect or post, or call `post_with_api`, `youtube_api.connect`,
+  `youtube_api.upload` or `youtube_api_tab.run`.
 - Use your strongest model at high reasoning effort for video work.
 - Read `README.md` for what the kit does, and `docs/` for the pipeline, the quality bar and the sound rules.

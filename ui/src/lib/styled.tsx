@@ -109,6 +109,33 @@ export function truncate(segs: Segs, width: number): Segs {
   return out
 }
 
+/** Rows a text takes when it's wrapped at its spaces to `width` columns (a word wider than that breaks inside). For
+ * giving a scrolling area the height of what's in it: by itself it takes all the height it can get. The spaces an
+ * indented line starts with are drawn, so they take room too: left out, a dialog's line that only just wrapped was
+ * counted a row short, and the dialog's last row went under its scrollbar. */
+export function wrappedRows(text: string, width: number): number {
+  const room = Math.max(width, 1)
+  const body = text.trimStart()
+  let rows = 1
+  let used = cellLen(text) - cellLen(body)
+  let words = 0 // on this row so far
+  for (const word of body.split(" ")) {
+    const n = cellLen(word)
+    if (words && used + 1 + n > room) {
+      rows++
+      used = 0
+      words = 0
+    }
+    used += (words ? 1 : 0) + n
+    words++
+    while (used > room) {
+      rows++
+      used -= room
+    }
+  }
+  return rows
+}
+
 /** Pad the segments with spaces to `width` columns. */
 export function pad(segs: Segs, width: number, right = false): Segs {
   const n = segsLen(segs)

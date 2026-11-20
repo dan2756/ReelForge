@@ -1,0 +1,653 @@
+"""The readers: what ReelForge makes of each platform's pages (dashboard/platforms). Nothing here goes near the
+internet or a real browser: YouTube's pages are answered by a stand-in (httpx.MockTransport), and ReelForge's browser
+by stand-in windows and pages."""
+
+from __future__ import annotations
+
+import json
+import sys
+import tempfile
+import types
+import unittest
+from contextlib import contextmanager
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+
+import httpx
+
+from dashboard import config, db, sync
+from dashboard.platforms import Account, PlatformError, TikTok, X, YouTube, browser, public
+
+AGAIN = "ReelForge tries again at the next refresh."
+CHANNEL = ('<link rel="canonical" href="https://www.youtube.com/channel/UC' + "a" * 22 + '">'
+           '{"content":"1.2K subscribers"}')
+OLDER = [f"old{n:08d}" for n in range(30)]  # Shorts the feed no longer lists, newest first
+WATCH = '"viewCount":"123","publishDate":"2026-10-01T10:00:00-07:00","likeCount":"7"'
+
+
+def entry(n: int, likes: bool = True) -> str:
+    return (f"<entry><yt:videoId>feed{n:07d}</yt:videoId><title>Feed &amp; {n}</title>"
+            "<published>2026-11-01T10:00:00+00:00</published>"
+            + ('<media:starRating count="4"/>' if likes else "") + f'<media:statistics views="{900 + n}"/></entry>')
+
+
+FEED = "<feed>" + "".join(entry(n) for n in range(15)) + "</feed>"
+SHORTS = "".join(f'"videoId":"feed{n:07d}"' for n in range(15)) + "".join(f'"videoId":"{v}"' for v in OLDER)
+
+
+class YouTubePages(unittest.TestCase):
+    """public.youtube against a stand-in YouTube: a channel whose feed lists its newest 15 videos and whose Shorts
+    tab lists those and 30 older ones."""
+
+    def site(self, **answers) -> list[str]:
+        """Stand in for YouTube. answers: what a kind of page ("channel", "feed", "shorts", "watch", or one video's
+        id) gives instead of its usual page: a status code, a page's text, or an error to raise (or something to
+        call for one of those, each time the page is asked for). Returns the list the addresses asked for are added
+        to."""
+        asked: list[str] = []
+
+        def answer(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            asked.append(url)
+            kind, usual = ("feed", FEED) if "feeds/videos.xml" in url else \
+                ("shorts", SHORTS) if url.endswith("/shorts") else \
+                ("watch", WATCH) if "watch?v=" in url else ("channel", CHANNEL)
+            given = answers.get(url.rsplit("=", 1)[-1], answers.get(kind, usual))
+            if callable(given):
+                given = given()
+            if isinstance(given, Exception):
+                raise given
+            return httpx.Response(given, text="") if isinstance(given, int) else httpx.Response(200, text=given)
+
+        patch = mock.patch.object(public, "_client", lambda: httpx.Client(
+            transport=httpx.MockTransport(answer), follow_redirects=True, timeout=15))
+        patch.start()
+        self.addCleanup(patch.stop)
+        return asked
+
+    @staticmethod
+    def watched(asked: list[str]) -> list[str]:
+        return [url.rsplit("=", 1)[-1] for url in asked if "watch?v=" in url]
+
+    def test_a_whole_read(self):
+        asked = self.site()
+        account, posts = public.youtube("somechannel")
+        self.assertEqual((account.handle, account.followers, account.warning), ("@somechannel", 1200, ""))
+        self.assertEqual(len(posts), 25)
+        self.assertEqual((posts[0].post_id, posts[0].title, posts[0].views, posts[0].likes),
+                         ("feed0000000", "Feed & 0", 900, 4))
+        self.assertEqual((posts[-1].post_id, posts[-1].views, posts[-1].likes), ("old00000009", 123, 7))
+        self.assertEqual(len(asked), 3 + public.WATCH_PAGES)
+
+    def test_older_videos_take_turns(self):
+        """Ten of the videos the feed doesn't list are looked up per read: those read longest ago, a new one first.
+        (It used to be the same ten every time, so the rest never moved.)"""
+        last_read: dict[str, str] = {}
+        seen = []
+        for hour in range(3):
+            asked = self.site()
+            _, posts = public.youtube("somechannel", last_read)
+            seen.append(self.watched(asked))
+            last_read.update({p.post_id: f"2026-11-15T{10 + hour}:00:00+00:00" for p in posts})
+        self.assertEqual(seen, [OLDER[:10], OLDER[10:20], OLDER[20:]])
+        asked = self.site(shorts=SHORTS.replace('"videoId":"old', '"videoId":"new00000001""videoId":"old', 1))
+        public.youtube("somechannel", last_read)  # a Short the feed hasn't got yet: first, then the stalest
+        self.assertEqual(self.watched(asked), ["new00000001", *OLDER[:9]])
+
+    def test_a_page_that_fails_only_loses_itself(self):
+        """Only the channel page has to answer: the feed, the Shorts tab and each video's page are extras."""
+        asked = self.site(old00000003=httpx.ReadTimeout("timed out"), old00000005=503)
+        account, posts = public.youtube("somechannel")
+        self.assertEqual((account.followers, len(posts), account.warning), (1200, 23, ""))
+        self.assertEqual(len(self.watched(asked)), 10)  # it went on after the one that timed out
+
+        self.site(feed=httpx.ReadTimeout("timed out"))
+        account, posts = public.youtube("somechannel")
+        self.assertEqual((account.followers, account.warning), (1200, ""))
+        self.assertEqual([p.post_id for p in posts][:2], ["feed0000000", "feed0000001"])  # from their own pages
+        self.assertEqual(len(posts), 10)
+
+        self.site(shorts=httpx.ConnectError("reset"))
+        account, posts = public.youtube("somechannel")
+        self.assertEqual((account.followers, len(posts), account.warning), (1200, 15, ""))
+
+    def test_videos_pages_that_dont_answer_are_given_up_on(self):
+        """A page that doesn't answer takes the client's 15 seconds, and every window's refresh waits for the read.
+        All ten were tried, two and a half minutes of it, where the first used to end the read. Now the videos'
+        own pages get 20 seconds between them, and the rest wait for the next read."""
+        clock = Clock()
+        with mock.patch.object(public, "time", clock):
+            asked = self.site(watch=lambda: clock.sleep(15) or httpx.ReadTimeout("timed out"))
+            account, posts = public.youtube("somechannel")
+            self.assertEqual(self.watched(asked), OLDER[:2])  # the second was started 15 seconds in, the third not
+            self.assertEqual((account.followers, len(posts), account.warning), (1200, 15, ""))  # the feed's are kept
+            # Slow all the way, the feed too: said, with what was given up on in the log.
+            self.site(feed=httpx.ReadTimeout("timed out"),
+                      watch=lambda: clock.sleep(15) or httpx.ReadTimeout("timed out"))
+            account, posts = public.youtube("somechannel")
+            self.assertEqual((posts, account.warning),
+                             ([], f"YouTube's videos weren't read this time, only its subscribers. {AGAIN}"))
+            self.assertIn("the videos' pages from feed0000002 on: left for the next read after 20s", account.detail)
+            # Pages that answer, each in a second and a half, are all read.
+            asked = self.site(watch=lambda: clock.sleep(1.5) or WATCH)
+            _, posts = public.youtube("somechannel")
+            self.assertEqual((len(self.watched(asked)), len(posts)), (10, 25))
+
+    def test_no_videos_at_all_is_said(self):
+        self.site(feed=httpx.ReadTimeout("timed out"), shorts=httpx.ConnectError("reset"))
+        account, posts = public.youtube("somechannel")
+        self.assertEqual((account.followers, posts), (1200, []))
+        self.assertEqual(account.warning, f"YouTube's videos weren't read this time, only its subscribers. {AGAIN}")
+        self.assertEqual(account.detail, "the feed: ReadTimeout: timed out; the Shorts tab: ConnectError: reset")
+        self.site(feed=404, shorts="")  # a new channel with nothing up yet isn't a failure
+        account, posts = public.youtube("somechannel")
+        self.assertEqual((posts, account.warning), ([], ""))
+
+    def test_the_channel_page_says_what_went_wrong(self):
+        """A wrong handle is the only thing reported as one: a busy YouTube or a page that isn't the channel's used
+        to send people off to retype a handle that was right."""
+        for given, said in ((404, "Couldn't find the YouTube channel @somechannel."),
+                            (429, f"YouTube is busy or limiting how often it's read right now. {AGAIN}"),
+                            (503, f"YouTube is busy or limiting how often it's read right now. {AGAIN}"),
+                            ("<title>Before you continue to YouTube</title>",
+                             f"YouTube's page for @somechannel wasn't what ReelForge expected. {AGAIN}")):
+            asked = self.site(channel=given)
+            with self.assertRaises(PlatformError) as caught:
+                public.youtube("somechannel")
+            self.assertEqual(str(caught.exception), said)
+            self.assertEqual(len(asked), 1)
+        self.site(channel=httpx.ConnectError("no route"))  # no internet is the read's failure, as it was
+        with self.assertRaises(httpx.ConnectError):
+            public.youtube("somechannel")
+
+    def test_a_like_count_that_isnt_there_is_unknown_not_zero(self):
+        """Zero would replace the count ReelForge already has; unknown keeps it (db.record_snapshot)."""
+        self.site(feed=f"<feed>{entry(0, likes=False)}{entry(1)}</feed>", shorts='"videoId":"old00000000"',
+                  watch='"viewCount":"5","uploadDate":"2026-10-01"')
+        _, posts = public.youtube("somechannel")
+        self.assertEqual([(p.post_id, p.likes) for p in posts],
+                         [("feed0000000", None), ("feed0000001", 4), ("old00000000", None)])
+
+    def test_the_platform_hands_over_when_each_video_was_last_read(self):
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(setattr, db, "_path", db._path)
+        db.init(Path(tmp.name) / "stats.db")
+        asked = self.site()
+        account, posts = YouTube({"handle": "@somechannel"}).fetch()
+        self.assertEqual(self.watched(asked), OLDER[:10])
+        db.record_snapshot("youtube", account, posts)
+        asked = self.site()
+        YouTube({"handle": "@somechannel"}).fetch()
+        self.assertEqual(self.watched(asked), OLDER[10:20])
+
+
+# --- ReelForge's browser, stood in for ---------------------------------------------------------------------------
+
+def browser_error(name: str) -> type[Exception]:
+    """An error class as Playwright's own look to ReelForge: by where they come from and what they're called."""
+    return type(name, (Exception,), {"__module__": "playwright._impl._errors"})
+
+
+TargetClosedError, NavigationError, BrowserTimeout = (browser_error(n) for n in ("TargetClosedError", "Error",
+                                                                                 "TimeoutError"))
+SESSION = {"instagram": {"name": "sessionid", "domain": ".instagram.com"},
+           "x": {"name": "auth_token", "domain": ".x.com"}}
+
+
+class Clock:
+    """Time that passes only when the code under test waits, with things set to happen at given seconds."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.due: list[tuple[float, object]] = []
+
+    def at(self, seconds: float, happen) -> None:
+        self.due.append((seconds, happen))
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def time(self) -> float:
+        return 1_800_000_000 + self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+        for when, happen in sorted(self.due, key=lambda d: d[0]):
+            if when <= self.now:
+                self.due.remove((when, happen))
+                happen()
+
+
+class Reply:
+    """Something a page loaded in the background: its address, the query's name (Instagram) and what it said."""
+
+    def __init__(self, url: str, data, name: str = "") -> None:
+        self.url, self.data = url, data
+        self.request = SimpleNamespace(headers={"x-fb-friendly-name": name})
+
+    def json(self):
+        return self.data
+
+    def text(self) -> str:
+        return json.dumps(self.data)
+
+
+class Page:
+    def __init__(self, window: "Window") -> None:
+        self.window, self.url, self.heard = window, "about:blank", []
+        self.mouse = SimpleNamespace(wheel=lambda x, y: None)
+
+    def on(self, event: str, hear) -> None:
+        self.heard.append(hear)
+
+    def goto(self, url: str, **how) -> None:
+        self.window.check()
+        self.window.opened.append(url)
+        if self.window.wont_open:
+            raise self.window.wont_open
+        self.url, replies, self.html = self.window.site(url)
+        for reply in replies:
+            for hear in self.heard:
+                hear(reply)
+
+    def content(self) -> str:
+        return self.html
+
+    def wait_for_timeout(self, ms: float) -> None:
+        self.window.clock.sleep(ms / 1000)
+        self.window.check()
+
+
+class Window:
+    """ReelForge's browser, open: its cookies, its pages and the site they show. site(address) gives where the page
+    ends up, what it loads in the background and its HTML."""
+
+    def __init__(self, clock: Clock, cookies=(), site=None) -> None:
+        self.clock, self.jar, self.gone = clock, list(cookies), False
+        self.site = site or (lambda url: (url, [], ""))
+        self.opened: list[str] = []
+        self.wont_open: Exception | None = None
+        self.pages = [Page(self)]
+
+    def check(self) -> None:
+        if self.gone:  # the last window was closed, which ends the browser: every call fails like this
+            raise TargetClosedError("BrowserContext.cookies: Target page, context or browser has been closed")
+
+    def cookies(self) -> list[dict]:
+        self.check()
+        return list(self.jar)
+
+    def new_page(self) -> Page:
+        self.pages.append(Page(self))
+        return self.pages[-1]
+
+    def clear_cookies(self, domain=None) -> None:
+        self.jar = [c for c in self.jar if not domain.search(c["domain"])]
+
+
+class BrowserTest(unittest.TestCase):
+    """A reader or a log-in on a stand-in for ReelForge's browser, with the log-ins it knows of in a scratch file."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        self.clock = Clock()
+        self.windows: list[bool] = []  # each time the browser was opened: in the background (headless) or not
+
+        @contextmanager
+        def opened(headless: bool = True, busy: str = ""):
+            self.windows.append(headless)
+            yield self.window
+
+        for patch in (mock.patch.object(config, "TOKENS_PATH", Path(tmp.name) / "tokens.json"),
+                      mock.patch.object(browser, "_browser", opened), mock.patch.object(browser, "time", self.clock)):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def said(self, do) -> str:
+        with self.assertRaises(PlatformError) as caught:
+            do()
+        return str(caught.exception)
+
+
+class LogIn(BrowserTest):
+    """browser.login: the window stays until the log-in is really done, and closing it is never an error from the
+    browser's insides."""
+
+    CHALLENGE = "https://www.instagram.com/challenge/?next=%2F"
+
+    def test_a_first_log_in_ends_once_the_site_has_set_its_cookie(self):
+        self.window = w = Window(self.clock)
+        self.clock.at(20, lambda: w.jar.append(SESSION["instagram"]))
+        browser.login("instagram")
+        self.assertEqual((self.windows, w.opened), ([False], [browser.LOGIN_URLS["instagram"]]))
+        self.assertEqual(self.clock.now, 23)  # 20 seconds to log in, 3 for the site to finish
+        self.assertEqual(config.get_token("browser:instagram"), {"since": self.clock.time()})
+
+    def test_log_in_again_waits_while_the_site_checks_its_you(self):
+        """Logged in already, and Instagram wants to check it's you: the window used to close after 3 seconds,
+        before anything could be done in it. Now it opens Instagram itself and stays until the check is passed."""
+        config.set_token("browser:instagram", {"since": 1.0, "misses": 1})
+        self.window = w = Window(self.clock, [SESSION["instagram"]],
+                                 site=lambda url: (self.CHALLENGE, [], ""))  # where Instagram sends you
+        self.clock.at(40, lambda: setattr(w.pages[0], "url", "https://www.instagram.com/"))  # you passed it
+        browser.login("instagram")
+        self.assertEqual(w.opened, [browser.HOME_URLS["instagram"]])  # not the login page: you're logged in
+        self.assertTrue(40 < self.clock.now <= 40 + browser.SETTLED, self.clock.now)  # once it has stayed clear
+        self.assertEqual(config.get_token("browser:instagram"), {"since": self.clock.time()})  # no misses left
+
+    def test_log_in_again_on_a_site_that_asks_nothing_stays_until_you_close_it(self):
+        self.window = w = Window(self.clock, [SESSION["x"]])
+        self.clock.at(90, lambda: setattr(w, "gone", True))  # you looked around and closed the window
+        browser.login("x")
+        self.assertEqual((w.opened, self.clock.now), ([browser.HOME_URLS["x"]], 90))
+        self.assertIsNotNone(config.get_token("browser:x"))  # still logged in: that's a log-in
+
+    def test_closing_the_window_just_after_logging_in_is_a_log_in(self):
+        """ReelForge carries on "once you're in, or when you close the window": closing it in the few seconds after
+        the site set its cookie used to count as closed before logging in."""
+        self.window = w = Window(self.clock)
+        self.clock.at(20, lambda: w.jar.append(SESSION["instagram"]))
+        self.clock.at(21.5, lambda: setattr(w, "gone", True))  # in, and closed straight away
+        browser.login("instagram")
+        self.assertEqual(config.get_token("browser:instagram"), {"since": self.clock.time()})
+
+    def test_closing_the_window_before_logging_in_says_so(self):
+        """It used to say "TargetClosedError: BrowserContext.cookies: Target page, context or browser has been
+        closed"."""
+        closed = "The login window closed before you finished logging in."
+        self.window = w = Window(self.clock)
+        self.clock.at(7, lambda: setattr(w, "gone", True))  # the browser went with its last window
+        self.assertEqual(self.said(lambda: browser.login("instagram")), closed)
+        self.window = w = Window(self.clock)
+        self.clock.at(self.clock.now + 7, w.pages.clear)  # the window went, the browser stayed (macOS)
+        self.assertEqual(self.said(lambda: browser.login("instagram")), closed)
+        self.window = w = Window(self.clock, [SESSION["instagram"]])  # logged out in the window, then closed it
+        self.clock.at(self.clock.now + 5, w.jar.clear)
+        self.clock.at(self.clock.now + 9, lambda: setattr(w, "gone", True))
+        self.assertEqual(self.said(lambda: browser.login("instagram")), closed)
+        self.assertIsNone(config.get_token("browser:instagram"))
+
+    def test_a_window_left_open_says_how_long_it_waited(self):
+        self.window = Window(self.clock)
+        self.assertEqual(self.said(lambda: browser.login("x", timeout=600)),
+                         "The login window was open for 10 minutes without a log-in, so ReelForge closed it. Press "
+                         "Log in to try again.")
+        self.assertIsNone(config.get_token("browser:x"))
+
+    def test_a_page_that_doesnt_open_says_so_and_a_slow_one_is_waited_for(self):
+        self.window = w = Window(self.clock)
+        w.wont_open = NavigationError("Page.goto: net::ERR_INTERNET_DISCONNECTED at https://x.com/i/flow/login\n"
+                                      "Call log:")
+        self.assertEqual(self.said(lambda: browser.login("x")),
+                         "X's page didn't open in ReelForge's browser (is this computer online?). Press Log in to "
+                         "try again.")
+        self.window = w = Window(self.clock)
+        w.wont_open = BrowserTimeout("Page.goto: Timeout 45000ms exceeded.")
+        self.clock.at(self.clock.now + 30, lambda: w.jar.append(SESSION["x"]))  # it loaded in the end
+        browser.login("x")
+        self.assertIsNotNone(config.get_token("browser:x"))
+
+
+class LogOut(BrowserTest):
+    def test_log_out_removes_the_sites_cookies_and_forgets_the_log_in(self):
+        other = {"name": "auth_token", "domain": ".dropbox.com"}  # another site's cookie of the same name
+        self.window = w = Window(self.clock, [SESSION["x"], {"name": "ct0", "domain": "x.com"},
+                                              {"name": "auth_token", "domain": ".twitter.com"}, other,
+                                              SESSION["instagram"]])
+        for key in ("x", "instagram"):
+            config.set_token(f"browser:{key}", {"since": 1.0})
+        browser.logout("x")
+        self.assertEqual(w.jar, [other, SESSION["instagram"]])
+        self.assertEqual(self.windows, [True])  # in the background: no window to look at
+        self.assertEqual((browser.logged_in("x"), browser.logged_in("instagram")), (False, True))
+        self.assertFalse(browser._has_session(w, "x"))  # dropbox.com's cookie isn't x.com's
+
+
+class HeldProfile(unittest.TestCase):
+    """Another ReelForge has the browser's profile open (the hourly job, reading): after a few tries, each thing
+    says what happens next. A read is tried again by the next refresh. A log-in or a log-out isn't, so it says to
+    press again (the log-out used to say "it tries again next refresh")."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        self.tries: list[bool] = []  # each time the browser was started: in the background (headless) or not
+        held = browser_error("Error")("BrowserType.launch_persistent_context: Target page, context or browser has "
+                                      "been closed\nBrowser logs:\n<process did exit: exitCode=21, signal=null>")
+
+        def launch(profile: str, **how):
+            self.tries.append(how["headless"])
+            raise held
+
+        @contextmanager
+        def sync_playwright():
+            yield SimpleNamespace(chromium=SimpleNamespace(launch_persistent_context=launch))
+
+        playwright = {"playwright": types.ModuleType("playwright"),
+                      "playwright.sync_api": SimpleNamespace(sync_playwright=sync_playwright)}
+        for patch in (mock.patch.dict(sys.modules, playwright),
+                      mock.patch.object(config, "TOKENS_PATH", Path(tmp.name) / "tokens.json"),
+                      mock.patch.object(config, "DATA_DIR", Path(tmp.name)),
+                      mock.patch.object(browser, "available", lambda: True),
+                      mock.patch.object(browser, "chosen", lambda: SimpleNamespace(exe=None)),
+                      mock.patch.object(browser.browsers, "user_agent", lambda b: "a browser"),
+                      mock.patch.object(browser, "time", Clock())):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_each_says_what_happens_next(self):
+        config.set_token("browser:x", {"since": 1.0})
+        busy = "ReelForge's browser is busy reading stats right now. Press {} again in a moment."
+        for do, said in ((lambda: browser.x("me"),
+                          "ReelForge's browser was busy with another read; it tries again next refresh."),
+                         (lambda: browser.login("x"), busy.format("Log in")),
+                         (lambda: browser.logout("x"), busy.format("Log out"))):
+            with self.assertRaises(PlatformError) as caught:
+                do()
+            self.assertEqual(str(caught.exception), said)
+        self.assertEqual(self.tries, [True] * 8 + [False] * 8 + [True] * 8)
+        self.assertTrue(browser.logged_in("x"))  # a log-out that didn't happen forgets nothing
+
+
+def x_site(lands: str | None = None, tweets: list | None = None):
+    """A healthy, logged-in X for any handle (or one that sends the page to `lands`)."""
+    tweet = {"id_str": "9", "full_text": "a video post", "user_id_str": "1",
+             "created_at": "Wed Oct 14 20:19:24 +0000 2026", "favorite_count": 3,
+             "extended_entities": {"media": [{"type": "video"}]}}
+    user = {"data": {"user": {"result": {"rest_id": "1", "legacy": {"followers_count": 5, "statuses_count": 1}}}}}
+    timeline = {"data": [{"legacy": t} for t in (tweets if tweets is not None else [tweet])]}
+    return lambda url: (lands or url, [] if lands else [
+        Reply("https://x.com/i/api/graphql/abc/UserByScreenName?variables=1", user),
+        Reply("https://x.com/i/api/graphql/abc/UserTweets?variables=1", timeline)], "")
+
+
+def instagram_site(lands: str | None = None, items: list | None = None):
+    def site(url: str):
+        handle = url.split("instagram.com/")[1].split("/")[0]
+        reel = {"pk": "3400000000000000000", "code": "AbC", "like_count": 2, "media_type": 2, "play_count": 9,
+                "caption": {"text": "a reel"}}
+        media = {"items": items if items is not None else [reel]}
+        return lands or url, [] if lands else [
+            Reply(url, {"data": {"user": {"username": handle, "follower_count": 7, "media_count": 1}}},
+                  "PolarisProfilePageContentQuery"),
+            Reply(url, media, "PolarisProfileReelsTabContentQuery"), Reply(url, media, "PolarisProfilePostsQuery")], ""
+    return site
+
+
+class SitePages(BrowserTest):
+    """Whether a read ended on the site's login or "check it's you" page goes by the page's path, part by part: a
+    handle that starts with login, challenge or checkpoint used to count as one, so it could never be read."""
+
+    def test_a_handle_that_starts_like_a_site_page_is_read(self):
+        for handle in ("renderedwrong", "loginvideos", "login_fan", "i"):
+            config.set_token("browser:x", {"since": 1.0})
+            self.window = Window(self.clock, [SESSION["x"]], x_site())
+            account, posts = browser.x(handle)
+            self.assertEqual((account.handle, account.followers, [p.post_id for p in posts]), (f"@{handle}", 5, ["9"]))
+            self.assertEqual(config.get_token("browser:x"), {"since": 1.0})  # no strike against the log-in
+        for handle in ("renderedwrong", "challengeaccepted", "checkpointcharlie"):
+            self.window = Window(self.clock, [SESSION["instagram"]], instagram_site())
+            account, posts = browser.instagram(handle)
+            self.assertEqual((account.followers, [p.url for p in posts]), (7, ["https://www.instagram.com/reel/AbC/"]))
+
+    def test_the_sites_own_pages_still_count(self):
+        config.set_token("browser:x", {"since": 1.0})
+        for lands in ("https://x.com/i/flow/login?redirect_after_login=%2Floginvideos", "https://x.com/login"):
+            self.window = Window(self.clock, [SESSION["x"]], x_site(lands))
+            self.assertIn("X showed ReelForge's browser its login page", self.said(lambda: browser.x("loginvideos")))
+            config.set_token("browser:x", {"since": 1.0})
+        for lands in ("https://www.instagram.com/challenge/?next=/me/", "https://www.instagram.com/checkpoint/1/"):
+            self.window = Window(self.clock, [SESSION["instagram"]], instagram_site(lands))
+            self.assertIn("Instagram wants to check it's you", self.said(lambda: browser.instagram("me")))
+        config.set_token("browser:instagram", {"since": 1.0})
+        self.window = Window(self.clock, [SESSION["instagram"]],
+                             instagram_site("https://www.instagram.com/accounts/login/?next=%2Fme%2F"))
+        self.assertIn("showed ReelForge's browser its login page", self.said(lambda: browser.instagram("me")))
+        self.assertEqual(config.get_token("browser:instagram")["misses"], 1)
+
+    def test_a_cookie_is_the_sites_only_on_the_site(self):
+        for domain, ours in ((".x.com", True), ("x.com", True), ("api.x.com", True), (".dropbox.com", False),
+                             ("netflix.com", False), (".notx.com", False)):
+            self.assertEqual(browser._has_session(Window(self.clock, [{"name": "auth_token", "domain": domain}]), "x"),
+                             ours, domain)
+
+
+class OddItems(BrowserTest):
+    """One video the page describes in a way the reader doesn't expect is left out, and said: it used to fail the
+    whole platform's read."""
+
+    LEFT_OUT = "left out of this read: ReelForge couldn't make sense of what the page said about them."
+
+    def test_x(self):
+        good = {"id_str": "9", "full_text": "a video post", "user_id_str": "1",
+                "created_at": "Wed Oct 14 20:19:24 +0000 2026", "extended_entities": {"media": [{"type": "video"}]}}
+        odd = {**good, "id_str": "10"}
+        del odd["created_at"]
+        self.window = Window(self.clock, [SESSION["x"]], x_site(tweets=[odd, good]))
+        account, posts = browser.x("me")
+        self.assertEqual([p.post_id for p in posts], ["9"])
+        self.assertEqual((account.warning, account.detail), (f"1 of X's videos was {self.LEFT_OUT}",
+                                                             "KeyError: 'created_at'"))
+        self.window = Window(self.clock, [SESSION["x"]], x_site())
+        self.assertEqual(browser.x("me")[0].warning, "")
+
+    def test_instagram(self):
+        reel = {"pk": "3400000000000000000", "code": "AbC", "like_count": 2, "media_type": 2, "play_count": 9}
+        odd = [{**reel, "pk": f"not-a-number-{n}", "code": f"x{n}"} for n in range(2)]
+        self.window = Window(self.clock, [SESSION["instagram"]], instagram_site(items=[*odd, reel]))
+        account, posts = browser.instagram("me")
+        self.assertEqual([p.post_id for p in posts], ["3400000000000000000"])
+        self.assertEqual(account.warning, f"2 of Instagram's videos were {self.LEFT_OUT}")
+
+    def test_tiktok(self):
+        stats = {"__DEFAULT_SCOPE__": {"webapp.user-detail": {"userInfo": {"stats": {
+            "followerCount": 11, "heartCount": 22, "videoCount": 2}}}}}
+        html = f'<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">{json.dumps(stats)}</script>'
+        items = [{"id": "777", "desc": "no upload time", "stats": {"playCount": 5}},
+                 {"id": "778", "desc": "a video", "createTime": 1790000000, "stats": {"playCount": 6, "diggCount": 1}}]
+        self.window = Window(self.clock, site=lambda url: (url, [
+            Reply("https://www.tiktok.com/api/post/item_list/?x=1", {"itemList": items})], html))
+        account, posts = browser.tiktok("me")
+        self.assertEqual((account.followers, [(p.post_id, p.views) for p in posts]), (11, [("778", 6)]))
+        self.assertEqual((account.warning, account.detail), (f"1 of TikTok's videos was {self.LEFT_OUT}",
+                                                             "KeyError: 'createTime'"))
+
+
+class TikTokFallback(unittest.TestCase):
+    """TikTok is read in ReelForge's browser for its videos; when that fails, the plain page still gives the totals.
+    That used to pass for a whole read, with no word of why the videos had stopped."""
+
+    AGAIN = "ReelForge tries again at the next refresh."
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(setattr, db, "_path", db._path)
+        db.init(Path(tmp.name) / "stats.db")
+        for state in (sync._attempted, sync.last_errors, sync.last_warnings):
+            state.clear()
+            self.addCleanup(state.clear)
+        self.videos: Exception | None = None  # what reading the videos runs into, if anything
+        for patch in (mock.patch.object(browser, "available", lambda: True),
+                      mock.patch.object(browser, "tiktok", self.in_browser),
+                      mock.patch.object(public, "tiktok", lambda handle: (Account(f"@{handle}", 11, likes=22), []))):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def in_browser(self, handle: str):
+        if self.videos:
+            raise self.videos
+        return Account(f"@{handle}", 11, likes=22), [SimpleNamespace(
+            post_id="778", title="a video", url=None, published_at=1790000000, views=6, likes=1, comments=0,
+            shares=0, saves=None)]
+
+    def test_the_totals_come_with_why_the_videos_didnt(self):
+        tiktok = TikTok({"handle": "@me"})
+        only = "Only TikTok's totals were read this time, not its videos. "
+        for error, why, kept in (
+                (PlatformError("TikTok didn't load @me's profile (wrong handle, or a captcha); it tries again next "
+                               "refresh."),
+                 "TikTok didn't load @me's profile (wrong handle, or a captcha); it tries again next refresh.",
+                 "PlatformError: TikTok didn't load @me's profile (wrong handle, or a captcha); it tries again next "
+                 "refresh."),
+                (BrowserTimeout("Page.goto: Timeout 45000ms exceeded.\nCall log:\n  - navigating"),
+                 f"TikTok's video list took too long to answer. {self.AGAIN}",
+                 "TimeoutError: Page.goto: Timeout 45000ms exceeded. | Call log: | - navigating"),
+                (KeyError("createTime"),
+                 f"TikTok's video list wasn't read: its page wasn't what ReelForge expected. {self.AGAIN}",
+                 "KeyError: 'createTime'")):
+            self.videos = error
+            account, posts = tiktok.fetch()
+            self.assertEqual((account.followers, account.likes, posts), (11, 22, []))
+            self.assertEqual((account.warning, account.detail), (only + why, kept))
+        self.videos = None
+        account, posts = tiktok.fetch()
+        self.assertEqual((account.warning, len(posts)), ("", 1))
+
+    def test_a_refresh_keeps_it_for_every_window_until_a_whole_read(self):
+        ps = {"tiktok": TikTok({"handle": "@me"})}
+        self.videos = BrowserTimeout("Page.goto: Timeout 45000ms exceeded.")
+        result = sync.refresh(ps, {"refresh_minutes": 30}, manual=True, force=True)
+        self.assertEqual((result.done, result.errors), (["TikTok"], []))  # the totals were read: not a failed read
+        self.assertEqual(result.details, ["TikTok: TimeoutError: Page.goto: Timeout 45000ms exceeded."])
+        said = sync.last_warnings["tiktok"][1]
+        self.assertTrue(said.startswith("Only TikTok's totals were read this time, not its videos."))
+        sync.last_warnings.clear()  # a window that opens later (another process) takes it on
+        self.assertTrue(sync.adopt(sync.shared()))
+        self.assertEqual(sync.last_warnings["tiktok"][1], said)
+        self.videos = None
+        sync.refresh(ps, {"refresh_minutes": 30}, manual=True, force=True)
+        self.assertNotIn("tiktok", sync.last_warnings)
+        self.assertEqual(sync.shared()["warnings"], {})
+
+
+class Handles(unittest.TestCase):
+    def test_a_handle_that_would_change_the_address_counts_as_none(self):
+        """config.toml is edited by hand too. The handle goes into the addresses ReelForge opens, logged in."""
+        for typed, handle in (("@me", "me"), ("me.too_ok-1", "me.too_ok-1"), ("日本語", "日本語"), ("", ""),
+                              ("https://x.com/me", ""), ("x.com/me", ""), ("me?tab=1", ""), ("me#top", ""),
+                              ("me and you", ""), ("..", ""), ("me@evil.example", ""), ("a\\b", "")):
+            self.assertEqual(TikTok({"handle": typed}).public_handle, handle, typed)
+        self.assertFalse(YouTube({"handle": "youtube.com/@me"}).connected())
+
+    def test_a_handle_written_another_way_is_still_that_handle(self):
+        """A YouTube handle in another alphabet, copied from the address bar in its %-form, and a handle with a
+        slash after it: both name the page they always did, but counted as none once handles were checked, and
+        the platform dropped out of ReelForge without a word. What a %-form stands for is still checked."""
+        for typed, handle in (("@%D0%BA%D0%B0%D0%BD%D0%B0%D0%BB", "канал"), ("@me/", "me"), ("me%2Fabout", ""),
+                              ("me%3Ftab=1", ""), ("@%40me", ""), ("100%", ""), ("/", "")):
+            self.assertEqual(YouTube({"handle": typed}).public_handle, handle, typed)
+        channel = YouTube({"handle": "@%D0%BA%D0%B0%D0%BD%D0%B0%D0%BB"})
+        self.assertEqual((channel.handle, channel.connected(), channel.refused_handle), ("@канал", True, ""))
+        self.assertEqual(str(httpx.URL(f"https://www.youtube.com/@{channel.public_handle}")),
+                         "https://www.youtube.com/@%D0%BA%D0%B0%D0%BD%D0%B0%D0%BB")  # the page it always opened
+        # One that still counts as none is kept, to say on its Accounts panel what config.toml has.
+        self.assertEqual(X({"handle": " https://x.com/me?s=20 "}).refused_handle, "https://x.com/me?s=20")
+        self.assertEqual((X({"handle": "@me"}).refused_handle, X({}).refused_handle), ("", ""))
+
+
+if __name__ == "__main__":
+    unittest.main()

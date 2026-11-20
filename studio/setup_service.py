@@ -61,7 +61,7 @@ def saved_answers(profile=None) -> dict | None:
     if not path.exists():
         return None
     try:
-        return {k: v for k, v in json.loads(path.read_text(encoding="utf-8")).items()
+        return {k: v for k, v in json.loads(path.read_text(encoding="utf-8-sig")).items()
                 if k in BY_KEY or k.startswith("_")}
     except ValueError:
         return None
@@ -78,6 +78,7 @@ class Setup(Service):
         self.steps = STEPS + [REVIEW]
         self.preview = False
         self.written: list = []
+        self.undone: list[str] = []        # a channel's settings file left as it was, for the last screen to say
         self.profile = profiles.current()  # the profile onboarding is for, or (new) the one it was opened from
         self.new = False                   # making a new profile: it's made when you press Create
         self.made: profiles.Profile | None = None
@@ -133,8 +134,9 @@ class Setup(Service):
             "items": [{"key": i.key, "name": i.name, "why": i.why, "ready": i.ready, "detail": i.detail,
                        "size_mb": i.size_mb, "can_install": i.can_install, "default": i.default} for i in items],
             "todo": [i.key for i in setup_flow.todo(items)],
-            "note": "Downloads come only from the official sites (blender.org, gyan.dev, Mixkit) and every file is "
-                    "checked. Mixkit's sounds are free to use in your videos, YouTube and social media included.",
+            "note": f"Downloads come only from the official sites (blender.org, {tools.ffmpeg_source()[0]}, Mixkit) "
+                    "and every file is checked. Mixkit's sounds are free to use in your videos, YouTube and social "
+                    "media included.",
         })
 
     @rpc
@@ -203,7 +205,8 @@ class Setup(Service):
 
     @rpc
     def onboard_start(self) -> dict:
-        start = saved_answers()  # the profile it was opened for (or, for a new one, from)
+        # the profile it was opened for (or, for a new one, from), with the hourly read of its stats as it's done
+        start = generate.as_read(saved_answers(), self.profile)
         if self.new:  # a new channel: only what's about you and your AI carries over
             start = {k: v for k, v in (start or {}).items() if k in CARRIED}
         self.answers = defaults_for(dict(start or {}))
@@ -418,7 +421,8 @@ class Setup(Service):
                 if problems:  # said below, before a folder is made
                     raise ValueError("some answers need fixing:\n  " + "\n  ".join(problems))
                 self.made = profiles.create(a["channel_name"])
-            self.written = generate.write_all(self.answers, self.target())
+            self.undone = []
+            self.written = generate.write_all(self.answers, self.target(), say=self.undone.append)
         except ValueError as e:
             return {"ok": False, "status": str(e).splitlines()[0],
                     "review": self.summary() + "\n\n```\n" + str(e) + "\n```"}
@@ -499,10 +503,12 @@ class Setup(Service):
                 "back": f"Back to {self.profile.name}" if self.embedded and self.new else ""}
 
     def _apply_system(self) -> None:
-        lines = []
+        lines = [(False, line) for line in self.undone]   # a settings file with a mistake in it comes first
         try:
-            # One hourly job reads every profile that keeps its stats read in the background (most do).
-            if any(S.load(p.settings)["platforms"].get("background_stats", True) for p in profiles.every()):
+            # One hourly job reads every profile that keeps its stats read in the background (most do). A channel
+            # whose studio.toml has a typo in it goes by its own background_stats line, else its answers, else it's
+            # off (generate.background_stats): the line about the file is already above.
+            if any(generate.background_stats(p) for p in profiles.every()):
                 msg = stats_schedule.enable()
                 if msg.startswith(stats_schedule.TEST_COPY):       # a test copy leaves the job alone
                     lines.append((None, msg))

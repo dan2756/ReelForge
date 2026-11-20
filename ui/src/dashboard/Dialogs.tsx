@@ -1,19 +1,24 @@
 // Dialogs over the window: how ReelForge works, typing in stats, removing a video, which video a post is, making an
-// account (or the channel's Gmail), disconnecting one, the profile button's menu and deleting a profile (Profiles.tsx),
-// and the Settings tab's (Settings.tsx).
+// account (or the channel's Gmail), disconnecting one, logging ReelForge's browser out of one, the stats from before a
+// handle changed, the question before a post and the browser extension (Posting.tsx), the connection to YouTube's own
+// API and the question before a post through it (YouTubeApi.tsx), the profile button's menu and deleting a profile
+// (Profiles.tsx), and the Settings tab's (Settings.tsx).
 
 import { TextAttributes } from "@opentui/core"
+import { useTerminalDimensions } from "@opentui/react"
 import { useState } from "react"
-import { lines } from "../lib/styled"
+import { wrappedRows, type Segs } from "../lib/styled"
 import { DASH } from "../theme"
 import { Button } from "../ui/Button"
 import { RadioSet, TextField } from "../ui/Fields"
 import { OptionList } from "../ui/Lists"
-import { Modal, Scroll, Wrapped } from "../ui/Panels"
+import { DialogButtons, Modal, modalRoom, Note, Scroll } from "../ui/Panels"
 import { useFocusManager } from "../lib/focus"
+import { ExtensionDialog, PostDialog } from "./Posting"
 import { DeleteProfile, ProfileMenu } from "./Profiles"
 import { DiscardProfile, FactoryReset, MoveFolder, Uninstall } from "./Settings"
 import { PUBLISH_KEY, useDash, type EpisodeData, type LogData, type SignupData } from "./state"
+import { ApiDialog, ApiPostDialog } from "./YouTubeApi"
 
 export function Dialogs() {
   const s = useDash()
@@ -25,6 +30,12 @@ export function Dialogs() {
   if (d.kind === "remove") return <Remove data={d.data} close={close} />
   if (d.kind === "signup") return <SignUp data={d.data} close={close} />
   if (d.kind === "disconnect") return <Disconnect data={d.data} close={close} />
+  if (d.kind === "logout") return <LogOut data={d.data} close={close} />
+  if (d.kind === "handle_change") return <HandleChange data={d.data} close={close} />
+  if (d.kind === "post") return <PostDialog data={d.data} close={close} />
+  if (d.kind === "extension") return <ExtensionDialog from={d.from} close={close} />
+  if (d.kind === "youtube_api") return <ApiDialog connect={d.connect} close={close} />
+  if (d.kind === "api_post") return <ApiPostDialog data={d.data} close={close} />
   if (d.kind === "profiles") return <ProfileMenu data={d.data} close={close} />
   if (d.kind === "delete_profile") return <DeleteProfile data={d.data} close={close} />
   if (d.kind === "discard_profile") return <DiscardProfile data={d.data} close={close} />
@@ -32,14 +43,6 @@ export function Dialogs() {
   if (d.kind === "uninstall") return <Uninstall data={d.data} close={close} />
   if (d.kind === "move_folder") return <MoveFolder data={d.data} close={close} />
   return <EpisodePicker data={d.data} close={close} />
-}
-
-function Buttons({ children }: { children: React.ReactNode }) {
-  return (
-    <box flexDirection="row" justifyContent="flex-end" height={1} marginTop={2} flexShrink={0} gap={1}>
-      {children}
-    </box>
-  )
 }
 
 /** How ReelForge works: the tabs first, in the order they sit along the top, each with the number that opens it, then
@@ -53,32 +56,40 @@ function Help({ close }: { close: () => void }) {
   return (
     <Modal name="help" title="HOW REELFORGE WORKS">
       <Scroll maxHeight={30} flexShrink={1} scrollY>
-        {topics.map(({ topic: [title, text, tab] }) => (
-          <box key={title} flexDirection="column" marginBottom={1} flexShrink={0}>
-            <text fg={DASH.text} attributes={TextAttributes.BOLD}>
-              {tab ? `${title} (${key(tab)})` : title}
-            </text>
-            <text fg={DASH.muted} wrapMode="word">
-              {text}
-            </text>
-          </box>
-        ))}
-        <text fg={DASH.text} attributes={TextAttributes.BOLD} flexShrink={0}>
-          Keys
-        </text>
-        {s.init.keys.map(([key, what]) => (
-          <text key={key} flexShrink={0}>
-            <span attributes={TextAttributes.BOLD}>{`  ${key.padEnd(8)}`}</span>
-            <span fg={DASH.muted}>{what}</span>
+        {/* a column kept free beside the scrollbar, which is drawn over the last one of text that wrapped before it showed */}
+        <box flexDirection="column" flexShrink={0} paddingRight={1}>
+          {topics.map(({ topic: [title, text, tab] }) => (
+            <box key={title} flexDirection="column" marginBottom={1} flexShrink={0}>
+              <text fg={DASH.text} attributes={TextAttributes.BOLD}>
+                {tab ? `${title} (${key(tab)})` : title}
+              </text>
+              <text fg={DASH.muted} wrapMode="word">
+                {text}
+              </text>
+            </box>
+          ))}
+          <text fg={DASH.text} attributes={TextAttributes.BOLD} flexShrink={0}>
+            Keys
           </text>
-        ))}
-        <text fg={DASH.muted} flexShrink={0}>
-          Everything else is a button on the page it applies to.
-        </text>
+          {s.init.keys.map(([key, what]) => (
+            // each key in a column as wide as the longest, what it does wrapping beside it
+            <box key={key} flexDirection="row" flexShrink={0}>
+              <text attributes={TextAttributes.BOLD} width={Math.max(...s.init.keys.map(([k]) => k.length), 0) + 4} flexShrink={0} wrapMode="none">
+                {`  ${key}`}
+              </text>
+              <text fg={DASH.muted} wrapMode="word" flexGrow={1} flexShrink={1}>
+                {what}
+              </text>
+            </box>
+          ))}
+          <text fg={DASH.muted} flexShrink={0}>
+            Everything else is a button on the page it applies to.
+          </text>
+        </box>
       </Scroll>
-      <Buttons>
+      <DialogButtons>
         <Button id="help-close" label="Close" variant="primary" autoFocus onPress={close} />
-      </Buttons>
+      </DialogButtons>
     </Modal>
   )
 }
@@ -97,12 +108,17 @@ function LogStats({ data, close }: { data: LogData; close: () => void }) {
   const [values, setValues] = useState(() => fill(data.start))
   const [problem, setProblem] = useState("")
   const save = async () => {
-    const error = await s.bridge.call<string | null>("save_logged_stats", platform, values.followers, values.views)
+    let error: string | null
+    try {
+      error = await s.bridge.call<string | null>("save_logged_stats", platform, values.followers, values.views)
+    } catch (e) {
+      return s.bridge.failed(e) // nothing was saved: the dialog stays, with what was typed
+    }
     if (error) setProblem(error)
     else close()
   }
   return (
-    <Modal name="log" title="LOG STATS">
+    <Modal name="log" title="TYPE IN STATS">
       <RadioSet
         id="ls-platform"
         options={data.platforms.map((p) => [p.key, p.name])}
@@ -113,9 +129,20 @@ function LogStats({ data, close }: { data: LogData; close: () => void }) {
         }}
       />
       <box marginTop={1} marginBottom={1} flexShrink={0}>
-        <text fg={DASH.muted} wrapMode="word">
-          Copy the numbers from the app. Blank fields are skipped; 1.2K and 3,400 both work. Enter saves.
-        </text>
+        {problem ? (
+          // What's wrong with what was typed, where the hint was: under the list it took a row from the list, and in
+          // a window 24 rows tall the box with the wrong number went out of sight. (It is red everywhere: here,
+          // under an @handle, in first-time setup. A number lower than the one saved is not wrong, it is asked
+          // about: amber, and Save again is the answer.)
+          <text fg={problem.includes("Press Save again") ? DASH.warn : DASH.bad} wrapMode="word">
+            {problem}
+          </text>
+        ) : (
+          // (3400 and 12K, not 3,400 and 1.2K: the word wrap broke an example in two at its comma, or its point)
+          <text fg={DASH.muted} wrapMode="word">
+            Copy the numbers from the app. Blank fields are skipped; 3400 and 12K both work. Enter saves.
+          </text>
+        )}
       </box>
       <box flexDirection="row" height={3} flexShrink={0}>
         <box flexGrow={1} justifyContent="center">
@@ -140,7 +167,8 @@ function LogStats({ data, close }: { data: LogData; close: () => void }) {
           Videos show up here once you've uploaded them from the Publish tab.
         </text>
       )}
-      <Scroll maxHeight={15} flexShrink={1} scrollY>
+      {/* as tall as its rows, up to five of them: by itself a scrolling area takes all the height it can get */}
+      <Scroll maxHeight={Math.min(data.episodes.length * 3, 15)} flexShrink={1} scrollY>
         {data.episodes.map((e) => (
           <box key={e.id} flexDirection="row" height={3} flexShrink={0}>
             <box flexGrow={1} justifyContent="center">
@@ -157,15 +185,10 @@ function LogStats({ data, close }: { data: LogData; close: () => void }) {
           </box>
         ))}
       </Scroll>
-      {problem ? (
-        <text fg={DASH.warn} marginTop={1} flexShrink={0}>
-          {problem}
-        </text>
-      ) : null}
-      <Buttons>
+      <DialogButtons>
         <Button id="ls-cancel" label="Cancel" onPress={close} />
         <Button id="ls-save" label="Save" variant="primary" onPress={() => void save()} />
-      </Buttons>
+      </DialogButtons>
     </Modal>
   )
 }
@@ -179,14 +202,12 @@ function Remove({ data, close }: { data: { path: string; note: import("../lib/st
   }
   return (
     <Modal name="remove" title="REMOVE VIDEO">
-      {lines(data.note).map((l, i) => (
-        <Wrapped key={i} segs={l.length ? l : [[" ", ""]]} flexGrow={0} />
-      ))}
-      <Buttons>
+      <Note segs={data.note} />
+      <DialogButtons>
         <Button id="rm-cancel" label="Cancel" autoFocus onPress={close} />
         <Button id="rm-hide" label="Hide from list" onPress={() => choose("hide")} />
         <Button id="rm-recycle" label={`Move to ${data.bin}`} variant="error" onPress={() => choose("recycle")} />
-      </Buttons>
+      </DialogButtons>
     </Modal>
   )
 }
@@ -201,23 +222,23 @@ function EpisodePicker({ data, close }: { data: EpisodeData; close: () => void }
   }
   return (
     <Modal name="episode" title="WHICH VIDEO IS THIS?">
-      {lines(data.note).map((l, i) => (
-        <Wrapped key={i} segs={l} flexGrow={0} />
-      ))}
-      <box marginTop={1} flexShrink={0} flexDirection="column">
+      <Note segs={data.note} />
+      {/* in a window too short for the whole list it gives way first (it scrolls by itself), before what's said above it */}
+      <box marginTop={1} flexShrink={8} minHeight={3} flexDirection="column">
         <OptionList
           id="episode-choices"
           items={data.options}
           selected={selected}
           maxLines={16}
+          autoFocus
           onSelect={setSelected}
           onActivate={choose}
         />
       </box>
-      <Buttons>
+      <DialogButtons>
         <Button id="ep-cancel" label="Cancel" onPress={close} />
         <Button id="ep-pick" label="This one" variant="primary" disabled={!selected} onPress={() => selected && choose(selected)} />
-      </Buttons>
+      </DialogButtons>
     </Modal>
   )
 }
@@ -233,7 +254,12 @@ function SignUp({ data, close }: { data: SignupData; close: () => void }) {
   const [handle, setHandle] = useState(s.handles[data.key] ?? "")
   const [problem, setProblem] = useState("")
   const open = async () => {
-    const said = await s.bridge.call<string | null>("open_signup", data.key)
+    let said: string | null
+    try {
+      said = await s.bridge.call<string | null>("open_signup", data.key)
+    } catch (e) {
+      return s.bridge.failed(e) // nothing opened, so nothing here says it did
+    }
     setOpened(said || "Opened in your browser. Come back here when you're done.")
     setTimeout(() => focus.focus(data.account ? "su-handle" : "su-done"), 30)
   }
@@ -243,23 +269,32 @@ function SignUp({ data, close }: { data: SignupData; close: () => void }) {
     close()
     void s.connect(data.key, typed)
   }
+  // The reason and the steps, as many rows as they wrap to. In a window too short for the whole dialog (three of the
+  // four are a row taller than a window 24 rows tall takes) they scroll, and the button, the box for the handle and
+  // the dialog's own buttons keep their rows. With nothing to give way, those were drawn on the dialog's border.
+  const room = modalRoom(84, useTerminalDimensions().width) - 1 // a column kept free beside the scrollbar
+  const rows = wrappedRows(data.why, room) + 1 + data.steps.reduce((n, step) => n + wrappedRows(step, room - 4), 0)
   return (
     <Modal name="signup" title={data.title} width={84}>
-      <text fg={DASH.muted} wrapMode="word" flexShrink={0}>
-        {data.why}
-      </text>
-      <box flexDirection="column" marginTop={1} flexShrink={0}>
-        {data.steps.map((step, i) => (
-          <box key={i} flexDirection="row" flexShrink={0}>
-            <text attributes={TextAttributes.BOLD} width={4} flexShrink={0}>
-              {`${i + 1}.`.padStart(3)}
-            </text>
-            <text wrapMode="word" flexGrow={1} flexShrink={1}>
-              {step}
-            </text>
+      <Scroll maxHeight={rows} flexShrink={1} scrollY>
+        <box flexDirection="column" flexShrink={0} paddingRight={1}>
+          <text fg={DASH.muted} wrapMode="word" flexShrink={0}>
+            {data.why}
+          </text>
+          <box flexDirection="column" marginTop={1} flexShrink={0}>
+            {data.steps.map((step, i) => (
+              <box key={i} flexDirection="row" flexShrink={0}>
+                <text attributes={TextAttributes.BOLD} width={4} flexShrink={0}>
+                  {`${i + 1}.`.padStart(3)}
+                </text>
+                <text wrapMode="word" flexGrow={1} flexShrink={1}>
+                  {step}
+                </text>
+              </box>
+            ))}
           </box>
-        ))}
-      </box>
+        </box>
+      </Scroll>
       <box flexDirection="row" height={1} marginTop={1} marginLeft={4} flexShrink={0}>
         <Button id="su-open" label={data.button} variant="primary" autoFocus onPress={() => void open()} />
       </box>
@@ -281,34 +316,79 @@ function SignUp({ data, close }: { data: SignupData; close: () => void }) {
           ) : null}
         </>
       ) : null}
-      <Buttons>
+      <DialogButtons>
         <Button id="su-cancel" label="Cancel" onPress={close} />
         <Button id="su-done" label={data.account ? "Connect" : "Done"} variant={data.account ? "primary" : "default"} onPress={() => done()} />
-      </Buttons>
+      </DialogButtons>
     </Modal>
   )
 }
 
-/** Are you sure? Disconnecting a platform hides it everywhere in ReelForge and stops its reads; its stats stay. */
-function Disconnect({ data, close }: { data: { key: string; title: string; note: import("../lib/styled").Segs }; close: () => void }) {
+/** Are you sure? Disconnecting a platform hides it everywhere in ReelForge and stops its reads; its stats stay. While
+ * ReelForge's own browser is logged in to it (Instagram, X), that log-in stays too unless you pick Disconnect and log
+ * out. */
+function Disconnect({ data, close }: { data: { key: string; title: string; note: Segs; logged_in?: boolean }; close: () => void }) {
   const s = useDash()
+  const go = (logout: boolean) => {
+    close()
+    s.bridge.send("disconnect", data.key, logout)
+  }
   return (
     <Modal name="disconnect" title={data.title}>
-      {lines(data.note).map((l, i) => (
-        <Wrapped key={i} segs={l.length ? l : [[" ", ""]]} flexGrow={0} />
-      ))}
-      <Buttons>
+      <Note segs={data.note} />
+      <DialogButtons>
         <Button id="dc-cancel" label="Cancel" autoFocus onPress={close} />
+        {data.logged_in ? <Button id="disconnect-logout" label="Disconnect and log out" variant="error" onPress={() => go(true)} /> : null}
+        <Button id="disconnect" label="Disconnect" variant="error" onPress={() => go(false)} />
+      </DialogButtons>
+    </Modal>
+  )
+}
+
+/** Are you sure? Logging ReelForge's own browser out of a platform removes the log-in it keeps on this computer. The
+ * platform stays connected with its stats, and isn't read again until you log in. */
+function LogOut({ data, close }: { data: { key: string; title: string; note: Segs; button: string }; close: () => void }) {
+  const s = useDash()
+  return (
+    <Modal name="logout" title={data.title}>
+      <Note segs={data.note} />
+      <DialogButtons>
+        <Button id="lo-cancel" label="Cancel" autoFocus onPress={close} />
         <Button
-          id="disconnect"
-          label="Disconnect"
+          id="logout"
+          label={data.button}
           variant="error"
           onPress={() => {
             close()
-            s.bridge.send("disconnect", data.key)
+            s.bridge.send("logout", data.key)
           }}
         />
-      </Buttons>
+      </DialogButtons>
+    </Modal>
+  )
+}
+
+/** A platform whose stats were read under another @handle before: keep those stats (the account was renamed), or
+ * forget them (a typo, or someone else's account). Forgetting removes readings and videos, after a copy of the stats
+ * database is saved, so it's the red button and Cancel has the keyboard. */
+function HandleChange({ data, close }: { data: { key: string; title: string; note: Segs; forget: string; keep: string }; close: () => void }) {
+  const s = useDash()
+  const keep = () => {
+    close()
+    s.bridge.send("keep_handle_stats", data.key)
+  }
+  const forget = () => {
+    close()
+    s.bridge.send("forget_handle_stats", data.key)
+  }
+  return (
+    <Modal name="handle-change" title={data.title}>
+      <Note segs={data.note} />
+      <DialogButtons>
+        <Button id="hc-cancel" label="Cancel" autoFocus onPress={close} />
+        <Button id="hc-keep" label={data.keep} onPress={keep} />
+        <Button id="hc-forget" label={data.forget} variant="error" onPress={forget} />
+      </DialogButtons>
     </Modal>
   )
 }

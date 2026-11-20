@@ -17,7 +17,8 @@ import sys
 
 from studio.bridge import rpc
 
-from . import config, desktop, faq, tabs, videos
+from . import config, db, desktop, faq, tabs, videos
+from .analytics import fmt_ago
 from .view import MUTED, Text
 
 RESTART = 75  # the launcher starts ReelForge again, doing a reset, an uninstall or a move first if one was asked
@@ -85,6 +86,14 @@ class SettingsTab:
 
     def _look_up_computer(self) -> None:
         rows = self.computer_rows()
+        job = next((row for row in rows if row.get("key") == "stats"), None)
+        if job is not None and not self.demo:
+            # Beside whether the hourly job is on: how its last read and the daily backup went. What's wrong comes
+            # first, since the line is cut where the panel ends. (A row of its own would push the danger zone off
+            # a short window.)
+            wrong, fine = self.kept_note(job["on"])
+            job["value"] = " · ".join([*wrong, job["value"], *fine])
+            job["problem"] = bool(wrong)
         self.measure_deleted()
         self.loop.call_soon(lambda: self.emit("settings", self.settings_view(rows)))
 
@@ -224,6 +233,31 @@ class SettingsTab:
                     "button": "" if left else f"Move to the {desktop.BIN}" if made else "Make it"})
         out.append(_folder_row(False))
         return out
+
+    @staticmethod
+    def kept_note(job_on: bool = True) -> tuple[list[str], list[str]]:
+        """How the hourly job's last read of this channel's stats went, and their daily backup (data/backups, one a
+        day): (what went wrong, what went fine), each in a few words, for the Background refresh row. Neither has a
+        window to say it in, so a read that had a problem or a backup that failed shows here. Nothing is said about
+        one that hasn't happened yet, or when the stats can't be looked at right now. job_on: whether the job is
+        switched on. Off, its last read is old news, problem or not, and isn't said (it used to stay on the row
+        for as long as the job was off); the backup is the window's doing too, so that still is."""
+        try:
+            job, backup = db.get_meta("job"), db.last_backup()
+        except Exception:
+            return [], []
+        wrong, fine = [], []
+        if job_on and isinstance(job, dict) and job.get("at"):
+            if job.get("problems"):
+                wrong.append(f"its last read, {fmt_ago(job['at'])}, had a problem (see data/refresh.log)")
+            else:
+                fine.append(f"read {fmt_ago(job['at'])}")
+        if backup.get("failed"):
+            why = backup.get("why") or "no reason given"
+            wrong.append(f"the daily backup failed {fmt_ago(backup['failed'])} ({why})")
+        elif backup.get("ok"):
+            fine.append(f"backed up {fmt_ago(backup['ok'])}")
+        return wrong, fine
 
     @rpc
     def settings_toggle(self, key: str, on: bool | None = None) -> None:
@@ -396,6 +430,8 @@ class SettingsTab:
         note.append("\n\nReelForge closes, the folder moves" + (" (a small window does it, and waits while anything "
                     "still has a file in it open)" if desktop.WINDOWS else "") + ", and ReelForge opens again from its "
                     "new folder. If you open it in Claude Code or Codex, open the new folder from now on.", MUTED)
+        if p.browsers:   # connected to the extension, which each of them loads from this folder
+            note.append(f" {move.EXTENSION_BEFORE}", MUTED)
         return {"note": note.json(), "to": str(p.target), "problem": problem}
 
     @rpc

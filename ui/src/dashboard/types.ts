@@ -189,6 +189,7 @@ export interface CompareChart {
 
 export interface CompareView {
   heading: Segs
+  empty?: string // why the scoreboard has nothing to show (no platform is connected): said in place of its bars
   bars: [string, [string, number, string, string][]][]
   charts: CompareChart[]
   table: TableData
@@ -207,6 +208,140 @@ export interface PreviewView {
   rows: { name: string; color: string; text: string }[]
 }
 
+/** Where the picked video's post stands on one platform (dashboard/posting_tab.py): none (nothing yet), spotted (a
+ * stats read found the post) or its job's state, in a line of words, with what can be done about it. */
+export interface PostingRow {
+  key: string
+  name: string
+  color: string
+  state: string
+  line: Segs
+  busy: boolean // ReelForge or the extension is at work on it
+  url: string | null
+  job: string | null
+  via: "extension" | "api" | null // how that job goes: with the browser extension, or through YouTube's own API
+  // retry, cancel, mark_posted, not_posted, open_post, post_again. On the YouTube row also post_api (the question
+  // before a post through YouTube's API) while this window is connected to it, and connect_api (Google's page, to
+  // connect this window) while it isn't. A row whose job went through the API has no retry: a new try is post_api.
+  // The view's labels has the words for each: an action's name is never drawn.
+  actions: string[]
+  // The YouTube row, while this window is connected to YouTube's API and a post could start through it. force: the
+  // video is up there already, so it would be a post again: the window's own button asks for that by name.
+  api?: { force: boolean }
+}
+
+/** off: no browser is connected; waiting: one is, and hasn't been heard from lately (it wakes when a post starts); on;
+ * old: it and ReelForge speak different versions of the link between them. */
+export type ExtensionState = "off" | "waiting" | "on" | "old"
+
+/** Posting the picked video (the "posting" view): its review, a row for each connected platform, and whether Post
+ * can be pressed. setup: only the extension is in the way, so Post explains how to set it up. */
+export interface PostingView {
+  video: { path: string; name: string } | null
+  review: { state: string; line: Segs }
+  extension: { state: ExtensionState; line: Segs }
+  can_post: boolean
+  why: string
+  setup: boolean
+  rows: PostingRow[]
+  labels: Record<string, string> // the words for each action's button
+}
+
+/** A browser the extension is connected in. signed: what it was last seen signed in to, in the extension's words about
+ * its own browser (never the accounts connected in ReelForge). */
+export interface ExtensionInstall {
+  install: string
+  name: string
+  version: string
+  paired: string // when it connected: new when the same browser connects again
+  seen: string
+  on: boolean
+  old: boolean
+  signed: string
+}
+
+/** The browser extension (the "extension" view). */
+export interface ExtensionView {
+  state: ExtensionState
+  line: Segs
+  lines: Segs[] // what it is, why this window isn't listening for it, how far it has been tested
+  installs: ExtensionInstall[]
+  port: number | null // null: this window isn't listening for it
+  folder: string
+  folder_there: boolean
+  hint_dismissed: boolean
+  hint: Parts // the Publish tab's one line about it while it isn't set up
+  steps: string[] // setting it up, once
+  signed_note: string // whose word "signed in there" is, under the connected browsers
+  problem: string // why this window can't hand a post to it ("" when it can)
+}
+
+/** One platform in the question before a post (post_info): the exact text for each of its boxes, the account, and
+ * what stops it if anything does. again: it is up there already, and can be posted again when ticked. press: the
+ * extension may press Post there, once "stop before posting" is switched off here. It then still presses only where
+ * Press Post for me is on in its own settings and you said yes for that post in the browser. */
+export interface PostInfoPlatform {
+  key: string
+  name: string
+  color: string
+  handle: string
+  fields: { label: string; text: string }[]
+  blocked: { reason: string; message: string; url?: string } | null
+  again: boolean
+  press: boolean
+}
+
+export interface PostInfo {
+  video: { path: string; name: string; size: string; sha256: string } // sha256: the file as the question saw it
+  review: { state: string; line: string }
+  extension: { state: ExtensionState; line: Segs }
+  platforms: PostInfoPlatform[]
+  can_post: boolean
+  why: string
+  note: string // how far posting with the extension has been tested
+  how: string // what happens next, in a sentence
+  how_press: string // ... with "stop before posting" switched off: what else the extension wants before it presses
+}
+
+/** The connection to YouTube's own API (the "youtube_api" view, dashboard/youtube_api_tab.py), a second way to post
+ * there. off: no client file was ever given. again: one is on file and this window has no sign-in (every window
+ * starts there: the sign-in is never kept in a file). connecting: Google's consent page is open in your browser. on. */
+export interface YouTubeApiView {
+  state: "off" | "connecting" | "on" | "again"
+  line: Segs
+  said: Segs // how the last thing its dialog asked for went, while the dialog is open ([]: nothing to say)
+  said_id: number // which time that was said: one more each time, when the words are the same as the last too
+  lines: Segs[] // what it is, or why this window has to connect, and how far this way of posting is tested
+  client: boolean // a client is on file: Connect needs no file
+  wants_file: boolean // connecting takes a client file: none is on file, or Google no longer knows the one that is
+  channel: { id: string; title: string } | null // where the last upload went: all Google tells
+  privacy: string // who can see a new post, until you choose otherwise for one
+  made_for_kids: boolean | null // your answer for the posts to come (null: not given, and then none is sent)
+  privacies: { key: string; label: string }[]
+  note: string // that this way of posting has never been run against YouTube itself
+  docs: string // where the guide is
+  // The sentences beside the dialog's controls. caveat: for the Publish tab's line while a post is on offer.
+  words: { caveat: string; file: string; waiting: string; leave: string; start_as: string; kids: string }
+}
+
+/** What the question before a post through YouTube's API shows (youtube_api_info): the view, and for the picked video
+ * exactly what would be sent. video is null when there is nothing to post (why says so); its sha256 is the file as the
+ * question saw it, which goes back with the yes. force: the video is up there or may be, so this would be a post
+ * again. */
+export interface YouTubeApiInfo extends YouTubeApiView {
+  video: { path: string; name: string; size: string; sha256: string } | null
+  review: { state: string; line: string } | null
+  send: { title: string; description: string; privacy: string; made_for_kids: boolean | null; category: string } | null
+  fields: { key: string; label: string; text: string }[] // send, a row each, in words
+  left: string // what ReelForge leaves to YouTube Studio
+  can_post: boolean
+  why: string
+  force: boolean
+  blocked: { reason: string; message: string; url?: string } | null
+  how: string // what happens after your yes
+  again: string // what a post again means
+}
+
 /** One platform on the Accounts tab: on (connected), login (its handle is in, waiting for the one log-in) or off
  * (not connected: a box for its @handle, Connect and Sign up). */
 export interface AccountPanelView {
@@ -222,6 +357,8 @@ export interface AccountPanelView {
   signup?: boolean
   logs_in?: boolean
   login_label?: string
+  logs_out?: boolean // ReelForge's own browser is logged in to it: Log out
+  old_handles?: string[] // it also holds stats read under these handles, from before the handle changed
   profile_disabled?: boolean
   refresh_disabled?: boolean
   show_log?: boolean

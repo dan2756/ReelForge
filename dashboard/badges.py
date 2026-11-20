@@ -25,6 +25,7 @@ video on the Videos tab, or the platform's card on the Overview.
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -56,8 +57,11 @@ class Badge:
 def rank(value: float, others: list[float]) -> tuple[int, int, int]:
     """(tier, position, how many) for `value` among itself and `others`. Ties rank below: the position is one more
     than every other value at least as high."""
-    n = len(others) + 1
-    ahead = sum(1 for o in others if o >= value)
+    return _placed(value, sum(1 for o in others if o >= value), len(others) + 1)
+
+
+def _placed(value: float, ahead: int, n: int) -> tuple[int, int, int]:
+    """rank's answer for a value with `ahead` others at least as high, among `n` in all."""
     pos = ahead + 1
     if not ahead and n >= MIN_BEST and value > 0:
         return BEST, pos, n
@@ -92,8 +96,23 @@ def _value(post: dict, metric: str, first_day: dict) -> float | None:
     return post.get(metric)
 
 
-def video_badges(post: dict, posts: list[dict], first_day: dict, platforms: dict) -> list[Badge]:
-    """The badges one video has earned against your other videos on its platform, best first."""
+def sorted_values(posts: list[dict], first_day: dict) -> dict[tuple[str, str], list[float]]:
+    """(platform, metric) -> every video's value there, lowest first: what video_badges ranks against when it's
+    asked about every video in turn (notify_new), so a year of videos isn't gone through once per video."""
+    out: dict[tuple[str, str], list[float]] = {}
+    for q in posts:
+        for metric in VIDEO_METRICS:
+            if (v := _value(q, metric, first_day)) is not None:
+                out.setdefault((q["platform"], metric), []).append(v)
+    for values in out.values():
+        values.sort()
+    return out
+
+
+def video_badges(post: dict, posts: list[dict], first_day: dict, platforms: dict,
+                 values: dict | None = None) -> list[Badge]:
+    """The badges one video has earned against your other videos on its platform, best first. values: those videos'
+    numbers, sorted already (sorted_values), for a caller that asks about many."""
     p = platforms.get(post["platform"])
     if p is None:
         return []
@@ -102,9 +121,13 @@ def video_badges(post: dict, posts: list[dict], first_day: dict, platforms: dict
         mine = _value(post, metric, first_day)
         if mine is None:
             continue
-        others = [v for q in posts if q["platform"] == post["platform"] and q["post_id"] != post["post_id"]
-                  and (v := _value(q, metric, first_day)) is not None]
-        tier, pos, n = rank(mine, others)
+        if values is not None:  # the same answer as below: everyone at least as high, but for the video itself
+            all_of = values.get((post["platform"], metric), [mine])
+            tier, pos, n = _placed(mine, len(all_of) - bisect_left(all_of, mine) - 1, len(all_of))
+        else:
+            others = [v for q in posts if q["platform"] == post["platform"] and q["post_id"] != post["post_id"]
+                      and (v := _value(q, metric, first_day)) is not None]
+            tier, pos, n = rank(mine, others)
         if not tier:
             continue
         what = f"{p.name} video" if tier == BEST else f"{p.name} videos"
@@ -164,8 +187,9 @@ def notify_new(posts: list[dict], first_day: dict, account_rows: dict, platforms
     seeding = "_seeded" not in marks
     told = 0
     found: dict[str, list[Badge]] = {}
+    values = sorted_values(posts, first_day)
     for post in posts:
-        for b in video_badges(post, posts, first_day, platforms):
+        for b in video_badges(post, posts, first_day, platforms, values):
             found.setdefault(b.subject, []).append(b)
     for b in account_badges(account_rows, platforms):
         found.setdefault(b.subject, []).append(b)

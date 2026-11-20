@@ -1,6 +1,8 @@
 """2D videos (3.0): the video-type question, the notes first-time setup writes for a 2D channel, the voice's word
-timing, the spec's beat-relative times, and drawing the 2D demo in a real browser (skipped where there's none)."""
+timing, the spec's beat-relative times, a 2D episode in the pipeline's steps that were written for 3D ones (3.1), and
+drawing the 2D demo in a real browser (skipped where there's none)."""
 
+import io
 import json
 import shutil
 import subprocess
@@ -8,11 +10,14 @@ import sys
 import tempfile
 import tomllib
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from studio import generate, questions
+from studio import generate, profiles, questions
 from studio import paths as P
+
+from test_profiles import ANSWERS, Scratch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "pipeline"))
@@ -135,6 +140,121 @@ class Spec(unittest.TestCase):
         spec = config.load_spec(ROOT / "examples" / "demo_doubling_duck")
         self.assertEqual(spec["duration"], 67.0)
         self.assertEqual(config.engine(spec), "blender")
+
+
+class WithTheRestOfThePipeline(unittest.TestCase):
+    """3.1 brought --status, a sound check straight after the audio step and --stills lines, all written for 3D
+    episodes. A 2D episode goes through the same make_episode.py: its length comes from its voice ("duration":
+    "auto"), it has no scene.blend, and its frames carry their own stamp."""
+
+    def episode(self, voiced: bool = True) -> Path:
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        ep = Path(tmp.name) / "ep01_penny"
+        ep.mkdir()
+        spec = {"id": "ep01_penny", "engine": "2d", "title": "A penny doubled for 30 days?", "fps": 30,
+                "duration": "auto", "scene": "scene.js", "script": [{"id": "hook", "say": "One penny."}],
+                "audio": {"mixer": "samples", "cue_hits": [{"sound": "bubble_pop", "at": "hook"}]}}
+        (ep / "episode.json").write_text(json.dumps(spec), encoding="utf-8")
+        (ep / "scene.js").write_text("rf.scene(() => {})\n", encoding="utf-8")
+        if voiced:
+            (ep / "build" / "voice").mkdir(parents=True)
+            (ep / "build" / "voice" / "timeline.json").write_text(json.dumps({
+                "script_hash": voice.script_hash(spec), "duration": 3.0, "words": [],
+                "beats": [{"i": 0, "id": "hook", "say": "One penny.", "start": 0.3, "end": 1.4}]}), encoding="utf-8")
+        return ep
+
+    def test_status_says_where_a_2d_episode_stands(self):
+        import make_episode
+        import render
+
+        ep = self.episode(voiced=False)
+        said = make_episode.status(ep, config.load_spec(ep))
+        self.assertIn("voiced     no (run --steps build)", said)
+        self.assertIn("frames     0, of a video whose length isn't known until it is voiced", said)
+        self.assertNotIn("built", said)          # no scene.blend to build: that row is a 3D episode's
+
+        ep = self.episode()
+        frames = ep / "build" / "frames"
+        frames.mkdir()
+        for n in (1, 2):
+            (frames / f"f_{n:04d}.jpg").write_bytes(b"\xff\xd8 a picture \xff\xd9")
+        (frames / render.FRAMES_STAMP).write_text(render.frames_stamp(ep, config.load_spec(ep)) + "\n",
+                                                  encoding="utf-8")
+        said = make_episode.status(ep, config.load_spec(ep))
+        self.assertIn("voiced     yes\n", said)
+        self.assertIn("frames     2 of 90, they match the scene and the script", said)
+
+        (ep / "scene.js").write_text("rf.scene(() => { /* drawn again */ })\n", encoding="utf-8")
+        self.assertIn("frames     2 of 90, drawn before the scene, the script or the spec changed",
+                      make_episode.status(ep, config.load_spec(ep)))
+        spec = json.loads((ep / "episode.json").read_text(encoding="utf-8"))
+        spec["script"][0]["say"] = "Two pennies."
+        (ep / "episode.json").write_text(json.dumps(spec), encoding="utf-8")
+        self.assertIn("voiced     yes, but the script or the voice changed since: run --steps build again",
+                      make_episode.status(ep, config.load_spec(ep)))
+
+    def test_the_render_keeps_the_stamp_3_0_gave_its_frames(self):
+        # frames a 3.0 render left are still this scene's after the update: the stamp is worked out the same way
+        import hashlib
+        import render
+
+        ep = self.episode()
+        spec = config.load_spec(ep)
+        drawn = json.dumps({k: spec.get(k) for k in ("title", "captions", "duration", "render_until", "fps", "scene")},
+                           sort_keys=True).encode()
+        parts = (ep / "scene.js", ep / "build" / "voice" / "timeline.json", ROOT / "pipeline" / "twod" / "runtime.js")
+        self.assertEqual(render.frames_stamp(ep, spec),
+                         hashlib.sha1(drawn + b"".join(p.read_bytes() for p in parts)).hexdigest())
+
+    def test_the_sound_check_after_the_audio_step_takes_a_2d_episodes_length_from_its_voice(self):
+        import wave
+
+        import numpy as np
+        import qa
+
+        ep = self.episode()
+        tone = (np.sin(np.arange(3 * 48000) * 2 * np.pi * 220 / 48000) * 3000).astype("<i2")
+        with wave.open(str(ep / "build" / "audio.wav"), "wb") as w:
+            w.setnchannels(2)
+            w.setsampwidth(2)
+            w.setframerate(48000)
+            w.writeframes(np.repeat(tone, 2).tobytes())
+        length = next(c for c in qa.audio_check(ep).checks if c["check"] == "audio length")
+        self.assertEqual((length["status"], length["detail"]), ("PASS", "3.00 s (the video is 3.0 s)"))
+
+    def test_the_lint_asks_for_the_voice_first(self):
+        import qa
+
+        with self.assertRaises(SystemExit) as stop:
+            qa.lint(self.episode(voiced=False))
+        self.assertIn("isn't voiced yet", str(stop.exception))
+
+    def test_stills_lines_is_answered_in_a_sentence(self):
+        import make_episode
+
+        ep = self.episode()
+        with self.assertRaises(SystemExit) as stop:
+            make_episode.steps_2d(ep, config.load_spec(ep), ["stills"], "lines")
+        self.assertIn("--stills lines follows a 3D scene's story lines and cuts", str(stop.exception))
+
+
+class NotesForAnAddedChannel(Scratch):
+    def test_a_second_2d_channels_commands_name_its_own_episode_folder(self):
+        # 3.0's notes for a 2D channel and 3.1's way of naming an added channel's folder, in one file
+        self.onboard_main()
+        with redirect_stdout(io.StringIO()):
+            other = profiles.create("Cool Epic Facts")
+            generate.write_all({**ANSWERS, "channel_name": "Cool Epic Facts"}, other)
+        self.assertEqual(tomllib.loads(other.settings.read_text(encoding="utf-8"))["video"]["engine"], "2d")
+        notes = (other.folder / "CLAUDE.md").read_text(encoding="utf-8")
+        where = str(Path("profiles") / "cool-epic-facts" / "episodes" / "<id>")
+        self.assertIn(f"make_episode.py {where} --steps build` speaks the script", notes)      # Making a video
+        for steps in ("build ", "stills --stills 1,15,31", "render", "post", "ship"):          # Commands
+            self.assertIn(f"make_episode.py {where} --steps {steps}", notes)
+        self.assertIn("(voice the script)", notes)
+        self.assertIn("checks the voice, the browser, ffmpeg", notes)
+        self.assertNotIn("keyframe_insert", notes)
 
 
 class Draw(unittest.TestCase):

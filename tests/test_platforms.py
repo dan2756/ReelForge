@@ -6,15 +6,17 @@ the real thing run only there (the CI workflow runs this file on Windows, macOS 
   REELFORGE_BROWSER_TEST=1 ...    also start the browser ReelForge reads stats with (needs one installed)
 """
 
+import base64
 import os
 import plistlib
 import shlex
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
 import zipfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest import mock
 
 from studio import browsers, logo, shortcut, stats_schedule, tools
@@ -120,6 +122,38 @@ class Icon(unittest.TestCase):
             self.assertTrue(shortcut.remove())
             self.assertFalse(made.exists())
 
+    def test_a_windows_shortcut_is_this_folders_whatever_letters_its_path_has(self):
+        # What PowerShell is asked and what's made of its answer (PowerShell itself only runs on Windows). The
+        # shortcut's target used to come back as text in the console's code page: "José" arrived as "Jos" and a
+        # stray byte, never equal to this folder, so its own icon counted as another copy's.
+        root = PureWindowsPath("C:\\Users\\José 田中\\ReelForge")
+        link = self.home / "Desktop" / "ReelForge.lnk"
+        link.parent.mkdir(parents=True)
+        link.write_bytes(b"a shortcut")
+        asked, answer = [], [""]
+
+        def powershell(cmd, **kwargs):
+            asked.append((cmd[-1], kwargs["env"]["RF_LINK"]))
+            return subprocess.CompletedProcess(cmd, 0, stdout=answer[0], stderr="")
+
+        def as_powershell_prints(target: str) -> str:
+            return base64.b64encode(target.encode("utf-8")).decode("ascii") + "\r\n"
+
+        with mock.patch.object(P, "WINDOWS", True), mock.patch.object(P, "MAC", False), \
+                mock.patch.object(P, "ROOT", root), mock.patch.dict(os.environ, {"USERPROFILE": str(self.home)}), \
+                mock.patch.object(shortcut.subprocess, "run", powershell):
+            answer[0] = as_powershell_prints(str(root / "ReelForge.bat"))
+            self.assertTrue(shortcut.ours())
+            script, about = asked[0]
+            self.assertIn("[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(", script)   # plain ASCII back
+            self.assertIn("CreateShortcut($env:RF_LINK).TargetPath", script)
+            self.assertEqual(about, str(link))
+            answer[0] = as_powershell_prints("C:\\Users\\José 田中\\Another ReelForge\\ReelForge.bat")
+            self.assertFalse(shortcut.ours())                       # another copy's icon
+            for nothing_to_go_by in ("", "\r\n", "C:\\Users\\Jos\ufffd\\ReelForge\\ReelForge.bat\r\n", "!!!"):
+                answer[0] = nothing_to_go_by
+                self.assertFalse(shortcut.ours(), nothing_to_go_by)
+
     def test_linux_menu_entry(self):
         with mock.patch.object(P, "MAC", False), mock.patch.object(P, "WINDOWS", False), \
                 mock.patch.object(P, "ROOT", self.root), mock.patch.dict(os.environ, {"XDG_DATA_HOME": str(self.home)}), \
@@ -166,6 +200,35 @@ class HourlyJob(unittest.TestCase):
         (folder / "reelforge-stats.service").write_text(service, encoding="utf-8")
         with mock.patch.object(P, "MAC", False), mock.patch.object(stats_schedule, "_units", return_value=folder):
             self.assertEqual(stats_schedule._job(), self.script)
+
+    def test_turning_it_off_on_linux_stops_a_read_the_timer_has_started(self):
+        """The timer's service is a oneshot: turning the timer off leaves a read it started a moment ago running,
+        from a folder that reelforge move is about to rename or an uninstall to put in the Trash."""
+        folder = self.root / "units"
+        folder.mkdir()
+        both = ["reelforge-stats.service", "reelforge-stats.timer"]
+        for slow in (False, True):   # (a read that takes its time to stop doesn't keep the job on)
+            for name, text in stats_schedule.systemd_units(self.py, self.script).items():
+                (folder / name).write_text(text, encoding="utf-8")
+            asked = []
+
+            def systemctl(*args):
+                asked.append((args, sorted(f.name for f in folder.iterdir())))
+                if args[0] == "stop" and slow:
+                    raise subprocess.TimeoutExpired("systemctl", 30)
+                return subprocess.CompletedProcess(args, 0, "", "")
+
+            with mock.patch.object(P, "MAC", False), mock.patch.dict(os.environ, {"STUDIO_DRY_SYSTEM": ""}), \
+                    mock.patch.object(P, "TEST_COPY", self.root / "no-marker"), \
+                    mock.patch.object(stats_schedule, "_units", return_value=folder), \
+                    mock.patch.object(stats_schedule, "_systemctl", systemctl), \
+                    mock.patch.object(stats_schedule.shutil, "which",
+                                      lambda name: "/usr/bin/systemctl" if name == "systemctl" else None):
+                self.assertEqual(stats_schedule.status(), "on")
+                self.assertEqual(stats_schedule.disable(), "Background stats are off.")
+            # the timer first, so nothing new starts; then the read under way, while systemd still knows its service
+            self.assertEqual(asked, [(("disable", "--now", "reelforge-stats.timer"), both),
+                                     (("stop", "reelforge-stats.service"), both), (("daemon-reload",), [])])
 
     def test_crontab_line(self):
         line = stats_schedule.cron_line(self.py, self.script)
@@ -271,6 +334,53 @@ class Browser(unittest.TestCase):
             exe = Path(tmp, "msedge.exe")
             with mock.patch.object(browsers, "WINDOWS", True):
                 self.assertEqual(browsers.major_version(browsers.Browser("Edge", exe, True)), 141)
+
+    def test_the_version_is_looked_up_once_per_browser(self):
+        """On Linux it means running the browser with --version, which every background read used to do again."""
+        asked = []
+
+        def run(cmd, **how):
+            asked.append(cmd)
+            return mock.Mock(stdout="Google Chrome 153.0.7500.12\n")
+
+        chrome = browsers.Browser("Chrome", Path("/opt/somewhere/chrome"))
+        with mock.patch.object(browsers, "WINDOWS", False), mock.patch.object(browsers, "MAC", False), \
+                mock.patch.object(browsers.subprocess, "run", run):
+            self.assertEqual([browsers.major_version(chrome) for _ in range(3)], [153, 153, 153])
+            self.assertIn("Chrome/153.0.0.0", browsers.user_agent(chrome))
+        # the program as this system writes its path: \opt\somewhere\chrome on Windows
+        self.assertEqual(asked, [[str(chrome.exe), "--version"]])
+
+    def test_the_version_follows_the_browser_when_it_is_updated(self):
+        """The version was kept for as long as ReelForge ran, so a window left open across a browser update went on
+        presenting the old one, and a look-up that failed once stayed "unknown". It is asked again when the
+        browser's program file has changed, and until it has answered."""
+        said = ["", "Google Chrome 153.0.7500.12\n", "Google Chrome 154.0.7600.3\n"]
+        asked = []
+
+        def run(cmd, **how):
+            asked.append(cmd)
+            return mock.Mock(stdout=said[len(asked) - 1])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp, "chrome")
+            exe.write_bytes(b"153")
+            chrome = browsers.Browser("Chrome", exe)
+            with mock.patch.object(browsers, "WINDOWS", False), mock.patch.object(browsers, "MAC", False), \
+                    mock.patch.object(browsers.subprocess, "run", run):
+                self.assertEqual(browsers.major_version(chrome), 0)  # it didn't say: not kept
+                self.assertEqual([browsers.major_version(chrome) for _ in range(3)], [153, 153, 153])
+                exe.write_bytes(b"154")  # the update replaced the program
+                os.utime(exe, ns=(exe.stat().st_atime_ns, exe.stat().st_mtime_ns + 10 ** 9))
+                self.assertEqual([browsers.major_version(chrome) for _ in range(3)], [154, 154, 154])
+                self.assertIn("Chrome/154.0.0.0", browsers.user_agent(chrome))
+            self.assertEqual(len(asked), 3)
+            # Windows reads the folder beside the program each time, so there is nothing to go stale.
+            for v in ("141.0.3537.71", "142.0.3595.5"):
+                Path(tmp, v).mkdir()
+                with mock.patch.object(browsers, "WINDOWS", True):
+                    self.assertEqual(browsers.major_version(browsers.Browser("Edge", Path(tmp, "msedge.exe"), True)),
+                                     int(v[:3]))
 
     @unittest.skipUnless(os.environ.get("REELFORGE_BROWSER_TEST") == "1", "set REELFORGE_BROWSER_TEST=1")
     def test_the_browser_starts_headless(self):

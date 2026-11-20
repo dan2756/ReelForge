@@ -2,8 +2,9 @@
 ReelForge folder on a "Desktop", its own folder waiting in a "home" folder, and video folders outside it. What stops a
 move, the Publish tab's outside folders written in full so they name the same places, the rename done at once (macOS,
 Linux) or by the small window once ReelForge has closed (Windows: the script itself is run here too), what follows the
-folder, a move that never finished, and the window asking for one (the launcher starts it). The Settings tab's row and
-dialog are tested in dashboard/tests/test_settings.py and ui/test/settings.test.tsx."""
+folder, a move that never finished, the window asking for one (the launcher starts it), and what it says about the
+browser extension while a browser is connected. The Settings tab's row and dialog are tested in
+dashboard/tests/test_settings.py and ui/test/settings.test.tsx."""
 
 import io
 import json
@@ -27,6 +28,15 @@ from studio import paths as P
 from test_profiles import ANSWERS
 
 KIT = Path(__file__).resolve().parent.parent
+TOKEN_HASH = "ab" * 32   # what the connections file keeps of a browser's token: never shown
+
+
+def connect_a_browser() -> None:
+    """A browser connected to the extension, as dashboard/extension_api.py files one."""
+    from dashboard import extension_api
+
+    extension_api.change_store(lambda s: s["paired"].append({"install": "chrome", "name": "Chrome on this PC",
+                                                             "token_sha256": TOKEN_HASH}))
 
 
 class MoveScratch(unittest.TestCase):
@@ -161,6 +171,19 @@ class WhereItGoes(MoveScratch):
         self.assertEqual(move.follows({"command": True, "stats": True}), ["the reelforge command",
                                                                           "the hourly stats read"])
 
+    def test_with_a_browser_connected_it_says_the_extension_has_to_be_loaded_again(self):
+        # The browser loads the extension from the folder, by its old place: the one thing that can't follow it.
+        self.assertEqual(move.plan().browsers, 0)
+        self.assertNotIn("extension", "\n".join(move.summary(move.plan())))   # nothing to do, so nothing is said
+        connect_a_browser()
+        p = move.plan()
+        self.assertEqual(p.browsers, 1)
+        self.assertEqual(move.summary(p)[-1], "After the move, load the browser extension again from the new folder, "
+                                              "and connect it again if it then says it isn't connected.")
+        self.assertNotIn(TOKEN_HASH, "\n".join(move.summary(p)))
+        (self.root / "dashboard" / "data" / "extension.json").write_text("{not json", encoding="utf-8")
+        self.assertEqual(move.plan().browsers, 0)   # a file that can't be read connects nothing
+
 
 MOVE_HOME = move.home   # the real one (the tests patch it)
 
@@ -199,6 +222,28 @@ class AtOnce(MoveScratch):
         self.assertIsNone(move.take_marker())                  # once
         execv.assert_not_called()
 
+    def test_the_browsers_connected_to_the_extension_stay_connected(self):
+        from dashboard import extension_api
+
+        extension_api.change_store(lambda s: s["paired"].append({"install": "chrome", "name": "Chrome"}))
+        before = extension_api.read_store()
+        self.assertEqual(extension_api.store_path(), self.root / "dashboard" / "data" / "extension.json")
+        self.go()
+        self.assertEqual(extension_api.store_path(), self.home / "dashboard" / "data" / "extension.json")
+        self.assertEqual(extension_api.read_store(), before)  # the same ReelForge to the extension, at its new place
+        self.assertEqual(extension_api.folder(), self.home / "extension")  # (the folder to load again in the browser)
+
+    def test_the_connection_to_youtubes_api_goes_along(self):
+        from dashboard import db
+        from dashboard.platforms import youtube_api
+
+        with mock.patch.object(db, "_path", None):  # no stats open: the folder says where the file is
+            youtube_api.set_defaults("unlisted")
+            self.assertEqual(youtube_api.store_path(), self.root / "dashboard" / "data" / "youtube_api.json")
+            self.go()
+            self.assertEqual(youtube_api.store_path(), self.home / "dashboard" / "data" / "youtube_api.json")
+            self.assertEqual(youtube_api.status()["privacy"], "unlisted")
+
     def test_from_the_window_reelforge_opens_again_from_the_new_place(self):
         self.write("bin/reelforge", "#!/bin/sh\n")
         code, moved, execv = self.go(reopen=True)
@@ -214,6 +259,128 @@ class AtOnce(MoveScratch):
         self.assertTrue(self.root.is_dir())
         self.assertFalse((self.root / move.STATE).exists())
         self.assertIn("didn't move (in use)", self.said)
+
+    def with_the_hourly_read(self, rename=None, on_again=("on",)):
+        """Move a folder whose hourly stats read is on, with a stand-in for the scheduler. Returns what was done
+        in turn, each with the place ReelForge was in at that moment, and what go() answered."""
+        done = []
+        real = move.rename
+
+        def note(what, answer=None):
+            done.append((what, self.root if self.root.is_dir() else self.home))
+            return answer
+
+        def renamed(p, wait=10):
+            note("rename")
+            return rename or real(p, wait)
+
+        p = move.plan()
+        self.assertFalse(any(p.system.values()))   # STUDIO_DRY_SYSTEM: the tests' own plan never has a job
+        p.system["stats"] = True                   # as plan() finds it when the hourly job is this folder's
+        with mock.patch.object(P, "WINDOWS", False), mock.patch.object(P, "dry_system", lambda: False), \
+                mock.patch.object(move.subprocess, "run", self.finish_there), mock.patch.object(move.os, "chdir"), \
+                mock.patch.object(move, "rename", renamed), \
+                mock.patch.object(reset, "_wait_for_reads", lambda say: note("wait")), \
+                mock.patch("studio.stats_schedule.disable", lambda: note("off", "Background stats are off.")), \
+                mock.patch("studio.stats_schedule.enable", lambda: note("on", "stats ok")), \
+                mock.patch("studio.stats_schedule.status", side_effect=on_again):
+            answer = self.quiet(move.go, p)
+        return done, answer
+
+    def test_the_hourly_read_is_off_before_the_folder_is_renamed_and_on_again_from_the_new_place(self):
+        """A read the scheduler started as the folder was renamed ran from the old folder by name, and put a stub
+        of it back. So the job goes off first (which stops a read it has just started), a read under way gets its
+        time to finish, and only then is the folder renamed."""
+        done, answer = self.with_the_hourly_read()
+        self.assertEqual(answer, (0, True))
+        self.assertEqual(done, [("off", self.root), ("wait", self.root), ("rename", self.root), ("on", self.home)])
+        self.assertEqual(move.take_marker()["problems"], [])
+
+    def test_a_move_that_doesnt_happen_puts_the_hourly_read_back(self):
+        done, answer = self.with_the_hourly_read(rename="in use")
+        self.assertEqual(answer, (1, False))
+        self.assertEqual(done, [("off", self.root), ("wait", self.root), ("rename", self.root), ("on", self.root)])
+        self.assertIn("didn't move (in use), and nothing else changed.", self.said)
+        self.assertNotIn("hourly", self.said)
+        done, answer = self.with_the_hourly_read(rename="in use", on_again=("off",))   # ... and says so if it can't
+        self.assertIn("The hourly stats read is off now, and couldn't be turned on again: reelforge stats on does it.",
+                      self.said)
+
+    def test_a_move_stopped_while_it_waited_for_a_stats_read_puts_the_hourly_read_back(self):
+        """Ctrl+C in the two minutes a read under way is given: the job was off already, and the folder kept the
+        note of a move that never happened."""
+        done = []
+
+        def note(what, answer=None):
+            done.append(what)
+            return answer
+
+        def stopped(say):
+            note("wait")
+            raise KeyboardInterrupt
+
+        p = move.plan()
+        p.system["stats"] = True
+        with mock.patch.object(P, "WINDOWS", False), mock.patch.object(P, "dry_system", lambda: False), \
+                mock.patch.object(move.os, "chdir"), mock.patch.object(reset, "_wait_for_reads", stopped), \
+                mock.patch("studio.stats_schedule.disable", lambda: note("off", "Background stats are off.")), \
+                mock.patch("studio.stats_schedule.enable", lambda: note("on", "stats ok")), \
+                mock.patch("studio.stats_schedule.status", return_value="on"), \
+                self.assertRaises(KeyboardInterrupt):
+            self.quiet(move.go, p)
+        self.assertEqual(done, ["off", "wait", "on"])
+        self.assertTrue(self.root.is_dir())
+        self.assertFalse((self.root / move.STATE).exists())   # no note of a move left in a folder that didn't move
+        self.assertFalse(self.home.exists())
+
+    def test_a_move_stopped_just_as_the_folder_was_renamed_is_finished_from_the_new_place_next_time(self):
+        """Ctrl+C a moment after the rename: the folder had moved, and the note of the move went from it and the
+        hourly read was put back on, from the folder that had gone."""
+        done = []
+
+        def renamed_then_stopped(plan, wait=10):
+            os.rename(plan.source, plan.target)
+            raise KeyboardInterrupt
+
+        p = move.plan()
+        p.system["stats"] = True
+        with mock.patch.object(P, "WINDOWS", False), mock.patch.object(P, "dry_system", lambda: False), \
+                mock.patch.object(move.os, "chdir"), mock.patch.object(reset, "_wait_for_reads", lambda say: None), \
+                mock.patch.object(move, "rename", renamed_then_stopped), \
+                mock.patch("studio.stats_schedule.disable", lambda: done.append("off") or "off"), \
+                mock.patch("studio.stats_schedule.enable", lambda: done.append("on") or "on"), \
+                mock.patch("studio.stats_schedule.status", return_value="on"), \
+                self.assertRaises(KeyboardInterrupt):
+            self.quiet(move.go, p)
+        self.assertEqual(done, ["off"])   # on again only from the new place, by the step that finishes the move
+        self.assertFalse(self.root.exists())
+        self.assertTrue((self.home / move.STATE).is_file())   # what the next start finishes it by
+
+    def test_a_folder_without_the_hourly_read_leaves_the_scheduler_alone(self):
+        with mock.patch("studio.stats_schedule.disable") as off, mock.patch("studio.stats_schedule.enable") as on:
+            code, moved, _ = self.go()
+        self.assertEqual((code, moved), (0, True))
+        off.assert_not_called()
+        on.assert_not_called()
+
+    def test_a_move_that_doesnt_happen_leaves_the_settings_naming_the_folders_they_did(self):
+        # A folder written in full inside ReelForge is pointed at the new place before the folder moves. When the
+        # move then failed it stayed that way, and the Publish tab read a folder that doesn't exist.
+        self.outside_config()
+        cfg = self.root / "dashboard" / "config.toml"
+        text = cfg.read_text(encoding="utf-8")
+        text = text.replace('videos_dir = "../../../rendered/renders"', f"videos_dir = {json.dumps(str(self.root / 'clips'))}")
+        cfg.write_text(text, encoding="utf-8")
+        with mock.patch.object(P, "WINDOWS", False), mock.patch.object(move.os, "chdir"), \
+                mock.patch.object(move, "rename", lambda p, wait=10: "in use"):
+            code, moved = self.quiet(move.go, move.plan())
+        self.assertEqual((code, moved), (1, False))
+        self.assertIn("nothing else changed", self.said)
+        self.assertEqual(cfg.read_text(encoding="utf-8"), text)
+        self.assertEqual(Path(tomllib.loads(text)["videos_dir"]), self.root / "clips")
+        with mock.patch.object(P, "WINDOWS", True), mock.patch.object(move, "_window", lambda p, reopen, pause: "no PowerShell"):
+            code, moved = self.quiet(move.go, move.plan())      # on Windows: the small window that couldn't start
+        self.assertEqual((code, moved, cfg.read_text(encoding="utf-8")), (1, False, text))
 
 
 class OnWindows(MoveScratch):
@@ -236,6 +403,20 @@ class OnWindows(MoveScratch):
         state = json.loads((self.root / move.STATE).read_text(encoding="utf-8"))
         self.assertEqual((state["from"], state["to"], state["reopen"]), (str(self.root), str(self.home), True))
         self.assertIn("A small window moves ReelForge", self.said)
+
+    def test_the_hourly_read_stays_on_until_the_small_window_has_moved_the_folder(self):
+        """Windows can't rename a folder a read is running from, so the small window waits for one, and the job is
+        pointed at the new place once the folder is there. Taken off here, it would stay off if the folder never
+        came free."""
+        p = move.plan()
+        p.system["stats"] = True
+        with mock.patch.object(P, "WINDOWS", True), mock.patch.object(move.subprocess, "Popen") as popen, \
+                mock.patch("studio.stats_schedule.disable") as off:
+            self.assertEqual(self.quiet(move.go, p, pause=False), (0, False))
+        args = popen.call_args.args[0]
+        self.addCleanup(lambda: Path(args[args.index("-File") + 1]).unlink(missing_ok=True))
+        off.assert_not_called()
+        self.assertTrue(json.loads((self.root / move.STATE).read_text(encoding="utf-8"))["system"]["stats"])
 
     @unittest.skipUnless(sys.platform == "win32", "the small window is PowerShell, on Windows")
     def test_the_small_window_waits_for_the_folder_then_moves_it_and_finishes_from_there(self):
@@ -299,6 +480,35 @@ class Finish(MoveScratch):
         self.assertIn(f"ReelForge is in {self.home} now.", self.said)
         self.assertFalse((self.home / move.STATE).exists())
         self.assertEqual(move.take_marker()["problems"], [])
+
+    def test_with_a_browser_connected_it_says_where_to_load_the_extension_from_and_so_does_the_next_window(self):
+        from dashboard import service
+
+        connect_a_browser()
+        self.moved({})
+        self.assertEqual(self.quiet(move.finish), 0)
+        again = (f"Load the browser extension again from {self.home / 'extension'} (Load unpacked on your browser's "
+                 "extensions page), and connect it again if it then says it isn't connected.")
+        self.assertEqual(self.said.splitlines(), [f"ReelForge is in {self.home} now.", again])
+        # The window that opens next: its pop-up, and the notification that stays once the pop-up has gone.
+        window = mock.Mock(demo=False, _safe=lambda fn, default=None: fn())
+        with mock.patch.object(service.notify, "add") as kept:
+            service.Dashboard.say_moved(window)
+        self.assertTrue(window.notify.call_args.args[0].endswith(f"open this folder from now on. {again}"))
+        self.assertEqual(kept.call_args.args[2], f"From {self.root} to {self.home}. {again}")
+        self.assertIsNone(move.take_marker())   # said once
+
+    def test_with_no_browser_connected_nothing_is_said_about_the_extension(self):
+        from dashboard import service
+
+        self.moved({})
+        self.assertEqual(self.quiet(move.finish), 0)
+        self.assertEqual(self.said.splitlines(), [f"ReelForge is in {self.home} now."])
+        window = mock.Mock(demo=False, _safe=lambda fn, default=None: fn())
+        with mock.patch.object(service.notify, "add") as kept:
+            service.Dashboard.say_moved(window)
+        self.assertTrue(window.notify.call_args.args[0].endswith("open this folder from now on."))
+        self.assertEqual(kept.call_args.args[2], f"From {self.root} to {self.home}.")
 
     def test_what_couldnt_follow_it_is_said(self):
         self.moved({"stats": True})

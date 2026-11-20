@@ -93,7 +93,7 @@ describe("deleting a profile", () => {
   })
 
   test("from the Settings tab: Profiles deletes one, lists it as deleted, and Restore brings it back", async () => {
-    const h = await onAlpha("settings", [160, 72])
+    const h = await onAlpha("settings", [160, 76])
     await until(h, () => frame(h).includes("PROFILES"))
     let f = frame(h)
     if (process.env.SHOW) console.log(f)
@@ -130,8 +130,10 @@ describe("deleting a profile", () => {
     await clickText(h, "Delete…", 2)
     await h.settle(500)
     expect(frame(h)).not.toContain("DELETE TINY WORLDS")
+    expect(said().filter((t) => t.startsWith("Demo mode"))).toHaveLength(1)
+    toasts.clear()
     await clickText(h, " Restore ", 1)
     await h.settle(500)
-    expect(said().filter((t) => t.startsWith("Demo mode"))).toHaveLength(2)
+    expect(said().filter((t) => t.startsWith("Demo mode"))).toHaveLength(1) // each press says so (the same pop-up, once)
   })
 })

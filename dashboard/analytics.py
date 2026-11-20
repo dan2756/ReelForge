@@ -207,16 +207,6 @@ def post_curve(post: dict, parsed: Series) -> tuple[list[float], list[float]]:
     return xs, ys
 
 
-def interp(xs: list[float], ys: list[float], x: float) -> float:
-    i = bisect_left(xs, x)
-    if i <= 0:
-        return ys[0]
-    if i >= len(xs):
-        return ys[-1]
-    x0, x1 = xs[i - 1], xs[i]
-    return ys[i - 1] + (ys[i] - ys[i - 1]) * ((x - x0) / (x1 - x0) if x1 > x0 else 1)
-
-
 # --- matching the same video across platforms -------------------------------------------
 
 # Titles in a series read alike ("What if your <X> doubled every <N> second(s)?"), so whole captions are mostly the
@@ -375,8 +365,12 @@ def _place(posts: list[dict], episodes: list[dict], links: dict) -> tuple[dict, 
     for e in sorted(episodes, key=lambda e: m.order[e["id"]]):
         if e["video"]:
             files.setdefault(db.video_file(e["video"]).name.lower(), []).append(e["id"])
+    bare = {e["id"] for e in episodes if not e["video"]}  # made from posts alone (twins): no video of their own
     placed = dict(links)
-    taken = {(eid, ref[0]) for ref, (eid, how) in links.items() if how in FIXED_LINKS and eid is not None}
+    # A fixed link holds its episode's place on that platform, except numbers you typed in (manual-<episode>): the
+    # real post takes that place once ReelForge can read it (and gets the typed readings: db.retire_typed).
+    taken = {(eid, ref[0]) for ref, (eid, how) in links.items()
+             if how in FIXED_LINKS and eid is not None and not ref[1].startswith(db.TYPED)}
     claims, named = [], set()
     for p in posts:
         ref = p["ref"]
@@ -394,9 +388,10 @@ def _place(posts: list[dict], episodes: list[dict], links: dict) -> tuple[dict, 
                 claims.append((2, kept, current, p))
         claims += [(1, 0.0, eid, p) for eid in files.get(p["upload"], ())]
     # One post per platform per episode, strongest claim first. On a tie the post already there keeps it (and a post
-    # stays in the episode it is in), then the one posted first, then the older episode.
+    # stays in the episode it is in), then the one posted first, then an episode that has a video (its ✓ on Publish
+    # goes by that), then the older episode.
     claims.sort(key=lambda c: (-c[0], -round(c[1], 6), c[2] != links[c[3]["ref"]][0], c[3]["published_at"] or "",
-                               c[3]["ref"], m.order[c[2]]))
+                               c[3]["ref"], c[2] in bare, m.order[c[2]]))
     for tier, _, eid, p in claims:
         ref = p["ref"]
         if placed[ref][0] is None and (eid, ref[0]) not in taken:
@@ -430,7 +425,8 @@ def _place(posts: list[dict], episodes: list[dict], links: dict) -> tuple[dict, 
 
 
 def auto_link() -> int:
-    """File posts under episodes: by caption, else by the upload page opened just before, else as twins.
+    """File posts under episodes: by caption, else by the upload page opened (or the post started from ReelForge)
+    just before, else as twins.
 
     Every post not linked by hand (or by ReelForge when it posted) is checked again on each run, so fixes reach old
     mistakes
@@ -438,7 +434,8 @@ def auto_link() -> int:
     """
     opened: dict[str, list[tuple]] = {}
     for u in db.uploads(None):
-        if u["status"] in ("ok", "manual") and u["video"]:
+        # an upload page you opened (manual), or a post started with the extension or a platform's API
+        if u["status"] in ("ok", "manual", "extension", "api") and u["video"]:
             opened.setdefault(u["platform"], []).append((db.parse(u["ts"]), u["id"], db.video_file(u["video"]).name.lower()))
     for rows in opened.values():
         rows.sort()
@@ -455,7 +452,9 @@ def auto_link() -> int:
         if not twins:
             break
     changes = [(*ref, *was[ref], *links[ref]) for ref in links if links[ref] != was[ref]]
-    return db.relink(changes, {e["id"]: (e["title"], e["created_at"]) for e in made})
+    changed = db.relink(changes, {e["id"]: (e["title"], e["created_at"]) for e in made})
+    db.retire_typed()
+    return changed
 
 
 # --- formatting ---------------------------------------------------------------------------

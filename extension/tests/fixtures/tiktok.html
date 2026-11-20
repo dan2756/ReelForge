@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TikTok Studio (ReelForge test copy)</title>
+<style>body { font: 14px system-ui; margin: 24px } [contenteditable] { border: 1px solid #999; padding: 8px; min-height: 40px } button[data-disabled="true"] { opacity: .4 }</style>
+</head>
+<body>
+<div id="app"></div>
+<script>const MODE = "__MODE__"</script>
+<script src="/fixture/common.js"></script>
+<script>
+// Built from the hooks open-source TikTok uploaders use: input[type=file][accept="video/*"], the "Select
+// video" button, the Draft.js caption editor that starts with the file's name, and
+// button[data-e2e="post_video_button"] that stays data-disabled until the upload is done.
+const app = document.getElementById("app")
+
+if (MODE === "iframe" && window.top === window) {
+  // The real form can sit inside a same-origin frame.
+  app.innerHTML = '<iframe data-tt="Upload_index_iframe" src="/tiktokstudio/upload" style="width:100%;height:700px;border:0"></iframe>'
+} else if (MODE !== "no_input") {
+  app.innerHTML = `
+    <div class="upload-container">
+      <button type="button" aria-label="Select file">Select video</button>
+      <input type="file" accept="video/*" style="display:none">
+    </div>`
+  const input = app.querySelector("input")
+  input.addEventListener("change", async event => {
+    const file = await takeFile(input, event)
+    if (file) editor(file)
+  })
+} else {
+  app.innerHTML = '<div class="upload-container"><p>Drop a video here</p></div>'
+}
+
+function editor(file) {
+  if (MODE === "captcha") {
+    app.innerHTML = '<div class="captcha_verify_container"><img id="captcha-verify-image" alt="" width="60" height="60" style="display:block;background:#888" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="><div class="verify-captcha-submit-button">Verify</div></div>'
+    // Anything that touches the verification is written down: the extension must not.
+    app.addEventListener("click", event => fixture.touched.push(event.target.className || event.target.id), true)
+    return
+  }
+  app.innerHTML = `
+    <div class="DraftEditor-root">
+      <div class="public-DraftEditor-content" contenteditable="true" role="textbox" spellcheck="false"><div data-contents="true"><div><span></span></div></div></div>
+    </div>
+    <div style="height:1400px"></div>
+    <button type="button" data-e2e="post_video_button" data-disabled="true" aria-disabled="true">Post</button>`
+  app.querySelector("span").textContent = file.name.replace(/\.[^.]+$/, "")
+  const post = app.querySelector("[data-e2e=post_video_button]")
+  // "no_post": TikTok replaced its Post button with something no hook knows.
+  if (MODE === "no_post") return post.replaceWith(Object.assign(document.createElement("div"), { className: "x9f3", textContent: "Publish" }))
+  // "slow" leaves time to close the tab before the page is ready.
+  setTimeout(() => {
+    post.dataset.disabled = "false"
+    post.setAttribute("aria-disabled", "false")
+  }, MODE === "slow" ? 6000 : 400)
+  post.addEventListener("click", event => {
+    if (!pressed(event, post)) return
+    fixture.text = app.querySelector(".public-DraftEditor-content").innerText.trim()
+    if (MODE === "confirm" && !fixture.confirmed) {
+      // TikTok's "Continue to post?" question. Answering it is the person's call.
+      app.insertAdjacentHTML("beforeend", '<div role="dialog"><p>Continue to post?</p><div class="common-modal-footer"><button type="button">Post now</button></div></div>')
+      app.querySelector(".common-modal-footer button").addEventListener("click", () => {
+        fixture.confirmed = true
+        done()
+      })
+      return
+    }
+    done()
+  })
+}
+
+function done() {
+  fixture.posted = true
+  if (MODE === "fullnav") return location.assign("/tiktokstudio/content")
+  history.pushState({}, "", "/tiktokstudio/content")
+  app.innerHTML = "<h1>Posts</h1><p>Your video has been uploaded</p>"
+}
+</script>
+</body>
+</html>

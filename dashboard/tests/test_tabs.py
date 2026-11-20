@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from dashboard import config, db, demo, sync, tabs
+from dashboard import config, db, demo, posting_tab, sync, tabs
 from dashboard.config import PLATFORM_KEYS
 from dashboard.service import HELP, KEYS
 from dashboard.settings_tab import SettingsTab
@@ -183,8 +183,32 @@ class WindowTest(Folder):
             self.assertNotRegex(text, r"\(\d\)|tab \d", title)
         self.assertIn("order of the tabs", about["settings"][1])
         self.assertIn("green button", about["publish"][1])
+        # Posting: both ways are there, and the extension is never said to do more than it has been seen to do.
+        for said in ("Post…", "BY HAND", "you check it and press Post there", "optional",
+                     "not yet on the live sites"):
+            self.assertIn(said, about["publish"][1])
+        # The two timed looks for a new post come after a by-hand button only (record_manual): the help says so for
+        # by hand, and for Post… what its row goes by. It said "either way".
+        post, by_hand = about["publish"][1].split("Under BY HAND", 1)
+        self.assertIn("ReelForge checks for the new post 10 and 30 minutes later", by_hand)
+        self.assertNotIn("10 and 30 minutes", post)
+        self.assertIn("Its row shows the post when the extension reports it, or when a refresh finds it.", post)
+        # YouTube's own API: how it is reached and connected, in the buttons' own words, and how far it is tested.
+        for said in ("YouTube API… above Post…", "the client file of a Google Cloud project you make yourself",
+                     "docs/YOUTUBE-API.md", "Each window connects again when it opens",
+                     f"{posting_tab.LABELS['post_api']} on the YouTube row then asks",
+                     "tested against a stand-in for Google, never against Google itself"):
+            self.assertIn(said, post)
+        self.assertIn("Log out", about["accounts"][1])
         self.assertEqual(dict(KEYS)["1-7"], "switch tabs")
         self.assertIn("Publish", dict(KEYS)["u"])
+        self.assertIn("notifications", dict(KEYS)["n"])  # the bell, for the keyboard
+        self.assertIn("scroll", dict(KEYS)["PgUp/PgDn"])
+        self.assertIn("scrolls into view", dict(KEYS)["Tab"])
+        other = {topic[0]: topic[1] for topic in HELP if len(topic) == 2}
+        self.assertIn("(or n)", other["Notifications"])
+        self.assertIn("Delete or Backspace", other["Notifications"])
+        self.assertIn("80 columns by 24 rows", other["Small windows"])  # the smallest window it is drawn for
 
 
 if __name__ == "__main__":

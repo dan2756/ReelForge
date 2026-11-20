@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 
 from . import config
@@ -110,7 +111,11 @@ def find(cfg: dict) -> list[Path]:
     found: list[Path] = []
     folder = config.videos_dir(cfg)
     try:
-        folder.mkdir(parents=True, exist_ok=True)
+        # Made when it isn't there yet. Not once the ReelForge folder has gone from under this process, though (the
+        # hourly stats read, finishing as its folder is moved): the folders on the way to it would put a stub of
+        # the old ReelForge folder back.
+        if config.APP_DIR.is_dir():
+            folder.mkdir(parents=True, exist_ok=True)
         found += [f for f in folder.iterdir() if f.suffix.lower() in VIDEO_EXTS]
     except OSError:
         pass  # e.g. a drive that isn't plugged in: list what the other folders have
@@ -204,3 +209,126 @@ def meta(path: Path, cfg: dict) -> tuple[dict[str, str], list[str]]:
         "caption": strip_hashtags(raw),
         "tags": clean_tags(" ".join([*caption_tags(raw), found.get("tags") or default_tags])),
     }, warnings
+
+
+# Where a video stands before it is posted (approval): what the pipeline's QA and the review say about the file that
+# is on the list now. Posting with the browser extension goes ahead only for the states in POSTABLE; the buttons
+# that open an upload page for you to post by hand never ask.
+POSTABLE = ("approved", "none")
+
+
+def approval(path: Path, cfg: dict) -> dict[str, str]:
+    """{"state", "line"} for a video: whether ReelForge's own checks passed on this exact file. line is a sentence
+    for the person, saying what to do when something is in the way.
+
+    approved    a pipeline video: QA passed on this file and the review's latest verdict is APPROVED for this cut
+    stale       QA or the review looked at an earlier cut of it
+    rejected    the review's latest verdict is a rejection
+    unreviewed  QA passed and there is no review yet
+    qa_failed   QA failed, hasn't run, or its report can't be read
+    none        a video file that didn't come from the pipeline: nothing to check it against
+    demo        one of ReelForge's demos, which are never posted
+
+    Never raises: a file that can't be read is a state with its reason.
+    """
+    folder = episode_dir(path, cfg)
+    if folder is None:
+        return {"state": "none", "line": "Not checked by ReelForge: this video didn't come from the pipeline."}
+    try:
+        spec = json.loads((folder / "episode.json").read_text("utf-8-sig"))
+    except (OSError, ValueError):
+        spec = {}
+    if isinstance(spec, dict) and spec.get("demo"):
+        return {"state": "demo", "line": "This is one of ReelForge's demos, so it can't be posted."}
+    try:
+        qa = json.loads((folder / "build" / "qa" / "qa.json").read_text("utf-8-sig"))
+        if not isinstance(qa, dict):
+            raise ValueError("it isn't a QA report")
+    except FileNotFoundError:
+        return {"state": "qa_failed", "line": "QA hasn't checked this video yet. Run the pipeline's qa step."}
+    except (OSError, ValueError) as e:
+        return {"state": "qa_failed", "line": f"The QA report can't be read ({e}). Run the pipeline's qa step again."}
+    if not qa.get("pass"):
+        checks = qa.get("checks") if isinstance(qa.get("checks"), list) else []
+        failed = next((str(c.get("check")) for c in checks if isinstance(c, dict) and c.get("status") == "FAIL"), "")
+        return {"state": "qa_failed", "line": "QA failed" + (f" ({failed})" if failed else "")
+                + ". Fix it and run the pipeline's qa step again."}
+    try:
+        from studio import publish_check
+    except ImportError:  # the dashboard on its own, outside a ReelForge folder: nothing to read a review with
+        return {"state": "unreviewed", "line": "QA passed. The review can't be read outside a ReelForge folder."}
+    try:
+        state, line = _reviewed(path, folder, spec if isinstance(spec, dict) else {}, qa, publish_check)
+    except Exception as e:  # whatever a half-written episode folder throws: not approved, and why
+        state, line = "stale", (f"QA and the review can't be checked against this video ({type(e).__name__}: {e}). "
+                                "Run the pipeline's qa step again.")
+    return {"state": state, "line": line}
+
+
+SHOWN_FOR = 300.0  # seconds an approval is shown at most without being worked out again
+_shown: dict[str, tuple[tuple, float, dict[str, str]]] = {}  # video -> (its files' marks, when, its approval)
+
+
+def approval_shown(path: Path, cfg: dict) -> dict[str, str]:
+    """approval(), for showing it: the same answer for as long as the files it is read from are the same, and for
+    five minutes at most. With review receipts approval hashes the video and everything delivered with it, and a
+    list that redraws every few seconds (the extension's popup, for twenty videos) would read every video in full
+    each time. Never the answer a post goes by: starting one works it out afresh (posting.create_batch)."""
+    folder = episode_dir(path, cfg)
+    files = [path]
+    if folder is not None:  # what QA, the review and a receipt are about: the episode's own files and what it delivered
+        for part in (folder, folder / "final", folder / "build" / "qa"):
+            try:
+                files += sorted(f for f in part.iterdir() if not f.is_dir())
+            except OSError:
+                pass
+        files.append(folder / "build" / "scene.blend")
+    marks = []
+    for f in files:
+        try:
+            st = f.stat()
+            marks.append((str(f), st.st_size, st.st_mtime_ns))
+        except OSError:
+            marks.append((str(f), None, None))
+    known, now = _shown.get(str(path)), time.monotonic()
+    if known and known[0] == tuple(marks) and now - known[1] < SHOWN_FOR:
+        return known[2]
+    if len(_shown) > 200:  # videos that left the list long ago
+        _shown.clear()
+    answer = approval(path, cfg)
+    _shown[str(path)] = (tuple(marks), now, answer)
+    return answer
+
+
+def _reviewed(path: Path, folder: Path, spec: dict, qa: dict, publish_check) -> tuple[str, str]:
+    """approval's answer for a video whose QA passed: whether QA and the review are for the file as it is now."""
+    review = folder / "build" / "qa" / "review.md"
+    verdict = publish_check.review_state(folder)
+    words = {
+        "approved": "QA passed and the review says APPROVED.",
+        "rejected": "The review says REJECTED. Fix what it lists, then have it reviewed again.",
+        "unreviewed": "QA passed, but there is no review yet (build/qa/review.md has to say APPROVED).",
+        "stale": "The review is older than this video: it looked at an earlier cut. Have this cut reviewed.",
+    }
+    try:
+        from studio import review as receipts  # only in a ReelForge that binds a review to what it reviewed
+    except ImportError:
+        receipts = None
+    final = folder / "final" / path.name
+    if receipts is None or not (final.exists() and path.samefile(final)):
+        # QA's own mark of the file it checked (pipeline/qa.py: size and time). It is all there is without receipts,
+        # and with them it ties a copy of the video (in completed videos/) to the file they are about.
+        st = path.stat()
+        if qa.get("fingerprint") != f"{st.st_size}:{int(st.st_mtime)}":
+            return "stale", "QA checked an earlier cut of this video. Run the pipeline's qa step again, then review it."
+    if receipts is None or verdict in ("rejected", "unreviewed"):
+        return verdict, words[verdict]
+    # Receipts: QA stored what it checked (the video, the cover, the captions and what they were made from), and the
+    # review has to carry that receipt's fingerprint. They say more than the files' times, so those don't count here.
+    if not receipts.qa_matches(qa, receipts.snapshot(folder, spec)):
+        return "stale", ("The video, its cover, its captions or what they were made from changed after QA. Run the "
+                         "pipeline's qa step again, then review it.")
+    if not publish_check.review_approved(review, qa.get("review_fingerprint")):
+        return "stale", ("The review is for an earlier cut: it doesn't carry this one's Review-SHA256 line. Have "
+                         "this cut reviewed.")
+    return "approved", words["approved"]

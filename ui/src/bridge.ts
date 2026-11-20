@@ -135,9 +135,31 @@ export class Bridge {
     })
   }
 
-  /** A call whose answer nobody waits for (a button press): a failure shows up in the log. */
+  /** A call whose answer nobody waits for (a button press): a failure shows up as a pop-up. */
   send(method: string, ...args: unknown[]): void {
-    this.call(method, ...args).catch((e) => this.emit("toast", { title: "Something went wrong", body: String(e?.message ?? e), severity: "error", timeout: 8 }))
+    this.call(method, ...args).catch((e) => this.failed(e))
+  }
+
+  /** A call whose answer is waited for by something that has no use for an error (a dialog about to open): a failure
+   * shows up as the same pop-up, and the answer is null. */
+  async ask<T = any>(method: string, ...args: unknown[]): Promise<T | null> {
+    try {
+      return await this.call<T>(method, ...args)
+    } catch (e) {
+      this.failed(e)
+      return null
+    }
+  }
+
+  /** Say that a call failed: never a silent nothing. A Python exception (the Python side sends its kind and its
+   * words, "RuntimeError: boom") is a fault of ReelForge's own, which only a bug reaches: said in a sentence that
+   * says what it means for what was asked and what to do next, with the exception's own words after it for whoever
+   * reports it. Anything else (the Python side isn't running) says so itself. */
+  failed(e: unknown) {
+    const said = String((e as Error)?.message ?? e)
+    const own = /^[A-Z]\w*(Error|Exception|Exit|Interrupt|Warning)\b/.test(said)
+    const body = own ? `ReelForge ran into a problem of its own, so what you asked for may not have been done. Try again, and if it happens again run reelforge doctor. What it said: ${said}` : said
+    this.emit("toast", { title: "Something went wrong", body, severity: "error", timeout: own ? 12 : 8 })
   }
 
   on(event: string, fn: Handler): () => void {

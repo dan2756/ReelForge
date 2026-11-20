@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YouTube Studio (ReelForge test copy)</title>
+<style>body { font: 14px system-ui; margin: 24px }</style>
+</head>
+<body>
+<script>const MODE = "__MODE__"</script>
+<script src="/fixture/common.js"></script>
+<ytcp-app></ytcp-app>
+<script>
+// Built from the hooks YouTube Studio uploaders use: ytcp-uploads-dialog, the file input inside it,
+// #title-textarea #textbox and #description-textarea #textbox (two elements with the same id, as on the real
+// page), the VIDEO_MADE_FOR_KIDS_* and PUBLIC / UNLISTED / PRIVATE radio buttons, #next-button pressed three
+// times, span.progress-label, the youtu.be link and #done-button.
+//
+// The real page keeps these in the ordinary DOM. Here the whole app sits in an open shadow root, to prove the
+// extension finds its hooks through one.
+fixture.radioClicks = 0
+const root = document.querySelector("ytcp-app").attachShadow({ mode: "open" })
+root.innerHTML = `
+  <style>[contenteditable] { border: 1px solid #999; padding: 8px; min-height: 24px; margin: 6px 0 } [role=radio] { display: block; cursor: pointer } [aria-checked="true"]::before { content: "● " } [aria-checked="false"]::before { content: "○ " } [hidden] { display: none !important }</style>
+  <button id="avatar-btn" type="button" aria-label="Account">A</button>
+  <ytcp-uploads-dialog>
+    <h1>Upload videos</h1>
+    <div class="error-area style-scope ytcp-uploads-dialog"></div>
+    <div id="content">
+      <div id="picker">
+        <button type="button" id="select-files-button">Select files</button>
+        <input type="file" name="Filedata" style="display:none">
+      </div>
+    </div>
+  </ytcp-uploads-dialog>`
+const content = root.getElementById("content")
+const input = root.querySelector("input")
+input.addEventListener("change", async event => {
+  const file = await takeFile(input, event)
+  if (file) details(file)
+})
+
+function radio(name, label, checked) {
+  return `<tp-yt-paper-radio-button name="${name}" role="radio" tabindex="0" aria-checked="${checked}">${label}</tp-yt-paper-radio-button>`
+}
+
+function details(file) {
+  if (MODE === "error") {
+    root.querySelector(".error-area").textContent = "Daily upload limit reached"
+    return
+  }
+  const kids = MODE !== "kids_unset"
+  const visible = MODE !== "visibility_unset"
+  content.innerHTML = `
+    <ytcp-video-upload-progress><span class="progress-label">Uploading 0% ...</span></ytcp-video-upload-progress>
+    <a class="video-url-fadeable" href="https://youtu.be/FIXTUREvid1" target="_blank">https://youtu.be/FIXTUREvid1</a>
+    <div id="details">
+      <div id="title-textarea"><div id="textbox" contenteditable="true" role="textbox" aria-label="Add a title that describes your video (type @ to mention a channel)"></div></div>
+      <div id="description-textarea"><div id="textbox" contenteditable="true" role="textbox" aria-label="Tell viewers about your video (type @ to mention a channel)"></div></div>
+      <div id="audience">
+        ${radio("VIDEO_MADE_FOR_KIDS_MFK", "Yes, it's made for kids", false)}
+        ${radio("VIDEO_MADE_FOR_KIDS_NOT_MFK", "No, it's not made for kids", kids)}
+      </div>
+    </div>
+    <div id="elements" hidden><p>Video elements</p></div>
+    <div id="checks" hidden><p>Checks</p></div>
+    <div id="visibility" hidden>
+      <div id="privacy-radios">
+        ${radio("PRIVATE", "Private", visible)}
+        ${radio("UNLISTED", "Unlisted", false)}
+        ${radio("PUBLIC", "Public", false)}
+      </div>
+    </div>
+    <p id="complaint" hidden>Select whether this video is made for kids</p>
+    <button type="button" id="next-button">Next</button>
+    <button type="button" id="done-button" hidden>Save</button>`
+  // Like the real page, the title starts as the file's name.
+  content.querySelector("#title-textarea #textbox").textContent = file.name.replace(/\.[^.]+$/, "")
+
+  for (const button of content.querySelectorAll("[role=radio]")) {
+    button.addEventListener("click", () => {
+      fixture.radioClicks++
+      for (const other of button.parentElement.querySelectorAll("[role=radio]")) other.setAttribute("aria-checked", String(other === button))
+    })
+  }
+
+  const label = content.querySelector(".progress-label")
+  let percent = 0
+  // "held", "held_mute": the upload stays short of its end until the test lets it finish, with
+  // fixture.finishUpload(), however long the machine takes over the rest. ("slow" ends on its own, about ten
+  // seconds after the video was attached.)
+  const held = MODE === "held" || MODE === "held_mute"
+  const finish = () => {
+    clearInterval(tick)
+    label.textContent = "Upload complete ... Checks complete. No issues found."
+  }
+  const tick = setInterval(() => {
+    percent += MODE === "slow" || MODE === "slow_mute" || held ? 2 : 25
+    if (held) percent = Math.min(percent, 98)
+    if (percent < 100) return (label.textContent = `Uploading ${percent}% ... 1 minute left`)
+    finish()
+  }, 200)
+  fixture.finishUpload = finish
+
+  const screens = ["details", "elements", "checks", "visibility"]
+  let at = 0
+  const next = content.querySelector("#next-button")
+  const done = content.querySelector("#done-button")
+  next.addEventListener("click", event => {
+    const answered = content.querySelector("#audience [aria-checked=true]")
+    content.querySelector("#complaint").hidden = Boolean(answered)
+    if (!answered) return
+    // "next_publishes": YouTube changed its page, and the button that used to say Next publishes from the
+    // checks screen on. Whoever clicks it now has published.
+    if (MODE === "next_publishes" && at === 2) return publish(event, next)
+    content.querySelector("#" + screens[at]).hidden = true
+    at++
+    content.querySelector("#" + screens[at]).hidden = false
+    if (MODE === "next_publishes" && at === 2) next.textContent = "Publish"
+    if (at === 3) {
+      next.hidden = true
+      done.hidden = false
+    }
+  })
+  done.addEventListener("click", event => publish(event, done))
+
+  function publish(event, button) {
+    if (!pressed(event, button)) return
+    if (!content.querySelector("#privacy-radios [aria-checked=true]")) return
+    fixture.text = {
+      title: content.querySelector("#title-textarea #textbox").innerText.trim(),
+      description: content.querySelector("#description-textarea #textbox").innerText.trim(),
+    }
+    fixture.posted = true
+    root.querySelector("ytcp-uploads-dialog").remove()
+    // "quiet_save": a private video is saved and the dialog just closes, with nothing shown after it.
+    if (MODE === "quiet_save") return
+    const share = document.createElement("ytcp-video-share-dialog")
+    share.innerHTML = '<h2>Video published</h2><a href="https://youtu.be/FIXTUREvid1">https://youtu.be/FIXTUREvid1</a>'
+    root.append(share)
+  }
+}
+</script>
+</body>
+</html>

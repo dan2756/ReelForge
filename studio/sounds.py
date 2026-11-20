@@ -11,13 +11,28 @@ import hashlib
 import json
 
 from . import net
-from .paths import SFX
+from .paths import SFX, write_atomic
 
 MIXKIT_LICENSE = "https://mixkit.co/license/#sfxFree"
+# The kit's own list as it was put in place (studio/update.py's KIT_SOUNDS): what an update tells your entries by.
+KIT_LIST = SFX / ".kit-manifest.json"
 
 
 def manifest() -> dict:
     return json.loads((SFX / "manifest.json").read_text(encoding="utf-8"))
+
+
+def note_kit_list() -> None:
+    """First-time setup: the list as the kit came with it, kept beside it, so that the first update can tell the
+    entries you add from the kit's own (studio/update.py). Only while there's none and no channel is set up yet: by
+    then some entries may be yours, and an update with no record keeps a copy of your list before it replaces any."""
+    from . import settings
+
+    try:
+        if not KIT_LIST.exists() and not settings.onboarded():
+            write_atomic(KIT_LIST, (SFX / "manifest.json").read_bytes())
+    except OSError:
+        pass
 
 
 def missing() -> list[tuple[str, dict]]:
@@ -50,8 +65,7 @@ def fetch_mixkit(log=lambda s: print(s, flush=True), progress=None) -> list[str]
             data = net.fetch_bytes(url)
             if meta.get("sha256") and _sha256(data) != meta["sha256"]:
                 raise RuntimeError("checksum mismatch (Mixkit may have changed the file)")
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(data)
+            write_atomic(dest, data)      # whole or not at all: a sound cut short would count as downloaded
             if progress:
                 progress(f"Downloaded sound {k} of {len(todo)}: {name}", k, len(todo))
             else:

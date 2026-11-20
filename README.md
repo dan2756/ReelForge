@@ -81,34 +81,27 @@ First-time setup turns your answers into instructions for your AI, `CLAUDE.md` f
 and saves them in the ReelForge folder (`C:\Users\<you>\ReelForge` on Windows and `~/ReelForge` on a Mac or Linux,
 unless you picked another). Its last screen tells you what to do next.
 
-![First-time setup's last screen: open this folder in Claude Code or Codex, tell it about your channel, say "make my first video", then post it from Publish](docs/screenshots/first-run-ready.png)
+![First-time setup's last screen: copy the prompt for your AI, paste it into Claude Code or any other AI that can work with files on your computer, and your first video waits in Publish when it's done](docs/screenshots/first-run-ready.png)
 
-1. **Open the ReelForge folder in your AI.** In the Claude desktop app, go to **Code**, click **Open folder…** and
-   pick the ReelForge folder (or run `claude` in a terminal inside it). For Codex, run `codex` in a terminal inside
-   it.
-2. **Tell it about your channel.** Drag a file about it into the chat (your notes, a doc, videos you like: whatever
-   you have) or paste a description, and say:
-
-   ```
-   here's my channel
-   ```
-
-   First-time setup only asks a few questions, so this is where your AI gets the full picture. It keeps your words
-   as the channel's brief (`my-studio/brief.md`), reads it every time and plans every video from it, and it asks
-   before changing your answers to match. Skip this and it asks for one before your first video.
-3. **Ask for your first video** in the words that screen gives you:
-
-   ```
-   make my first video
-   ```
-
+1. **Copy the prompt for your AI.** Click **Copy prompt** on that screen. The prompt has your ReelForge folder's
+   path in it, so there's nothing to drag in or open first, and it asks your AI for your first video. **Copy prompt
+   for your AI** on ReelForge's Settings tab copies it again any time.
+2. **Paste it into your AI.** Claude Code is the **Code** tab in the Claude desktop app, or `claude` in a terminal;
+   Codex is `codex` in a terminal; any other AI that can work with files on your computer will do. It reads its
+   instructions in the ReelForge folder first.
+3. **Tell it about your channel when it asks.** First-time setup only asks a few questions, so before your first
+   video your AI asks for the full picture: describe your channel in the chat, or give it a file about it (your
+   notes, a doc, videos you like: whatever you have). It keeps your words as the channel's brief
+   (`my-studio/brief.md`), reads it every time and plans every video from it, and it asks before changing your
+   answers to match.
 4. **Let it work.** Your AI picks a subject, writes the script, checks the facts, voices it and draws the scenes
    (or, for 3D, builds the scene in Blender and renders it), adds the captions and the sound, then watches the
    finished video and fixes anything that's off. A 2D video renders in a few minutes; a 3D one takes from about 15
    minutes to an hour on a fast graphics card.
 5. **Post it.** Open ReelForge (type `reelforge` in any terminal, or open the ReelForge icon: on your desktop on
    Windows, in Applications on a Mac, in your app menu on Linux) and click the green **Publish** button at the top
-   right.
+   right. Each platform's button opens its upload page with the text copied, and you press Post there.
+   [Publish](#publish), below, has the two optional ways that do more of it for you.
 
 After that, say **make today's videos** whenever you want more, and give it a new file whenever your plans for the
 channel change.
@@ -118,16 +111,18 @@ channel change.
 Seven tabs run along the top: Overview, Videos, Compare, Stats, Accounts, Settings and Updates, in any order you like
 (pick it on the Settings tab). **Publish**, where your finished videos wait, is the green button at the top right.
 Open any of them straight from a terminal by name, like `reelforge publish`, or a tab by where it sits, from
-`reelforge 1` at the far left to `reelforge 7`. Everything works with the mouse or the keyboard: **1**-**7** open the
-tabs in the order they're shown, **u** opens Publish, **r** refreshes your stats, **p** opens your profiles, **?** the
-help, **Tab** moves between buttons and fields, **Enter** presses and **Esc** closes.
+`reelforge 1` at the far left to `reelforge 7`. It works with the mouse or the keyboard: **1**-**7** open the
+tabs in the order they're shown, **u** opens Publish, **r** refreshes your stats, **n** opens the notifications,
+**p** opens your profiles, **?** the help, **Tab** moves between buttons and fields, **Enter** presses, **Esc**
+closes, and **Page Up** and **Page Down** scroll a tab or a dialog that is longer than the window.
 
 The window is calm and dark, so your numbers stand out: each platform keeps its own colour (TikTok cyan, YouTube red,
 Instagram purple, X white), green and red show what went up and down, and amber marks where each video went up.
 Numbers count up and charts grow in as they arrive, and the tabs slide. Under **↻ Refresh** at the top is when your
 stats were last read (in amber while a read is under way), and if a platform's last read failed, the bottom left of
-the window says so: click it for Accounts. It fits any window: in a small one the Overview's panels stack and scroll
-instead of squeezing.
+the window says so: click it for Accounts. It is drawn for a window of 80 columns by 24 rows and up: in a small one
+the panels stack and the tab scrolls (the mouse wheel, or Page Up and Page Down) instead of squeezing, and on
+Publish the videos go above the form.
 ReelForge's window and its first-time setup are built with [OpenTUI](https://github.com/anomalyco/opentui), and look
 sharpest in Windows Terminal.
 
@@ -168,13 +163,29 @@ views first) to see it on every platform against each one's typical video.
 ### Publish
 
 Every finished video waits here with its post already written: click the green **Publish** button at the top right
-(or press **u**), from any tab. Each platform's button opens that site's upload page, copies exactly the text it
-needs and shows the video in Explorer, Finder or your file manager, so you drag it in and press Post. ReelForge spots
-the post by itself.
+(or press **u**), from any tab. Pick a video and check its caption and hashtags. Nothing is posted until you press
+it, and there are three ways to post:
+
+- **By hand.** Under **BY HAND**, each platform's button opens that site's upload page, copies exactly the text it
+  needs and shows the video in Explorer, Finder or your file manager, so you drag it in and press Post. It needs
+  nothing set up, and ReelForge spots the post by itself.
+- **With the browser extension** (optional). **Post…** shows each platform's exact text and asks first. Then your
+  own browser opens each upload page, and the extension attaches the video and fills in the text. It stops there:
+  you check the page and press Post. (It presses Post itself only where you switched on Press Post for me in its
+  own settings and asked for that for the post, and never on X.) [docs/EXTENSION.md](docs/EXTENSION.md) is its
+  guide: how to set it up, what it does and never does, what keeps it safe, and what to do when a post stops. It is
+  tested against copies of the upload pages, not yet on the live sites.
+- **To YouTube through its own API** (optional). With a Google Cloud project you make yourself, ReelForge uploads
+  the video itself when you press it on the Publish tab, private unless you choose otherwise.
+  [docs/YOUTUBE-API.md](docs/YOUTUBE-API.md) is its guide: the steps in Google Cloud, what a post sends, the limits
+  and what is kept on your computer. It is tested against a stand-in for Google and has never uploaded to YouTube
+  itself.
+
+Under **POST**, a row for each platform says where the video's post stands there, whichever way it went.
 Under the list, Best time to post shows the part of the day your videos have done best in on each platform, by
 their views in their first day, and when it next comes round, once there are enough videos to tell.
 
-![The Publish tab](docs/screenshots/app-publish.png)
+![The Publish tab, in the demo: a video's caption and hashtags, POST with a row for each platform and Post…, BY HAND with each platform's button, the preview of what each platform gets, and the best time to post under the list](docs/screenshots/app-publish.png)
 
 ### Stats
 
@@ -195,6 +206,11 @@ there's never an empty card, chart or button for one you don't use. TikTok and Y
 Instagram and X also need one log-in, in ReelForge's own browser window. There are no API keys to set up. No account
 yet? Sign up opens the platform's own sign-up page with a few steps beside it (first-time setup offers the same, and a
 new Gmail for your channel first). Disconnect hides a platform again without losing its stats.
+
+A platform ReelForge can't read yet (Instagram or X without its log-in, say) has **Type in stats** on its panel: it
+opens TYPE IN STATS, a box to type its numbers in. Once ReelForge reads the platform itself, what you typed
+becomes that post's history instead of being thrown away. If a number you type is lower than the one saved before,
+Save says so first and replaces it only when you press Save again, in case it was a slip.
 
 <p align="center">
   <img src="docs/screenshots/app-accounts.png" width="49%" alt="The Accounts tab: TikTok, YouTube and Instagram connected, and X with its Connect box">
@@ -217,6 +233,7 @@ out, say).
 `reelforge profiles --json` prints one JSON object with `current` (the selected profile's key) and a `profiles` array.
 Each profile has `key`, `name`, `folder` (an absolute path), `main`, `onboarded` (true once its first-time setup is
 done), and `platforms` (enabled platform keys from its studio settings, or the defaults before first-time setup).
+A profile whose `studio.toml` can't be read has no platforms and an `error` that says what's wrong in the file.
 Selection follows `reelforge profiles`: `-p NAME` or `REELFORGE_PROFILE`, then the last-opened profile, then the
 first. It changes no files or profile selection and includes no login data. `--json` cannot be combined with `new`,
 `delete`, or `restore`.
@@ -232,16 +249,17 @@ folder itself.
 
 ### Settings
 
-This channel's answers from first-time setup (**Change your answers** asks the questions again), an FAQ beside them
-(click a question and its answer opens under it), and what ReelForge set up on your computer: **Background refresh**,
-the hourly stats read that keeps your stats updating while ReelForge is closed, with a switch to turn it on or off,
-then the `reelforge` command and the icon, each with a button. **Restart** under them closes ReelForge and opens it
-again straight away. Then **Profiles** lists your channels, with **Delete…** beside each one you can delete and
-**New profile**, then the ones you've deleted, each with **Restore** and **Move to the Recycle Bin** (to free its space
-for good). Across the bottom, the danger zone: **Factory reset** puts every channel's settings, logins and stats in a
-backup and starts first-time setup again, and **Uninstall** removes ReelForge. Both ask you to type your channel's
-name first, and neither deletes anything: what they clear goes to a backup or the Recycle Bin (the Trash on a Mac).
-Neither stops half-way either: if something can't be moved (another ReelForge window has it open, say), nothing
+This channel's answers from first-time setup (**Change your answers** asks the questions again, and **Copy prompt for
+your AI** copies the prompt that starts your AI on this channel), an FAQ beside them (click a question and its answer
+opens under it), and what ReelForge set up on your computer: **Background refresh**, the hourly stats read that keeps
+your stats updating while ReelForge is closed, with a switch to turn it on or off, then the `reelforge` command and the
+icon, each with a button, and ReelForge's folder, with a button that opens it. **Restart** under them closes ReelForge
+and opens it again straight away. Then **Profiles** lists your channels, with **Delete…** beside each one you can
+delete and **New profile**, then the ones you've deleted, each with **Restore** and **Move to the Recycle Bin** (to
+free its space for good). Across the bottom, the danger zone: **Factory reset** puts every channel's settings, logins
+and stats in a backup and starts first-time setup again, and **Uninstall** removes ReelForge. Both ask you to type your
+channel's name first, and neither deletes anything: what they clear goes to a backup or the Recycle Bin (the Trash on a
+Mac). Neither stops half-way either: if something can't be moved (another ReelForge window has it open, say), nothing
 changes.
 
 **Tab order**, under the FAQ, puts the tabs along the top in the order you like: drag a tab where you want it, or
@@ -257,7 +275,8 @@ green button at the top right.
 When a new version is out, the bell tells you, and the **Updates** tab (`reelforge updates`) gets a red dot and shows
 what's new. Click **Update and restart** to install it: the anvil hammers while it installs and hops once it's in.
 Your channel, videos, stats and settings stay as they are, and your AI's instructions are refreshed for the new
-version.
+version. If you use the browser extension, press Reload on its card on your browser's extensions page afterwards:
+the browser keeps running the old copy until you do.
 
 <p align="center">
   <img src="docs/screenshots/app-updates.png" width="75%" alt="The Updates tab: a new version installs and restarts ReelForge in one click">
@@ -291,8 +310,14 @@ Yes. ReelForge is free and open source. Making videos uses your own Claude Code 
 
 <br>
 
-No. ReelForge never posts, uploads or sends anything. Finished videos wait in Publish (the green button at the top
-of ReelForge), and you post them yourself.
+Not by itself, and never without your press. Finished videos wait in Publish (the green button at the top of
+ReelForge), and by default you post them yourself: each platform's button opens its upload page for you.
+
+Two optional things can do more of it for you. The [browser extension](docs/EXTENSION.md) attaches the video and
+fills in the upload page, and unless you choose otherwise you press Post there. For YouTube, ReelForge can also
+upload the video itself through YouTube's own API, with a Google Cloud project you make
+([docs/YOUTUBE-API.md](docs/YOUTUBE-API.md)). Both start only when you press them, and neither has been tried on
+the live sites yet: each page says where it stands. Your AI never posts.
 
 </details>
 
@@ -382,9 +407,9 @@ itself. From a terminal: `reelforge profiles delete "Channel name"` and `reelfor
 <br>
 
 Make sure you opened the ReelForge folder itself, not the folder it's in: your AI reads `CLAUDE.md` (or `AGENTS.md`)
-from there. First-time setup only asks a few questions, so give it the full picture too: drag a file about your
-channel into the chat (or paste a description) and say "here's my channel". It keeps it as the channel's brief and
-plans every video from it. To change your answers, run `reelforge channel`.
+from there. First-time setup only asks a few questions, so give it the full picture too: describe your channel in
+the chat, or give it the path of a file about it (your notes, a doc, examples you like). It keeps your words as the
+channel's brief and plans every video from it. To change your answers, run `reelforge channel`.
 
 </details>
 
@@ -463,7 +488,7 @@ repairs the setup.
 
 Yes. Setup gets everything ReelForge needs into its own folder on all three, so you don't need Homebrew or a package
 manager: the voice from the kokoro-onnx project's GitHub release, Blender from blender.org, ffmpeg from the builds ffmpeg.org points to, Bun (for ReelForge's window) from its
-own releases, and a private Python if yours is older than 3.11. ReelForge reads your stats with Chrome or Edge if you have one, or with a Chromium setup downloads if you
+own releases, and a private Python if yours is older than 3.11.4. ReelForge reads your stats with Chrome or Edge if you have one, or with a Chromium setup downloads if you
 don't. On a Mac, ReelForge goes in your Applications folder (so it's in Launchpad, Spotlight and the Dock) and opens in
 Terminal; on Linux it goes in your app menu. The hourly stats job is a launchd agent on a Mac and a systemd timer (or
 a cron job) on Linux. Every change is tested on Windows, on Macs with Apple Silicon and Intel, and on Linux.
@@ -492,6 +517,12 @@ or point `STUDIO_BLENDER` at it.
   (`status`, `what`, and `detail` for each check). Status values are `ok`, `warn`, and `FAIL`.
   With `--render-test --json`, progress goes to stderr. Both formats exit with code 1 if any check fails, or 0 otherwise.
 - `reelforge stats on` and `reelforge stats off` turn the hourly stats on and off.
+- `reelforge extension` says where the browser extension stands: its folder, and the browsers connected.
+  `reelforge extension folder` shows the folder to load in your browser, and `reelforge extension pair` connects a
+  browser. None of them starts a post ([docs/EXTENSION.md](docs/EXTENSION.md)).
+- `reelforge youtube-api` says where posting to YouTube through its API stands. `reelforge youtube-api client FILE`
+  takes the client file from your Google Cloud project, and `reelforge youtube-api disconnect` forgets it. None of
+  them signs in or posts ([docs/YOUTUBE-API.md](docs/YOUTUBE-API.md)).
 - `reelforge reset` starts over (a factory reset), and `reelforge uninstall` removes ReelForge.
 - `reelforge help` lists the rest.
 
@@ -513,7 +544,8 @@ asks you to type your channel's name, then:
   settings. On Windows a small window does this once ReelForge has closed, and says when it's done. Restore it from
   the bin if you change your mind, or empty the bin to get the space back.
 
-Nothing is deleted for good, and videos kept outside the ReelForge folder aren't touched.
+Nothing is deleted for good, and videos kept outside the ReelForge folder aren't touched. Uninstalling can't take
+the browser extension out of your browser: if you loaded it, remove it yourself on the browser's extensions page.
 
 </details>
 
@@ -526,7 +558,8 @@ Run `reelforge reset`, or click **Factory reset…** on the **Settings** tab. It
 and stats into a backup in `backups` and starts first-time setup again. Your videos stay where they are, and so do
 Blender, ffmpeg and the sounds, so nothing is downloaded again. If you have more than one channel, the others go into
 the backup whole, videos included. If something can't be moved (another ReelForge window has it open, say), nothing
-changes. To undo a reset, move the backup's files back.
+changes. To undo a reset, move the backup's files back. A browser that was connected to the extension has to be
+connected again afterwards.
 
 </details>
 

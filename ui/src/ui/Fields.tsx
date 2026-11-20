@@ -30,6 +30,13 @@ export function TextField(
   useEffect(() => {
     if (input.current && input.current.value !== p.value) input.current.value = p.value
   }, [p.value])
+  // While it doesn't have the keyboard it shows its value from the start: left at the end, where typing goes on, a
+  // caption longer than the field showed only its tail. With the keyboard, the end again.
+  useEffect(() => {
+    if (!input.current) return
+    if (focused) input.current.gotoBufferEnd()
+    else input.current.cursorOffset = 0
+  }, [focused, p.value])
   const bg = p.bad ? mix(theme.input, theme.bad, 0.07) : focused ? theme.inputFocus : theme.input
   return (
     <box

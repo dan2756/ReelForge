@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Instagram (ReelForge test copy)</title>
+<style>body { font: 14px system-ui; margin: 24px } nav a { display: block; margin: 6px 0 } [contenteditable] { border: 1px solid #999; padding: 8px; min-height: 60px } [role=dialog] { border: 2px solid #333; padding: 16px; margin-top: 16px } [role=button] { cursor: pointer; color: #06c; display: inline-block }</style>
+</head>
+<body>
+<script>const MODE = "__MODE__"</script>
+<script src="/fixture/common.js"></script>
+<div id="app"></div>
+<script>
+// Built from the hooks Instagram uploaders use: svg[aria-label="New post"] in the navigation, the
+// [role=dialog] it opens, input[type=file] whose accept list has video/mp4, the "shared as reels" notice with
+// its reels_nux_icon image, two Next screens, the Lexical caption editor and the Share action. The dialog's
+// aria-label changes from screen to screen, as the sources say it does.
+const app = document.getElementById("app")
+if (MODE === "signed_out") {
+  app.innerHTML = '<form><input name="username" aria-label="Phone number, username, or email"><input name="password" type="password"><button type="submit">Log in</button></form>'
+} else {
+  app.innerHTML = `
+    <nav>
+      <a role="link" href="/direct/inbox/">Messages</a>
+      <a role="link" href="#" id="create"><svg aria-label="New post" role="img" width="24" height="24" viewBox="0 0 24 24"><title>New post</title><rect width="24" height="24" fill="#999"/></svg> <span>Create</span></a>
+      <a role="link" href="/fixtureuser/"><img alt="fixtureuser's profile picture" width="24" height="24" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="> <span>Profile</span></a>
+    </nav>
+    <div id="layer"></div>`
+  const layer = document.getElementById("layer")
+  document.getElementById("create").addEventListener("click", event => {
+    event.preventDefault()
+    if (MODE === "menu" && !layer.querySelector("[role=menu]") && !layer.querySelector("[role=dialog]")) {
+      // Some accounts get a menu first.
+      layer.innerHTML = '<div role="menu"><a role="link" href="#" id="post-item"><svg aria-label="Post" role="img" width="24" height="24"><title>Post</title></svg> <span>Post</span></a><a role="link" href="#"><span>Live video</span></a></div>'
+      document.getElementById("post-item").addEventListener("click", inner => {
+        inner.preventDefault()
+        openDialog()
+      })
+      return
+    }
+    openDialog()
+  })
+
+  function openDialog() {
+    layer.innerHTML = `
+      <div role="dialog" aria-label="Create new post">
+        <div role="heading" aria-level="1">Create new post</div>
+        <div id="action"></div>
+        <div id="screen"><button type="button">Select from computer</button></div>
+        <input type="file" accept="image/jpeg,image/png,image/heic,image/heif,video/mp4,video/quicktime" multiple style="display:none">
+      </div>`
+    const dialog = layer.querySelector("[role=dialog]")
+    const input = dialog.querySelector("input")
+    input.addEventListener("change", async event => {
+      const file = await takeFile(input, event)
+      if (!file) return
+      // The notice that video posts are shared as reels. The uploaders dismiss it with its one button.
+      layer.insertAdjacentHTML("beforeend", '<div role="dialog" id="notice"><img src="/images/instagram/clips/reels_nux_icon.png" alt="" width="40" height="40"><h2>Video posts are now shared as reels</h2><button type="button">OK</button></div>')
+      layer.querySelector("#notice button").addEventListener("click", () => {
+        layer.querySelector("#notice").remove()
+        screen("Crop")
+      })
+    })
+
+    function screen(name) {
+      dialog.setAttribute("aria-label", name)
+      dialog.querySelector("[role=heading]").textContent = name
+      const action = dialog.querySelector("#action")
+      const body = dialog.querySelector("#screen")
+      if (name === "New reel") {
+        action.innerHTML = '<div role="button" tabindex="0">Share</div>'
+        body.innerHTML = '<div contenteditable="true" role="textbox" data-lexical-editor="true" aria-label="Write a caption..." aria-placeholder="Write a caption..." spellcheck="true"><p><br></p></div>'
+        const share = action.firstChild
+        share.addEventListener("click", event => {
+          if (!pressed(event, share)) return
+          fixture.text = body.querySelector("[contenteditable]").innerText.trim()
+          fixture.posted = true
+          dialog.setAttribute("aria-label", "Reel shared")
+          dialog.querySelector("[role=heading]").textContent = "Reel shared"
+          action.innerHTML = ""
+          body.innerHTML = "<p>Your reel has been shared.</p>"
+        })
+        return
+      }
+      // "next_shares": Instagram changed its page, and the button on the Edit screen that is still labelled
+      // Next for screen readers now says Share and shares. Whoever clicks it has shared.
+      const shares = MODE === "next_shares" && name === "Edit"
+      action.innerHTML = shares ? '<div role="button" tabindex="0" aria-label="Next">Share</div>' : '<div role="button" tabindex="0">Next</div>'
+      body.innerHTML = `<p>${name} your video</p>`
+      // Each screen takes a moment to arrive, and Next is a fresh element every time.
+      action.firstChild.addEventListener("click", event => {
+        if (shares) {
+          if (pressed(event, action.firstChild)) fixture.posted = true
+          return
+        }
+        action.innerHTML = ""
+        setTimeout(() => screen(name === "Crop" ? "Edit" : "New reel"), 150)
+      })
+    }
+  }
+}
+</script>
+</body>
+</html>

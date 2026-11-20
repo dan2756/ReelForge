@@ -46,14 +46,26 @@ def main(argv: list[str] | None = None) -> int:
         print(f"reelforge doesn't know {args.what!r}. Use: {USAGE}")
         return 2
 
+    if word == "refresh" and _moved_away():
+        return 1  # nothing to read into, and nowhere to say so
+
     try:
         cfg = config.load_config()
     except config.ConfigError as e:
         print(f"ReelForge can't start: {e}")
+        if word == "refresh":
+            job_stopped(str(e))
         return 2
 
     if word == "refresh":  # only the connected platforms are read (Platform.connected)
-        return refresh_profiles(args.demo)
+        try:
+            return refresh_profiles(args.demo)
+        except Exception as e:
+            from .platforms import detail
+
+            print(f"reelforge refresh stopped: {detail(e)}")
+            job_stopped(detail(e))
+            return 1
 
     # The window is the OpenTUI app in ui/; it runs dashboard/service.py through studio/bridge.py, on the profile asked
     # for (reelforge -p NAME), else the one you had open last.
@@ -84,7 +96,7 @@ def load_platforms(demo: bool = False, only_demos: bool = False, unconnected=())
         path = config.DATA_DIR / "demo.db"
         for suffix in ("", "-wal", "-shm"):
             path.with_name(path.name + suffix).unlink(missing_ok=True)
-        db.init(path)
+        db.init(path, demo=True)
         if only_demos:
             from . import videos
 
@@ -117,8 +129,7 @@ def refresh_profiles(demo: bool = False) -> int:
     """`reelforge refresh`: one stats read of every profile (or just the one asked for: reelforge -p NAME refresh).
     Each profile is read in a process of its own, one after the other, as though each had its own job; a profile whose
     settings turn background stats off is left out. With one profile it's read here, as it always was."""
-    from studio import profiles
-    from studio import settings as S
+    from studio import generate, profiles
 
     asked = profiles.get(os.environ.get(profiles.ENV))
     if demo or asked is not None or not profiles.several():
@@ -130,7 +141,9 @@ def refresh_profiles(demo: bool = False) -> int:
     end = time.monotonic() + JOB_BUDGET
     code = 0
     for p in profiles.every():
-        if p.onboarded and not S.load(p.settings)["platforms"].get("background_stats", True):
+        # (a channel's studio.toml with a typo in it: its own background_stats line says, else its answers, else
+        # it isn't read; and the other channels are read all the same)
+        if p.onboarded and not generate.background_stats(p, say=lambda line: print(line, flush=True)):
             continue
         left = int(end - time.monotonic())
         if left < 30:
@@ -147,33 +160,54 @@ def refresh_profiles(demo: bool = False) -> int:
     return code
 
 
+def _moved_away() -> bool:
+    """Whether the ReelForge folder has gone from under this read since it was started: reelforge move renamed it, or
+    it was uninstalled, in the moment the hourly job began. From then on the read would work by the folder's old
+    name, with nothing there to read into, so it stops instead."""
+    return not (config.APP_DIR / "__main__.py").is_file()
+
+
+def job_stopped(why: str) -> None:
+    """The hourly job couldn't do its read at all (a config.toml it can't read, a stats database that won't open): a
+    line in data/refresh.log says why. It has no window to say so in and, started by the scheduler, no terminal."""
+    try:
+        sync.log([f"error: the stats read didn't run: {why}"], config.DATA_DIR / "refresh.log")
+    except Exception:
+        pass  # not even the data folder: nothing more to do here
+
+
 def refresh(platforms: dict, cfg: dict, demo: bool = False) -> int:
     """One stats read, then new videos and (every few hours) the update check, all saved for the next look. Open
     ReelForge windows show what it read."""
     result = sync.refresh(platforms, cfg, manual=True, who="job")
-    db.compact()
-    if not demo:
-        for extra in (lambda: notify.check_videos(cfg), _check_updates):
-            try:
-                extra()
-            except Exception:
-                pass  # extras: a hiccup here never fails the read
     if result.busy:  # another ReelForge has been reading all along: it saves what it reads
         done = f"nothing ({result.waited or sync.WHO['window']} was still reading after {sync.WAIT // 60} minutes)"
     elif result.done:
         done = ", ".join(result.done)
     else:
         done = "nothing due" + (f" ({result.waited} had just read them)" if result.waited else "")
-    lines = [f"refreshed: {done}", *("error: " + e for e in result.errors)]
-    print("\n".join(lines))
-    # A scheduled refresh has no window to read, so it also keeps a short log.
-    log = config.DATA_DIR / "refresh.log"
+    print("\n".join([f"refreshed: {done}", *("error: " + e for e in result.errors)]))
+    # A scheduled refresh has no window to read, so it also keeps a short log, with each error's own words. It's
+    # written before the tidying, so a run that goes wrong after its read still says what it read.
+    sync.log([f"refreshed: {done}", *("error: " + d for d in result.details)])
+    problems = len(result.details)
     try:
-        old = log.read_text("utf-8").splitlines()[-200:] if log.exists() else []
-        stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        log.write_text("\n".join([*old, *(f"{stamp}  {line}" for line in lines)]) + "\n", "utf-8")
-    except OSError:
-        pass
+        db.compact()
+    except Exception as e:
+        from .platforms import detail
+
+        sync.log([f"error: tidying the stats database: {detail(e)}"])
+        problems += 1
+    try:
+        db.set_meta("job", {"at": db.now_iso(), "read": done, "problems": problems})
+    except Exception:
+        pass  # the store is busy: the log has it
+    if not demo:
+        for extra in (lambda: notify.check_videos(cfg), _check_updates):
+            try:
+                extra()
+            except Exception:
+                pass  # extras: a hiccup here never fails the read
     return 1 if result.errors or result.busy else 0
 
 

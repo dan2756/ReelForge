@@ -1,5 +1,6 @@
 <!-- {{ mark }} on {{ date }}. Your AI keeps the slate and the research notes up to date. Changing your answers
-     (reelforge channel) rewrites this file but keeps the research notes (and a copy of the old one in {{ here }}my-studio/backups/). -->
+     (reelforge channel) or connecting an account rewrites this file but keeps the slate and the research notes (and
+     a copy of the old one in {{ here }}my-studio/backups/). -->
 # {{ ch.name }}: channel bible
 
 - **About:** {{ ch.about }}
@@ -97,7 +98,7 @@ Title pattern examples: {% for e in examples %}"{{ e }}"{% if not loop.last %}, 
 - {{ r }}.
 {% endfor %}
 - Cadence: {{ cadence }}{% if post_times %}, posted {{ post_times }}{% endif %}{% if timezone %} ({{ timezone }}){% endif %}.
-- The same cut goes to every platform. {{ Who }} posts by hand from ReelForge's Publish tab; the AI never posts.
+- The same cut goes to every platform. {{ Who }} posts from ReelForge's Publish tab, with their own press; the AI never posts.
 
 ## Research notes
 

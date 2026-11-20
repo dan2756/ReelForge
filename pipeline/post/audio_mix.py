@@ -23,7 +23,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config  # noqa: E402
 from post.loudness import master  # noqa: E402
-from post.sfx_cache import build_cache, cached  # noqa: E402
+from post.sfx_cache import build_cache, cached, cue_sounds  # noqa: E402
 
 SR = config.SAMPLE_RATE
 _cache = {}
@@ -233,10 +233,10 @@ def ducking(voice, depth_db):
 
 
 def build(ep_dir):
-    build_cache()
     spec = config.load_spec(ep_dir)
     series = json.loads((ep_dir / "build" / "series.json").read_text(encoding="utf-8"))
     A = spec.get("audio") or {}
+    build_cache(needed=cue_sounds(A))
     ev = series.get("events", {})
     dur = spec["duration"]
     n = int(dur * SR)

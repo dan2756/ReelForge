@@ -16,7 +16,7 @@ import { Chart } from "../ui/Chart"
 import { sparkline } from "../ui/Graphics"
 import { Line } from "../ui/Line"
 import { useProgress } from "../ui/Motion"
-import { Panel, Scroll } from "../ui/Panels"
+import { Panel, Reading, Scroll } from "../ui/Panels"
 import { useDash } from "./state"
 import type { TotalsMetric, TotalsRow, TotalsToggle, TotalsView } from "./types"
 
@@ -56,6 +56,7 @@ export function Stats() {
   const beside = Math.min(Math.max(Math.round(width * 0.28), BREAKDOWN_WIDTH[0]), BREAKDOWN_WIDTH[1])
   // The charts grow in again on a new range, or when a platform goes in or out of the totals.
   const animate = `${view?.range}|${(view?.toggles ?? []).map((t) => (t.counted ? t.key : "")).join(",")}`
+  if (!view) return <Reading what="your stats" />
   return (
     <box
       flexDirection="column"

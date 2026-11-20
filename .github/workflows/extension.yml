@@ -1,0 +1,52 @@
+# Runs the browser extension's tests (extension/tests/) on every push: the unpacked extension in headless Chromium,
+# with copies of the four upload pages served on this machine. First with a stand-in for ReelForge, then with
+# ReelForge's real local server and ledger on a scratch channel, so that the two halves are also tested together.
+# Nothing here reaches a platform's site and no account is used: these tests prove the extension's own machinery
+# and that it and ReelForge agree. They say nothing about today's live upload pages.
+# It is a workflow of its own, beside Test, so a change to one never has to touch the other.
+# The Release workflow calls this one too, for the tagged commit, and publishes only when it passed.
+name: Extension
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  extension:
+    name: The extension's tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      # ReelForge's side of the real-server tests: the same Python and packages the Test workflow uses.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python packages
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # Playwright with its own Chromium: branded Chrome and Edge no longer load an extension from the command
+      # line. It goes beside the checkout, not into it, and NODE_PATH is where the tests' require() finds it.
+      - name: Playwright and its Chromium
+        run: |
+          npm install --no-save --no-package-lock --prefix "$RUNNER_TEMP/playwright" playwright@1.63.0
+          echo "NODE_PATH=$RUNNER_TEMP/playwright/node_modules" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/playwright/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Every script of the extension parses
+        run: |
+          git ls-files -z 'extension/*.js' 'extension/*.mjs' | xargs -0 -n 1 node --check
+          python -m json.tool extension/manifest.json > /dev/null
+          python -m json.tool extension/selectors.json > /dev/null
+      - name: The extension with a stand-in for ReelForge
+        run: node extension/tests/run.mjs --stand-in
+      # REELFORGE_PYTHON: the Python that has ReelForge's packages. Without one this suite would be skipped, and
+      # with --real a run that tested nothing fails.
+      - name: The extension with ReelForge's real server
+        env:
+          REELFORGE_PYTHON: python
+        run: node extension/tests/run.mjs --real

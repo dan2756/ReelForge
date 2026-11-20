@@ -1,4 +1,5 @@
-"""SQLite store: stat snapshots over time, posts, episodes, the upload log and your notifications.
+"""SQLite store: stat snapshots over time, posts, episodes, the upload log, your notifications and the posting ledger
+(dashboard/posting.py keeps that one).
 
 Platforms mostly report lifetime totals, so every refresh writes a snapshot row. The charts
 are built from those snapshots; the longer ReelForge runs, the more history it has.
@@ -69,9 +70,40 @@ CREATE TABLE IF NOT EXISTS notifications (
     read INTEGER NOT NULL DEFAULT 0,
     deleted INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS post_jobs (
+    id TEXT PRIMARY KEY,                 -- "pj_" + 16 hex
+    batch TEXT NOT NULL,                 -- "pb_" + 16 hex: one press of Post = one batch
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,   -- db.now_iso()
+    platform TEXT NOT NULL,
+    via TEXT NOT NULL,                   -- "extension" | "api"
+    video TEXT NOT NULL,                 -- file name
+    video_path TEXT NOT NULL,
+    video_sha256 TEXT NOT NULL,
+    video_size INTEGER NOT NULL,
+    episode_id INTEGER,
+    text TEXT NOT NULL,                  -- JSON snapshot of exactly what goes in the boxes
+    press INTEGER NOT NULL DEFAULT 0,    -- 1: the person switched "stop before posting" off
+    options TEXT NOT NULL DEFAULT '{}',  -- JSON, e.g. {"privacy": "private"} for via=api
+    review TEXT NOT NULL DEFAULT '',     -- approval state when the job was made (videos.approval)
+    state TEXT NOT NULL,
+    step TEXT, progress REAL, detail TEXT,
+    error_code TEXT, error_message TEXT,
+    post_id TEXT, url TEXT,
+    claimed_by TEXT,                     -- the extension install that took it
+    superseded INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS post_jobs_one_live ON post_jobs (video_sha256, platform)
+    WHERE superseded = 0 AND state IN
+    ('queued','claimed','opening','uploading','filling','ready','posting','posted','unknown');
+CREATE INDEX IF NOT EXISTS post_jobs_by_batch ON post_jobs (batch);
+CREATE TABLE IF NOT EXISTS post_events (
+    id INTEGER PRIMARY KEY, job TEXT NOT NULL, ts TEXT NOT NULL,
+    state TEXT, step TEXT, detail TEXT
+);
 """
 
 _path: Path | None = None
+_demo = False  # the store is the demo's made-up one: nothing about it is kept (no backups, no log)
 
 
 LATEST_COLUMNS = ("last_ts", "views", "likes", "comments", "shares", "saves")
@@ -79,13 +111,14 @@ LATEST_COLUMNS = ("last_ts", "views", "likes", "comments", "shares", "saves")
 # video's upload page, posts on two platforms matched each other, or ReelForge posted it (or you typed in its numbers).
 # NULL: not linked. auto_link re-checks every link except hand and publish ones.
 LINKS = ("hand", "caption", "upload", "twin", "publish")
+TYPED = "manual-"  # a post id that starts with this holds numbers you typed in for an episode: manual-<episode id>
 BACKUPS_KEPT = 7
 
 
-def init(path: Path) -> None:
-    global _path
+def init(path: Path, demo: bool = False) -> None:
+    global _path, _demo
     path.parent.mkdir(parents=True, exist_ok=True)
-    _path = path
+    _path, _demo = path, demo
     with connect() as db:
         db.execute("PRAGMA journal_mode=WAL")
         db.executescript(SCHEMA)
@@ -93,6 +126,8 @@ def init(path: Path) -> None:
         notes = {r["name"] for r in db.execute("PRAGMA table_info(notifications)")}
     if not have.issuperset((*LATEST_COLUMNS, "link")) or "deleted" not in notes:
         _migrate()
+    if get_meta(TWINS_MERGED) is None:
+        _merge_twins()
 
 
 def _migrate() -> None:
@@ -128,11 +163,65 @@ def _migrate() -> None:
             db.execute("ALTER TABLE notifications ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
 
 
+TWINS_MERGED = "twins_merged"  # the meta key that says _merge_twins has been over this database
+
+
+def _merge_twins() -> None:
+    """Once per database: undo the double episodes older versions made. Posts ReelForge couldn't place got an
+    episode of their own with no video (a twin, analytics._place). Opening an upload page for that video afterwards
+    made a second episode, with the video and no posts, so the video never got its ✓ and the posts never got their
+    video. The twin takes the video and the empty episode goes, after a copy of the database is saved (see backup)."""
+    from .analytics import _key  # imported here because analytics imports this module
+
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")  # a second ReelForge starting at the same moment waits here, then finds it done
+        if get_meta(TWINS_MERGED, conn=db) is not None:
+            return
+        rows = db.execute("""SELECT e.*, (SELECT COUNT(*) FROM posts p WHERE p.episode_id = e.id) AS posts
+                             FROM episodes e ORDER BY e.created_at, e.id""").fetchall()
+        twins: dict[str, list] = {}
+        merges = []
+        for e in rows:
+            key = _key(e["title"])
+            if not key:
+                continue
+            if not e["video"] and e["posts"]:
+                twins.setdefault(key, []).append(e)
+            elif e["video"] and not e["posts"] and twins.get(key) and _made_before(e["video"], twins[key][-1]):
+                merges.append((twins[key].pop(), e))  # the twin last made before it
+        if merges:
+            backup("twins")
+        for twin, empty in merges:
+            db.execute("UPDATE episodes SET video = ? WHERE id = ?", (empty["video"], twin["id"]))
+            db.execute("DELETE FROM episodes WHERE id = ?", (empty["id"],))
+        db.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", (TWINS_MERGED, json.dumps(now_iso())))
+
+
+def _made_before(video: str, twin: sqlite3.Row) -> bool:
+    """Whether a twin episode's posts can be of this video file: they went up after the file was made (a twin is
+    dated by its first post). A file that is newer is another video with the same caption. One that isn't on this
+    computer can't be checked, and counts."""
+    try:
+        made = Path(video).stat().st_mtime
+    except OSError:
+        return True
+    return made <= parse(twin["created_at"]).timestamp() + 3600  # an hour's slack for clocks that disagree
+
+
 def backup(why: str) -> Path:
-    """Copy the database next to itself as stats.db.bak-<YYYYmmdd-HHMMSS>-<why>, consistent even while it's in use."""
-    target = _path.with_name(f"{_path.name}.bak-{datetime.now():%Y%m%d-%H%M%S}-{why}")
-    with closing(sqlite3.connect(_path, timeout=10)) as src, closing(sqlite3.connect(target)) as dst:
-        src.backup(dst)
+    """Copy the database next to itself as stats.db.bak-<YYYYmmdd-HHMMSS>-<why>, consistent even while it's in use.
+    A copy is never written over another: a second one in the same second gets a number before its why. One that
+    can't be finished (a full disk) isn't left behind: half a copy would pass for a whole one."""
+    stamp = f"{_path.name}.bak-{datetime.now():%Y%m%d-%H%M%S}"
+    target, n = _path.with_name(f"{stamp}-{why}"), 1
+    while target.exists():
+        target, n = _path.with_name(f"{stamp}-{n + 1}-{why}"), n + 1
+    try:
+        with closing(sqlite3.connect(_path, timeout=10)) as src, closing(sqlite3.connect(target)) as dst:
+            src.backup(dst)
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
     return target
 
 
@@ -172,23 +261,297 @@ def parse(ts: str) -> datetime:
 
 
 def record_snapshot(platform: str, account, posts: list, ts: str | None = None,
-                    conn: sqlite3.Connection | None = None) -> None:
+                    conn: sqlite3.Connection | None = None, put_right: bool = False) -> str | None:
     """Store one refresh: the account totals plus every post's current numbers.
 
     A read that misses numbers never wipes known ones: a post keeps its last known counts and its views never go down
     (RSS counts lag and dip), while post_stats keeps what was read. Without the platform's own totals, the account gets
     the sum over every post ReelForge knows there (one page load only shows the newest), or its last totals if no posts
-    came.
+    came. Numbers you typed in are taken as typed. put_right: you've said a typed-in number lower than the one saved
+    is the right one (the window asks first), so the readings that held the higher one come down to it (see
+    _correct_typed). Without that a lower number is only stored, and nothing saved before it is changed.
+
+    Returns the @handle the platform's stats were read under before, when this read is under another one and shows
+    that to be another account (see _handle_change): the two are stored together from here on, so a copy of the
+    store is saved first, and handle_change, forget_old_handle and keep_old_handle are how you say which it is.
     """
     ts = ts or now_iso()
-    if conn is None:
-        with connect() as db:
-            _record(db, platform, account, posts, ts)
+    if conn is not None:
+        _record(conn, platform, account, posts, ts, put_right)  # the demo writes its history in one go
+        return None
+    with connect() as db:
+        change = _handle_change(db, platform, account.handle, posts, ts)
+    if change and change["before"]:
+        _copy_first(account.handle)
+    with connect() as db:  # what the read showed about the handle is stored with the read, or not at all
+        if change:
+            _note_change(db, platform, account.handle, change)
+        _record(db, platform, account, posts, ts, put_right)
+    return change["before"] if change else None
+
+
+HANDLES = "handles"  # the meta key of the handle changes that aren't settled yet (see _changes)
+
+
+def _handle(text) -> str:
+    """A handle as kept with a reading, for comparing two: no @, lower case ("" for none)."""
+    return str(text or "").strip().lstrip("@").lower()
+
+
+def _newest_handle(db: sqlite3.Connection, platform: str) -> str | None:
+    """The handle of the platform's newest reading that has one: the one it's read under now."""
+    row = db.execute("""SELECT handle FROM account_stats WHERE platform = ? AND handle IS NOT NULL AND handle != ''
+                        ORDER BY ts DESC, rowid DESC LIMIT 1""", (platform,)).fetchone()
+    return row[0] if row else None
+
+
+def _under(db: sqlite3.Connection, platform: str, handles) -> list[sqlite3.Row]:
+    """The platform's account readings (rowid, ts) saved under any of these handles, however they were written."""
+    want = {_handle(h) for h in handles}
+    return [r for r in db.execute("SELECT rowid, ts, handle FROM account_stats WHERE platform = ? ORDER BY ts, rowid",
+                                  (platform,)) if _handle(r["handle"]) in want]
+
+
+def _changes(db: sqlite3.Connection) -> dict:
+    """Each platform's handle changes that aren't settled (meta HANDLES):
+
+      platform -> {"at": when it was first read under the handle it has now,
+                   "old": [{"handle": an earlier handle, "posts": the posts it left behind, "first", "last": when it
+                            was read, "sure": a read under the handle it has now showed it to be another account},
+                           ...]}, the handle it had last first
+
+    A handle's posts are written down when the change is seen, because nothing else says for good which handle a
+    post was read under: readings only carry their time, and old ones are thinned out (compact). Worked out later
+    from the times, an account's own post could be taken for the other account's, and a change that was never
+    answered was lost sight of once the old handle's readings were thinned away."""
+    found = get_meta(HANDLES, None, db)
+    return found if isinstance(found, dict) else {}
+
+
+def _keep_changes(db: sqlite3.Connection, platform: str, record: dict | None) -> None:
+    every = _changes(db)
+    if record and record["old"]:
+        every[platform] = record
     else:
-        _record(conn, platform, account, posts, ts)  # the demo writes its history in one go
+        every.pop(platform, None)
+    db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (HANDLES, json.dumps(every)))
 
 
-def _record(db: sqlite3.Connection, platform: str, account, posts: list, ts: str) -> None:
+def _handle_change(db: sqlite3.Connection, platform: str, handle: str, posts: list, ts: str) -> dict | None:
+    """Before a read under `handle` is stored: what it changes about the platform's handles (None: nothing).
+
+    A handle other than the newest reading's is a new name for the same account, or another account (a handle you
+    mistyped that exists, or a switch to another one). The posts say which. One of the old handle's posts, read
+    under the new one too: the same account, and its readings under the old name go under the new one. A read with
+    posts, none of them the old handle's: another account, whose numbers are about to be stored with the ones so
+    far, so the store is copied first (_copy_first) and you're asked which it is. A read with nothing to compare
+    (TikTok's totals alone, numbers you typed in) can't say, so the old handle's posts are only written down. Every
+    later read under the new handle is compared with what's written down, until one settles it either way.
+
+    Returns {"record": what's kept about the platform from here on (see _changes; None: nothing),
+             "relabel": the old handles whose readings go under `handle`,
+             "before": the old handle this read showed to be another account, or None,
+             "untold": whether an account you were told was another one turned out to be this one}."""
+    new = _handle(handle)
+    last = _newest_handle(db, platform) if new else None
+    if not last:
+        return None
+    was = _changes(db).get(platform)
+    if _handle(last) == new and not was:
+        return None  # the usual read
+    read = {p.post_id for p in posts if not p.post_id.startswith(TYPED)}
+    old = [dict(e) for e in was["old"]] if was else []
+    at = was["at"] if was else ts
+    if _handle(last) != new:
+        # The handle that's going leaves behind what was last read while it was the handle (_stretch), unless that
+        # is an earlier handle's, written down already. A post last read before then is from another handle's time:
+        # a store from before ReelForge wrote handle changes down can hold several (yours, then a mistyped one),
+        # and taking all of it for the mistyped one's made putting it right look like a new name for it. A post
+        # never read at all (one posted through ReelForge) was read under nobody's. Numbers you typed in are yours
+        # whatever the handle was, so they're no part of this: a platform with only those has nothing to ask.
+        times, since = _stretch(db, platform, last)
+        stored = {r[0] for r in db.execute(
+            "SELECT post_id FROM posts WHERE platform = ? AND post_id NOT LIKE 'manual-%' AND last_ts >= ?",
+            (platform, since))}
+        theirs = stored - {post_id for e in old for post_id in e["posts"]}
+        old = [e for e in old if _handle(e["handle"]) != new]  # back to an earlier handle: its posts are this one's
+        if theirs:
+            old.insert(0, {"handle": last, "posts": sorted(theirs), "first": times[0], "last": times[-1],
+                           "sure": False})
+        at = ts
+    relabel, kept, before, untold = [], [], None, False
+    for e in old:
+        if read & set(e["posts"]):  # one of its posts, under this handle now: the same account, renamed
+            relabel.append(e["handle"])
+            untold = untold or e["sure"]
+            continue
+        if read and not e["sure"]:
+            e["sure"], before = True, e["handle"]
+        kept.append(e)
+    record = {"at": at, "old": kept} if kept else None
+    if record == was and not relabel:
+        return None
+    return {"record": record, "relabel": relabel, "before": before,
+            "untold": untold and not any(e["sure"] for e in kept)}
+
+
+def _stretch(db: sqlite3.Connection, platform: str, handle: str) -> tuple[list[str], str]:
+    """The platform's newest readings under `handle`, back to the newest one under another handle: when they were
+    (oldest first), and the time from which a post's last reading was one of them ("" when the platform was never
+    read under another handle: any time, then). Old readings are thinned out (compact), so the stretch may have
+    begun before the first of its readings that's left. A post last read in between isn't counted as read under
+    `handle`, which only leaves it out of what you're asked about: it's never one of another handle's."""
+    times: list[str] = []
+    for r in db.execute("""SELECT ts, handle FROM account_stats WHERE platform = ? AND handle IS NOT NULL
+                           AND handle != '' ORDER BY ts DESC, rowid DESC""", (platform,)):
+        if _handle(r["handle"]) != _handle(handle):
+            return times[::-1], times[-1]
+        times.append(r["ts"])
+    return times[::-1], ""
+
+
+def _copy_first(handle: str) -> None:
+    """Save the copy that comes before another account's stats are stored with the ones so far (backup "handle").
+    Without it the read isn't stored: two accounts are never mixed with no way back. Said in a sentence, because
+    the next read runs into the same thing until there's room for the copy."""
+    from .platforms.base import AGAIN, PlatformError  # imported here because the platforms import this module
+
+    try:
+        backup("handle")
+    except (sqlite3.Error, OSError) as e:
+        raise PlatformError(f"ReelForge couldn't save a copy of your stats before storing {handle}'s with them, so "
+                            f"this read wasn't stored. Check that the disk has room. {AGAIN}") from e
+
+
+def _note_change(db: sqlite3.Connection, platform: str, handle: str, change: dict) -> None:
+    """Store what _handle_change worked out."""
+    if change["relabel"]:
+        db.executemany("UPDATE account_stats SET handle = ? WHERE rowid = ?",
+                       [(handle, r["rowid"]) for r in _under(db, platform, change["relabel"])])
+    if change["untold"]:  # the notification said the stats hold two accounts: they never did
+        db.execute("DELETE FROM notifications WHERE key LIKE ?", (f"handle:{platform}:%",))
+    _keep_changes(db, platform, change["record"])
+
+
+def old_handles(platform: str) -> list[str]:
+    """The other @handles this platform's stats were read under, besides the one it's read under now: none, unless
+    the handle changed to what a read showed to be another account (_handle_change) and you haven't said which it
+    is yet. That's kept in the store (_changes), so the question stays however old the readings get."""
+    with connect() as db:
+        return [e["handle"] for e in (_changes(db).get(platform) or {}).get("old", []) if e["sure"]]
+
+
+def _from_before(db: sqlite3.Connection, platform: str) -> dict | None:
+    """What a platform's stats hold from before its handle changed to another account's (None: nothing): the handle
+    now and the old ones, the readings still saved under the old ones (account_stats rowids), when the old ones
+    were read (first, last) and when the one now was first (at), and the old ones' posts: those written down when
+    the change was seen (_changes), never one that has been read since."""
+    record = _changes(db).get(platform) or {}
+    old = [e for e in record.get("old", []) if e["sure"]]
+    if not old:
+        return None
+    rows = _under(db, platform, [e["handle"] for e in old])
+    theirs = {post_id for e in old for post_id in e["posts"]}
+    posts = sorted(r[0] for r in db.execute(
+        "SELECT post_id FROM posts WHERE platform = ? AND (last_ts IS NULL OR last_ts < ?)", (platform, record["at"]))
+                   if r[0] in theirs)
+    return {"now": _newest_handle(db, platform), "old": [e["handle"] for e in old],
+            "rows": [r["rowid"] for r in rows], "first": min(e["first"] for e in old),
+            "last": max(e["last"] for e in old), "at": record["at"], "posts": posts}
+
+
+def _settled(db: sqlite3.Connection, platform: str) -> None:
+    """You've said which it is (keep_old_handle, forget_old_handle): the question is closed."""
+    record = _changes(db).get(platform) or {}
+    _keep_changes(db, platform, {**record, "old": [e for e in record.get("old", []) if not e["sure"]]})
+
+
+def handle_change(platform: str) -> dict | None:
+    """What forget_old_handle would forget, to ask about first (see _from_before); None when there's nothing."""
+    with connect() as db:
+        return _from_before(db, platform)
+
+
+def keep_old_handle(platform: str) -> bool:
+    """The stats from before the platform's handle changed are this account's too (you renamed it): the readings
+    under the old handle are put under the one it has now, and its posts stay. Returns whether there was anything
+    to keep."""
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        found = _from_before(db, platform)
+        if not found:
+            return False
+        db.executemany("UPDATE account_stats SET handle = ? WHERE rowid = ?",
+                       [(found["now"], r) for r in found["rows"]])
+        _settled(db, platform)
+        return True
+
+
+def forget_old_handle(platform: str) -> dict | None:
+    """Forget what a platform's stats hold from before its handle changed, because that was another account: the
+    readings under the old handle, its posts (those written down when the change was seen, see _changes) with their
+    readings, the notifications about them and the episodes ReelForge made up from them (twins without a video).
+    The whole store is copied first (backup "handle"), and nothing else is touched: this account's own readings and
+    posts stay, and so does every other platform. This account's totals since then lose what they counted of the
+    other's posts, and the round numbers and badges the platform has passed start again from where this account is.
+    Returns what went, with the copy's path ("backup"), or None when there was nothing to forget."""
+    from . import notify  # imported here because notify imports this module
+
+    if not handle_change(platform):
+        return None
+    copy = backup("handle")
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        found = _from_before(db, platform)  # looked up again, now that nothing else can write
+        if not found:
+            return None
+        posts = found["posts"]
+        mine = [(platform, pid) for pid in posts]
+        episodes = {r[0] for ref in mine for r in db.execute(
+            "SELECT episode_id FROM posts WHERE platform = ? AND post_id = ? AND episode_id IS NOT NULL", ref)}
+        # Where the platform's total is ReelForge's own sum over its posts (_record), this account's readings since
+        # then counted the other account's posts too: they come down by exactly those posts' numbers.
+        newest = db.execute("""SELECT views, likes FROM account_stats WHERE platform = ?
+                               ORDER BY ts DESC, rowid DESC LIMIT 1""", (platform,)).fetchone()
+        for field in ("views", "likes"):
+            every = db.execute(f"SELECT SUM({field}) FROM posts WHERE platform = ? AND post_id NOT LIKE 'manual-%'",
+                               (platform,)).fetchone()[0]
+            theirs = sum(r[0] or 0 for ref in mine for r in db.execute(
+                f"SELECT {field} FROM posts WHERE platform = ? AND post_id = ?", ref))
+            if theirs and newest[field] == every:
+                db.execute(f"UPDATE account_stats SET {field} = MAX({field} - ?, 0) WHERE platform = ? AND ts >= ?",
+                           (theirs, platform, found["at"]))
+        db.executemany("DELETE FROM account_stats WHERE rowid = ?", [(r,) for r in found["rows"]])
+        for table in ("post_stats", "posts"):
+            db.executemany(f"DELETE FROM {table} WHERE platform = ? AND post_id = ?", mine)
+        emptied = [e for e in episodes if db.execute(
+            """DELETE FROM episodes WHERE id = ? AND video IS NULL
+               AND NOT EXISTS (SELECT 1 FROM posts WHERE episode_id = episodes.id)""", (e,)).rowcount]
+        refs = {f"{platform}|{pid}" for pid in posts}
+        about = (f"milestone:followers:{platform}:", f"badge:day:{platform}:", f"handle:{platform}:")
+        gone = [n["id"] for n in map(dict, db.execute("SELECT id, kind, key, title FROM notifications"))
+                if notify.target(n).post in refs or (n["key"] or "").startswith(about)]
+        db.executemany("DELETE FROM notifications WHERE id = ?", [(i,) for i in gone])
+        # What the platform had passed was the other account's doing: these marks are set afresh, quietly, by the
+        # next read (notify.check_milestones, badges.notify_new).
+        for key, stale in (("milestones", lambda k: k in (f"followers:{platform}", "views:total")
+                            or k.removeprefix("video:") in refs),
+                           ("badge_tiers", lambda k: k == f"seen:{platform}" or k.startswith(f"day:{platform}:")
+                            or k.removeprefix("video:").rsplit(":", 1)[0] in refs)):
+            marks = get_meta(key, None, db)
+            if isinstance(marks, dict):
+                db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                           (key, json.dumps({k: v for k, v in marks.items() if not stale(k)})))
+        _settled(db, platform)
+    return {"backup": copy, "now": found["now"], "old": found["old"], "readings": len(found["rows"]),
+            "posts": len(posts), "episodes": len(emptied)}
+
+
+def _record(db: sqlite3.Connection, platform: str, account, posts: list, ts: str, put_right: bool = False) -> None:
+    # Typed-in numbers (manual-<episode> posts) and the platform's own posts are never added together.
+    typed = bool(posts) and all(p.post_id.startswith("manual-") for p in posts)
+    if typed and put_right:
+        _correct_typed(db, platform, posts)
     db.executemany(
         """INSERT INTO posts (platform, post_id, title, url, published_at,
                               last_ts, views, likes, comments, shares, saves)
@@ -198,18 +561,18 @@ def _record(db: sqlite3.Connection, platform: str, account, posts: list, ts: str
              url = COALESCE(excluded.url, posts.url),
              published_at = excluded.published_at,
              last_ts = excluded.last_ts,
-             views = COALESCE(MAX(excluded.views, posts.views), excluded.views, posts.views),
+             views = CASE WHEN posts.post_id LIKE 'manual-%' THEN COALESCE(excluded.views, posts.views)
+                          ELSE COALESCE(MAX(excluded.views, posts.views), excluded.views, posts.views) END,
              likes = COALESCE(excluded.likes, posts.likes), comments = COALESCE(excluded.comments, posts.comments),
              shares = COALESCE(excluded.shares, posts.shares), saves = COALESCE(excluded.saves, posts.saves)""",
         [(platform, p.post_id, p.title, p.url, to_iso(p.published_at),
           ts, p.views, p.likes, p.comments, p.shares, p.saves) for p in posts],
     )
     db.executemany(
-        "INSERT INTO post_stats VALUES (?,?,?,?,?,?,?,?)",
+        """INSERT INTO post_stats (platform, post_id, ts, views, likes, comments, shares, saves)
+           VALUES (?,?,?,?,?,?,?,?)""",
         [(platform, p.post_id, ts, p.views, p.likes, p.comments, p.shares, p.saves) for p in posts],
     )
-    # Typed-in numbers (manual-<episode> posts) and the platform's own posts are never added together.
-    typed = bool(posts) and all(p.post_id.startswith("manual-") for p in posts)
     totals = []
     for field, given in (("views", account.views), ("likes", account.likes)):
         if given is None and posts:
@@ -221,10 +584,63 @@ def _record(db: sqlite3.Connection, platform: str, account, posts: list, ts: str
                 f"SELECT {field} FROM account_stats WHERE platform = ? AND ts < ? ORDER BY ts DESC LIMIT 1",
                 (platform, ts)).fetchone() or [None])[0]
         totals.append(given)
+    # A read that couldn't see the followers (YouTube's page without its subscriber line) or the post count keeps
+    # the last one seen: stored as unknown, the platform's card would go blank and every total would drop by it.
+    counts = []
+    for field, given in (("followers", account.followers), ("posts", account.posts)):
+        if given is None:
+            given = (db.execute(
+                f"""SELECT {field} FROM account_stats WHERE platform = ? AND ts < ? AND {field} IS NOT NULL
+                    ORDER BY ts DESC LIMIT 1""", (platform, ts)).fetchone() or [None])[0]
+        counts.append(given)
     db.execute(
-        "INSERT INTO account_stats VALUES (?,?,?,?,?,?,?)",
-        (platform, ts, account.handle, account.followers, *totals, account.posts),
+        "INSERT INTO account_stats (platform, ts, handle, followers, views, likes, posts) VALUES (?,?,?,?,?,?,?)",
+        (platform, ts, account.handle, counts[0], *totals, counts[1]),
     )
+
+
+def _correct_typed(db: sqlite3.Connection, platform: str, posts: list) -> None:
+    """A typed-in number put right downwards (34000 that should have been 3400), before the right one is stored:
+    the reading the slip was saved in comes down to it, with the ones since that only repeat it (every Save stores
+    each video's number again), and the account's total at those readings comes down by as much. So no chart holds
+    on to the slip (charts keep a count at its highest reading).
+
+    Readings from before the slip stay as they are. Every earlier reading above the new number used to come down,
+    so a number typed too low by mistake (3400 for 34000) flattened the video's whole history and the account's;
+    now it costs the newest step at most, and only with your say: this runs when the window has asked about the
+    lower number and you've pressed Save again (Dashboard.save_logged_stats, record_snapshot's put_right)."""
+    typed_only = not db.execute("SELECT 1 FROM posts WHERE platform = ? AND post_id NOT LIKE 'manual-%' LIMIT 1",
+                                (platform,)).fetchone()
+    for p in posts:
+        # the number being put right, the readings it was saved in (newest first), and when the one before was
+        slip, saved, before = None, [], ""
+        for row in db.execute("""SELECT rowid, ts, views FROM post_stats WHERE platform = ? AND post_id = ?
+                                 ORDER BY ts DESC, rowid DESC""", (platform, p.post_id)):
+            if slip is None and p.views is not None and (row["views"] or 0) > p.views:
+                slip = row["views"]
+            if slip is None or row["views"] != slip:
+                before = row["ts"]
+                break
+            saved.append(row)
+        for row in saved:
+            db.execute("UPDATE post_stats SET views = ? WHERE rowid = ?", (p.views, row["rowid"]))
+            # (the reading of the account saved with it, in the same second: the sum of the typed-in numbers then)
+            db.execute("UPDATE account_stats SET views = MAX(views - ?, 0) WHERE platform = ? AND ts = ?",
+                       (slip - p.views, platform, row["ts"]))
+        if saved and typed_only:
+            # A Save from the same hours, whose reading of the video has been thinned out since (compact keeps the
+            # last one per three hours, per day, then per week, and the account's readings go later than a
+            # video's), has only the account's reading left, and that one still held the slip: it comes down to
+            # the total put right just after it. Nothing from before the reading the slip followed is touched,
+            # nor from more than a week before the slip's first reading left (no video's readings are kept
+            # further apart than that).
+            first = saved[-1]["ts"]
+            week = (parse(first) - timedelta(days=7)).isoformat(timespec="seconds")
+            db.execute("""UPDATE account_stats SET views = (SELECT views FROM account_stats
+                                                           WHERE platform = :p AND ts = :first)
+                          WHERE platform = :p AND ts > :after AND ts < :first
+                            AND views > (SELECT views FROM account_stats WHERE platform = :p AND ts = :first)""",
+                       {"p": platform, "first": first, "after": max(before, week)})
 
 
 def latest_accounts() -> dict[str, sqlite3.Row]:
@@ -234,14 +650,6 @@ def latest_accounts() -> dict[str, sqlite3.Row]:
                WHERE ts = (SELECT MAX(ts) FROM account_stats WHERE platform = a.platform)"""
         ).fetchall()
     return {r["platform"]: r for r in rows}
-
-
-def account_before(platform: str, ts: str) -> sqlite3.Row | None:
-    with connect() as db:
-        return db.execute(
-            "SELECT * FROM account_stats WHERE platform = ? AND ts <= ? ORDER BY ts DESC LIMIT 1",
-            (platform, ts),
-        ).fetchone()
 
 
 def account_series(platform: str, since: str) -> list[sqlite3.Row]:
@@ -261,6 +669,13 @@ def posts_latest() -> list[dict]:
                FROM posts p LEFT JOIN episodes e ON e.id = p.episode_id"""
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def last_read(platform: str) -> dict[str, str]:
+    """When each of a platform's posts was last read: post id -> time."""
+    with connect() as db:
+        return {r[0]: r[1] for r in db.execute(
+            "SELECT post_id, last_ts FROM posts WHERE platform = ? AND last_ts IS NOT NULL", (platform,))}
 
 
 def platforms_with_posts_since(since: str) -> set[str]:
@@ -289,14 +704,14 @@ def get_meta(key: str, default=None, conn: sqlite3.Connection | None = None):
 
 def set_meta(key: str, value) -> None:
     with connect() as db:
-        db.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", (key, json.dumps(value)))
+        db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, json.dumps(value)))
 
 
 def bump() -> int:
     """Count a change every ReelForge window shows (new stats, an episode, an upload, a hidden video): a window that
     sees the count go up reloads (app.ReelForge.keep_in_step). Returns the new count."""
     with connect() as db:
-        db.execute("""INSERT INTO meta VALUES ('changes', '1')
+        db.execute("""INSERT INTO meta (key, value) VALUES ('changes', '1')
                       ON CONFLICT (key) DO UPDATE SET value = CAST(value AS INTEGER) + 1""")
         return int(db.execute("SELECT value FROM meta WHERE key = 'changes'").fetchone()[0])
 
@@ -387,8 +802,12 @@ def compact(min_hours: float = 20) -> int:
 def daily_backup(keep: int = BACKUPS_KEPT) -> Path | None:
     """Save data/backups/stats-YYYYMMDD.db unless today's is there, and keep the newest `keep`.
 
-    Never raises: a failed backup only means there is none today. Returns today's backup, or None.
+    Never raises: a failed backup only means there is none today. Returns today's backup, or None. How it went is
+    kept for the Settings tab (last_backup): when today's copy was made, which is earlier today when it was there
+    already. The demo's made-up stats aren't backed up: its copies would sit among the real ones.
     """
+    if _demo:
+        return None
     try:
         folder = _path.parent / "backups"
         folder.mkdir(exist_ok=True)
@@ -402,9 +821,38 @@ def daily_backup(keep: int = BACKUPS_KEPT) -> Path | None:
         ours = sorted(f for f in folder.iterdir() if re.fullmatch(rf"{re.escape(_path.stem)}-\d{{8}}\.db", f.name))
         for old in ours[:-keep]:
             old.unlink()
-        return target
-    except Exception:
+        made = to_iso(target.stat().st_mtime)
+    except Exception as e:
+        _note_backup(e)
         return None
+    _note_backup(None, made)
+    return target
+
+
+def _note_backup(error: Exception | None, made: str = "") -> None:
+    """Keep how the daily backup went (meta "backup"): {"ok": when the last good copy was made}, and after one that
+    didn't work also {"failed": when, "why": in a few words}. A backup that fails every day (a full disk, a folder
+    ReelForge can't write to) would otherwise go unnoticed until the day it's needed. made: when today's copy was
+    written, which is not now when it was there already (the Settings tab said "backed up 3m ago" after every
+    start, for a copy up to a day old)."""
+    try:
+        was = get_meta("backup")
+        note = {"ok": was.get("ok") if isinstance(was, dict) else None}
+        if error is None:
+            note = {"ok": made}
+        else:
+            why = error.strerror if isinstance(error, OSError) and error.strerror else \
+                str(error) if isinstance(error, sqlite3.Error) else type(error).__name__
+            note.update(failed=now_iso(), why=why)
+        set_meta("backup", note)
+    except Exception:
+        pass  # the store itself is the trouble: nothing to keep it in
+
+
+def last_backup() -> dict:
+    """How the daily backup last went (see _note_backup); {} before the first one."""
+    note = get_meta("backup")
+    return note if isinstance(note, dict) else {}
 
 
 def episodes() -> list[sqlite3.Row]:
@@ -430,6 +878,28 @@ def episode_for_video(name: str) -> sqlite3.Row | None:
     return next((e for e in rows if video_file(e["video"]).name.lower() == name), None)
 
 
+def adopt_episode(title: str, video: str) -> int:
+    """The episode a video's posts go under, when you start posting it: the newest one made from a file of this
+    name; else a twin (an episode ReelForge made by itself from posts that matched each other, so it has no video)
+    with this caption, which takes the video, because those posts were this video's all along; else a new one. In
+    one go, so two windows starting at the same moment can't each make one."""
+    from .analytics import _key  # imported here because analytics imports this module
+
+    name, key = video_file(video).name.lower(), _key(title)
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        rows = db.execute("SELECT * FROM episodes ORDER BY id DESC").fetchall()
+        for e in rows:
+            if e["video"] and video_file(e["video"]).name.lower() == name:
+                return e["id"]
+        for e in rows:
+            if not e["video"] and key and _key(e["title"]) == key and _made_before(video, e):
+                db.execute("UPDATE episodes SET video = ? WHERE id = ?", (video, e["id"]))
+                return e["id"]
+        return db.execute("INSERT INTO episodes (title, video, created_at) VALUES (?,?,?)",
+                          (title, video, now_iso())).lastrowid
+
+
 def create_episode(title: str, video: str | None = None, created_at: str | None = None) -> int:
     with connect() as db:
         cur = db.execute(
@@ -451,6 +921,31 @@ def add_post(platform: str, post_id: str, episode_id: int | None, title: str, ur
                  link = COALESCE(excluded.link, posts.link)""",
             (platform, post_id, episode_id, title, url, published_at or now_iso(), link),
         )
+
+
+def retire_typed() -> int:
+    """Hand the numbers you typed in for an episode on a platform (a manual-<episode> post) over to that episode's
+    real post there, once it has been read since you typed them: ReelForge reads the platform itself now, so the
+    typed ones would only sit beside it with numbers that never move. Their readings become the real post's, as
+    typed: its history for the time ReelForge couldn't read it. (They used to be deleted, so weeks of typed-in
+    numbers went the moment the log-in worked again.) Only the stand-in post itself goes. Typed numbers stay where
+    they are for an episode whose post hasn't been found, and for one whose post was last read before you typed
+    them (the platform's log-in ran out, and typing is how its numbers are kept up since). Returns how many were
+    handed over."""
+    with connect() as db:
+        # (an episode with two posts on the platform, linked by hand: the one that went up first gets them)
+        found = db.execute(
+            """SELECT t.platform, t.post_id AS typed,
+                      (SELECT r.post_id FROM posts r WHERE r.platform = t.platform AND r.episode_id = t.episode_id
+                       AND r.post_id NOT LIKE 'manual-%' AND r.last_ts > COALESCE(t.last_ts, '')
+                       ORDER BY r.published_at, r.post_id LIMIT 1) AS real
+               FROM posts t WHERE t.post_id LIKE 'manual-%' AND t.episode_id IS NOT NULL""").fetchall()
+        over = [r for r in found if r["real"]]
+        db.executemany("UPDATE post_stats SET post_id = ? WHERE platform = ? AND post_id = ?",
+                       [(r["real"], r["platform"], r["typed"]) for r in over])
+        db.executemany("DELETE FROM posts WHERE platform = ? AND post_id = ?",
+                       [(r["platform"], r["typed"]) for r in over])
+    return len(over)
 
 
 def link_post(platform: str, post_id: str, episode_id: int | None, how: str | None = "caption") -> None:

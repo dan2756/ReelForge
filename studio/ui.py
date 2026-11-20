@@ -25,7 +25,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from .paths import MAC, ROOT, TOOLS, WINDOWS
+from .paths import MAC, ROOT, TOOLS, WINDOWS, replace
 
 BUN_VERSION = "1.4.3"   # the Bun the app is tested with (OpenTUI needs 1.3.14 or newer, 1.4 on Windows ARM)
 BUN_RELEASES = f"https://github.com/oven-sh/bun/releases/download/bun-v{BUN_VERSION}/"
@@ -90,10 +90,18 @@ def install_bun(progress=None) -> Path:
         inner = next(n for n in z.namelist() if n.endswith("/" + exe) or n == exe)
         BUN_DIR.mkdir(parents=True, exist_ok=True)
         dest = BUN_DIR / exe
-        with z.open(inner) as src, dest.open("wb") as out:
-            shutil.copyfileobj(src, out)
-    if not WINDOWS:
-        dest.chmod(0o755)
+        # Beside its place first, then renamed into it: bun_path() takes whatever is at dest for Bun, so a copy
+        # cut short there would be "Bun" for good and never be downloaded again.
+        part = dest.with_name(exe + ".part")
+        try:
+            with z.open(inner) as src, part.open("wb") as out:
+                shutil.copyfileobj(src, out)
+            if not WINDOWS:
+                part.chmod(0o755)
+            replace(part, dest)
+        except BaseException:
+            part.unlink(missing_ok=True)
+            raise
     archive.unlink(missing_ok=True)
     return dest
 

@@ -20,7 +20,7 @@ from studio.setup_service import Setup
 
 ROOT = Path(__file__).resolve().parent.parent
 UI = ROOT / "ui" / "src"
-CALL = re.compile(r"""\.(?:send|call)(?:<[^>()]*>)?\(\s*["'`](\w+)["'`]""")  # bridge.send("name"), .call<T>("name")
+CALL = re.compile(r"""\.(?:send|call|ask)(?:<[^>()]*>)?\(\s*["'`](\w+)["'`]""")  # .send("name"), .call<T>("name"), .ask
 OWN = re.compile(r"""\bcase\s+["'](\w+)["']\s*:""")  # the actions the window runs itself (DashState.run)
 
 

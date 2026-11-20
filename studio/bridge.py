@@ -72,7 +72,10 @@ class Loop:
         self.timers: list = []
         self.counter = itertools.count()
         self.running = True
-        self.workers: dict[str, Worker] = {}
+        # Every worker still running. A group can have several at once (a read under way and the refresh timer's
+        # next try, which only finds it busy), and quitting waits for all of the ones in FINISH.
+        self.workers: set[Worker] = set()
+        self.workers_lock = threading.Lock()
         self.local = threading.local()
 
     # ---- talking to the window
@@ -110,10 +113,9 @@ class Loop:
     def run_worker(self, fn: Callable, *args, group: str | None = None, exclusive: bool = False) -> Worker:
         """Run fn(*args) on a thread. exclusive: a worker already running in the same group is cancelled."""
         w = Worker(group)
-        if group and exclusive and group in self.workers:
-            self.workers[group].is_cancelled = True
-        if group:
-            self.workers[group] = w
+        if group and exclusive:
+            for other in self.live((group,)):
+                other.is_cancelled = True
 
         def run() -> None:
             self.local.worker = w
@@ -123,10 +125,20 @@ class Loop:
                 pass
             except Exception:
                 traceback.print_exc()
+            finally:
+                with self.workers_lock:
+                    self.workers.discard(w)
 
         w.thread = threading.Thread(target=run, daemon=True, name=f"worker-{group or 'any'}")
-        w.thread.start()
+        with self.workers_lock:  # added and started together, so a listed worker can always be joined
+            self.workers.add(w)
+            w.thread.start()
         return w
+
+    def live(self, groups: tuple[str, ...] | None = None) -> list[Worker]:
+        """The workers still running: all of them, or those in these groups."""
+        with self.workers_lock:
+            return [w for w in self.workers if groups is None or w.group in groups]
 
     def current_worker(self) -> Worker:
         return getattr(self.local, "worker", None) or Worker(None)
@@ -136,7 +148,7 @@ class Loop:
     def run(self, handle: Callable[[dict], None]) -> None:
         while self.running:
             self.step(handle)
-        for w in self.workers.values():
+        for w in self.live():
             w.is_cancelled = True  # a read waiting on another window's stops waiting; one under way finishes
 
     def step(self, handle: Callable[[dict], None] | None = None, longest: float = 0.5) -> None:
@@ -292,7 +304,7 @@ def main() -> int:
                     svc.stop()
                 loop.running = False
                 # True: a stats read (or an update) is still running; this process finishes it before it exits.
-                result = any(w.thread and w.thread.is_alive() for g, w in loop.workers.items() if g in FINISH)
+                result = bool(loop.live(FINISH))
             else:
                 if not service:
                     raise RuntimeError("nothing started yet")
@@ -325,9 +337,8 @@ def main() -> int:
             svc.stop()
         except Exception:
             traceback.print_exc()
-    for group, w in list(loop.workers.items()):
-        if group in FINISH and w.thread:
-            w.thread.join(timeout=600)
+    for w in loop.live(FINISH):  # every one of them: a group can have a read under way and a newer worker too
+        w.thread.join(timeout=600)
     return 0
 
 
