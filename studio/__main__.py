@@ -420,11 +420,11 @@ def new_episode(argv: list[str]) -> int:
     if spec.get("engine") == "2d":
         print("Next: write the title, the script, the sound cues and facts.md, voice it, then draw scene.js and look "
               "at the stills (docs/2D.md):")
-        print(f"  {P.venv_python()} {Path('pipeline') / 'make_episode.py'} {Path('episodes') / ep_id} "
+        print(f"  {P.venv_python()} {Path('pipeline') / 'make_episode.py'} {P.rel(dest)} "
               f"--steps build,stills")
         return 0
     print("Next: write the title, lines, HUD, sound cues and facts.md, then build and look at the stills:")
-    print(f"  {P.venv_python()} {Path('pipeline') / 'make_episode.py'} {Path('episodes') / ep_id} "
+    print(f"  {P.venv_python()} {Path('pipeline') / 'make_episode.py'} {P.rel(dest)} "
           f"--steps build,stills")
     return 0
 

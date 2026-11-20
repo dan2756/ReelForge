@@ -31,8 +31,8 @@ LOUDNESS = {
     "voice": (-16.0, "Voice: -16 LUFS, the usual level for videos with a voiceover (recommended for 2D)"),
 }
 ENGINES = {
-    "2d": "2D animation with a voiceover and captions (recommended: quick to make, no 3D needed)",
-    "blender": "3D scenes in Blender, with on-screen story lines and no voiceover",
+    "2d": "2D animation with a voiceover and captions   · recommended",
+    "blender": "3D scenes made in Blender (no voiceover)",
 }
 
 DEFAULTS: dict = {
