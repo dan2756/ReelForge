@@ -7,7 +7,9 @@ Sounds come from assets/sfx/manifest.json (cached as 48 kHz WAV by sfx_cache.py)
   ticks    synthesized blip at every time in a series event list (e.g. each doubling)
   rewind   the finished mix of [source] played backwards into [from, to) (accelerating, like the picture)
   cut_at   everything except hits/rewind stops dead here
-Writes build/audio.wav.
+  voice    a 2D episode's narration (build/voice/voice.wav, from the voice step): {"gain_db": 0, "duck_db": -9} puts
+           it on top and turns the beds down by duck_db (the hits by half as much) while it speaks
+Writes build/audio.wav (and build/mix.json: how far the voice sits above everything else, which QA checks).
 """
 import json
 import math
@@ -194,11 +196,47 @@ def synth(name, p, rng):
     raise KeyError(f"unknown synth sound {name!r}")
 
 
+def load_voice(ep_dir, n):
+    """The narration at 48 kHz mono, n samples long (None when there's none)."""
+    p = ep_dir / "build" / "voice" / "voice.wav"
+    if not p.exists():
+        return None
+    with wave.open(str(p)) as w:
+        if w.getframerate() != SR:
+            raise SystemExit(f"{p} is {w.getframerate()} Hz, not {SR}: run the voice step (--steps build) again")
+        x = np.frombuffer(w.readframes(w.getnframes()), "<i2").reshape(-1, w.getnchannels()).astype(np.float32)
+    x = x.mean(1) / 32768.0
+    out = np.zeros(n, np.float32)
+    out[:min(n, len(x))] = x[:n]
+    return out
+
+
+def _moving(x, k, centred=True):
+    """Moving average of x over k samples (a running sum, so it's fast on a whole mix)."""
+    c = np.concatenate([[0.0], np.cumsum(x, dtype=np.float64)])
+    out = (c[k:] - c[:-k]) / k
+    if centred:
+        pad = k // 2
+        return np.concatenate([np.full(pad, out[0]), out, np.full(len(x) - len(out) - pad, out[-1])])
+    return np.concatenate([np.full(k - 1, out[0]), out])
+
+
+def ducking(voice, depth_db):
+    """A gain curve that dips by depth_db while the voice speaks (30 ms in, 300 ms out)."""
+    k = int(0.03 * SR)
+    env = _moving(np.abs(voice), k)
+    on = (env > 10 ** (-45 / 20)).astype(np.float64)
+    # hold the dip through short gaps between words, then let it go
+    held = _moving(on, int(0.3 * SR), centred=False) > 0
+    smooth = _moving(held.astype(np.float64), k)
+    return (1.0 - (1.0 - 10 ** (depth_db / 20)) * smooth).astype(np.float32), held
+
+
 def build(ep_dir):
     build_cache()
-    spec = json.loads((ep_dir / "episode.json").read_text(encoding="utf-8"))
+    spec = config.load_spec(ep_dir)
     series = json.loads((ep_dir / "build" / "series.json").read_text(encoding="utf-8"))
-    A = spec["audio"]
+    A = spec.get("audio") or {}
     ev = series.get("events", {})
     dur = spec["duration"]
     n = int(dur * SR)
@@ -272,7 +310,33 @@ def build(ep_dir):
         for b in A.get("beds", []):   # beds that deliberately start after the cut (e.g. the loop back to the start)
             if b["from"] >= cut:
                 render_bed(b, 0.0)
+    voice = load_voice(ep_dir, n) if (config.engine(spec) == "2d" or A.get("voice")) else None
+    speech = None
+    if voice is not None:
+        vc = A.get("voice") or {}
+        duck, speech = ducking(voice, float(vc.get("duck_db", -9.0)))
+        buf *= duck[:, None]
+        hits_buf *= (1.0 - (1.0 - duck) * 0.5)[:, None]
     buf += hits_buf
+    if voice is not None:
+        vt = voice * np.float32(10 ** (float((A.get("voice") or {}).get("gain_db", 0.0)) / 20))
+        # the voice sits at -20 dBFS RMS while it speaks before the mix is mastered, so gain_db is relative to that
+        on = speech if speech.any() else np.ones(n, bool)
+        vrms = float(np.sqrt(np.mean(vt[on] ** 2))) + 1e-9
+        scale = np.float32(10 ** (-20 / 20) / vrms)
+        vt *= scale
+        bed_rms = float(np.sqrt(np.mean(buf[on] ** 2))) + 1e-9
+        bed_rms_raw = bed_rms
+        if (A.get("voice") or {}).get("bed_db") is not None:    # pin everything else this far under the voice
+            target = 10 ** ((-20 + float(A["voice"]["bed_db"])) / 20)
+            buf *= np.float32(target / bed_rms)
+            bed_rms = target
+        buf += np.stack([vt, vt], 1)
+        over = 20 * math.log10(10 ** (-20 / 20) / bed_rms)
+        (ep_dir / "build" / "mix.json").write_text(json.dumps({"voice_over_rest_db": round(over, 1),
+                                                               "rest_before_db": round(20 * math.log10(bed_rms_raw), 1)}),
+                                                   encoding="utf-8")
+        print(f"  voice sits {over:.1f} dB above the rest of the mix while it speaks")
 
     rw = A.get("rewind")
     if rw:
@@ -287,7 +351,8 @@ def build(ep_dir):
     story = buf[: int((cut or dur) * SR)]
     rms = float(np.sqrt(np.mean(story ** 2))) + 1e-9
     buf *= 10 ** (A.get("target_rms_db", -16.0) / 20) / rms
-    buf = np.tanh(buf * 1.1) / 1.1
+    if voice is None:              # a voice would turn harsh through it: master() limits a voiced mix's peaks instead
+        buf = np.tanh(buf * 1.1) / 1.1
     peak = float(np.max(np.abs(buf)))
     if peak > 10 ** (-1.0 / 20):
         buf *= 10 ** (-1.0 / 20) / peak

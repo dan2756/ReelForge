@@ -314,6 +314,30 @@
       "file": "generated/shutter.wav",
       "source": "generated",
       "title": "Camera shutter click (synth)"
+    },
+    "pulse_bed": {
+      "file": "generated/pulse_bed.wav",
+      "source": "generated",
+      "title": "Upbeat pulse bed, 120 bpm loop (synth)",
+      "license": "generated (pipeline/post/sfx_generate.py)"
+    },
+    "calm_bed": {
+      "file": "generated/calm_bed.wav",
+      "source": "generated",
+      "title": "Calm pad bed, loop (synth)",
+      "license": "generated (pipeline/post/sfx_generate.py)"
+    },
+    "bubble_pop": {
+      "file": "generated/bubble_pop.wav",
+      "source": "generated",
+      "title": "Bubble pop (synth)",
+      "license": "generated (pipeline/post/sfx_generate.py)"
+    },
+    "rise_tone": {
+      "file": "generated/rise_tone.wav",
+      "source": "generated",
+      "title": "Tonal riser (synth)",
+      "license": "generated (pipeline/post/sfx_generate.py)"
     }
   },
   "_mixkit_url": "https://assets.mixkit.co/active_storage/sfx/{id}/{id}.{ext}"

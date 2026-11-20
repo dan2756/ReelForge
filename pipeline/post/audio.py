@@ -77,7 +77,7 @@ def crush(x, bits=4, hold=1):
 
 
 def build(ep_dir):
-    spec = json.loads((ep_dir / "episode.json").read_text(encoding="utf-8"))
+    spec = config.load_spec(ep_dir)
     series = json.loads((ep_dir / "build" / "series.json").read_text(encoding="utf-8"))
     A = spec.get("audio", {})
     fps = spec["fps"]

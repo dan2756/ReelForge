@@ -199,8 +199,40 @@ def check_captions(spec, final, R):
     R.add("caption rules", "FAIL" if cap_problems else "PASS", "; ".join(cap_problems) or ", ".join(rules))
 
 
+def check_voice(spec, ep_dir, R):
+    """A 2D episode's voiceover: voiced from the current script, clear over everything else, and no dead air."""
+    sys.path.insert(0, str(config.PIPELINE / "twod"))
+    import voice
+    tl_path = ep_dir / "build" / "voice" / "timeline.json"
+    if not tl_path.exists():
+        R.add("voiceover", "FAIL", "no build/voice/timeline.json: run --steps build")
+        return
+    tl = json.loads(tl_path.read_text(encoding="utf-8"))
+    raw = json.loads((ep_dir / "episode.json").read_text(encoding="utf-8"))
+    fresh = tl.get("script_hash") == voice.script_hash(raw)
+    words, beats, dur = tl.get("words", []), tl.get("beats", []), spec["duration"]
+    spoken = sum(b["end"] - b["start"] for b in beats if b.get("say"))
+    detail = f"{len(words)} words, {len(beats)} beats, speech {spoken:.1f} s of {dur:.1f} s ({tl['voice']['voice']})"
+    if not fresh:
+        R.add("voiceover", "FAIL", "the script or voice changed after the voice step: run --steps build, render, post")
+    elif not words:
+        R.add("voiceover", "FAIL", "the script has no words")
+    else:
+        R.add("voiceover", "PASS" if spoken >= 0.6 * dur else "WARN",
+              detail + ("" if spoken >= 0.6 * dur else "; under 60% narrated: write more script"))
+    gaps = [f"{a['end']:.1f}-{b['start']:.1f}s" for a, b in zip(beats, beats[1:]) if b["start"] - a["end"] > 2.5]
+    R.add("no dead air between lines", "WARN" if gaps else "PASS", ", ".join(gaps) or "no pause over 2.5 s")
+    mix = ep_dir / "build" / "mix.json"
+    if mix.exists():
+        over = json.loads(mix.read_text(encoding="utf-8")).get("voice_over_rest_db", 99)
+        R.add("voice clear over the mix", "FAIL" if over < 6 else ("WARN" if over < 10 else "PASS"),
+              f"the voice is {over:.1f} dB above the beds and hits while it speaks (WARN under 10, FAIL under 6)")
+    else:
+        R.add("voice clear over the mix", "FAIL", "no build/mix.json: run --steps audio")
+
+
 def check_episode(ep_dir):
-    spec = json.loads((ep_dir / "episode.json").read_text(encoding="utf-8"))
+    spec = config.load_spec(ep_dir)
     fps, dur = spec["fps"], spec["duration"]
     final = ep_dir / "final"
     video = final / f"{spec['id']}.mp4"
@@ -455,6 +487,8 @@ def check_episode(ep_dir):
     if spec.get("hud"):
         check_hud_contrast(spec, video, R)
     check_captions(spec, final, R)
+    if config.engine(spec) == "2d":
+        check_voice(spec, ep_dir, R)
 
     # ---- not one of ReelForge's demos: everyone has those, so a demo (or a copy with its hook) would be a repost
     demo_titles = set()

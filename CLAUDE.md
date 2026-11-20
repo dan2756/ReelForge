@@ -1,10 +1,11 @@
 <!-- reelforge-bootstrap: first-time setup replaces this file with one written for your channel. -->
 # ReelForge (not set up yet)
 
-This folder is **ReelForge**, a kit for making faceless short-form videos with you, Claude: Blender builds
-and renders each scene, Python draws the text and mixes the sound, ffmpeg encodes, an automatic QA gate checks
-every video, and the **ReelForge** window (type `reelforge` in a terminal) is where the person you're working with
-sees their stats and posts from, by hand.
+This folder is **ReelForge**, a kit for making faceless short-form videos with you, Claude. New channels
+make **2D videos**: you write the script and draw the scenes in code, a free offline voice reads it, and big
+word-by-word captions follow the voice. A channel can make **3D videos** instead, which Blender builds and renders.
+Python mixes the sound, ffmpeg encodes, an automatic QA gate checks every video, and the **ReelForge** window
+(type `reelforge` in a terminal) is where the person you're working with sees their stats and posts from, by hand.
 
 It hasn't been set up for their channel yet. First-time setup replaces this file with a full CLAUDE.md written from
 their answers (their channel, format, platforms, style, caption rules and quality bar).
@@ -14,12 +15,16 @@ their answers (their channel, format, platforms, style, caption rules and qualit
 1. **Install.** If there is no `.venv` folder here, ask them to double-click `setup.bat` (Windows) or run
    `./setup.sh` (macOS/Linux). It lists what ReelForge still needs, sets it all up inside this folder once they
    say yes, then checks everything. You can run it for them only if they agree to all of it: `setup.bat -Yes` /
-   `./setup.sh --yes` downloads Blender 4.5 (about 400 MB), ffmpeg (60-150 MB), the sound effects (about 55 MB)
+   `./setup.sh --yes` downloads the voice for 2D videos (about 420 MB), Blender 4.5 for 3D videos (about 400 MB;
+   only once a channel makes 3D videos), ffmpeg (60-150 MB), the sound effects (about 55 MB)
    and Bun with the ReelForge window's packages (about 60 MB) into this folder (on macOS/Linux also a private Python
    if theirs is older than 3.11, and Chromium if they have no Chrome or Edge), adds the `reelforge` command to their PATH and ReelForge's icon (a desktop shortcut on
    Windows, ReelForge in Applications on macOS, an app-menu entry on Linux).
 2. **Their channel.** Either they run `channel.bat` / `./channel.sh` (a few questions in a full-screen box), or you
    interview them here in the chat:
+   - The first big choice is `video_type`: `2d` (the default: drawn in code, voiced, captioned) or `blender`
+     (3D scenes, no voiceover). Explain the difference in a line each. If they pick `blender`, run setup again
+     afterwards: it then offers Blender.
    - Get the questions: `.venv\Scripts\python -m studio channel --questions` (macOS/Linux: `.venv/bin/python`).
      Each has a key and its options, and most have a default (which AI they use, one or both, has none: ask).
    - Ask them conversationally, a few at a time, offering the options as choices and the defaults as suggestions.

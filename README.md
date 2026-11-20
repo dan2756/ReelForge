@@ -19,8 +19,14 @@
 
 ## What it makes
 
-An AI made these three videos with ReelForge, start to finish: it wrote the script, checked every number against a
-real source, built and rendered the 3D scenes, and added the text and the sound. They're ReelForge's three demos.
+**2D videos with a voiceover** (the default since 3.0): your AI writes the script, checks every number against a real
+source and draws each scene in code; a free voice that runs on your computer reads the script, and big word-by-word
+captions follow it. No graphics card needed, and a video renders in minutes. ReelForge's 2D demo is "A million
+dollars now, or a penny doubled for 30 days?".
+
+**Or 3D videos made in Blender**, with on-screen story lines and no voiceover. An AI made these three with ReelForge,
+start to finish: it wrote the script, checked every number, built and rendered the 3D scenes, and added the text
+and the sound.
 
 <p align="center">
   <img src="docs/demos/rubber-duck.webp" width="250" alt="What if a rubber duck doubled in size every 2 seconds?">&nbsp;
@@ -33,11 +39,10 @@ on Earth did X at once?", or you describe your own.
 
 ## Quick start
 
-You need about 15 GB of free space, Claude Code or Codex, and one of these:
-
-- a **Windows 10 or 11** PC with a recent NVIDIA or AMD graphics card
-- a **Mac** with Apple Silicon (M1 or newer); an Intel Mac works too, but renders much more slowly
-- a **Linux** PC (x64) with a recent NVIDIA or AMD graphics card and its drivers
+You need about 10 GB of free space, Claude Code or Codex, and a **Windows 10 or 11** PC, a **Mac** or a **Linux**
+PC (x64). 2D videos run on any of them. For 3D videos you also need a recent NVIDIA or AMD graphics card (with its
+drivers on Linux) or a Mac with Apple Silicon (an Intel Mac works too, but renders much more slowly), and about 15 GB
+free.
 
 1. **Open a terminal.** On Windows, press the Windows key, type `PowerShell` and press Enter. On a Mac, press
    ⌘ Space, type `Terminal` and press Enter. On Linux, open your terminal.
@@ -58,9 +63,9 @@ You need about 15 GB of free space, Claude Code or Codex, and one of these:
    It downloads the newest ReelForge straight from GitHub into a ReelForge folder in your user folder, checks it and
    starts setup, so your browser, Windows and macOS have no download warning to show.
 3. **Say yes, then answer a few questions.** ReelForge lists what it still needs and, when you click **Set up**,
-   downloads Blender, ffmpeg and the sound effects into its own folder (and Python too, if your Mac or Linux PC
-   doesn't have a recent one; Bun, which runs ReelForge's window, comes first by itself). Then it asks about your
-   channel: what it's about, the format, where you post (TikTok, YouTube Shorts and Instagram Reels to start), and how
+   downloads the voice, ffmpeg and the sound effects into its own folder (Blender too, once a channel makes 3D
+   videos; and Python, if your Mac or Linux PC doesn't have a recent one; Bun, which runs ReelForge's window, comes
+   first by itself). Then it asks about your channel: 2D or 3D videos, what it's about, the format, where you post (TikTok, YouTube Shorts and Instagram Reels to start), and how
    your videos should look and sound. No accounts yet? It helps you make them, starting with a new Gmail for your
    channel. ReelForge's mascot, the anvil, keeps you company: he hammers away while it all downloads and hops when
    everything's ready.
@@ -97,9 +102,10 @@ unless you picked another). Its last screen tells you what to do next.
    make my first video
    ```
 
-4. **Let it work.** Your AI picks a subject, writes the script, checks the facts, builds the scene in Blender and
-   renders it, adds the text and the sound, then watches the finished video and fixes anything that's off. Rendering
-   takes from about 15 minutes to an hour on a fast graphics card.
+4. **Let it work.** Your AI picks a subject, writes the script, checks the facts, voices it and draws the scenes
+   (or, for 3D, builds the scene in Blender and renders it), adds the captions and the sound, then watches the
+   finished video and fixes anything that's off. A 2D video renders in a few minutes; a 3D one takes from about 15
+   minutes to an hour on a fast graphics card.
 5. **Post it.** Open ReelForge (type `reelforge` in any terminal, or open the ReelForge icon: on your desktop on
    Windows, in Applications on a Mac, in your app menu on Linux) and click the green **Publish** button at the top
    right.
@@ -456,7 +462,7 @@ repairs the setup.
 <br>
 
 Yes. Setup gets everything ReelForge needs into its own folder on all three, so you don't need Homebrew or a package
-manager: Blender from blender.org, ffmpeg from the builds ffmpeg.org points to, Bun (for ReelForge's window) from its
+manager: the voice from the kokoro-onnx project's GitHub release, Blender from blender.org, ffmpeg from the builds ffmpeg.org points to, Bun (for ReelForge's window) from its
 own releases, and a private Python if yours is older than 3.11. ReelForge reads your stats with Chrome or Edge if you have one, or with a Chromium setup downloads if you
 don't. On a Mac, ReelForge goes in your Applications folder (so it's in Launchpad, Spotlight and the Dock) and opens in
 Terminal; on Linux it goes in your app menu. The hourly stats job is a launchd agent on a Mac and a systemd timer (or
@@ -526,6 +532,6 @@ changes. To undo a reset, move the backup's files back.
 
 ## License
 
-ReelForge is free and open source under the [MIT license](LICENSE). Setup downloads Blender and ffmpeg from their
-official sites, Bun from its GitHub releases (with the window's OpenTUI packages from npm) and the Mixkit sound
+ReelForge is free and open source under the [MIT license](LICENSE). Setup downloads the Kokoro voice (Apache 2.0)
+from the kokoro-onnx project's GitHub release, Blender and ffmpeg from their official sites, Bun from its GitHub releases (with the window's OpenTUI packages from npm) and the Mixkit sound
 effects from Mixkit; the Kenney sound effects come with it. Details are in [THIRD_PARTY.md](THIRD_PARTY.md).

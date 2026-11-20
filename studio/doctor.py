@@ -18,7 +18,7 @@ from pathlib import Path
 from . import BLENDER_VERSION, KIT_NAME, KIT_VERSION
 from . import paths as P
 from . import settings as S
-from . import sounds, tools
+from . import sounds, tools, voice
 
 OK, WARN, FAIL = "ok", "warn", "FAIL"
 MARK = {OK: "  ok  ", WARN: " warn ", FAIL: " FAIL "}
@@ -102,8 +102,18 @@ def checks(render_test: bool = False, quiet: bool = False) -> Report:
           "numpy, Pillow, Jinja2, httpx, Playwright")
     window_check(r, fix)
 
+    kinds = S.engines_in_use()
+    if voice.ready():
+        r.add(OK, "Voice", f"Kokoro ({P.rel(voice.folder())})")
+    else:
+        r.add(FAIL if "2d" in kinds else WARN, "Voice", f"{voice.missing()} not installed: {fix} and tick Voice"
+              + ("" if "2d" in kinds else " (only 2D videos need it)"))
+
     blender = tools.find_blender()
-    if not blender:
+    if not blender and "blender" not in kinds:
+        r.add(OK, "Blender", "not installed, and not needed: your channels make 2D videos (setup can download it "
+                             "for a 3D channel)")
+    elif not blender:
         r.add(FAIL, "Blender", f"not found: {fix} (it can download Blender {BLENDER_VERSION}), or set STUDIO_BLENDER")
     else:
         ver = tools.blender_version(blender)
@@ -139,8 +149,9 @@ def checks(render_test: bool = False, quiet: bool = False) -> Report:
     from . import browsers
 
     b = browsers.find()
-    r.add(OK if b else WARN, "Stats browser", b.describe() if b else
-          f"no Chrome, Edge or Chromium for the TikTok, Instagram and X stats: {fix} (it downloads Chromium)")
+    r.add(OK if b else (FAIL if "2d" in kinds else WARN), "Browser", b.describe() if b else
+          f"no Chrome, Edge or Chromium to draw 2D videos and read the TikTok, Instagram and X stats: {fix} (it "
+          "downloads Chromium)")
 
     try:
         gone = sounds.missing()
@@ -189,8 +200,41 @@ def checks(render_test: bool = False, quiet: bool = False) -> Report:
               (f" ({', '.join(unset)} not set up yet: its Settings in the profile menu)" if unset else ""))
 
     if render_test and not r.failed:
-        render_check(r)
+        if "2d" in kinds:
+            render_check_2d(r)
+        if "blender" in kinds:
+            render_check(r)
     return r
+
+
+def render_check_2d(r: Report) -> None:
+    """Draw one frame of the 2D demo with a silent stand-in voiceover, in a temporary episode folder."""
+    src = P.EXAMPLES / "demo_2d_penny"
+    if not (src / "scene.js").exists():
+        r.add(WARN, "2D render test", "no 2D example found in examples/")
+        return
+    tmp = Path(tempfile.mkdtemp(prefix="render_test_", dir=P.ROOT / "episodes"))
+    try:
+        spec = json.loads((src / "episode.json").read_text(encoding="utf-8"))
+        spec["id"], spec["duration"] = tmp.name, 10.0
+        (tmp / "episode.json").write_text(json.dumps(spec), encoding="utf-8")
+        shutil.copy2(src / "scene.js", tmp / "scene.js")
+        beats = [{"i": i, "id": b.get("id", ""), "say": b.get("say", ""), "start": i * 0.5, "end": i * 0.5 + 0.4}
+                 for i, b in enumerate(spec["script"])]
+        words = [{"text": "Hello", "clean": "hello", "start": 0.1, "end": 0.5, "beat": 0}]
+        (tmp / "build" / "voice").mkdir(parents=True)
+        (tmp / "build" / "voice" / "timeline.json").write_text(json.dumps(
+            {"duration": 10.0, "beats": beats, "words": words}), encoding="utf-8")
+        t0 = time.time()
+        cmd = [sys.executable, str(P.ROOT / "pipeline" / "twod" / "render.py"), str(tmp), "--stills", "0.3"]
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        still = next(iter(sorted((tmp / "build" / "stills").glob("s_*.jpg"))), None) if res.returncode == 0 else None
+        if still and still.stat().st_size > 10_000:
+            r.add(OK, "2D render test", f"drew a frame of the 2D demo in {time.time() - t0:.0f} s")
+        else:
+            r.add(FAIL, "2D render test", "the browser couldn't draw the 2D demo:\n" + (res.stdout + res.stderr)[-600:])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def render_check(r: Report) -> None:

@@ -49,6 +49,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -375,7 +376,8 @@ def new_episode(argv: list[str]) -> int:
     ep_id = f"ep{(max(nums) + 1) if nums else 1:02d}_{slug}"
     starters = {"doubling": "demo_doubling_duck", "disaster_pov": "demo_disaster_pov",
                 "everyone": "demo_everyone_jumps", "reality_bug": "demo_disaster_pov"}
-    source = args.source or starters.get(s["format"]["template"], "")
+    twod = S.engine(s) == "2d"
+    source = args.source or ("demo_2d_penny" if twod else starters.get(s["format"]["template"], ""))
     if not args.source and not (P.EXAMPLES / source / "episode.json").exists():
         source = next((d.name for d in sorted(P.EXAMPLES.iterdir()) if (d / "episode.json").exists()), "")
     src = next((p / "episode.json" for p in (P.EXAMPLES / source, P.EPISODES / source)
@@ -387,12 +389,15 @@ def new_episode(argv: list[str]) -> int:
     spec = json.loads(src.read_text(encoding="utf-8"))
     spec["id"] = ep_id
     spec["title"] = "WRITE THE HOOK LINE HERE (one question, at most 80 characters)"
+    if spec.get("engine") == "2d" and spec.get("voice"):
+        spec["voice"]["voice"] = s["video"].get("voice") or spec["voice"].get("voice", "af_heart")
     spec["series"] = s["format"]["series"]
     spec.pop("episode_label", None)
     spec.pop("demo", None)                 # a demo carries a DEMO watermark and can't ship; your episode can
     spec.get("hud", {}).pop("brand", None)
     if "cta" in spec or s["video"]["cta"]:
-        cta = spec.get("cta", {"start": spec["duration"] - 2.4, "end": spec["duration"] - 0.5})
+        end = spec["duration"] if isinstance(spec.get("duration"), (int, float)) else 0
+        cta = spec.get("cta", {"start": end - 2.4, "end": end - 0.5})
         cta["text"] = s["video"]["cta"]
         cta.setdefault("sub", "")
         spec["cta"] = cta
@@ -403,9 +408,21 @@ def new_episode(argv: list[str]) -> int:
     dest.mkdir()
     from . import jsonfmt
     jsonfmt.write(dest / "episode.json", spec)
+    src_dir = src.parent
+    for extra in ("scene.js", "assets"):      # a 2D episode's drawing code and its images come along
+        if (src_dir / extra).is_file():
+            shutil.copy2(src_dir / extra, dest / extra)
+        elif (src_dir / extra).is_dir():
+            shutil.copytree(src_dir / extra, dest / extra)
     facts = (P.TEMPLATES / "facts.md").read_text(encoding="utf-8").replace("{id}", ep_id)
     (dest / "facts.md").write_text(facts, encoding="utf-8")
     print(f"Started {P.rel(dest)} from {P.rel(src.parent)}.")
+    if spec.get("engine") == "2d":
+        print("Next: write the title, the script, the sound cues and facts.md, voice it, then draw scene.js and look "
+              "at the stills (docs/2D.md):")
+        print(f"  {P.venv_python()} {Path('pipeline') / 'make_episode.py'} {Path('episodes') / ep_id} "
+              f"--steps build,stills")
+        return 0
     print("Next: write the title, lines, HUD, sound cues and facts.md, then build and look at the stills:")
     print(f"  {P.venv_python()} {Path('pipeline') / 'make_episode.py'} {Path('episodes') / ep_id} "
           f"--steps build,stills")
@@ -417,8 +434,10 @@ def new_episode(argv: list[str]) -> int:
 def ready_state() -> str:
     """'setup' while a tool is missing, 'onboard' until the channel is set up, '' when ReelForge is ready."""
     from . import settings as S
-    from . import sounds, tools
-    if not tools.find_blender() or not tools.find_ffmpeg() or sounds.missing():
+    from . import sounds, tools, voice
+    kinds = S.engines_in_use()
+    if ("blender" in kinds and not tools.find_blender()) or ("2d" in kinds and not voice.ready()) \
+            or not tools.find_ffmpeg() or sounds.missing():
         return "setup"
     return "" if S.onboarded() else "onboard"
 

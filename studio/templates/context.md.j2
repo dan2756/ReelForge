@@ -3,9 +3,17 @@
 # {{ ch.name }}: the video studio
 
 You make the videos for **{{ ch.name }}**, {{ whose }} faceless short-form channel on {{ platform_list }}.
+{% if twod %}
+Its videos are **2D**: you write each video's script and draw its scenes in code (a `scene.js` on a 1080×1920
+canvas), a free offline voice ({{ voice_label }}) reads the script, and big word-by-word captions follow the voice.
+Everything happens in {% if extra %}the ReelForge folder{% else %}this folder{% endif %}: a headless browser draws every frame, Python mixes the voice with the
+sound effects, ffmpeg encodes, an automatic QA gate checks the finished file, and the **ReelForge** window
+(type `{{ app_cmd }}` in a terminal) is where {{ who }} posts from. **You never post, upload or send anything.**
+{% else %}
 Everything happens in {% if extra %}the ReelForge folder{% else %}this folder{% endif %}: Blender builds and renders each scene, Python draws the text and the counter
 and mixes the sound, ffmpeg encodes, an automatic QA gate checks the finished file, and the **ReelForge** window
 (type `{{ app_cmd }}` in a terminal) is where {{ who }} posts from. **You never post, upload or send anything.**
+{% endif %}
 {% if extra %}
 
 **This is one of several channels in this ReelForge folder** (the first is {{ main_name }}, whose notes are the
@@ -23,6 +31,10 @@ Read before making or changing a video:
 - `{{ here }}my-studio/brief.md`: {{ whose }} own description of the channel, in their words (see "The channel brief")
 - `{{ here }}my-studio/channel-bible.md`: the channel, the format, the slate of ideas, posting
 - `docs/QUALITY.md`: the quality bar and the faults that get a video rejected
+{% if twod %}
+- `docs/2D.md`: how a 2D video is made: the script, the voice, `scene.js` and every drawing helper, the captions
+- `examples/demo_2d_penny/`: the 2D demo (`episode.json`, `scene.js`, `facts.md`): the minimum standard
+{% endif %}
 - `docs/PIPELINE.md`: pipeline commands, every `episode.json` key, and how to add a new scene
 - `docs/SOUND.md`: the sound rules (no static, the loudness target)
 - `{{ here }}completed videos/production-log.md`: what has been made, so no subject is repeated
@@ -85,8 +97,14 @@ file is for, ask.
   `model_reasoning_effort = "high"` (or higher, if your model offers it) in `~/.codex/config.toml`. The kit's
   `.codex/config.toml` sets "high" for this folder once you trust the project. If you are not on your strongest
   setting, say so in one line and tell {{ who }} how to switch.
+{% if twod %}
+- **Rendering runs a headless browser** (Edge, Chrome or Chromium) and the voice model from `tools/kokoro`, both
+  writing into this folder. If your sandbox blocks them, ask {{ who }} to approve the command or to give you write
+  access to this folder.
+{% else %}
 - **Rendering runs Blender** from `tools/` (or the installed copy), which writes into this folder and uses the GPU.
   If your sandbox blocks it, ask {{ who }} to approve the command or to give you write access to this folder.
+{% endif %}
 {% endif %}
 - **A great video, checked carefully, every time.** Fix every fault QA or your review finds, without endless optional
   polish.
@@ -140,7 +158,12 @@ Why this format: {{ fmt.proof }} Re-check what is working before each new batch 
 Study these first, and again whenever views drop: {% for r in references %}{{ r }}{% if not loop.last %}; {% endif %}{% endfor %}.
 
 {% endif %}
-{% if built_in %}
+{% if twod %}
+Every video is drawn fresh in code: start from the 2D demo (`examples/demo_2d_penny`, which `new-episode` copies),
+keep its structure (beats with ids, scenes keyed to them, a counter, a payoff), and make the subject, the drawings,
+the palette and the ending your own. Reuse your own helpers between episodes by copying them, never by changing an
+older episode's `scene.js`.
+{% elif built_in %}
 Ready-made scenes exist for this format (`examples/`, and the worlds and effects listed in `docs/PIPELINE.md`):
 start from them, then make each episode's subject, milestones and camera its own.
 {% else %}
@@ -153,14 +176,29 @@ them on purpose, so they can't be posted. Never work round that; `new-episode` g
 ## Video rules (every video)
 
 - 9:16, {{ dims }}, 30 fps, **{{ min }}-{{ max }} s** (`duration`{% if over_minute %}; over 60 s so TikTok's Creator Rewards counts it{% endif %}).
+{% if twod %}
+- **A voiceover reads the script** (`script`: one beat per sentence or two, each with an `id`), in the voice
+  {{ voice_label }} (`"voice"` in the spec; another Kokoro voice is fine for one video if it suits it better). Short,
+  punchy, spoken sentences in the second person; numbers written the way they're said, with the on-screen digits in
+  the beat's `"show"`. Every claim must be **true and on screen** as it's said: the scene draws it at that beat
+  (`rf.cue("<id>")`), and the captions show it word by word. Every claim goes in `{{ here }}episodes/<id>/facts.md` with a
+  source.
+- **Captions on every word**, big and centred (the runtime draws them; `"captions"` in the spec moves or restyles
+  them). Never draw anything important where the captions sit (about y 1150-1350), or in the bottom 380 px and the
+  right 140 px, which the apps cover with their buttons.
+{% else %}
 - **No voiceover.** Short second-person story lines, one at a time (`lines`). Each line must be **true and visible
   on screen** at that moment. Every claim and the second it becomes true go in `{{ here }}episodes/<id>/facts.md` with a
   source.
+{% endif %}
 - **Hook in seconds 0-2.** Something new every 2-3 s. The framing changes at least every ~8 s. Escalation speeds
   up, and the last 20 s are the most spectacular. Nothing winds down in the back half.
 - **Ending:** {{ ending_text }}
 - **Always end with "{{ cta }}"**: the spec's `cta`, e.g. `{"start": {{ cta_start }}, "end": {{ cta_end }}, "text": "{{ cta }}", "sub": "Next: ..."}`{% if loops %}, drawn over the rewind so the loop stays seamless{% endif %}.
-{% if hud %}
+{% if hud and twod %}
+- **The counter:** a big number at the top that moves with the story (`rf.hud`, or your own), no dark box behind it
+  and no channel name on it or on the cover. A thick dark outline keeps it readable over anything.
+{% elif hud %}
 - **The counter (HUD):** no dark box behind it, and no channel name on it or on the cover. The pipeline does this
   by default: never add `"panel"` or `"show_brand"` to the spec's `hud`, or `"brand"` to its `cover`. It must read
   over any background: QA fails a video whose HUD stays below 4.5:1 contrast for half a second. Don't thin the
@@ -168,13 +206,23 @@ them on purpose, so they can't be posted. Never work round that; `new-episode` g
 {% else %}
 - No on-screen counter unless a video truly needs one; the story lines carry it.
 {% endif %}
+{% if twod %}
+- **Look:** {{ style_text }}. Something moves in every frame (the camera drifts, things bob, pop and slide), the
+  first frame is cover-worthy (the subject big, the question clear), and each video gets its own palette and
+  drawings. `examples/demo_2d_penny` is the minimum standard; `docs/QUALITY.md` lists the banned faults.
+{% else %}
 - **Look:** {{ style_text }}. The example scenes in `examples/` are the minimum visual standard;
   `docs/QUALITY.md` lists the banned faults.
+{% endif %}
 - **Loudness: {{ lufs }} LUFS integrated.** Both mixers master to it automatically, and QA fails a video louder
   than {{ lufs_fail }} LUFS, with a loudest 3 s above {{ short_fail }} LUFS, or a true peak above {{ tp_fail }} dBTP.
   Never raise it for one video; ask {{ who }} before changing it (`{{ here }}my-studio/studio.toml`).
 - **No static, ever.** Beds and long effects come from recordings only; QA fails hiss, loudness blasts and piled-up
   samples (`docs/SOUND.md`).
+{% if twod %}
+- **The voice comes first in the mix.** A light bed under it (`pulse_bed` or `calm_bed`, or a recording) and a hit on
+  each big beat (`audio.cue_hits`). QA fails a voice less than 6 dB above the rest while it speaks.
+{% endif %}
 
 ## Captions
 
@@ -192,6 +240,20 @@ them on purpose, so they can't be posted. Never work round that; `new-episode` g
    the bible's slate, or research a new one (`docs/RESEARCH.md`).
 2. **Start the episode:** `{{ py }} -m studio{{ pflag }} new-episode <slug>` makes `{{ here }}episodes/epNN_<slug>/` with an
    `episode.json` and a `facts.md` to fill in.
+{% if twod %}
+3. **Script and facts:** `title`, `script` (the beats the voice reads, each with an `id`), `cta`, `hashtags`, the
+   sound cues. Check every number; write it with its source in `facts.md`. Aim for the channel's length: about 2.6
+   spoken words a second at the voice's speed.
+4. **Voice it:** `{{ py }} pipeline{{ sep }}make_episode.py {{ here_cmd }}episodes{{ sep }}<id> --steps build` speaks the script and times every
+   word (`build/voice/timeline.json`; `"duration": "auto"` follows the voice). Each beat's time is printed: the
+   scene keys off them, so voice first, then draw.
+5. **Draw the scene:** write `scene.js` (`docs/2D.md`), then `--steps stills --stills {{ stills }}` and **look at
+   every still** in `build/stills/` (captions included). Fix and repeat until each one clears `docs/QUALITY.md`.
+   Stills take seconds: iterate freely.
+6. **Render:** `--steps render` draws every frame (a few minutes). It redraws everything by itself when the scene,
+   the script or the spec's captions change.
+
+{% else %}
 3. **Script and facts:** `title`, `lines`, `hud`, `cta`, `hashtags`, the sound cue sheet. Check every number;
    write it with its source and the second it becomes true in `facts.md`. No line appears before its fact is true.
 4. **Build the scene:** `{{ py }} pipeline{{ sep }}make_episode.py {{ here_cmd }}episodes{{ sep }}<id> --steps build,stills --stills {{ stills }}`
@@ -203,6 +265,7 @@ them on purpose, so they can't be posted. Never work round that; `new-episode` g
    that already exist**, so delete `build/frames` after changing the scene.{% if codex %} If your shell stops a long
    command, run it again: it carries on where it stopped.{% endif %}
 
+{% endif %}
 7. **Post-production:** `--steps post` (sound, video, cover, captions, then QA -> `build/qa/report.md`). It stops on
    any FAIL. A WARN in the sound checks is a reason to fix the mix, not to ship.
 8. **Your review:** look at every `build/qa/sheet_*.jpg`, the cover, and full-resolution frames from the final mp4
@@ -253,20 +316,33 @@ when {{ who }} asks for it, as in "Making a video".
 ## Commands (run from {% if extra %}the ReelForge folder{% else %}this folder{% endif %})
 
 ```
+{% if twod %}
+{{ py }} pipeline{{ sep }}make_episode.py {{ here_cmd }}episodes{{ sep }}<id> --steps build                (voice the script)
+{{ py }} pipeline{{ sep }}make_episode.py {{ here_cmd }}episodes{{ sep }}<id> --steps stills --stills 1,15,31
+{% else %}
 {{ py }} pipeline{{ sep }}make_episode.py {{ here_cmd }}episodes{{ sep }}<id> --steps build,stills --stills 1,15,31
+{% endif %}
 {{ py }} pipeline{{ sep }}make_episode.py {{ here_cmd }}episodes{{ sep }}<id> --steps render
 {{ py }} pipeline{{ sep }}make_episode.py {{ here_cmd }}episodes{{ sep }}<id> --steps post
 {{ py }} pipeline{{ sep }}make_episode.py {{ here_cmd }}episodes{{ sep }}<id> --steps ship
 {{ py }} pipeline{{ sep }}post{{ sep }}compose.py {{ here_cmd }}episodes{{ sep }}<id> --preview {{ preview }}
 {{ py }} -m studio{{ pflag }} new-episode <slug>        a new episode folder from the template
 {{ py }} -m studio publish-check {{ here_cmd }}episodes{{ sep }}<id>
-{{ py }} -m studio doctor                    checks Blender, ffmpeg, sounds, fonts, disk space
+{{ py }} -m studio doctor                    checks {% if twod %}the voice, the browser{% else %}Blender{% endif %}, ffmpeg, sounds, fonts, disk space
 ```
 
 ## Gotchas
 
+{% if twod %}
+- A scene is a pure function of time: draw everything from `t` (no state carried between frames), so stills,
+  resumed renders and the video agree. Random numbers come from `rf.rand(seed)`, never `Math.random()`.
+- Change the script, and run `--steps build` again before stills: QA and the render stop on a stale voiceover.
+- Kokoro reads digits and symbols its own way: write numbers out in `say` ("sixty-four cents") and put the digits in
+  `show`.
+{% else %}
 - Blender's `keyframe_insert()` ignores the default interpolation: call `rf.set_interpolation(...)`.
 - Delete `build/frames` after changing the world or effect, or the render keeps the old frames.
+{% endif %}
 - Run anything that reads downloaded files (e.g. `assets/sfx/`) with `python -I`. Every new sound needs a licence
   entry in `assets/sfx/manifest.json`; Mixkit and Kenney (CC0) are the approved free sources.
 - `{{ here }}episodes/` grows by about 0.6 GB per video until `ship` cleans the frames. Keep 10 GB free before a render.

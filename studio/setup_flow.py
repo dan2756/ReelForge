@@ -1,5 +1,5 @@
 """Setup's second half, once setup.bat / setup.sh has Python and the packages in: find what's still missing
-(Blender, ffmpeg, the sound effects, the reelforge command, ReelForge's icon and, on a Mac or Linux PC without Chrome
+(the voice for 2D videos, Blender for 3D ones, ffmpeg, the sound effects, the reelforge command, ReelForge's icon and, on a Mac or Linux PC without Chrome
 or Edge, a browser for the stats), ask once, set it all up, check everything, then onboarding. Everything downloaded
 goes into this folder (Playwright keeps its Chromium in its own cache folder).
 
@@ -12,7 +12,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 
-from . import BLENDER_VERSION, KIT_NAME, browsers, command, doctor, shortcut, sounds, tools
+from . import BLENDER_VERSION, KIT_NAME, browsers, command, doctor, shortcut, sounds, tools, voice
 from . import paths as P
 from . import settings as S
 
@@ -21,7 +21,7 @@ SERIES = ".".join(BLENDER_VERSION.split(".")[:2])
 
 @dataclass
 class Item:
-    key: str              # blender, ffmpeg, sounds, browser, fonts, command, shortcut
+    key: str              # voice, blender, ffmpeg, sounds, browser, fonts, command, shortcut
     name: str             # "Blender 4.5.5"
     why: str              # what it's for, in a few words
     ready: bool
@@ -49,20 +49,28 @@ def installed_by_installer() -> bool:
 def plan() -> list[Item]:
     """Everything setup looks after, each marked ready or not. Takes a few seconds (it starts Blender once)."""
     items: list[Item] = []
+    kinds = S.engines_in_use()          # 2D for a new folder; whatever the channels here make otherwise
+    if voice.ready():
+        items.append(Item("voice", "Voice", "reads your 2D videos' scripts (Kokoro, offline)", True, "ready"))
+    else:
+        items.append(Item("voice", "Voice", "reads your 2D videos' scripts (Kokoro, offline)", False,
+                          f"about {voice.DOWNLOAD_MB} MB: {voice.missing()}", voice.DOWNLOAD_MB,
+                          default="2d" in kinds))
+    want_blender = "blender" in kinds
+    why3d = "builds and renders 3D videos" + ("" if want_blender else " (only needed for 3D channels)")
     blender = tools.find_blender()
     ver = tools.blender_version(blender) if blender else ""
     if blender and (ver.startswith(SERIES + ".") or ver == SERIES):
-        items.append(Item("blender", f"Blender {ver}", "builds and renders your 3D scenes", True, _where(blender)))
+        items.append(Item("blender", f"Blender {ver}", why3d, True, _where(blender)))
     elif not tools.blender_downloadable():
-        items.append(Item("blender", f"Blender {SERIES}", "builds and renders your 3D scenes", False,
+        items.append(Item("blender", f"Blender {SERIES}", why3d, False,
                           "blender.org has no ARM Linux build: install Blender 4.5 with your package manager",
-                          can_install=False, default=False))
+                          can_install=False, default=want_blender))
     else:
         note = "about 400 MB from blender.org"
         if blender:
             note += f" (your Blender {ver or '?'} stays as it is)"
-        items.append(Item("blender", f"Blender {BLENDER_VERSION}", "builds and renders your 3D scenes", False, note,
-                          400))
+        items.append(Item("blender", f"Blender {BLENDER_VERSION}", why3d, False, note, 400, default=want_blender))
 
     ffmpeg = tools.find_ffmpeg()
     if ffmpeg:
@@ -83,7 +91,7 @@ def plan() -> list[Item]:
                           f"{len(gone)} from Mixkit, about {mb} MB", mb))
 
     if not browsers.installed():        # Windows always has Edge; a Mac or Linux PC may have no Chrome or Edge
-        items.append(Item("browser", "Chromium", "reads your TikTok, Instagram and X stats", False,
+        items.append(Item("browser", "Chromium", "draws 2D videos and reads your TikTok, Instagram and X stats", False,
                           "about 170 MB from Playwright (there's no Chrome or Edge here)", 170))
 
     if not P.WINDOWS and not P.MAC and not tools.find_fonts()[0].is_file():
@@ -111,6 +119,8 @@ def make_shortcut() -> str:
 
 def apply(item: Item, progress=None) -> str:
     """Set up one item. Returns a short sentence; raises with a readable message if it fails."""
+    if item.key == "voice":
+        return voice.install(progress)
     if item.key == "blender":
         return f"Blender ready ({P.rel(tools.install_blender(progress))})"
     if item.key == "ffmpeg":
@@ -177,8 +187,10 @@ def run(yes: bool = False, onboard: bool = True) -> int:
     for i in items:
         mark = "ok  " if i.ready else ("todo" if i.can_install else "you ")
         print(f"  [{mark}] {i.name}: {i.why} ({i.detail})")
-    work = [i for i in todo(items) if i.default or yes]
-    manual = [i for i in items if not i.ready and not i.can_install]
+    # --yes takes everything ticked to begin with, and the icon; the voice and Blender only for the channels that need
+    # them (a 2D channel needs no Blender, a 3D one no voice)
+    work = [i for i in todo(items) if i.default or (yes and i.key not in ("voice", "blender"))]
+    manual = [i for i in items if not i.ready and not i.can_install and (i.key != "blender" or i.default)]
     if work:
         size = sum(i.size_mb for i in work)
         names = ", ".join(i.name for i in work)

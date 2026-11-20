@@ -28,6 +28,11 @@ LOUDNESS = {
     "quiet": (-25.5, "Quiet: -25.5 LUFS, tested on this kit's sound-effects-only videos; easy on the ears"),
     "medium": (-20.0, "Medium: -20 LUFS"),
     "loud": (-15.0, "Loud: -15 LUFS, about as loud as most uploads (booms will hit hard)"),
+    "voice": (-16.0, "Voice: -16 LUFS, the usual level for videos with a voiceover (recommended for 2D)"),
+}
+ENGINES = {
+    "2d": "2D animation with a voiceover and captions (recommended: quick to make, no 3D needed)",
+    "blender": "3D scenes in Blender, with on-screen story lines and no voiceover",
 }
 
 DEFAULTS: dict = {
@@ -60,7 +65,10 @@ DEFAULTS: dict = {
         "cta": "FOLLOW FOR MORE",
         "style": "cinematic",
         "style_notes": "",
-        "voiceover": False,            # the pipeline tells the story in on-screen lines, no narration
+        "engine": "blender",           # "2d": code-drawn scenes + voiceover + captions; "blender": 3D scenes. Channels
+                                       # set up before 3.0 have no engine and keep making 3D videos
+        "voice": "af_heart",           # the voice of 2D videos (studio/voice.py)
+        "voiceover": False,            # 3D videos tell the story in on-screen lines, no narration; 2D videos are voiced
     },
     "sound": {"loudness": "quiet", "target_lufs": -25.5},
     "captions": {
@@ -205,3 +213,22 @@ def dump_toml(data: dict, comments: dict | None = None) -> str:
 
     table("", data)
     return "\n".join(lines) + "\n"
+
+
+def engine(s: dict) -> str:
+    """A channel's video type: "2d" or "blender"."""
+    return "2d" if str(s.get("video", {}).get("engine", "blender")).lower() == "2d" else "blender"
+
+
+def engines_in_use() -> set[str]:
+    """The video types the channels in this folder make. Before any channel is set up: 2D, the default for new ones."""
+    from . import profiles
+
+    out = set()
+    for p in profiles.every():
+        if p.onboarded:
+            try:
+                out.add(engine(load(p.settings)))
+            except (OSError, ValueError):
+                continue
+    return out or {"2d"}

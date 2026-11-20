@@ -45,7 +45,12 @@ the first frame should feel they can't scroll away before the payoff.
 ### Format rules
 
 - 9:16, {{ dims }}, 30 fps, {{ min }}-{{ max }} s.
+{% if twod %}
+- 2D, drawn in code, with a voiceover ({{ voice_label }}) and word-by-word captions: every claim is said, captioned and
+  drawn at the same beat.
+{% else %}
 - No voiceover: short second-person lines, one at a time, each true and visible on screen when it shows.
+{% endif %}
 - Hook in 0-2 s, something new every 2-3 s, the framing changes at least every ~8 s, the last 20 s are the biggest.
 {% if hud %}
 - A big on-screen counter that ticks in chapters (label, value, sub-line), with no box and no channel name.

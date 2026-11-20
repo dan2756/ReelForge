@@ -1,3 +1,16 @@
+## What's new in 3.0.0
+
+- **2D videos with a voiceover are the new default.** New channels pick **2D** or **3D (Blender)** in first-time setup.
+  - Your AI writes the script and draws each scene in code. A free voice that runs on your computer reads it.
+  - Big word-by-word captions follow the voice, the word being said lit up.
+  - No graphics card needed: a 2D video renders in a few minutes. Setup downloads the voice (about 420 MB).
+  - Pick the voice and a 2D look in first-time setup: flat cartoon, infographic, paper cut-out, doodle or neon.
+- **Blender is still there for 3D videos.** Setup downloads it once a channel makes 3D videos, and not before.
+- **Your channels stay as they are.** A channel set up before 3.0 keeps making 3D videos until you change it.
+- **A new 2D demo** to start from: "A million dollars now, or a penny doubled for 30 days?"
+- **QA checks the voice** too: made from the latest script, clear over the music, and no long silences.
+- **Two music beds and new sounds** for voiced videos, made by ReelForge itself, so they're free to use.
+
 ## What's new in 2.2.1
 
 - **A big Copy prompt button on setup's last screen,** right under step 1, so it's the first thing you see.

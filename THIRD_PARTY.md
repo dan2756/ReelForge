@@ -7,6 +7,8 @@
 | Sounds in `assets/sfx/generated/` | Synthesized by the kit (`pipeline/post/sfx_generate.py`) | Yes |
 | **JetBrains Mono** font (`assets/fonts/`, used on macOS and Linux) | [SIL Open Font License 1.1](assets/fonts/JetBrainsMono-OFL.txt) | Yes |
 | Georgia and Consolas fonts (Windows) | Microsoft's licence, part of Windows | No: used from your Windows fonts folder |
+| **Kokoro** voice model (kokoro-v1.0) | [Apache 2.0](https://huggingface.co/hexgrad/Kokoro-82M); the voices can be used commercially | No: setup downloads it from the kokoro-onnx GitHub release (SHA-256 verified) into `tools/kokoro` |
+| **kokoro-onnx**, **onnxruntime** | MIT | No: setup installs them with pip (`requirements-voice.txt`); kokoro-onnx brings espeak-ng (GPL-3.0) for pronunciation, installed on your computer only |
 | **Blender** 4.5 LTS | [GPL](https://www.blender.org/about/license/); what you make with it is yours | No: setup downloads it from download.blender.org (checksum verified) |
 | **ffmpeg** (builds by gyan.dev for Windows, Martin Riedl for macOS, BtbN for Linux) | [GPL](https://ffmpeg.org/legal.html) | No: setup downloads it from gyan.dev, ffmpeg.martin-riedl.de or BtbN's GitHub releases (checksum verified), or use your own |
 | **Python** (macOS and Linux, only without Python 3.11+) | [PSF licence](https://docs.python.org/3/license.html) | No: setup downloads it from the python-build-standalone releases on GitHub (checksum verified) into `tools/python` |

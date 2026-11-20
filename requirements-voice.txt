@@ -1,0 +1,5 @@
+# The voice of 2D videos (studio/voice.py): setup installs these into the kit's .venv when you tick "Voice".
+# kokoro-onnx is MIT, onnxruntime is MIT; the phonemizer it uses (espeak-ng) is GPL-3.0, installed on your
+# computer only, never shipped with ReelForge.
+kokoro-onnx>=0.6.1,<0.7
+onnxruntime>=1.20

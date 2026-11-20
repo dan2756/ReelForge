@@ -9,8 +9,9 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from . import signup
-from .formats import FORMATS, STYLES, TONES
-from .settings import LOUDNESS, PLATFORM_NAMES, PLATFORMS, RECOMMENDED
+from .formats import FORMATS, STYLES, STYLES_2D, TONES
+from .settings import ENGINES, LOUDNESS, PLATFORM_NAMES, PLATFORMS, RECOMMENDED
+from .voice import DEFAULT_VOICE, VOICES
 
 
 @dataclass
@@ -53,6 +54,14 @@ def _fmt(a: dict) -> dict:
     return FORMATS.get(a.get("format") or "doubling", FORMATS["doubling"])
 
 
+def _twod(a: dict) -> bool:
+    return (a.get("video_type") or "2d") == "2d"
+
+
+def _custom_style(a: dict) -> bool:
+    return (a.get("style_2d") if _twod(a) else a.get("style")) == "custom"
+
+
 def _has(platform: str) -> Callable[[dict], bool]:
     return lambda a: platform in (a.get("platforms") or PLATFORMS)
 
@@ -92,10 +101,16 @@ QUESTIONS: list[Q] = [
       options=[(t, t.capitalize()) for t in TONES], help="Pick one or more."),
 
     # ---- format
+    Q("video_type", "format", "What kind of videos?", "choice", default="2d",
+      options=list(ENGINES.items()),
+      help="2D: your AI draws each video in code, a free voice reads the script and big captions follow it. "
+           "3D: Blender builds and renders real-scale scenes (setup downloads Blender, about 400 MB, and it needs "
+           "a good graphics card). You can change it later."),
     Q("format", "format", "Which format do you want to start with?", "choice", default="doubling",
       options=[(k, f["label"] + ("   · ready-made 3D scenes" if f["built_in"] else "")) for k, f in FORMATS.items()],
       help="Proven formats first: your AI copies what is already pulling views, then does it better. "
-           "'Ready-made 3D scenes' means the kit already has working scenes for it."),
+           "'Ready-made 3D scenes' means the kit already has working Blender scenes for it; 2D videos start from "
+           "the 2D demo for any format."),
     Q("custom_format", "format", "Describe your format", "long", required=True,
       show=lambda a: a.get("format") == "custom",
       placeholder="Each video: a question at the top, a 3D scene that escalates, a counter, a twist at the end...",
@@ -130,13 +145,21 @@ QUESTIONS: list[Q] = [
 
     # ---- look and sound
     Q("style", "look", "What should your videos look like?", "choice", default="cinematic",
-      options=list(STYLES.items())),
-    Q("style_notes", "look", "Describe the look", "long", show=lambda a: a.get("style") == "custom",
-      required=True, placeholder="Pastel colours, toy-like 3D, soft shadows"),
+      options=list(STYLES.items()), show=lambda a: not _twod(a)),
+    Q("style_2d", "look", "What should your videos look like?", "choice", default="flat",
+      options=list(STYLES_2D.items()), show=_twod),
+    Q("style_notes", "look", "Describe the look", "long", show=_custom_style,
+      required=True, placeholder=lambda a: "Pastel colours, rounded shapes, soft shadows" if _twod(a) else
+      "Pastel colours, toy-like 3D, soft shadows"),
+    Q("voice", "look", "Which voice should read your videos?", "choice", default=DEFAULT_VOICE,
+      options=list(VOICES.items()), show=_twod,
+      help="Free voices that run on your computer (Kokoro, Apache 2.0: fine for a monetized channel). Your AI can "
+           "switch voices for a video too."),
     Q("hud", "look", "Show a big on-screen counter, like a game HUD?", "yesno",
       default=lambda a: _fmt(a)["hud"], help="It ticks up (or down) as the video escalates. No box behind it."),
     Q("cta", "look", "The call-to-action at the end of every video", default="FOLLOW FOR MORE"),
-    Q("loudness", "look", "How loud should your videos be?", "choice", default="quiet",
+    Q("loudness", "look", "How loud should your videos be?", "choice",
+      default=lambda a: "voice" if _twod(a) else "quiet",
       options=[(k, v[1]) for k, v in LOUDNESS.items()]),
     Q("length", "look", "How long should each video be?", "choice", default="61-75",
       options=[("61-75", "61-75 s (recommended: TikTok only pays Creator Rewards on videos over a minute)"),
@@ -172,6 +195,10 @@ def defaults_for(answers: dict) -> dict:
     """Fill every visible question that has no answer with its default (an answer a newer version renamed becomes the
     new one first)."""
     out = dict(answers)
+    # Answers saved before 3.0 (they carry the date first-time setup ran) are a channel making 3D videos: 2D only
+    # became the default for new channels in 3.0, and an old channel must never switch on its own.
+    if "video_type" not in out and out.get("_created"):
+        out["video_type"] = "blender"
     for key, renamed in RENAMED.items():
         if isinstance(out.get(key), str) and out[key] in renamed:
             out[key] = renamed[out[key]]
@@ -305,7 +332,9 @@ def describe() -> list[dict]:
             item["required"] = True
         if q.show is not None:
             item["only_if"] = {
-                "custom_format": "format is custom", "style_notes": "style is custom",
+                "custom_format": "format is custom",
+                "style_notes": "style (or style_2d, for 2D videos) is custom",
+                "style": "video_type is blender", "style_2d": "video_type is 2d", "voice": "video_type is 2d",
                 "length_custom": "length is custom",
                 "tiktok_first_tag": "tiktok is in platforms", "hashtags_on_x": "x is in platforms",
             }.get(q.key, "that platform is in platforms" if q.key.startswith("handle_") else "")

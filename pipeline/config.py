@@ -85,3 +85,54 @@ def require_ffmpeg():
 
 # Typography: Georgia (serif) and Consolas (mono) on Windows; the closest fonts elsewhere (studio/tools.py).
 FONT_SERIF, FONT_SERIF_ITALIC, FONT_SERIF_BOLD, FONT_MONO, FONT_MONO_BOLD = _tools.find_fonts()
+
+
+# ---------------------------------------------------------------- the episode spec
+
+def engine(spec):
+    """The engine: "2d" (code-drawn scenes with a voiceover and captions) or "blender" (3D scenes): the spec's "engine"."""
+    return "2d" if str(spec.get("engine", "blender")).lower() in ("2d", "twod", "canvas") else "blender"
+
+
+def load_spec(ep_dir):
+    """episode.json, with a 2D episode's "duration": "auto" filled from its voiceover (build/voice/timeline.json:
+    the voice ends, plus a short tail) and render_until defaulting to the whole video. None while not voiced yet."""
+    import json
+
+    ep_dir = Path(ep_dir)
+    spec = json.loads((ep_dir / "episode.json").read_text(encoding="utf-8"))
+    if engine(spec) == "2d":
+        tl = ep_dir / "build" / "voice" / "timeline.json"
+        if spec.get("duration") in (None, "auto"):
+            spec["duration"] = None
+            if tl.exists():
+                spec["duration"] = float(json.loads(tl.read_text(encoding="utf-8"))["duration"])
+        if spec.get("duration") is not None:
+            spec.setdefault("render_until", spec["duration"])
+            dur = spec["duration"]
+            beats = {}
+            if tl.exists():
+                beats = {b["id"]: b for b in json.loads(tl.read_text(encoding="utf-8"))["beats"] if b.get("id")}
+
+            def when(v, what):
+                """A time: seconds, a beat's id (when it starts; "id:end" for when it ends), or negative seconds from
+                the end of the video."""
+                if isinstance(v, str):
+                    bid, _, edge = v.partition(":")
+                    if bid not in beats:
+                        raise SystemExit(f"{what}: no beat with \"id\": \"{bid}\" in the script")
+                    return beats[bid]["end" if edge == "end" else "start"]
+                return dur + v if v < 0 else v
+
+            audio = spec.get("audio") or {}
+            for h in audio.pop("cue_hits", []):         # sound hits on the script's beats: {"at": "d10", ...}
+                h = dict(h)
+                h["at"] = round(when(h["at"], "audio.cue_hits") + float(h.pop("offset", 0.0)), 3)
+                audio.setdefault("hits", []).append(h)
+            for key in ("cta", "title_card"):
+                if spec.get(key):
+                    spec[key] = {**spec[key], **{k: when(spec[key][k], key) for k in ("start", "end")
+                                                 if k in spec[key]}}
+            if spec.get("cover") and "time" in spec["cover"]:
+                spec["cover"] = {**spec["cover"], "time": when(spec["cover"]["time"], "cover")}
+    return spec

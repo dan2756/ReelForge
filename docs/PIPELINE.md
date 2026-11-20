@@ -1,8 +1,13 @@
 # The episode pipeline
 
 Turns one `episodes/<id>/episode.json` into a finished 9:16 video (1080×1920, 30 fps) with a cover and captions,
-checked by an automatic QA gate and listed in ReelForge's Publish tab. All visuals are procedural (no downloaded 3D
-models): Blender builds and renders the world, Python draws the text and HUD and mixes the sound, ffmpeg encodes.
+checked by an automatic QA gate and listed in ReelForge's Publish tab. There are two kinds of episode:
+
+- **2D** (`"engine": "2d"`, the default for channels set up since ReelForge 3.0): the episode's `scene.js` draws
+  every frame in a headless browser, a free offline voice reads the script, and word-by-word captions follow it.
+  **`docs/2D.md` has everything specific to them**; the steps, the sound, QA and shipping below are shared.
+- **3D** (Blender): all visuals are procedural (no downloaded 3D models): Blender builds and renders the world,
+  Python draws the text and HUD and mixes the sound, ffmpeg encodes. The rest of this file is mostly about them.
 
 Your channel's rules (video length, loudness, caption format, platforms) come from `my-studio/studio.toml`, which
 first-time setup writes. Commands below use Windows paths; on macOS/Linux use `.venv/bin/python` and `/`.
@@ -17,7 +22,9 @@ ReelForge folder.
 
 | Tool | Where it comes from | Override |
 |---|---|---|
-| Blender 4.5 LTS | `tools/` (setup downloads 4.5.5), or an installed 4.5 | env `STUDIO_BLENDER` |
+| Blender 4.5 LTS (3D videos) | `tools/` (setup downloads 4.5.5), or an installed 4.5 | env `STUDIO_BLENDER` |
+| Kokoro voice (2D videos) | `tools/kokoro` (setup downloads the model) and the `kokoro-onnx` package (`requirements-voice.txt`) | |
+| A browser (2D videos and stats) | Edge, Chrome or Chromium (`studio/browsers.py`) | |
 | ffmpeg + ffprobe | `tools/ffmpeg` (setup downloads it: gyan.dev on Windows, Martin Riedl's builds on macOS, BtbN's on Linux), or winget, Homebrew or PATH | env `STUDIO_FFMPEG` |
 | Python 3.11+ with numpy, Pillow, Jinja2 | the kit's `.venv` (setup makes it, on macOS/Linux from `tools/python` if there was no recent Python) | |
 | Bun, for ReelForge's window (OpenTUI, `ui/`) | `tools/bun` (setup downloads it from Bun's GitHub releases), or a Bun of your own on the PATH | env `REELFORGE_BUN` |
@@ -91,6 +98,7 @@ fact).
 | Key | Meaning |
 |---|---|
 | `id`, `title`, `series` | the folder name, the one-line hook (also the caption), the series name |
+| `engine` | `"2d"` for a 2D episode (`docs/2D.md`: `script`, `voice`, `scene`, `captions`, `audio.voice`, `audio.cue_hits`); left out for 3D |
 | `fps`, `duration`, `render_until` | 30 fps; `duration` inside your channel's length. Frames after `render_until` are post-only (e.g. the rewind) |
 | `render` | `samples`, `motion_blur`, `shadow_scale` (0.5 avoids Eevee "shadow buffer full"), `shutter`, `blur_depth_scale` |
 | `world` | `type` = a module in `pipeline/blender/worlds/`, plus its options (seed, camera...) |

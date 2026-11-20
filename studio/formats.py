@@ -177,4 +177,14 @@ STYLES = {
     "custom": "My own look (describe it)",
 }
 
+# The looks first-time setup offers for 2D videos (scenes drawn in code, pipeline/twod)
+STYLES_2D = {
+    "flat": "Flat cartoon: bold shapes, thick dark outlines, bright colours, bouncy motion",
+    "infographic": "Clean infographic: big numbers, charts, icons and arrows on calm colours",
+    "paper": "Paper cut-out: layered shapes with soft shadows and a hand-made feel",
+    "doodle": "Hand-drawn doodle: sketchy lines and scribbles on a light background",
+    "neon": "Neon night: glowing shapes and text on a dark background",
+    "custom": "My own look (describe it)",
+}
+
 TONES = ["awe", "suspense", "funny", "satisfying", "educational", "eerie", "hype"]

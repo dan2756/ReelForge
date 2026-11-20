@@ -1,0 +1,60 @@
+{
+  "demo": true,
+  "id": "demo_2d_penny",
+  "engine": "2d",
+  "title": "A million dollars now, or a penny doubled for 30 days?",
+  "series": "Doubling",
+  "fps": 30,
+  "duration": "auto",
+  "scene": "scene.js",
+  "voice": {"voice": "am_michael", "speed": 1.08, "start": 0.25, "gap": 0.16, "tail": 1.6},
+  "script": [
+    {"id": "hook", "say": "Would you take one million dollars right now, or a penny that doubles every day for thirty days?"},
+    {"id": "most", "say": "Most people grab the million. Let's see if they're right."},
+    {"id": "d1", "say": "Day one. You have one penny.", "show": "Day 1. You have 1 penny."},
+    {"id": "d3", "say": "Day two, two cents. Day three, four cents.", "show": "Day 2: 2¢. Day 3: 4¢."},
+    {"id": "d7", "say": "After a whole week, sixty-four cents. Not even a candy bar.", "show": "After a whole week: 64¢. Not even a candy bar."},
+    {"id": "d10", "say": "Day ten. Five dollars and twelve cents. You're starting to regret this.", "show": "Day 10: $5.12. You're starting to regret this."},
+    {"id": "d14", "say": "Day fourteen. Eighty-one dollars. A nice dinner.", "show": "Day 14: $81. A nice dinner."},
+    {"id": "d17", "say": "Day seventeen. Six hundred and fifty-five dollars. A new phone.", "show": "Day 17: $655. A new phone."},
+    {"id": "d20", "say": "Day twenty. Over five thousand dollars.", "show": "Day 20: over $5,000."},
+    {"id": "d22", "say": "Day twenty-two. Twenty thousand. That's a car.", "show": "Day 22: $20,000. That's a car."},
+    {"id": "d25", "say": "Day twenty-five. One hundred and sixty-seven thousand. Still way behind the million.", "show": "Day 25: $167,000. Still way behind the million."},
+    {"id": "d27", "say": "Day twenty-seven. Six hundred and seventy-one thousand.", "show": "Day 27: $671,000."},
+    {"id": "d28", "say": "Day twenty-eight. One point three million. You just passed the million.", "show": "Day 28: $1.3 million. You just passed the million."},
+    {"id": "d29", "say": "Day twenty-nine. Two point seven million.", "show": "Day 29: $2.7 million."},
+    {"id": "d30", "say": "And on day thirty?", "gap": 0.35},
+    {"id": "final", "say": "Five million, three hundred and sixty-eight thousand dollars.", "show": "$5,368,709!", "gap": 0.5},
+    {"id": "ask", "say": "So which one would you have picked?", "gap": 0.4}
+  ],
+  "captions": {"y": 1250},
+  "audio": {
+    "mixer": "samples",
+    "voice": {"gain_db": 0, "duck_db": -8, "bed_db": -17},
+    "beds": [
+      {"sound": "calm_bed", "from": 0.0, "to": 12.0, "gain": [[0, 0.7], [10.5, 0.7], [12, 0]]},
+      {"sound": "pulse_bed", "from": 11.0, "to": 70.0, "gain": [[11, 0], [12, 0.8], [40, 0.9], [52, 1.0], [70, 1.0]]}
+    ],
+    "hits": [],
+    "cue_hits": [
+      {"sound": "bubble_pop", "at": "d1", "gain": 0.7},
+      {"sound": "coins", "at": "d3", "gain": 0.5},
+      {"sound": "coins", "at": "d7", "gain": 0.6},
+      {"sound": "kaching", "at": "d10", "gain": 0.7},
+      {"sound": "bubble_pop", "at": "d14", "gain": 0.7},
+      {"sound": "bubble_pop", "at": "d17", "gain": 0.7},
+      {"sound": "kaching", "at": "d20", "gain": 0.7},
+      {"sound": "bubble_pop", "at": "d22", "gain": 0.7},
+      {"sound": "bubble_pop", "at": "d25", "gain": 0.7},
+      {"sound": "rise_tone", "at": "d28", "align": "end", "gain": 0.8},
+      {"sound": "boom_impact", "at": "d28", "gain": 0.6},
+      {"sound": "kaching", "at": "d29", "gain": 0.7},
+      {"sound": "rise_tone", "at": "final", "align": "end", "gain": 0.9},
+      {"sound": "coins", "at": "final", "gain": 0.9},
+      {"sound": "shimmer", "at": "final", "gain": 0.6}
+    ]
+  },
+  "cta": {"start": -2.6, "end": -0.3, "text": "FOLLOW FOR MORE", "sub": "Comment your pick", "y": 1560},
+  "cover": {"time": 1.2, "plain": true},
+  "hashtags": ["fyp", "money", "whatif", "doubling", "finance"]
+}

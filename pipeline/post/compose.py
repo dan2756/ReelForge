@@ -124,7 +124,7 @@ def glitch_frame(arr, s, rng):
 class Episode:
     def __init__(self, ep_dir):
         self.dir = ep_dir
-        self.spec = json.loads((ep_dir / "episode.json").read_text(encoding="utf-8"))
+        self.spec = config.load_spec(ep_dir)
         self.series = json.loads((ep_dir / "build" / "series.json").read_text(encoding="utf-8"))
         self.fps = self.spec["fps"]
         self.total = int(round(self.spec["duration"] * self.fps))
@@ -294,8 +294,16 @@ def make_video(ep):
 def make_cover(ep):
     c = ep.spec["cover"]
     idx = int(round(c["time"] * ep.fps))
-    base = Image.fromarray(ep.world(idx))
-    img = overlay.draw_cover(base, c["kicker"], c["keyword"], c.get("tail", ""), ep.brand if c.get("brand") else None)
+    plain = ep.dir / "build" / "cover_base.jpg"     # a 2D episode's cover frame, drawn without its captions
+    if config.engine(ep.spec) == "2d" and plain.exists():
+        base = Image.open(plain).convert("RGB")
+    else:
+        base = Image.fromarray(ep.world(idx))
+    if c.get("plain"):          # the frame as it is (a 2D scene can draw its own cover words at that moment)
+        img = base.convert("RGB")
+    else:
+        img = overlay.draw_cover(base, c["kicker"], c["keyword"], c.get("tail", ""),
+                                 ep.brand if c.get("brand") else None)
     if ep.spec.get("demo"):
         img = img.convert("RGBA")
         overlay.demo_watermark(img)

@@ -5,6 +5,9 @@
   python pipeline/make_episode.py episodes/<id> --steps post          (audio, video, cover, captions, QA)
   python pipeline/make_episode.py episodes/<id> --steps ship          (deliver, clean, check the Publish tab)
 
+A 2D episode ("engine": "2d": a scene.js drawn in a browser, a voiceover and word-by-word captions; docs/2D.md) has
+the same steps: build voices the script (Kokoro) and times every word, stills and render draw the scene.
+
 Steps: build (Blender scene from episode.json) -> stills (preview frames) -> render (all frames, resumable)
        -> post (= audio, video, cover, caption, qa) -> your own review in build/qa/review.md
        -> ship (= deliver: copy to "completed videos/" only if QA passed; clean: delete render frames;
@@ -55,7 +58,8 @@ def main():
     ep = args.episode.resolve()
     if not (ep / "episode.json").exists():
         raise SystemExit(f"{ep / 'episode.json'} not found")
-    spec = json.loads((ep / "episode.json").read_text(encoding="utf-8"))
+    spec = config.load_spec(ep)
+    twod = config.engine(spec) == "2d"
     build = ep / "build"
     final = ep / "final"
     build.mkdir(exist_ok=True)
@@ -68,10 +72,15 @@ def main():
         if s not in ALIASES and s not in ALL_STEPS:
             raise SystemExit(f"unknown step {s!r}; steps: {', '.join(ALL_STEPS)} (or post, ship, all)")
         steps += ALIASES.get(s, [s])
-    if NEEDS_BLENDER & set(steps):
+    if NEEDS_BLENDER & set(steps) and not twod:
         config.require_blender()
-    if NEEDS_FFMPEG & set(steps):
+    if (NEEDS_FFMPEG | ({"build"} if twod else set())) & set(steps):
         config.require_ffmpeg()
+
+    if twod:
+        steps_2d(ep, spec, steps, args.stills)
+        steps = [s for s in steps if s not in ("build", "stills", "render", "cover")]
+        spec = config.load_spec(ep)
 
     if "build" in steps:
         run([config.BLENDER, "-b", "--factory-startup", "--python-exit-code", "1",
@@ -90,7 +99,7 @@ def main():
 
     post = config.PIPELINE / "post"
     if "audio" in steps:
-        mixer = "audio_mix.py" if spec.get("audio", {}).get("mixer") == "samples" else "audio.py"
+        mixer = "audio_mix.py" if spec.get("audio", {}).get("mixer") == "samples" or twod else "audio.py"
         run([sys.executable, "-I", post / mixer, ep])
     if "video" in steps:
         run([sys.executable, post / "compose.py", ep, "--video"])
@@ -106,6 +115,37 @@ def main():
         clean(spec, build)
     if "check" in steps:
         check_publish(ep)
+
+
+def steps_2d(ep, spec, steps, stills_arg):
+    """build (the voiceover and its timeline), stills, render and the cover of a 2D episode. The audio, video,
+    caption, qa and ship steps are the same for every episode."""
+    twod = config.PIPELINE / "twod"
+    if "build" in steps:
+        run([sys.executable, twod / "voice.py", ep])
+    elif {"stills", "render", "cover"} & set(steps):
+        stale_voice(ep)
+    spec = config.load_spec(ep)
+    if "stills" in steps:
+        secs = [float(s) for s in stills_arg.split(",") if s] or spec.get("preview_times") or             [round(spec["duration"] * k / 10, 1) for k in range(10)]
+        run([sys.executable, twod / "render.py", ep, "--stills", ",".join(f"{s:g}" for s in secs)])
+    if "render" in steps:
+        run([sys.executable, twod / "render.py", ep, "--frames"])
+    if "cover" in steps:
+        run([sys.executable, twod / "render.py", ep, "--cover-base"])
+        run([sys.executable, config.PIPELINE / "post" / "compose.py", ep, "--cover"])
+
+
+def stale_voice(ep):
+    """Stop if the script changed since the voice step: the captions and the scene's timing would be wrong."""
+    sys.path.insert(0, str(config.PIPELINE / "twod"))
+    import voice
+    tl = ep / "build" / "voice" / "timeline.json"
+    if not tl.exists():
+        raise SystemExit("2D: the script isn't voiced yet: run --steps build first")
+    spec = json.loads((ep / "episode.json").read_text(encoding="utf-8"))
+    if json.loads(tl.read_text(encoding="utf-8")).get("script_hash") != voice.script_hash(spec):
+        raise SystemExit("2D: the script or the voice changed since the voice step: run --steps build again first")
 
 
 def completed_dir(spec):
