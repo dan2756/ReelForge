@@ -529,7 +529,8 @@ def unknown(word: str) -> str:
     the top of this file lists, so a new one is known here as soon as it's written there."""
     import difflib
 
-    words = {"help", "open", *re.findall(r"^  reelforge ([a-z][a-z-]+)", __doc__, re.M)}
+    # (Python 3.13 takes the two spaces every line of the help begins with out of __doc__; older ones leave them in)
+    words = {"help", "open", *re.findall(r"^ *reelforge ([a-z][a-z-]+)", __doc__, re.M)}
     try:
         from dashboard.tabs import TABS
         words.update(TABS)

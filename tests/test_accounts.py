@@ -346,11 +346,12 @@ class SetAccount(Scratch):
         generate.write_all({"channel_name": "Night Physics", "about": "What-ifs.", "assistant": "claude",
                             "platforms": ["tiktok"], "handle_tiktok": "@np"})
         P.ANSWERS.write_text('{"channel_name": "Night Physics",}', encoding="utf-8")
+        with self.assertRaises(ValueError) as wrong:        # in this Python's own words: 3.13 names the comma,
+            json.loads(P.ANSWERS.read_text(encoding="utf-8"))   # earlier ones the name they expected after it
         said = []
         generate.set_account("x", "@np_x", say=said.append)
-        self.assertEqual(said, [f"Your answers file, {P.ANSWERS}, can't be read (Expecting property name enclosed in "
-                                "double quotes: line 1 column 34 (char 33)), so it and your AI's notes stay as they "
-                                "were. Fix it in a text editor, then do this here again."])
+        self.assertEqual(said, [f"Your answers file, {P.ANSWERS}, can't be read ({wrong.exception}), so it and your "
+                                "AI's notes stay as they were. Fix it in a text editor, then do this here again."])
         self.assertEqual(self.handles()["x"], "@np_x")
         self.assertEqual(P.ANSWERS.read_text(encoding="utf-8"), '{"channel_name": "Night Physics",}')
 

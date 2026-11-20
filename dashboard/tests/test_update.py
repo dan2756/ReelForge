@@ -349,6 +349,16 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(json.loads((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8")),
                          {**kit, "_licenses": mine["_licenses"]})
 
+    @staticmethod
+    def mistake_in(text: str) -> str:
+        """json's own words for what is wrong with this text, and where, as the update says them. They are this
+        Python's: 3.13 names a comma before a closing bracket, earlier ones the name they expected after it."""
+        try:
+            json.loads(text)
+        except json.JSONDecodeError as e:
+            return f"{e.msg} at line {e.lineno}, column {e.colno}"
+        raise AssertionError("that text reads as JSON")
+
     def test_a_list_of_yours_that_cant_be_read_is_kept_in_backups_before_the_new_one_takes_its_place(self):
         """A comma after the last entry you added (your mixes already stop on it): the new list went over yours with
         no copy and no word, and the sounds you had added were gone from it."""
@@ -360,7 +370,7 @@ class InstallTest(unittest.TestCase):
         copies = list((self.root / "backups").glob("sounds-before-update-*.json"))
         self.assertEqual([c.read_text(encoding="utf-8") for c in copies], [broken])
         self.assertEqual(said, "Updated ReelForge from 1.0.0 to 1.1.0. Your assets/sfx/manifest.json couldn't be read "
-                               "(Expecting property name enclosed in double quotes at line 15, column 3), so the new "
+                               f"({self.mistake_in(broken)}), so the new "
                                "version's list took its place. Your list as it was is in "
                                f"backups/{copies[0].name}: copy your own entries from there into the new one.")
         self.assertEqual(update.take_marker(self.root)["notes"], [said.split(" ", 6)[6]])  # the restarted window's
@@ -384,7 +394,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual((self.root / update.KIT_SOUNDS).read_text(encoding="utf-8"), json.dumps(self.OLD_KIT))
         self.assertEqual(update.read_version(self.root), "1.1.0")    # the rest of the update is in
         self.assertEqual(said, "Updated ReelForge from 1.0.0 to 1.1.0. Your assets/sfx/manifest.json can't be read "
-                               "(Expecting property name enclosed in double quotes at line 1, column 50), and "
+                               f"({self.mistake_in(broken)}), and "
                                "ReelForge couldn't keep a copy of it in backups/, so it's left as it was, and the new "
                                "version's sounds aren't in it yet (the next update brings them). Put the mistake right "
                                "in a text editor: every mix stops on it until then.")
