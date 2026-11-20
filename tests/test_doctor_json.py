@@ -122,6 +122,9 @@ class DoctorJson(unittest.TestCase):
                     self.assertEqual(data["root"], str(ROOT))
                     self.assertIs(data["failed"], True)
                     statuses = {check["what"]: check["status"] for check in data["checks"]}
-                    self.assertEqual(statuses["Blender"], doctor.FAIL)
+                    # Blender is only missing for a folder with a 3D channel (a fresh one counts as 2D: 3.0's default)
+                    from studio import settings as S
+                    want = doctor.FAIL if "blender" in S.engines_in_use() else doctor.OK
+                    self.assertEqual(statuses["Blender"], want)
                     self.assertEqual(statuses["ffmpeg"], doctor.FAIL)
                     self.assertNotIn("Render test", statuses)
