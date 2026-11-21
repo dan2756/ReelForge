@@ -41,6 +41,18 @@ class ReviewVerdict(unittest.TestCase):
         self.assertTrue(self.verdict("**APPROVED**\n\nSo the shots approved before stay as they were."))
         self.assertTrue(self.verdict("Verdict: APPROVED.\nNothing else to fix."))
 
+    def test_a_line_that_ends_in_a_not_before_the_verdict_is_no_rejection(self):
+        # A list's last line with no full stop, then the verdict on a line of its own, as the guides ask for it.
+        # Read across the line break that was "NOT CUT OFF APPROVED", and an approved video could not ship.
+        self.assertTrue(self.verdict("- Captions: readable, not cut off\nAPPROVED"))
+        self.assertTrue(self.verdict("- Loop: seamless, does not jump\n\nAPPROVED"))
+        self.assertTrue(self.verdict("- Not too fast\nAPPROVED"))
+        self.assertTrue(self.verdict("Facts: all sourced, not invented\nVerdict APPROVED"))
+        self.assertFalse(self.verdict("Looked at every shot.\nNOT YET APPROVED"))   # on one line it is a rejection
+        self.assertFalse(self.verdict("Sound: fine.\nNOT\tYET  APPROVED"))
+        self.assertFalse(self.verdict("## Verdict\nNOT\u00a0APPROVED"))            # with a no-break space between
+        self.assertFalse(self.verdict("NOT\u202fYET\u3000APPROVED"))
+
     def test_a_fingerprint_has_to_be_in_the_review(self):
         digest = "ab" * 32
         with tempfile.TemporaryDirectory() as tmp:

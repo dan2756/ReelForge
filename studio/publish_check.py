@@ -21,8 +21,10 @@ from .paths import ROOT
 # A review's verdict. An approval is the whole word APPROVED in capitals, as the guides ask for it. A rejection is
 # "rejected" or "not ... approved" however it's written. Prose after the verdict ("what to fix before this is
 # approved", "the shots approved before") is not a verdict, and DISAPPROVED or pre-approved is not an approval.
+# A "not ... approved" is on one line: a list's last line that ends "... not cut off", with the verdict APPROVED on the
+# line after it, is an approval (read across the line break it was "NOT CUT OFF APPROVED", a rejection).
 _APPROVAL = re.compile(r"(?<![\w-])APPROVED(?![\w-])")
-_REJECTION = re.compile(r"\b(?:rejected|not\s+(?:\w+\s+){0,2}approved)\b", re.IGNORECASE)
+_REJECTION = re.compile(r"\b(?:rejected|not[^\S\n]+(?:\w+[^\S\n]+){0,2}approved)\b", re.IGNORECASE)
 _RECEIPT = re.compile(r"^Review-SHA256:\s*([0-9a-f]{64})\s*$", re.MULTILINE)
 
 
@@ -132,7 +134,11 @@ def check(ep_dir: Path) -> tuple[bool, str]:
              else "QA failed, or the video changed after QA (rerun --steps qa)")
     else:
         item(False, "QA report (run --steps post)")
-    item(review_approved(ep_dir / "build" / "qa" / "review.md"), "your review (build/qa/review.md) says APPROVED")
+    # as deliver and the Publish tab ask it: an APPROVED written before this cut was made is of an earlier cut
+    reviewed = review_state(ep_dir)
+    item(reviewed == "approved", "your review (build/qa/review.md) says APPROVED" if reviewed != "stale" else
+         "your review says APPROVED, but of an earlier cut: the video changed after it (look at this cut, then write "
+         "build/qa/review.md again)")
 
     title = " ".join(str(spec.get("title", "")).split())
     tags_line = ""

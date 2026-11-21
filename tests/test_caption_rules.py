@@ -3,6 +3,7 @@
 import copy
 import io
 import json
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -40,7 +41,7 @@ class CaptionRules(unittest.TestCase):
         qa.check_captions(self.spec, self.final, report)
         return report
 
-    def publish_check(self):
+    def publish_check(self, review_before_video: float = 0.0):
         episode = self.final.parent
         (episode / "episode.json").write_text(json.dumps(self.spec), encoding="utf-8")
         video = self.final / "ep01_test.mp4"
@@ -52,6 +53,8 @@ class CaptionRules(unittest.TestCase):
                                                    "fingerprint": f"{st.st_size}:{int(st.st_mtime)}"}),
                                         encoding="utf-8")
         (qa_dir / "review.md").write_text("APPROVED", encoding="utf-8")
+        if review_before_video:         # the review was written, and the video made again that many seconds later
+            os.utime(qa_dir / "review.md", (st.st_mtime - review_before_video,) * 2)
         with mock.patch.object(profiles, "of", return_value=profiles.Profile(self.root)), \
                 mock.patch.object(profiles, "use"), mock.patch.object(settings, "load", return_value=self.settings), \
                 mock.patch.object(publish_check, "_dashboard_listing", return_value=None):
@@ -124,6 +127,16 @@ class CaptionRules(unittest.TestCase):
         (self.final / "caption.txt").write_text(self.spec["title"] + "\n", encoding="utf-8")
         ok, report = self.publish_check()
         self.assertTrue(ok, report)
+
+    def test_publish_check_fails_a_review_of_an_earlier_cut(self):
+        # deliver and the Publish tab refuse a video made again after its APPROVED was written. publish-check, and
+        # the check step of ship, said READY for it.
+        self.configure(0)
+        (self.final / "caption.txt").write_text(self.spec["title"] + "\n", encoding="utf-8")
+        ok, report = self.publish_check(review_before_video=60)
+        self.assertFalse(ok, report)
+        self.assertIn("FAIL  your review says APPROVED, but of an earlier cut", report)
+        self.assertIn("NOT READY", report)
 
     def test_publish_check_still_requires_tags_when_enabled(self):
         self.configure(5)
