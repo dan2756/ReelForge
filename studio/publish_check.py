@@ -21,25 +21,35 @@ from .paths import ROOT
 # A review's verdict. An approval is the whole word APPROVED in capitals, as the guides ask for it. A rejection is
 # "rejected" or "not ... approved" however it's written. Prose after the verdict ("what to fix before this is
 # approved", "the shots approved before") is not a verdict, and DISAPPROVED or pre-approved is not an approval.
-# A "not ... approved" is one statement. On one line it may have a word or two in it ("NOT YET APPROVED"). Across a
-# line break it is one only where the line can't have ended there: a sentence wrapped right after "not", or after
-# "not yet", "not been", "not be" or "not to" (in a review wrapped at 120 columns, "... so this cut is NOT" and then
-# "APPROVED." is a rejection: read line by line it was an approval, and the cut shipped). A list's last line that ends
-# "... not cut off", with the verdict APPROVED on the line after it, is an approval (read across the line break it was
-# "NOT CUT OFF APPROVED", a rejection), and so is an APPROVED after an empty line, whatever the line before ends in.
+# A "not ... approved" ("no longer approved" too) is one statement. On one line it may have a word or two in it ("NOT
+# YET APPROVED"). Across a line break it is one only where the line can't have ended there: a sentence wrapped right
+# after "not", or after "not" and a word no statement ends on ("not yet", "not been", "not fully", "not an"). In a
+# review wrapped at 120 columns, "... so this cut is NOT" and then "APPROVED." is a rejection: read line by line it
+# was an approval, and the cut shipped. A list's last line that ends "... not cut off", with the verdict APPROVED on
+# the line after it, is an approval (read across the line break it was "NOT CUT OFF APPROVED", a rejection), and so
+# is an APPROVED after an empty line, whatever the line before ends in.
 _APPROVAL = re.compile(r"(?<![\w-])APPROVED(?![\w-])")
 _GAP = r"[^\S\n]+"                      # the space between two words on a line
 _WRAP = r"[^\S\n]*\n[^\S\n]*"           # ... and where a line was wrapped: one line break, not an empty line
-_GOES_ON = r"(?:yet|been|be|being|to)"  # after "not", a word no line of a review ends its statement on
+_NOT = rf"(?:not|no(?:{_GAP}|{_WRAP})longer)"
+_GOES_ON = ("(?:yet|been|being|be|to|fully|quite|entirely|completely|formally|officially|currently|finally|even"
+            "|an|a|the)")               # after "not", a word no line of a review ends its statement on
 _REJECTION = re.compile(
     r"\b(?:rejected"
-    rf"|not{_GAP}(?:\w+{_GAP}){{0,2}}approved"                      # on one line
-    rf"|not{_WRAP}(?:\w+{_GAP}){{0,2}}approved"                     # wrapped after "not"
-    rf"|not(?:{_GAP}{_GOES_ON}){{1,2}}{_WRAP}approved"              # ... after "not yet", "not yet been", "not to be"
-    rf"|not{_GAP}{_GOES_ON}{_WRAP}{_GOES_ON}{_GAP}approved"         # ... or between those two
+    rf"|{_NOT}{_GAP}(?:\w+{_GAP}){{0,2}}approved"                   # on one line
+    rf"|{_NOT}{_WRAP}(?:\w+{_GAP}){{0,2}}approved"                  # wrapped after "not"
+    rf"|{_NOT}(?:{_GAP}{_GOES_ON}){{1,2}}{_WRAP}approved"           # ... after "not yet", "not yet been", "not to be"
+    rf"|{_NOT}{_GAP}{_GOES_ON}{_WRAP}\w+{_GAP}approved"             # ... or after the first of two such words
     r")\b", re.IGNORECASE)
-_LINE_BREAK = re.compile(r"\r\n?|[\v\f\x1c-\x1e\x85\u2028\u2029]")     # each one that str.splitlines() knows
+_LINE_BREAK = re.compile(r"\r*\n|\r|[\v\f\x1c-\x1e\x85\u2028\u2029]")     # each one that str.splitlines() knows
 _RECEIPT = re.compile(r"^Review-SHA256:\s*([0-9a-f]{64})\s*$", re.MULTILINE)
+
+
+def _read(review: Path) -> str:
+    """A review's text, each line break in it one "\\n". The bytes are read as they are: read as text, a file with
+    CR CR LF line ends (text that had CRLF already, written out as text on Windows) came back with an empty line
+    after every line, and a rejection wrapped onto two lines read as two statements."""
+    return _LINE_BREAK.sub("\n", review.read_bytes().decode("utf-8", errors="replace"))
 
 
 def _verdict(text: str) -> str:
@@ -60,9 +70,10 @@ def review_approved(review: Path, fingerprint: str | None = None) -> bool:
     Only the whole word in capitals counts: DISAPPROVED is not an approval, "NOT APPROVED" is a rejection, and so is
     a review that says REJECTED and then mentions "approved" in a later sentence. With a fingerprint, the review must
     also carry it as its last "Review-SHA256: <fingerprint>" line."""
-    if not review.exists():
+    try:
+        text = _read(review)
+    except OSError:
         return False
-    text = review.read_text(encoding="utf-8", errors="replace")
     if _verdict(text) != "approved":
         return False
     if fingerprint is None:
@@ -82,7 +93,7 @@ def review_state(ep_dir: Path) -> str:
     ep_dir = Path(ep_dir)
     review = ep_dir / "build" / "qa" / "review.md"
     try:
-        text = review.read_text(encoding="utf-8", errors="replace")
+        text = _read(review)
         written = review.stat().st_mtime
     except OSError:
         return "unreviewed"

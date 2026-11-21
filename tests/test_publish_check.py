@@ -66,6 +66,11 @@ class ReviewVerdict(unittest.TestCase):
         self.assertFalse(self.verdict("The counter can't be read over the clouds: this cut should NOT BE\nAPPROVED."))
         self.assertFalse(self.verdict("The counter can't be read over the clouds: this cut is NOT TO\nBE APPROVED."))
         self.assertFalse(self.verdict("so this cut is NOT   \n    APPROVED"))               # spaces round the break
+        # ... and after a word no statement ends on, with one more word after the break at most
+        self.assertFalse(self.verdict("The title covers the counter, so this cut is NOT FULLY\nAPPROVED yet."))
+        self.assertFalse(self.verdict("The title covers the counter, so this cut is NOT YET\nFULLY APPROVED."))
+        self.assertFalse(self.verdict("Looked at it again, and as it stands this is NOT an\nAPPROVED cut."))
+        self.assertTrue(self.verdict("- Is the floor level? Not quite level, and it reads fine\nAPPROVED"))
         self.assertFalse(self.verdict("APPROVED\n\nSecond look: a caption is cut off at 41 s, so this one is not\n"
                                       "approved after all."))
         with tempfile.TemporaryDirectory() as tmp:      # ... and with the line ends Windows writes
@@ -74,6 +79,24 @@ class ReviewVerdict(unittest.TestCase):
             self.assertFalse(review_approved(path))
             path.write_bytes(b"- Captions: readable, not cut off\r\nAPPROVED\r\n")
             self.assertTrue(review_approved(path))
+            # CR CR LF: text that had CRLF already, written out as text on Windows. Read as text it has an empty
+            # line after every line, and the two halves of the rejection were two statements.
+            path.write_bytes(b"The rewind is too long, so this cut is NOT\r\r\nAPPROVED. Fix it and render again.\r\r\n")
+            self.assertFalse(review_approved(path))
+            path.write_bytes(b"- Captions: readable, not cut off\r\r\nAPPROVED\r\r\n")
+            self.assertTrue(review_approved(path))
+            path.write_bytes(b"- Glitch before the reversal: there is not\r\r\n\r\r\nAPPROVED\r\r\n")   # an empty line
+            self.assertTrue(review_approved(path))
+
+    def test_no_longer_approved_is_a_rejection(self):
+        # in capitals it was an approval: the word APPROVED, and no "not" before it
+        self.assertFalse(self.verdict("NO LONGER APPROVED: the loop jumps at the rewind."))
+        self.assertFalse(self.verdict("APPROVED\n\nSecond look: the loop jumps at the rewind, so this cut is no longer "
+                                      "approved."))
+        self.assertFalse(self.verdict("APPROVED\n\nSecond look: the loop jumps at the rewind, so this cut is no longer\n"
+                                      "approved."))
+        self.assertFalse(self.verdict("Second look: the caption at 12 s is cut off on the right. NO\nLONGER APPROVED."))
+        self.assertTrue(self.verdict("- Clipping at 31 s: no longer there\nAPPROVED"))
 
     def test_an_empty_line_ends_the_statement(self):
         # a new paragraph is a new statement, whatever the one before it ends in
