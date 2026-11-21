@@ -263,7 +263,8 @@ them on purpose, so they can't be posted. Never work round that; `new-episode` g
    every still** in `build/stills/` (captions included). Fix and repeat until each one clears `docs/QUALITY.md`.
    Stills take seconds: iterate freely.
 6. **Render:** `--steps render` draws every frame (a few minutes). It redraws everything by itself when the scene,
-   the script or the spec's captions change.
+   the script or the spec's captions change. It can't see a change to a picture the scene loads (its `assets`): after
+   one, run `--steps render --rerender all`.
 
 {% else %}
 3. **Script and facts:** `title`, `lines`, `hud`, `cta`, `hashtags`, the sound cue sheet. Check every number;

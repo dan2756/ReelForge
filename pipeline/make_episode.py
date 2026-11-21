@@ -196,8 +196,9 @@ def read_spec(ep, steps=(), status=False):
     the cover's second) are read off its voiceover (config.load_spec), and until the voice step has run again that
     is the voiceover of the script as it was. A cue on a beat written since stopped build itself, the one step that
     voices it. So with build among the steps a 2D spec is taken as episode.json has it (steps_2d reads it again once
-    it is voiced), any other step is told to build first when that is what is wrong, and --status never stops on
-    it: its "voiced" row says so."""
+    it is voiced), any other step is told to build first when that is what is wrong, and --status doesn't stop on
+    that: its "voiced" row says so. A spec that is wrong in itself (a cue on a beat the script doesn't have) stops
+    them all, in its own words."""
     raw = json.loads((ep / "episode.json").read_text(encoding="utf-8"))
     if config.engine(raw) != "2d":
         return config.load_spec(ep)
@@ -206,9 +207,10 @@ def read_spec(ep, steps=(), status=False):
     try:
         return config.load_spec(ep)
     except (SystemExit, Exception):
-        if status:
+        if status and voice_state(ep) != "fresh":
             return raw
-        stale_voice(ep)     # the script changed since it was voiced, or isn't voiced: run --steps build (again)
+        if not status:
+            stale_voice(ep)     # the script changed since it was voiced, or isn't voiced: run --steps build (again)
         raise
 
 
@@ -218,7 +220,9 @@ def steps_2d(ep, spec, steps, stills_arg, rerender=""):
     twod = config.PIPELINE / "twod"
     if "build" in steps:
         run([sys.executable, twod / "voice.py", ep])
-    elif {"stills", "render", "cover"} & set(steps):
+    elif {"stills", "render", "cover", "audio", "video"} & set(steps):
+        # (audio and video too: by themselves they made a mix and a video of the script as it was, without a word,
+        # and stopped in a traceback on an episode that was never voiced)
         stale_voice(ep)
     spec = config.load_spec(ep)
     if "stills" in steps:
@@ -249,14 +253,15 @@ def redraw_2d(ep, spec, rerender):
     except ValueError as exc:
         raise SystemExit(f"render: --rerender {exc}") from None
     gone = framecache.delete(frames, spans) if frames.is_dir() else 0
+    # (which other frames it draws is the render's own to say: all of them, where the scene or the script changed too)
     print(f"  deleted {gone} frames: drawing every frame again" if rerender == "all" else
-          f"  drawing {framecache.describe(spans, fps)} again; the other frames are kept", flush=True)
+          f"  drawing {framecache.describe(spans, fps)} again", flush=True)
 
 
 def voice_state(ep):
-    """Where a 2D episode's voiceover stands: "none" (not voiced yet), "stale" (the script or the voice changed
-    since the voice step, or the step left no voice: 3.0 wrote the timeline beside an empty voice.wav where ffmpeg
-    has no soxr) or "fresh"."""
+    """Where a 2D episode's voiceover stands: "none" (not voiced yet), "unfinished" (the voice step left no voice:
+    3.0 wrote the timeline beside an empty voice.wav where ffmpeg has no soxr), "stale" (the script or the voice
+    changed since the voice step) or "fresh"."""
     sys.path.insert(0, str(config.PIPELINE / "twod"))
     import voice
     tl = ep / "build" / "voice" / "timeline.json"
@@ -264,9 +269,9 @@ def voice_state(ep):
         return "none"
     try:
         if tl.with_name("voice.wav").stat().st_size <= 44:      # no more than a WAV file's header
-            return "stale"
+            return "unfinished"
     except OSError:
-        return "stale"
+        return "unfinished"
     spec = json.loads((ep / "episode.json").read_text(encoding="utf-8"))
     try:
         voiced = json.loads(tl.read_text(encoding="utf-8")).get("script_hash")
@@ -280,6 +285,9 @@ def stale_voice(ep):
     state = voice_state(ep)
     if state == "none":
         raise SystemExit("2D: the script isn't voiced yet: run --steps build first")
+    if state == "unfinished":
+        raise SystemExit("2D: the voice step left no voice (build/voice/voice.wav is empty or missing): run --steps "
+                         "build again first")
     if state == "stale":
         raise SystemExit("2D: the script or the voice changed since the voice step: run --steps build again first")
 
@@ -588,6 +596,7 @@ def status_2d(ep, spec, frames_dir):
     """--status's first two rows for a 2D episode: is the script voiced and is that still the script, and how many
     frames are drawn and are they of the scene, script and spec as they are now. -> (("voiced", text), frames text)"""
     voiced = {"none": "no (run --steps build)", "fresh": "yes",
+              "unfinished": "no: the voice step left no voice (run --steps build again)",
               "stale": "yes, but the script or the voice changed since: run --steps build again"}[voice_state(ep)]
     have = framecache.present(frames_dir)
     if spec.get("render_until") is None:        # "duration": "auto" and no voiceover yet to take the length from

@@ -47,6 +47,14 @@ class Questions(unittest.TestCase):
         self.assertEqual(a["loudness"], "quiet")
         self.assertNotIn("voice", a)
 
+    def test_the_interview_as_data_says_the_loudness_follows_the_kind_of_video(self):
+        # channel --questions gives one default, a 2D channel's: an AI that asks the questions in chat offered the
+        # voiceover's -16 LUFS to a channel that makes 3D videos, which have no voice.
+        item = next(i for i in questions.describe() if i["key"] == "loudness")
+        self.assertEqual(item["default"], "voice")
+        self.assertIn("quiet (-25.5 LUFS) for blender", item["help"])
+        self.assertIn("Leave it out of the answers unless they pick one", item["help"])
+
     def test_answers_saved_before_3_0_stay_3d(self):
         # A channel set up with 2.x has no video_type: it must never turn into a 2D channel on its own.
         a, _ = questions.validate({**BASE, "_created": "2026-10-24", "style": "cinematic", "loudness": "quiet"})
@@ -330,12 +338,14 @@ class WithTheRestOfThePipeline(unittest.TestCase):
             else:
                 wav.unlink()
             with self.subTest(left=left):
-                self.assertEqual(make_episode.voice_state(ep), "stale")
-                self.assertIn("voiced     yes, but the script or the voice changed since: run --steps build again",
+                self.assertEqual(make_episode.voice_state(ep), "unfinished")
+                self.assertIn("voiced     no: the voice step left no voice (run --steps build again)",
                               self.main(ep, "--status")[1])
-                with self.assertRaises(SystemExit) as stop:
-                    self.main(ep, "--steps", "post")
-                self.assertIn("run --steps build again first", str(stop.exception))
+                for steps in ("post", "audio", "video", "stills"):      # each by itself, too
+                    with self.assertRaises(SystemExit) as stop:
+                        self.main(ep, "--steps", steps)
+                    self.assertIn("the voice step left no voice", str(stop.exception))
+                    self.assertIn("run --steps build again first", str(stop.exception))
                 # the audio step by itself says it too, in a sentence, and before it reads a sound: the episode's
                 # sounds may not be on this computer, and the voice is what is wrong
                 no_sound = AssertionError("a sound was read before the voice was looked at")
@@ -348,6 +358,39 @@ class WithTheRestOfThePipeline(unittest.TestCase):
             audio_mix.build(self.episode(voiced=False))
         self.assertIn("isn't voiced yet: run --steps build first", str(stop.exception))
 
+    def test_the_audio_and_video_steps_ask_for_the_voice_too(self):
+        # By themselves they never looked: before any build they stopped in a traceback (no build/series.json), and
+        # after a change to the script they made a mix and a video of the script as it was, without a word.
+        never = self.episode(voiced=False)
+        changed = self.episode()
+        spec = json.loads((changed / "episode.json").read_text(encoding="utf-8"))
+        spec["script"][0]["say"] = "Two pennies."
+        (changed / "episode.json").write_text(json.dumps(spec), encoding="utf-8")
+        for steps in ("audio", "video", "audio,video"):
+            with self.subTest(steps=steps):
+                with self.assertRaises(SystemExit) as stop:
+                    self.main(never, "--steps", steps)
+                self.assertIn("isn't voiced yet: run --steps build first", str(stop.exception))
+                with self.assertRaises(SystemExit) as stop:
+                    self.main(changed, "--steps", steps)
+                self.assertIn("the script or the voice changed since the voice step: run --steps build again first",
+                              str(stop.exception))
+        ran, _ = self.main(self.episode(), "--steps", "audio,video")        # voiced, and still this script: they run
+        self.assertEqual(ran, ["audio_mix.py", "qa.py --audio", "compose.py --video"])
+
+    def test_a_spec_that_is_wrong_in_itself_stops_status_too(self):
+        # A cue on a beat the script doesn't have is no matter of voicing. --status went on with the spec as written:
+        # "voiced yes", and frames that were this scene's "drawn before the scene, the script or the spec changed".
+        ep = self.episode()
+        spec = json.loads((ep / "episode.json").read_text(encoding="utf-8"))
+        spec["audio"]["cue_hits"].append({"sound": "bubble_pop", "at": "hok"})
+        (ep / "episode.json").write_text(json.dumps(spec), encoding="utf-8")
+        for argv in (["--status"], ["--steps", "render"], ["--steps", "audio"]):
+            with self.subTest(argv=argv):
+                with self.assertRaises(SystemExit) as stop:
+                    self.main(ep, *argv)
+                self.assertIn('audio.cue_hits: no beat with "id": "hok" in the script', str(stop.exception))
+
     def test_rerender_draws_a_2d_episodes_frames_again_for_a_change_the_render_cant_see(self):
         # a picture the scene loads isn't in the frames' stamp: --rerender only said it changes nothing here
         ep = self.episode()
@@ -359,7 +402,8 @@ class WithTheRestOfThePipeline(unittest.TestCase):
         self.assertEqual(ran, ["render.py --frames"])
         self.assertEqual(sorted(set(range(1, 91)) - {int(f.stem[2:]) for f in frames.glob("f_*.jpg")}),
                          list(range(31, 47)))                           # seconds 1 to 1.5, as the stills number them
-        self.assertIn("drawing frames 31-46 (1.0-1.5 s) again; the other frames are kept", said)
+        self.assertIn("drawing frames 31-46 (1.0-1.5 s) again", said)
+        self.assertNotIn("are kept", said)      # (the render draws them all where the scene or the script changed too)
         ran, said = self.main(ep, "--steps", "render", "--rerender", "all")
         self.assertEqual((ran, list(frames.glob("f_*.jpg"))), (["render.py --frames"], []))
         self.assertIn("deleted 74 frames: drawing every frame again", said)
@@ -430,6 +474,13 @@ class WithTheRestOfThePipeline(unittest.TestCase):
             self.assertIn("ffmpeg couldn't write the voiceover (Invalid data found when processing input)",
                           str(stop.exception))
             self.assertFalse(final.exists())                    # ... and is not left to be taken for this one's
+            # (a voice.wav that can't be taken away either, open in a player: a sentence still, not a traceback)
+            with mock.patch.object(voice.subprocess, "run", broken), \
+                    mock.patch.object(Path, "unlink", side_effect=PermissionError(13, "in use")), \
+                    self.assertRaises(SystemExit) as stop:
+                voice.resample(raw, final)
+            self.assertIn("is open in another program. Close it there, then run --steps build again",
+                          str(stop.exception))
 
     def test_the_voices_gain_moves_it_against_everything_else(self):
         # "gain_db" was measured after it was applied and scaled straight back out: any value gave the same mix
@@ -505,6 +556,14 @@ class AChannelThatMakes3dVideos(Scratch):
         for unreadable in ("{", "[]", '{"channel_name": "Night Physics", "format": ["custom"]}'):
             (self.root / "my-studio" / "answers.json").write_text(unreadable, encoding="utf-8")
             self.assertEqual(settings.engines_in_use(), set(), unreadable)      # not known: it asks for neither tool
+        # ... and doctor doesn't say that these channels make 2D videos, which it can't know
+        from studio import doctor, tools
+
+        with mock.patch.object(tools, "find_blender", return_value=None):
+            rows = {what: (status, detail) for status, what, detail in doctor.checks(quiet=True).rows}
+        self.assertEqual(rows["Blender"][0], doctor.WARN)
+        self.assertIn("isn't known until the channel's settings file is put right", rows["Blender"][1])
+        self.assertEqual(rows["Settings"][0], doctor.FAIL)
 
 
 class Draw(unittest.TestCase):

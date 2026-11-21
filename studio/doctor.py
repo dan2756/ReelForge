@@ -170,7 +170,10 @@ def checks(render_test: bool = False, quiet: bool = False) -> Report:
               + ("" if "2d" in kinds else " (only 2D videos need it)"))
 
     blender = tools.find_blender()
-    if not blender and "blender" not in kinds:
+    if not blender and not kinds:       # no channel's settings or answers could be read: which kind isn't known
+        r.add(WARN, "Blender", "not installed. Whether it is needed isn't known until the channel's settings file is "
+                               "put right (Settings, below): 3D videos need it, 2D videos don't")
+    elif not blender and "blender" not in kinds:
         r.add(OK, "Blender", "not installed, and not needed: your channels make 2D videos (setup can download it "
                              "for a 3D channel)")
     elif not blender:

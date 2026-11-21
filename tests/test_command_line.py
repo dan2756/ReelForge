@@ -123,6 +123,31 @@ class Commands(Scratch):
         self.assertTrue((ep / "scene.js").is_file())
         self.assertIn(f'make_episode.py {Path("episodes") / "ep01_penny"} --steps build,stills', out)
 
+    def test_new_episode_says_so_when_no_example_is_of_the_channels_kind(self):
+        from studio import paths as P
+
+        self.onboard_main(video_type="blender", format="disappear")
+        none = self.root / "no-examples"
+        none.mkdir()
+        with mock.patch.object(P, "EXAMPLES", none):
+            code, out = self.run_main("new-episode", "snowball")
+        self.assertEqual(code, 1, out)
+        self.assertIn("examples/ has no 3D video to start from", out)       # it said: no example or episode called ''
+        self.assertFalse((self.root / "episodes" / "ep01_snowball").exists())
+
+    def test_answers_that_are_not_a_set_of_answers_get_one_line(self):
+        # A list, a line of text and a number are JSON too: each went on into a traceback ('list' object has no
+        # attribute 'items').
+        self.onboard_main()
+        file = self.root / "answers-again.json"
+        for text in ("[]", '"hello"', "3"):
+            for argv in (["channel", "--answers", str(file)], ["channel", "--new", "--answers", str(file)]):
+                with self.subTest(text=text, new="--new" in argv):
+                    file.write_text(text, encoding="utf-8")
+                    code, out = self.run_main(*argv)
+                    self.assertEqual(code, 1, out)
+                    self.assertIn("isn't a set of answers: it has to be one JSON object", out)
+
     def test_publish_check_on_an_episode_json_with_a_typo_is_one_fail_line(self):
         self.onboard_main()
         ep = self.root / "episodes" / "ep01_snowball"

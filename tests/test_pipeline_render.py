@@ -352,6 +352,9 @@ class RenderGuard(Steps):
         self.rendered(range(1, 13), self.built())
         for options, why in (({"rerender": "5-9"}, "starts after the last rendered frame"),
                              ({"rerender": "soon"}, "isn't a range of seconds"),
+                             ({"rerender": "inf"}, "isn't a range of seconds"),      # (numbers to float(): each of
+                             ({"rerender": "0-1e400"}, "isn't a range of seconds"),  # them ended in a traceback)
+                             ({"rerender": "nan"}, "isn't a range of seconds"),
                              ({"rerender": "all", "keep": True}, "don't go together")):
             with self.assertRaisesRegex(SystemExit, why):
                 self.render(**options)

@@ -317,6 +317,9 @@ def describe() -> list[dict]:
             item["question"] = f"Your {q.prompt} handle"
         if q.help:
             item["help"] = q.help
+        if q.key == "loudness":     # the default given here is a 2D channel's: an AI offered it for a 3D one as well
+            item["help"] = ("The default follows video_type: voice (-16 LUFS) for 2d, quiet (-25.5 LUFS) for blender, "
+                            "whose videos have no voice. Leave it out of the answers unless they pick one.")
         if q.kind == "handle":
             guide = signup.GUIDES[q.key.removeprefix("handle_")]
             item["signup"] = {"page": guide.url, "steps": guide.steps_for()}

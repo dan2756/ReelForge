@@ -168,8 +168,12 @@ def resample(raw: Path, final: Path) -> None:
     if done.returncode != 0 or not written():
         done = run("")
     if done.returncode != 0 or not written():
-        final.unlink(missing_ok=True)
         why = (done.stderr or "").strip().splitlines()[-1:] or ["it gave no reason"]
+        try:
+            final.unlink(missing_ok=True)       # not left to be taken for this script's voice
+        except OSError:                         # open in another program (a player): ffmpeg couldn't write it either
+            raise SystemExit(f"2D: ffmpeg couldn't write the voiceover ({why[0]}): {final} is open in another "
+                             "program. Close it there, then run --steps build again.") from None
         raise SystemExit(f"2D: ffmpeg couldn't write the voiceover ({why[0]}). Run python -m studio doctor to check "
                          "ffmpeg, then --steps build again.")
 

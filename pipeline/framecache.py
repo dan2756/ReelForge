@@ -13,6 +13,7 @@ Standard library only: build_scene.py imports this inside Blender's own Python.
 """
 import hashlib
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -265,6 +266,8 @@ def frames_for(text, fps, total):
             continue
         try:
             a, b = (float(x) for x in part.split("-", 1)) if "-" in part else (float(part), float(part))
+            if not (math.isfinite(a) and math.isfinite(b)):     # "inf", "nan", "1e400": numbers to float(), no seconds
+                raise ValueError(part)
         except ValueError:
             raise ValueError(f"{part!r} isn't a range of seconds: write them like 12-15.5,31-33") from None
         if b < a:

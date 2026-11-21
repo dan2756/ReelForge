@@ -159,6 +159,9 @@ def onboard(argv: list[str], *, preserve_settings: bool = False, only: profiles.
         except ValueError as e:
             print(f"{src} isn't valid JSON: {e}")
             return 1
+        if not isinstance(answers, dict):       # a list, a number, a line of text: it went on into a traceback
+            print(f"{src} isn't a set of answers: it has to be one JSON object, {{\"key\": value, ...}}")
+            return 1
         target = None
         again = not args.new and S.onboarded()  # run again: the update prompt
         if args.new:  # a new profile: its own folder in profiles/, named after the channel
@@ -468,6 +471,10 @@ def new_episode(argv: list[str]) -> int:
         source = next((d.name for d in sorted(P.EXAMPLES.iterdir()) if _example_kind(d) == S.engine(s)), "")
     src = next((p / "episode.json" for p in (P.EXAMPLES / source, P.EPISODES / source)
                 if source and (p / "episode.json").exists()), None)
+    if src is None and not source:      # (the kit's own examples were taken out of examples/)
+        print(f"examples/ has no {'2D' if twod else '3D'} video to start from: name an episode of yours to copy with "
+              "--from")
+        return 1
     if src is None:
         print(f"no example or episode called {source!r} (examples: "
               f"{', '.join(d.name for d in P.EXAMPLES.iterdir() if d.is_dir())})")
