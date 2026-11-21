@@ -192,21 +192,46 @@ describe("where each post stands", () => {
     const h = await kit({ extension: "on", jobs: { instagram: ["opening", "failed"], x: ["ready", "unknown"] } })
     let now = 10_000
     pressClock.now = () => now
+    const was = posting(h) // the rows before the press: Instagram's with Try again, X's under it
     const before = state(h, "x")
     expect(row(h, "X")).toMatch(/▐ It's posted ▌ ▐ It didn't post ▌/)
-    await clickOnRow(h, "Instagram", "Try again")
-    // Instagram's row as it is a moment later (sent from here, so that it is there at once): fewer words, other buttons
-    h.bridge.emit("posting", { ...posting(h), rows: posting(h).rows.map((r) => (r.key === "instagram" ? { ...r, line: r.line.slice(0, 1), actions: ["cancel"] } : r)) })
+    const again = find(h, "▐ Try again ▌")! // Instagram's
+    const spot: [number, number] = [again[0] + 2, again[1]]
+    await h.t.mockMouse.click(...spot)
+    await until(h, () => state(h, "instagram") !== "failed") // (what the Python side makes of it has come and gone)
+    await h.settle(300)
+    // X's row where Instagram's was a moment ago, as when the rows above it took fewer lines. Sent from here, with
+    // the words Instagram's row had, so that it is drawn on the very same lines: X's first button is under the pointer.
+    const xRow = was.rows.find((r) => r.key === "x")!
+    const moved = was.rows.filter((r) => r.key !== "x").map((r) => (r.key === "instagram" ? { ...xRow, line: r.line } : r))
+    h.bridge.emit("posting", { ...was, rows: moved })
     await h.settle(60)
+    const under = find(h, "▐ It's posted ▌")!
+    expect(under[1]).toBe(spot[1])
+    expect(under[0]).toBeLessThanOrEqual(spot[0])
+    expect(under[0] + 15).toBeGreaterThan(spot[0])
     now += 120
-    await clickOnRow(h, "X", "It's posted") // the second click, on what is under the pointer now
+    await h.t.mockMouse.click(...spot) // the second click of the double click, on the same spot
     await h.settle(700)
     expect(state(h, "x")).toBe(before)
-    expect(state(h, "x")).not.toBe("posted")
     now += 1000 // ... and a press in its own right does what it says
-    await clickOnRow(h, "X", "It's posted")
+    await h.t.mockMouse.click(...spot)
     await until(h, () => state(h, "x") === "posted")
     expect(state(h, "x")).toBe("posted")
+  })
+
+  test("... and a press somewhere else straight after one still does what it says", async () => {
+    // The guard goes by the spot. Cancel on one row and then on another, 300 ms on, are two presses you meant: kept
+    // from the second, that platform's post went on.
+    const h = await kit({ extension: "on", jobs: { tiktok: ["uploading"], instagram: ["uploading"] } })
+    let now = 10_000
+    pressClock.now = () => now
+    await clickOnRow(h, "TikTok", "Cancel")
+    await until(h, () => state(h, "tiktok") === "cancelled") // its row has changed
+    now += 300
+    await clickOnRow(h, "Instagram", "Cancel")
+    await until(h, () => state(h, "instagram") === "cancelled")
+    expect([state(h, "tiktok"), state(h, "instagram")]).toEqual(["cancelled", "cancelled"])
   })
 
   test("a post a stats read found has its numbers and its link; one nobody picked up can be tried again", async () => {

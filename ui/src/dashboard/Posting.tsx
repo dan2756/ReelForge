@@ -19,7 +19,7 @@ import { useView } from "../bridge"
 import { useFocus, useFocusManager } from "../lib/focus"
 import { cellLen, plain, segsLen, wrappedRows, type Parts, type Segs } from "../lib/styled"
 import { DASH } from "../theme"
-import { Button } from "../ui/Button"
+import { Button, type Cell } from "../ui/Button"
 import { Switch } from "../ui/Fields"
 import { Fitted } from "../ui/Line"
 import { DialogButtons, Modal, modalRoom, Panel, Scroll, toasts, useWidth, Wrapped } from "../ui/Panels"
@@ -85,14 +85,19 @@ export function PostBlock() {
   // becomes Try again, and It's posted comes up where It didn't post was. A row whose words get shorter takes one line
   // where it took two, and the rows under it move up: another platform's button is under the pointer. That second
   // click was a press of whatever had come up: a post just called off started again, or one that never went up
-  // written down as posted. So a press on a row that comes straight after another does nothing when anything about
-  // the rows changed in between.
+  // written down as posted. So a press on a row that comes straight after another, on the same spot, does nothing
+  // when anything about the rows changed in between. (On the same spot: a press somewhere else that soon is one you
+  // meant, Cancel on one row and then on the next, and it does what it says.)
   const shown = JSON.stringify([head, (v?.rows ?? []).map((r) => [r.key, r.line, r.actions, Boolean(r.api?.force)])])
-  const last = useRef({ shown, at: -DOUBLE_CLICK }) // the rows at the last press, and when that was
-  const pressRow = (row: PostingRow, action: string) => {
+  // the rows at the last press, when that was, and the cell the pointer pressed at (none: the keyboard)
+  const last = useRef<{ shown: string; at: number; cell?: Cell }>({ shown, at: -DOUBLE_CLICK })
+  const pressRow = (row: PostingRow, action: string, cell?: Cell) => {
     const now = pressClock.now()
-    if (now - last.current.at < DOUBLE_CLICK && last.current.shown !== shown) return
-    last.current = { shown, at: now }
+    const was = last.current
+    // (a cell to either side is still the same spot: the hand moves a little between the two clicks)
+    const sameSpot = cell && was.cell ? cell.y === was.cell.y && Math.abs(cell.x - was.cell.x) <= 1 : !cell && !was.cell
+    if (now - was.at < DOUBLE_CLICK && was.shown !== shown && sameSpot) return
+    last.current = { shown, at: now, cell }
     s.postAction(row, action)
   }
   return (
@@ -104,7 +109,7 @@ export function PostBlock() {
         <Wrapped segs={head} width={Math.max(width - 6, 0)} />
       </box>
       {(v?.rows ?? []).map((row) => (
-        <PostRow key={row.key} row={row} labels={v!.labels} nameWidth={nameWidth} room={width - nameWidth} press={(action) => pressRow(row, action)} />
+        <PostRow key={row.key} row={row} labels={v!.labels} nameWidth={nameWidth} room={width - nameWidth} press={(action, at) => pressRow(row, action, at)} />
       ))}
       {v && picked && !v.rows.length ? (
         <box flexDirection="row" flexShrink={0} gap={2}>
@@ -138,7 +143,7 @@ export function PostBlock() {
  * Python side sent no words for isn't drawn. On a row whose video is up on YouTube while this window is connected to
  * YouTube's API (row.api.force), one more button asks about posting it there again that way. press: what a press of
  * one does (PostBlock's, which knows the second click of a double click). */
-function PostRow({ row, labels, nameWidth, room, press }: { row: PostingRow; labels: Record<string, string>; nameWidth: number; room: number; press: (action: string) => void }) {
+function PostRow({ row, labels, nameWidth, room, press }: { row: PostingRow; labels: Record<string, string>; nameWidth: number; room: number; press: (action: string, at?: Cell) => void }) {
   const actions = [...row.actions, ...(row.api?.force ? ["post_api_again"] : [])].filter((a) => labels[a])
   const label = (action: string) => labels[action]!
   const buttons = actions.reduce((n, a) => n + cellLen(label(a)) + 5, 0) // each with its ends and the gap before it
@@ -158,7 +163,7 @@ function PostRow({ row, labels, nameWidth, room, press }: { row: PostingRow; lab
           // YouTube row has three, and the third was cut off in a window 100 columns wide)
           <box flexDirection="row" flexWrap={beside ? "no-wrap" : "wrap"} flexShrink={0} columnGap={1}>
             {actions.map((action) => (
-              <Button key={action} id={`post-${row.key}-${action}`} label={label(action)} onPress={() => press(action)} />
+              <Button key={action} id={`post-${row.key}-${action}`} label={label(action)} onPress={(at) => press(action, at)} />
             ))}
           </box>
         ) : null}

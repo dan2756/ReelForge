@@ -7,10 +7,17 @@ import { useFocus, useTheme } from "../lib/focus"
 import { cellLen } from "../lib/styled"
 import { along, mix } from "../theme"
 
+/** A cell of the screen: where the pointer was when it pressed a button. */
+export interface Cell {
+  x: number
+  y: number
+}
+
 export interface ButtonProps {
   id: string
   label: string
-  onPress: () => void
+  /** at: the cell the pointer pressed it at; nothing when the keyboard did. */
+  onPress: (at?: Cell) => void
   variant?: "primary" | "default" | "error" | "ghost"
   disabled?: boolean
   /** Columns wide; by default the label and two spaces either side. */
@@ -29,8 +36,8 @@ export function Button(props: ButtonProps) {
   const { id, label, onPress, variant = "default", disabled = false } = props
   const [hover, setHover] = useState(false)
   const [down, setDown] = useState(false)
-  const press = () => {
-    if (!disabled) onPress()
+  const press = (at?: Cell) => {
+    if (!disabled) onPress(at)
   }
   const { ref, focused, focus } = useFocus(id, {
     disabled,
@@ -65,10 +72,10 @@ export function Button(props: ButtonProps) {
       focus()
       setDown(true)
     },
-    onMouseUp: (e: { button: number }) => {
+    onMouseUp: (e: { button: number; x: number; y: number }) => {
       if (!down) return
       setDown(false)
-      if (e.button === 0) press()
+      if (e.button === 0) press({ x: e.x, y: e.y })
     },
     onMouseOver: () => setHover(true),
     onMouseOut: () => {
