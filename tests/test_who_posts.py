@@ -23,7 +23,7 @@ RULE = ("Never post, upload or send anything", "with the browser extension (`doc
         "`dashboard/data/extension.json`", "switching on Press Post for me")
 GUIDES = ("AGENTS.md", "CLAUDE.md", "studio/templates/context.md.j2")
 PAGES = ("README.md", "dashboard/README.md", "THIRD_PARTY.md", "docs/PIPELINE.md", "docs/EXTENSION.md",
-         "docs/YOUTUBE-API.md", "studio/templates/channel-bible.md.j2", *GUIDES)
+         "docs/YOUTUBE-API.md", "studio/templates/channel-bible.md.j2", ".github/release-notes.md", *GUIDES)
 # Pages that are not in this tree yet. They come with the editing backend (pull request #6), which was written while
 # posting by hand was the only way, and are read from the day they are here.
 LATER = ("docs/AGENTCUT.md", "studio/agentcut.py")
@@ -92,7 +92,10 @@ class ThePages(unittest.TestCase):
         for rel, said in (("README.md", "Not by itself, and never without your press."),
                           ("dashboard/README.md", "Nothing is posted without your press"),
                           ("THIRD_PARTY.md", "Nothing is posted without your press"),
-                          ("docs/PIPELINE.md", "every post starts with your own press")):
+                          ("docs/PIPELINE.md", "every post starts with your own press"),
+                          # the release's own page (under the --- that the Updates tab stops at): it said "Nothing is
+                          # ever posted for you" until 3.1
+                          (".github/release-notes.md", "Nothing is posted without your press")):
             text = flat((KIT / rel).read_text(encoding="utf-8"))
             self.assertIn(said, text, rel)
             if rel != "THIRD_PARTY.md":
