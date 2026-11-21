@@ -77,9 +77,9 @@ The first update that keeps that record can't tell yet. There the new list's ent
 was goes to `backups/sounds-before-update-<date>.json` first, and the update names the entries it replaced: put back
 any of yours from the copy, under a name of its own. (Where that copy can't be made, your entries stay as they are
 instead, the update says which, and it keeps no record yet, so the next update asks again and keeps the copy then.)
-The one exception is the update away from ReelForge 2.2.1, which 2.2.1's own updater does: it puts the new list over
-yours. Your sound files stay where they are, so add their entries again after that update, or keep a copy of your
-`manifest.json` before it.
+The one exception is the update away from ReelForge 3.0.0 or older, which that version's own updater does: it puts
+the new list over yours. Your sound files stay where they are, so add their entries again after that update, or keep
+a copy of your `manifest.json` before it.
 
 An update that stops at a file another program has open says all this in its message, and again when you update
 again and it finishes.

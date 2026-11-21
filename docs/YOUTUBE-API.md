@@ -58,7 +58,8 @@ Keep the file out of any folder you share or commit. ReelForge's own `.gitignore
 
 ## Connect ReelForge
 
-On the Publish tab, above Post…, press **YouTube API…**. Its dialog has a box for the client file. Type or paste
+On the Publish tab, above Post…, press **YouTube API…**. The button is there once YouTube is connected on the
+Accounts tab and a video is picked on the Publish tab. Its dialog has a box for the client file. Type or paste
 where the file you downloaded is, and press **Connect with this file**. Google's consent page opens in your
 browser, and the dialog says that it is waiting for your answer there.
 

@@ -225,9 +225,21 @@ files in your ReelForge folder. The extension is loaded from that folder. Its co
 files there, and the browser reads some of them afresh for every post. Such a program can change what the
 extension does: start a post, and press Post, with no switch and no click. It can also read your videos directly.
 An AI that works in your ReelForge folder is such a program. What keeps it from posting is that it is told not
-to, and that ReelForge gives it no command for it. Two smaller things are also left open: a page that you open on
-one of ReelForge's ports can ask the extension to connect to whatever serves it, and a program that listens on
-ReelForge's port in the two seconds after ReelForge closes could be sent the token once.
+to, and that ReelForge gives it no command for it.
+
+Two more things are left open. A page that you open on one of ReelForge's ports can ask the extension to connect to
+whatever serves it, with no click from you. A program that listens on one of those ports and gets its page opened
+in your browser then counts as ReelForge to the extension, and it need not run as you: another account on a shared
+computer, or a container or virtual machine that shares this computer's addresses, can listen there too. That
+program could have the extension open the upload pages and fill them in with a video and text of its own, with no
+press in ReelForge (on YouTube a video that is attached is uploaded as a draft). It also learns which account your
+browser is signed in to on each platform, and it can hand the extension a list of page hooks of its own, which
+stays until you disconnect that browser. If it answers with your ReelForge's own id, which anyone on this computer
+can ask for, your ReelForge shows as not connected until you connect it again; with an id of its own, the
+extension's popup lists one more ReelForge window. It could not get Post pressed unless Press Post for me is on for
+that platform and you give the yes for one of its posts: a click on its page, or Post in the extension's popup
+while the popup is showing that program. And a program that listens on ReelForge's port in the two seconds after
+ReelForge closes could be sent the token, and with it pass for your ReelForge until you connect again.
 
 Nor does it protect against another account on this computer, if the computer is shared and that account can see
 which programs yours is running. The pages ReelForge opens in your browser carry a key in their address: ten
