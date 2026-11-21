@@ -21,16 +21,31 @@ from .paths import ROOT
 # A review's verdict. An approval is the whole word APPROVED in capitals, as the guides ask for it. A rejection is
 # "rejected" or "not ... approved" however it's written. Prose after the verdict ("what to fix before this is
 # approved", "the shots approved before") is not a verdict, and DISAPPROVED or pre-approved is not an approval.
-# A "not ... approved" is on one line: a list's last line that ends "... not cut off", with the verdict APPROVED on the
-# line after it, is an approval (read across the line break it was "NOT CUT OFF APPROVED", a rejection).
+# A "not ... approved" is one statement. On one line it may have a word or two in it ("NOT YET APPROVED"). Across a
+# line break it is one only where the line can't have ended there: a sentence wrapped right after "not", or after
+# "not yet", "not been", "not be" or "not to" (in a review wrapped at 120 columns, "... so this cut is NOT" and then
+# "APPROVED." is a rejection: read line by line it was an approval, and the cut shipped). A list's last line that ends
+# "... not cut off", with the verdict APPROVED on the line after it, is an approval (read across the line break it was
+# "NOT CUT OFF APPROVED", a rejection), and so is an APPROVED after an empty line, whatever the line before ends in.
 _APPROVAL = re.compile(r"(?<![\w-])APPROVED(?![\w-])")
-_REJECTION = re.compile(r"\b(?:rejected|not[^\S\n]+(?:\w+[^\S\n]+){0,2}approved)\b", re.IGNORECASE)
+_GAP = r"[^\S\n]+"                      # the space between two words on a line
+_WRAP = r"[^\S\n]*\n[^\S\n]*"           # ... and where a line was wrapped: one line break, not an empty line
+_GOES_ON = r"(?:yet|been|be|being|to)"  # after "not", a word no line of a review ends its statement on
+_REJECTION = re.compile(
+    r"\b(?:rejected"
+    rf"|not{_GAP}(?:\w+{_GAP}){{0,2}}approved"                      # on one line
+    rf"|not{_WRAP}(?:\w+{_GAP}){{0,2}}approved"                     # wrapped after "not"
+    rf"|not(?:{_GAP}{_GOES_ON}){{1,2}}{_WRAP}approved"              # ... after "not yet", "not yet been", "not to be"
+    rf"|not{_GAP}{_GOES_ON}{_WRAP}{_GOES_ON}{_GAP}approved"         # ... or between those two
+    r")\b", re.IGNORECASE)
+_LINE_BREAK = re.compile(r"\r\n?|[\v\f\x1c-\x1e\x85\u2028\u2029]")     # each one that str.splitlines() knows
 _RECEIPT = re.compile(r"^Review-SHA256:\s*([0-9a-f]{64})\s*$", re.MULTILINE)
 
 
 def _verdict(text: str) -> str:
     """approved, rejected, or "" when the review gives no verdict. The latest one wins: an approval stands only
     if no rejection comes after it."""
+    text = _LINE_BREAK.sub("\n", text)
     rejections = [m.span() for m in _REJECTION.finditer(text)]
     approvals = [m.start() for m in _APPROVAL.finditer(text)
                  if not any(a <= m.start() < b for a, b in rejections)]

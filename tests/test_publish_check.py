@@ -53,6 +53,43 @@ class ReviewVerdict(unittest.TestCase):
         self.assertFalse(self.verdict("## Verdict\nNOT\u00a0APPROVED"))            # with a no-break space between
         self.assertFalse(self.verdict("NOT\u202fYET\u3000APPROVED"))
 
+    def test_a_rejection_wrapped_onto_two_lines_is_still_a_rejection(self):
+        # A review wrapped at 120 columns breaks "NOT APPROVED" between its words about one time in ten. Read line by
+        # line that was an approval: the APPROVED that starts the next line was the verdict, and the cut shipped.
+        self.assertFalse(self.verdict("The rewind is 2.6 s, over the 2.2 s the format allows, so this cut is NOT\n"
+                                      "APPROVED. Fix both and render again."))
+        self.assertFalse(self.verdict("Two captions sit over the wrong shot. NOT YET\nAPPROVED: fix them first."))
+        self.assertFalse(self.verdict("Two captions sit over the wrong shot. This cut is NOT\nYET APPROVED."))
+        self.assertFalse(self.verdict("The loop jumps at the rewind, so this cut has NOT BEEN\nAPPROVED."))
+        self.assertFalse(self.verdict("The loop jumps at the rewind, so this cut has NOT YET BEEN\n  APPROVED."))
+        self.assertFalse(self.verdict("The loop jumps at the rewind, so this cut has NOT YET\nBEEN APPROVED."))
+        self.assertFalse(self.verdict("The counter can't be read over the clouds: this cut should NOT BE\nAPPROVED."))
+        self.assertFalse(self.verdict("The counter can't be read over the clouds: this cut is NOT TO\nBE APPROVED."))
+        self.assertFalse(self.verdict("so this cut is NOT   \n    APPROVED"))               # spaces round the break
+        self.assertFalse(self.verdict("APPROVED\n\nSecond look: a caption is cut off at 41 s, so this one is not\n"
+                                      "approved after all."))
+        with tempfile.TemporaryDirectory() as tmp:      # ... and with the line ends Windows writes
+            path = Path(tmp) / "review.md"
+            path.write_bytes(b"The rewind is too long, so this cut is NOT\r\nAPPROVED. Fix it and render again.\r\n")
+            self.assertFalse(review_approved(path))
+            path.write_bytes(b"- Captions: readable, not cut off\r\nAPPROVED\r\n")
+            self.assertTrue(review_approved(path))
+
+    def test_an_empty_line_ends_the_statement(self):
+        # a new paragraph is a new statement, whatever the one before it ends in
+        self.assertTrue(self.verdict("- Glitch before the reversal: there is not\n\nAPPROVED"))
+        self.assertTrue(self.verdict("- Posted anywhere: not yet\n\nAPPROVED"))
+        # Straight under a line that ends in "not" or "not yet" it reads as that sentence going on. That is the safe
+        # way round: the other way, a cut that was turned down ships.
+        self.assertFalse(self.verdict("- Posted anywhere: not yet\nAPPROVED"))
+
+    def test_every_kind_of_line_break_ends_a_line(self):
+        for name, br in (("vertical tab", chr(0x0b)), ("form feed", chr(0x0c)), ("next line", chr(0x85)),
+                         ("line separator", chr(0x2028)), ("paragraph separator", chr(0x2029))):
+            with self.subTest(between=name):
+                self.assertTrue(self.verdict(f"- Captions: readable, not cut off{br}APPROVED"))
+                self.assertFalse(self.verdict(f"so this cut is NOT{br}APPROVED"))
+
     def test_a_fingerprint_has_to_be_in_the_review(self):
         digest = "ab" * 32
         with tempfile.TemporaryDirectory() as tmp:
