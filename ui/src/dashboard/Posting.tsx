@@ -40,6 +40,10 @@ const reachable = (ext: ExtensionView | undefined) => Boolean(ext && (ext.state 
 const HINT_BUTTONS = 24 // columns Set it up and Hide take beside the hint, with the gaps
 const POST_BUTTON = 11 // ... Post… and the gap after it
 const BROWSERS_BUTTON = 15 // ... and Browsers…, with the gap before it
+const DOUBLE_CLICK = 450 // ms: a second press this soon after the first is the second click of a double click
+/** The clock a double click is told by (not the one on the wall, which can be set back). A test sets it, so that its
+ * two clicks are as far apart as it says however slowly its machine draws. */
+export const pressClock = { now: () => performance.now() }
 
 /** POST, on the Publish tab: the picked video's review, a row for each connected platform, the line for YouTube's own
  * API (YouTubeApi.tsx: one quiet button until it is set up), then Post… with the extension's state beside it, and
@@ -77,6 +81,20 @@ export function PostBlock() {
   const line = v?.extension.line ?? []
   const browsers = Boolean(v && v.extension.state !== "off" && !problem)
   const fits = segsLen(line.slice(0, 1)) <= width - POST_BUTTON - (browsers ? BROWSERS_BUTTON : 0)
+  // The second click of a double click. A press moves its post on, and the buttons with it, in the same place: Cancel
+  // becomes Try again, and It's posted comes up where It didn't post was. A row whose words get shorter takes one line
+  // where it took two, and the rows under it move up: another platform's button is under the pointer. That second
+  // click was a press of whatever had come up: a post just called off started again, or one that never went up
+  // written down as posted. So a press on a row that comes straight after another does nothing when anything about
+  // the rows changed in between.
+  const shown = JSON.stringify([head, (v?.rows ?? []).map((r) => [r.key, r.line, r.actions, Boolean(r.api?.force)])])
+  const last = useRef({ shown, at: -DOUBLE_CLICK }) // the rows at the last press, and when that was
+  const pressRow = (row: PostingRow, action: string) => {
+    const now = pressClock.now()
+    if (now - last.current.at < DOUBLE_CLICK && last.current.shown !== shown) return
+    last.current = { shown, at: now }
+    s.postAction(row, action)
+  }
   return (
     <box flexDirection="column" marginTop={1} flexShrink={0} onSizeChange={measure}>
       <box flexDirection="row" flexShrink={0}>
@@ -86,7 +104,7 @@ export function PostBlock() {
         <Wrapped segs={head} width={Math.max(width - 6, 0)} />
       </box>
       {(v?.rows ?? []).map((row) => (
-        <PostRow key={row.key} row={row} labels={v!.labels} nameWidth={nameWidth} room={width - nameWidth} />
+        <PostRow key={row.key} row={row} labels={v!.labels} nameWidth={nameWidth} room={width - nameWidth} press={(action) => pressRow(row, action)} />
       ))}
       {v && picked && !v.rows.length ? (
         <box flexDirection="row" flexShrink={0} gap={2}>
@@ -114,29 +132,15 @@ export function PostBlock() {
   )
 }
 
-const DOUBLE_CLICK = 450 // ms: a second press this soon after the first is the second click of a double click
-
 /** One platform: its name, where its post stands in the Python side's words, and a button for each thing that can be
  * done about it: at the end of the line while it all fits in one (room: the columns after the name), else under the
  * words, which then wrap under themselves. A button says its words (labels), never an action's own name: one the
  * Python side sent no words for isn't drawn. On a row whose video is up on YouTube while this window is connected to
- * YouTube's API (row.api.force), one more button asks about posting it there again that way. */
-function PostRow({ row, labels, nameWidth, room }: { row: PostingRow; labels: Record<string, string>; nameWidth: number; room: number }) {
-  const s = useDash()
+ * YouTube's API (row.api.force), one more button asks about posting it there again that way. press: what a press of
+ * one does (PostBlock's, which knows the second click of a double click). */
+function PostRow({ row, labels, nameWidth, room, press }: { row: PostingRow; labels: Record<string, string>; nameWidth: number; room: number; press: (action: string) => void }) {
   const actions = [...row.actions, ...(row.api?.force ? ["post_api_again"] : [])].filter((a) => labels[a])
   const label = (action: string) => labels[action]!
-  // A row's buttons change the moment its post moves on, and in the same place: Cancel becomes Try again, and It's
-  // posted comes up where It didn't post was. The second click of a double click on the old button was a press of
-  // the new one: the post just called off started again, or one that never went up was written down as posted. So a
-  // press that comes straight after another on this row does nothing when the buttons changed in between.
-  const shown = actions.join(" ")
-  const last = useRef({ shown, at: -DOUBLE_CLICK }) // the row's buttons at its last press, and when that was
-  const press = (action: string) => {
-    const now = performance.now() // (not the clock on the wall, which can be set back)
-    if (now - last.current.at < DOUBLE_CLICK && last.current.shown !== shown) return
-    last.current = { shown, at: now }
-    s.postAction(row, action)
-  }
   const buttons = actions.reduce((n, a) => n + cellLen(label(a)) + 5, 0) // each with its ends and the gap before it
   const beside = segsLen(row.line) + buttons <= room
   return (

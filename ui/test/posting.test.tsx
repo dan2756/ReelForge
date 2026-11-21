@@ -17,6 +17,7 @@ import { headless, type Headless } from "../scripts/headless"
 import { clickText, find } from "../scripts/shots"
 import { Bridge, ROOT } from "../src/bridge"
 import { DashboardApp } from "../src/dashboard/App"
+import { pressClock } from "../src/dashboard/Posting"
 import type { ExtensionView, Init, PostingView } from "../src/dashboard/types"
 import { toasts } from "../src/ui/Panels"
 
@@ -26,6 +27,7 @@ let tmp = ""
 const SERVER = { REELFORGE_EXTENSION_PORT: "0" } // this window listens for the extension, on any free port
 const NO_SERVER = { REELFORGE_EXTENSION_PORT: "off" } // ... and this one doesn't, whatever the tests were started with
 const CAPTION = "What if hail doubled every 2 seconds?"
+const clock = pressClock.now // the real one: a test of a double click sets its own, and gets this one back after
 
 /** A window on the scratch channel, with what the test asks the preload for. */
 async function kit(ask: object = {}, size: [number, number] = [150, 45], env: Record<string, string> = SERVER, tab = "publish"): Promise<Headless> {
@@ -43,6 +45,7 @@ async function kit(ask: object = {}, size: [number, number] = [150, 45], env: Re
 }
 
 afterEach(async () => {
+  pressClock.now = clock
   await open?.close()
   open = null
   toasts.clear()
@@ -158,6 +161,8 @@ describe("where each post stands", () => {
     // The moment a post is called off, Try again and It's posted come up where its Cancel was. The second click of a
     // double click was a press of them: the post just cancelled was written down as posted, or started again.
     const h = await kit({ extension: "on", jobs: { tiktok: ["uploading"] } })
+    let now = 10_000
+    pressClock.now = () => now // the two clicks are 120 ms apart, however slowly this machine draws
     const made = jobsMade()
     const at = find(h, "▐ Cancel ▌")!
     const x = at[0] + 7 // near its right-hand end, where It's posted ends too
@@ -168,14 +173,40 @@ describe("where each post stands", () => {
     await h.settle(60)
     expect(row(h, "TikTok")).toMatch(/▐ Try again ▌ ▐ It's posted ▌/)
     expect(find(h, "▐ It's posted ▌")![0]).toBeLessThanOrEqual(x) // it is under the pointer now
+    now += 120
     await h.t.mockMouse.click(x, at[1]) // the second click of the double click, on what is there now
     await until(h, () => state(h, "tiktok") === "cancelled")
     await h.settle(700)
     expect([state(h, "tiktok"), jobsMade(), listed("opened.txt")]).toEqual(["cancelled", made, []])
     // ... and a moment later the buttons do what they say
+    now += 1000
     await clickOnRow(h, "TikTok", "It's posted")
     await until(h, () => state(h, "tiktok") === "posted")
     expect(state(h, "tiktok")).toBe("posted")
+  })
+
+  test("... nor the button of the row under it, which moves up when the row above gets shorter", async () => {
+    // A row whose words get shorter takes one line where it took two, and the rows under it move up. The second click
+    // of a double click on Instagram's Try again was then a press of X's It's posted: a post that never went up,
+    // written down as posted.
+    const h = await kit({ extension: "on", jobs: { instagram: ["opening", "failed"], x: ["ready", "unknown"] } })
+    let now = 10_000
+    pressClock.now = () => now
+    const before = state(h, "x")
+    expect(row(h, "X")).toMatch(/▐ It's posted ▌ ▐ It didn't post ▌/)
+    await clickOnRow(h, "Instagram", "Try again")
+    // Instagram's row as it is a moment later (sent from here, so that it is there at once): fewer words, other buttons
+    h.bridge.emit("posting", { ...posting(h), rows: posting(h).rows.map((r) => (r.key === "instagram" ? { ...r, line: r.line.slice(0, 1), actions: ["cancel"] } : r)) })
+    await h.settle(60)
+    now += 120
+    await clickOnRow(h, "X", "It's posted") // the second click, on what is under the pointer now
+    await h.settle(700)
+    expect(state(h, "x")).toBe(before)
+    expect(state(h, "x")).not.toBe("posted")
+    now += 1000 // ... and a press in its own right does what it says
+    await clickOnRow(h, "X", "It's posted")
+    await until(h, () => state(h, "x") === "posted")
+    expect(state(h, "x")).toBe("posted")
   })
 
   test("a post a stats read found has its numbers and its link; one nobody picked up can be tried again", async () => {
