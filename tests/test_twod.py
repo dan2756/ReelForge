@@ -336,9 +336,17 @@ class WithTheRestOfThePipeline(unittest.TestCase):
                 with self.assertRaises(SystemExit) as stop:
                     self.main(ep, "--steps", "post")
                 self.assertIn("run --steps build again first", str(stop.exception))
-                with mock.patch.object(audio_mix, "build_cache"), self.assertRaises(SystemExit) as stop:
-                    audio_mix.build(ep)                 # the audio step by itself says it too, in a sentence
+                # the audio step by itself says it too, in a sentence, and before it reads a sound: the episode's
+                # sounds may not be on this computer, and the voice is what is wrong
+                no_sound = AssertionError("a sound was read before the voice was looked at")
+                with mock.patch.object(audio_mix, "build_cache", side_effect=no_sound), \
+                        mock.patch.object(audio_mix, "load", side_effect=no_sound), \
+                        self.assertRaises(SystemExit) as stop:
+                    audio_mix.build(ep)
                 self.assertIn("--steps build", str(stop.exception))
+        with self.assertRaises(SystemExit) as stop:     # ... as it does for a script that was never voiced
+            audio_mix.build(self.episode(voiced=False))
+        self.assertIn("isn't voiced yet: run --steps build first", str(stop.exception))
 
     def test_rerender_draws_a_2d_episodes_frames_again_for_a_change_the_render_cant_see(self):
         # a picture the scene loads isn't in the frames' stamp: --rerender only said it changes nothing here

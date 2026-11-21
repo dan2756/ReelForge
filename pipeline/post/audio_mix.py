@@ -248,12 +248,20 @@ def ducking(voice, depth_db):
 
 def build(ep_dir):
     spec = config.load_spec(ep_dir)
-    series = json.loads((ep_dir / "build" / "series.json").read_text(encoding="utf-8"))
     A = spec.get("audio") or {}
-    build_cache(needed=cue_sounds(A))
-    ev = series.get("events", {})
+    twod = config.engine(spec) == "2d"
+    if twod and spec.get("duration") is None:
+        raise SystemExit("2D: the script isn't voiced yet: run --steps build first")
     dur = spec["duration"]
     n = int(dur * SR)
+    # The voice before any sound is read: an episode whose voice step left none stops here, in a sentence, whatever
+    # sounds this computer has.
+    voice = load_voice(ep_dir, n) if (twod or A.get("voice")) else None
+    if voice is None and twod:
+        raise SystemExit("2D: there is no voiceover (build/voice/voice.wav) to mix: run --steps build first")
+    series = json.loads((ep_dir / "build" / "series.json").read_text(encoding="utf-8"))
+    build_cache(needed=cue_sounds(A))
+    ev = series.get("events", {})
     buf = np.zeros((n, 2), np.float32)
     rnd = random.Random(11)
     hits_buf = np.zeros_like(buf)
@@ -324,9 +332,6 @@ def build(ep_dir):
         for b in A.get("beds", []):   # beds that deliberately start after the cut (e.g. the loop back to the start)
             if b["from"] >= cut:
                 render_bed(b, 0.0)
-    voice = load_voice(ep_dir, n) if (config.engine(spec) == "2d" or A.get("voice")) else None
-    if voice is None and config.engine(spec) == "2d":
-        raise SystemExit("2D: there is no voiceover (build/voice/voice.wav) to mix: run --steps build first")
     speech = None
     if voice is not None:
         vc = A.get("voice") or {}
