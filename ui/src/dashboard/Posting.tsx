@@ -114,6 +114,8 @@ export function PostBlock() {
   )
 }
 
+const DOUBLE_CLICK = 450 // ms: a second press this soon after the first is the second click of a double click
+
 /** One platform: its name, where its post stands in the Python side's words, and a button for each thing that can be
  * done about it: at the end of the line while it all fits in one (room: the columns after the name), else under the
  * words, which then wrap under themselves. A button says its words (labels), never an action's own name: one the
@@ -123,6 +125,18 @@ function PostRow({ row, labels, nameWidth, room }: { row: PostingRow; labels: Re
   const s = useDash()
   const actions = [...row.actions, ...(row.api?.force ? ["post_api_again"] : [])].filter((a) => labels[a])
   const label = (action: string) => labels[action]!
+  // A row's buttons change the moment its post moves on, and in the same place: Cancel becomes Try again, and It's
+  // posted comes up where It didn't post was. The second click of a double click on the old button was a press of
+  // the new one: the post just called off started again, or one that never went up was written down as posted. So a
+  // press that comes straight after another on this row does nothing when the buttons changed in between.
+  const shown = actions.join(" ")
+  const last = useRef({ shown, at: -DOUBLE_CLICK }) // the row's buttons at its last press, and when that was
+  const press = (action: string) => {
+    const now = performance.now() // (not the clock on the wall, which can be set back)
+    if (now - last.current.at < DOUBLE_CLICK && last.current.shown !== shown) return
+    last.current = { shown, at: now }
+    s.postAction(row, action)
+  }
   const buttons = actions.reduce((n, a) => n + cellLen(label(a)) + 5, 0) // each with its ends and the gap before it
   const beside = segsLen(row.line) + buttons <= room
   return (
@@ -140,7 +154,7 @@ function PostRow({ row, labels, nameWidth, room }: { row: PostingRow; labels: Re
           // YouTube row has three, and the third was cut off in a window 100 columns wide)
           <box flexDirection="row" flexWrap={beside ? "no-wrap" : "wrap"} flexShrink={0} columnGap={1}>
             {actions.map((action) => (
-              <Button key={action} id={`post-${row.key}-${action}`} label={label(action)} onPress={() => s.postAction(row, action)} />
+              <Button key={action} id={`post-${row.key}-${action}`} label={label(action)} onPress={() => press(action)} />
             ))}
           </box>
         ) : null}

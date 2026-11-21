@@ -154,6 +154,30 @@ describe("where each post stands", () => {
     expect(frame(h)).not.toContain("Something went wrong")
   })
 
+  test("a double click on a row's button never presses the one that comes up in its place", async () => {
+    // The moment a post is called off, Try again and It's posted come up where its Cancel was. The second click of a
+    // double click was a press of them: the post just cancelled was written down as posted, or started again.
+    const h = await kit({ extension: "on", jobs: { tiktok: ["uploading"] } })
+    const made = jobsMade()
+    const at = find(h, "▐ Cancel ▌")!
+    const x = at[0] + 7 // near its right-hand end, where It's posted ends too
+    await h.t.mockMouse.click(x, at[1])
+    // The row with the buttons a post that was called off has, as the Python side sends it a moment later: sent from
+    // here, so the second click finds them there at once, however fast this machine answers.
+    h.bridge.emit("posting", { ...posting(h), rows: posting(h).rows.map((r) => (r.key === "tiktok" ? { ...r, actions: ["retry", "mark_posted"] } : r)) })
+    await h.settle(60)
+    expect(row(h, "TikTok")).toMatch(/▐ Try again ▌ ▐ It's posted ▌/)
+    expect(find(h, "▐ It's posted ▌")![0]).toBeLessThanOrEqual(x) // it is under the pointer now
+    await h.t.mockMouse.click(x, at[1]) // the second click of the double click, on what is there now
+    await until(h, () => state(h, "tiktok") === "cancelled")
+    await h.settle(700)
+    expect([state(h, "tiktok"), jobsMade(), listed("opened.txt")]).toEqual(["cancelled", made, []])
+    // ... and a moment later the buttons do what they say
+    await clickOnRow(h, "TikTok", "It's posted")
+    await until(h, () => state(h, "tiktok") === "posted")
+    expect(state(h, "tiktok")).toBe("posted")
+  })
+
   test("a post a stats read found has its numbers and its link; one nobody picked up can be tried again", async () => {
     const h = await kit({ extension: "on", jobs: { tiktok: ["queued"], youtube: ["expired"] }, spotted: { instagram: 2100 } })
     expect(row(h, "TikTok")).toMatch(/● waiting for the extension to pick it up +▐ Cancel ▌/)
