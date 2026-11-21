@@ -41,6 +41,7 @@ const HINT_BUTTONS = 24 // columns Set it up and Hide take beside the hint, with
 const POST_BUTTON = 11 // ... Post… and the gap after it
 const BROWSERS_BUTTON = 15 // ... and Browsers…, with the gap before it
 const DOUBLE_CLICK = 450 // ms: a second press this soon after the first is the second click of a double click
+const NEXT_ROW = 250 // ms: ... and a press on the next row of the screen this soon is that click too, slipped a row
 /** The clock a double click is told by (not the one on the wall, which can be set back). A test sets it, so that its
  * two clicks are as far apart as it says however slowly its machine draws. */
 export const pressClock = { now: () => performance.now() }
@@ -94,9 +95,13 @@ export function PostBlock() {
   const pressRow = (row: PostingRow, action: string, cell?: Cell) => {
     const now = pressClock.now()
     const was = last.current
-    // (a cell to either side is still the same spot: the hand moves a little between the two clicks)
-    const sameSpot = cell && was.cell ? cell.y === was.cell.y && Math.abs(cell.x - was.cell.x) <= 1 : !cell && !was.cell
-    if (now - was.at < DOUBLE_CLICK && was.shown !== shown && sameSpot) return
+    const since = now - was.at
+    // (A cell to either side is still the same spot: the hand moves a little between the two clicks. So is the row
+    // above or below, with the pointer at a row's edge, for as long as no one takes to move on to the next row.)
+    const dx = cell && was.cell ? Math.abs(cell.x - was.cell.x) : 0
+    const dy = cell && was.cell ? Math.abs(cell.y - was.cell.y) : 0
+    const sameSpot = cell && was.cell ? dx <= 1 && (dy === 0 || (dy === 1 && since < NEXT_ROW)) : !cell && !was.cell
+    if (since < DOUBLE_CLICK && was.shown !== shown && sameSpot) return
     last.current = { shown, at: now, cell }
     s.postAction(row, action)
   }

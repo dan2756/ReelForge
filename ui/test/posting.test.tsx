@@ -174,7 +174,7 @@ describe("where each post stands", () => {
     expect(row(h, "TikTok")).toMatch(/▐ Try again ▌ ▐ It's posted ▌/)
     expect(find(h, "▐ It's posted ▌")![0]).toBeLessThanOrEqual(x) // it is under the pointer now
     now += 120
-    await h.t.mockMouse.click(x, at[1]) // the second click of the double click, on what is there now
+    await h.t.mockMouse.click(x + 1, at[1]) // the second click of the double click (the hand moved a cell), on what is there now
     await until(h, () => state(h, "tiktok") === "cancelled")
     await h.settle(700)
     expect([state(h, "tiktok"), jobsMade(), listed("opened.txt")]).toEqual(["cancelled", made, []])
@@ -218,6 +218,26 @@ describe("where each post stands", () => {
     await h.t.mockMouse.click(...spot)
     await until(h, () => state(h, "x") === "posted")
     expect(state(h, "x")).toBe("posted")
+  })
+
+  test("... nor the next row's, when the second click slips a row down", async () => {
+    // The pointer at a row's lower edge, and a hand that moves a little between the two clicks: the second one is on
+    // the next platform's row, whose button sits right under the first. It cancelled that platform's post as well.
+    const h = await kit({ extension: "on", jobs: { tiktok: ["uploading"], youtube: ["uploading"] } })
+    let now = 10_000
+    pressClock.now = () => now
+    const at = find(h, "▐ Cancel ▌")! // TikTok's, with YouTube's right under it
+    expect(find(h, "▐ Cancel ▌", at[1] + 1)).toEqual([at[0], at[1] + 1])
+    await h.t.mockMouse.click(at[0] + 4, at[1])
+    await until(h, () => state(h, "tiktok") === "cancelled") // its row has changed
+    now += 120
+    await h.t.mockMouse.click(at[0] + 4, at[1] + 1) // the second click of the double click, a row down
+    await h.settle(1500)
+    expect([state(h, "tiktok"), state(h, "youtube")]).toEqual(["cancelled", "uploading"])
+    now += 200 // a third of a second after the first press: you moved on to YouTube's row, and mean it
+    await h.t.mockMouse.click(at[0] + 4, at[1] + 1)
+    await until(h, () => state(h, "youtube") === "cancelled")
+    expect(state(h, "youtube")).toBe("cancelled")
   })
 
   test("... and a press somewhere else straight after one still does what it says", async () => {
