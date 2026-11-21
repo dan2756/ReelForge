@@ -401,7 +401,10 @@ class WithTheRestOfThePipeline(unittest.TestCase):
         (ep / "episode.json").write_text(json.dumps(spec), encoding="utf-8")
         with self.assertRaises(TypeError):
             config.load_spec(ep)
-        self.assertIn("voiced     yes\n", self.main(ep, "--status")[1])
+        said = self.main(ep, "--status")[1]
+        self.assertIn("voiced     yes\n", said)
+        self.assertIn("episode.json has a mistake that every step stops on (TypeError: ", said)
+        self.assertNotIn("isn't known until it is voiced", said)        # it is voiced: that is not what is wrong
 
     def test_rerender_draws_a_2d_episodes_frames_again_for_a_change_the_render_cant_see(self):
         # a picture the scene loads isn't in the frames' stamp: --rerender only said it changes nothing here

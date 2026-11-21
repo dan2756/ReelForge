@@ -212,8 +212,9 @@ def read_spec(ep, steps=(), status=False):
         if not status:
             stale_voice(ep)     # the script changed since it was voiced, or isn't voiced: run --steps build (again)
         raise
-    except Exception:           # a time that is no time ("cover": {"time": null}): --status still says where it stands
+    except Exception as exc:    # a time that is no time ("cover": {"time": null}): --status still says where it stands
         if status:
+            raw["_mistake"] = f"{type(exc).__name__}: {exc}"     # ... and that every step stops on this (status_2d)
             return raw
         stale_voice(ep)
         raise
@@ -604,6 +605,9 @@ def status_2d(ep, spec, frames_dir):
               "unfinished": "no: the voice step left no voice (run --steps build again)",
               "stale": "yes, but the script or the voice changed since: run --steps build again"}[voice_state(ep)]
     have = framecache.present(frames_dir)
+    if spec.get("_mistake"):                    # the spec as written, which its reader stopped on (read_spec)
+        return ("voiced", voiced), (f"{len(have)}; how many there should be can't be told: episode.json has a mistake "
+                                    f"that every step stops on ({spec['_mistake']})")
     if spec.get("render_until") is None:        # "duration": "auto" and no voiceover yet to take the length from
         return ("voiced", voiced), f"{len(have)}, of a video whose length isn't known until it is voiced"
     total = int(round(spec["render_until"] * spec["fps"]))
