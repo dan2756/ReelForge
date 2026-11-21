@@ -34,8 +34,9 @@ START = {
     "windows": """ReelForge {v} for Windows
 
 1. Setup. The install line starts it for you; to run it again, double-click setup.bat. It lists what ReelForge
-   still needs (Python packages, Blender, ffmpeg, the sound effects, the reelforge command), sets it all up in this
-   folder once you say yes, then starts a short interview about your channel.
+   still needs (Python packages, the voice for 2D videos, ffmpeg, the sound effects, the reelforge command, and
+   Blender once a channel makes 3D videos), sets it all up in this folder once you say yes, then starts a short
+   interview about your channel.
 2. Setup's last screen has the prompt for your AI, with a Copy button. Paste it into Claude Code (the Claude
    desktop app's Code tab), Codex or any AI that can work with files on your computer: it has this folder's path
    in it, so there's nothing to drag in, and your AI makes your first video. (Copy prompt for your AI, on
@@ -48,8 +49,9 @@ Keep this folder somewhere with a short path, e.g. C:\\Users\\<you>\\ReelForge. 
 
 1. Setup. The install line starts it for you; to run it again, run ./setup.sh in Terminal in this folder (or
    double-click "Set up ReelForge.command"). It lists what ReelForge still needs (Python if you haven't got it,
-   Blender, ffmpeg, the sound effects, the reelforge command and ReelForge in your Applications folder), puts it all
-   in this folder once you say yes, then starts a short interview about your channel.
+   the voice for 2D videos, ffmpeg, the sound effects, the reelforge command, ReelForge in your Applications folder,
+   and Blender once a channel makes 3D videos), puts it all in this folder once you say yes, then starts a short
+   interview about your channel.
 2. Setup's last screen has the prompt for your AI, with a Copy button. Paste it into Claude Code (the Claude
    desktop app's Code tab), Codex or any AI that can work with files on your computer: it has this folder's path
    in it, so there's nothing to drag in, and your AI makes your first video. (Copy prompt for your AI, on
@@ -62,9 +64,9 @@ Full guide: README.md
     "linux": """ReelForge {v} for Linux (x64, or ARM with your own Blender)
 
 1. Setup. The install line starts it for you; to run it again, run ./setup.sh in a terminal in this folder. It
-   lists what ReelForge still needs (Python if you haven't got a recent one, Blender, ffmpeg, the sound effects, the
-   reelforge command and ReelForge in your app menu), puts it all in this folder once you say yes, then starts a
-   short interview about your channel.
+   lists what ReelForge still needs (Python if you haven't got a recent one, the voice for 2D videos, ffmpeg, the
+   sound effects, the reelforge command, ReelForge in your app menu, and Blender once a channel makes 3D videos),
+   puts it all in this folder once you say yes, then starts a short interview about your channel.
 2. Setup's last screen has the prompt for your AI, with a Copy button. Paste it into Claude Code (claude in a
    terminal), Codex or any AI that can work with files on your computer: it has this folder's path in it, so
    there's nothing to drag in, and your AI makes your first video. (Copy prompt for your AI, on ReelForge's

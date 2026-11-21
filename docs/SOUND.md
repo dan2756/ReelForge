@@ -1,7 +1,8 @@
 # Sound
 
-The videos have no voiceover, so sound design carries the energy: ambience, rising beds, a hit on every milestone,
-the climax loudest. Two things ruin it, and QA checks for both: **static** and **loudness**.
+A 3D video has no voiceover, so sound design carries the energy: ambience, rising beds, a hit on every milestone,
+the climax loudest. (In a 2D video the voice comes first and the sounds sit under it: `docs/2D.md`.) Two things ruin
+it, and QA checks for both: **static** and **loudness**.
 
 ## No static, ever
 
@@ -28,10 +29,11 @@ Every mix is mastered to the channel's target (`my-studio/studio.toml` -> `[soun
 first-time setup) by `pipeline/post/loudness.py`. QA FAILs a video louder than the target + 2 LU integrated, a loudest
 3 s above the target + 8, or a true peak above the limit (-6 dBTP at the default).
 
-The default, -25.5 LUFS, is quieter than most uploads on purpose. These videos are booms, rumbles and risers with
-no voice: at -15 LUFS (a normal level for music and speech) they were reported as "insanely loud", and -25.5
-fixed it. Don't raise it for one video. If you want it louder for the whole channel, run `reelforge channel` and pick
-another level.
+The default for 3D videos, -25.5 LUFS, is quieter than most uploads on purpose. These videos are booms, rumbles and
+risers with no voice: at -15 LUFS (a normal level for music and speech) they were reported as "insanely loud", and
+-25.5 fixed it. (A 2D channel's videos have a voiceover, and start at -16 LUFS, the usual level for speech:
+`docs/2D.md`.) Don't raise it for one video. If you want it louder for the whole channel, run `reelforge channel`
+and pick another level.
 
 `target_rms_db` in a cue sheet only balances the mix internally; it doesn't set how loud the video is.
 
