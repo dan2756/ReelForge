@@ -41,21 +41,28 @@ _REJECTION = re.compile(
     rf"|{_NOT}(?:{_GAP}{_GOES_ON}){{1,2}}{_WRAP}approved"           # ... after "not yet", "not yet been", "not to be"
     rf"|{_NOT}{_GAP}{_GOES_ON}{_WRAP}\w+{_GAP}approved"             # ... or after the first of two such words
     r")\b", re.IGNORECASE)
-_LINE_BREAK = re.compile(r"\r*\n|\r|[\v\f\x1c-\x1e\x85\u2028\u2029]")     # each one that str.splitlines() knows
+_LINE_BREAK = re.compile(r"\r+\n?|\n|[\v\f\x1c-\x1e\x85\u2028\u2029]")     # each one that str.splitlines() knows
 _RECEIPT = re.compile(r"^Review-SHA256:\s*([0-9a-f]{64})\s*$", re.MULTILINE)
+
+
+def _breaks(text: str) -> str:
+    """The text with each line break in it as one "\\n". CRs before an LF are that one line break, however many
+    (CR LF, and CR CR LF where text that had CRLF already was written out as text on Windows). CRs with no LF after
+    them are a line break each. One pass over each run of CRs: a file that is CRs for 200 kB is read in a moment."""
+    return _LINE_BREAK.sub(lambda m: "\n" * len(m.group()) if m.group().endswith("\r") else "\n", text)
 
 
 def _read(review: Path) -> str:
     """A review's text, each line break in it one "\\n". The bytes are read as they are: read as text, a file with
-    CR CR LF line ends (text that had CRLF already, written out as text on Windows) came back with an empty line
-    after every line, and a rejection wrapped onto two lines read as two statements."""
-    return _LINE_BREAK.sub("\n", review.read_bytes().decode("utf-8", errors="replace"))
+    CR CR LF line ends came back with an empty line after every line, and a rejection wrapped onto two lines read
+    as two statements."""
+    return _breaks(review.read_bytes().decode("utf-8", errors="replace"))
 
 
 def _verdict(text: str) -> str:
     """approved, rejected, or "" when the review gives no verdict. The latest one wins: an approval stands only
     if no rejection comes after it."""
-    text = _LINE_BREAK.sub("\n", text)
+    text = _breaks(text)
     rejections = [m.span() for m in _REJECTION.finditer(text)]
     approvals = [m.start() for m in _APPROVAL.finditer(text)
                  if not any(a <= m.start() < b for a, b in rejections)]

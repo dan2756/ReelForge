@@ -70,6 +70,7 @@ class ReviewVerdict(unittest.TestCase):
         self.assertFalse(self.verdict("The title covers the counter, so this cut is NOT FULLY\nAPPROVED yet."))
         self.assertFalse(self.verdict("The title covers the counter, so this cut is NOT YET\nFULLY APPROVED."))
         self.assertFalse(self.verdict("Looked at it again, and as it stands this is NOT an\nAPPROVED cut."))
+        self.assertFalse(self.verdict("Looked at it again: as it stands this is NOT the\nfinal APPROVED cut."))
         self.assertTrue(self.verdict("- Is the floor level? Not quite level, and it reads fine\nAPPROVED"))
         self.assertFalse(self.verdict("APPROVED\n\nSecond look: a caption is cut off at 41 s, so this one is not\n"
                                       "approved after all."))
@@ -87,6 +88,21 @@ class ReviewVerdict(unittest.TestCase):
             self.assertTrue(review_approved(path))
             path.write_bytes(b"- Glitch before the reversal: there is not\r\r\n\r\r\nAPPROVED\r\r\n")   # an empty line
             self.assertTrue(review_approved(path))
+            path.write_bytes(b"- Glitch before the reversal: there is not\r\rAPPROVED\r")   # CRs alone: one each
+            self.assertTrue(review_approved(path))
+            path.write_bytes(b"The rewind is too long, so this cut is NOT\rAPPROVED. Fix it and render again.\r")
+            self.assertFalse(review_approved(path))
+
+    def test_a_review_that_is_carriage_returns_for_200_kb_is_read_in_a_moment(self):
+        # (each CR was looked at once for every CR after it: 13 seconds for a file like this one)
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "review.md"
+            path.write_bytes(b"APPROVED" + b"\r" * 200_000)
+            began = time.perf_counter()
+            self.assertTrue(review_approved(path))
+            self.assertLess(time.perf_counter() - began, 2.0)
 
     def test_no_longer_approved_is_a_rejection(self):
         # in capitals it was an approval: the word APPROVED, and no "not" before it
