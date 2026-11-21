@@ -195,6 +195,19 @@ class LastGoodVideo(Composing):
         self.assertEqual(self.video.read_bytes(), b"the last good video")
         self.assertEqual(self.left_over(), [self.video.name])
 
+    def test_ffmpeg_stopping_midway_on_windows_is_said_the_same_way(self):
+        # there a write to an ffmpeg that has gone is OSError 22, not a BrokenPipeError: the step ended in a traceback
+        import errno
+
+        def gone(data):
+            Ffmpeg.last.code = 1
+            raise OSError(errno.EINVAL, "Invalid argument")
+        with mock.patch.object(Ffmpeg, "feed", lambda self, data: gone(data)):
+            with self.assertRaisesRegex(SystemExit, "ffmpeg failed.*ep01_test.mp4 was left as it was"):
+                self.make_video()
+        self.assertEqual(self.video.read_bytes(), b"the last good video")
+        self.assertEqual(self.left_over(), [self.video.name])
+
     def test_a_fault_while_drawing_a_frame_stops_ffmpeg_and_leaves_the_last_video_alone(self):
         ep = self.episode()
         real = ep.frame

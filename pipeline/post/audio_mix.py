@@ -201,6 +201,8 @@ def load_voice(ep_dir, n):
     p = ep_dir / "build" / "voice" / "voice.wav"
     if not p.exists():
         return None
+    if p.stat().st_size <= 44:      # 3.0's voice step left it empty where ffmpeg has no soxr, and the mix a traceback
+        raise SystemExit(f"{p} is empty: the voice step did not finish. Run --steps build again.")
     with wave.open(str(p)) as w:
         if w.getframerate() != SR:
             raise SystemExit(f"{p} is {w.getframerate()} Hz, not {SR}: run the voice step (--steps build) again")
@@ -219,6 +221,18 @@ def _moving(x, k, centred=True):
         pad = k // 2
         return np.concatenate([np.full(pad, out[0]), out, np.full(len(x) - len(out) - pad, out[-1])])
     return np.concatenate([np.full(k - 1, out[0]), out])
+
+
+VOICE_REFERENCE_DB = -20.0      # where the narration sits (RMS while it speaks) before the mix is mastered
+
+
+def voice_at_reference(voice, speaking, gain_db=0.0):
+    """(the narration at VOICE_REFERENCE_DB while it speaks, plus gain_db; that level in dB). The level is measured
+    before the gain goes on: measured after it, as it was, the gain was scaled straight back out, and "gain_db" in
+    an episode's audio.voice changed nothing."""
+    rms = float(np.sqrt(np.mean(voice[speaking] ** 2))) + 1e-9
+    level = VOICE_REFERENCE_DB + float(gain_db)
+    return voice * np.float32(10 ** (level / 20) / rms), level
 
 
 def ducking(voice, depth_db):
@@ -311,6 +325,8 @@ def build(ep_dir):
             if b["from"] >= cut:
                 render_bed(b, 0.0)
     voice = load_voice(ep_dir, n) if (config.engine(spec) == "2d" or A.get("voice")) else None
+    if voice is None and config.engine(spec) == "2d":
+        raise SystemExit("2D: there is no voiceover (build/voice/voice.wav) to mix: run --steps build first")
     speech = None
     if voice is not None:
         vc = A.get("voice") or {}
@@ -319,20 +335,17 @@ def build(ep_dir):
         hits_buf *= (1.0 - (1.0 - duck) * 0.5)[:, None]
     buf += hits_buf
     if voice is not None:
-        vt = voice * np.float32(10 ** (float((A.get("voice") or {}).get("gain_db", 0.0)) / 20))
-        # the voice sits at -20 dBFS RMS while it speaks before the mix is mastered, so gain_db is relative to that
+        # the voice sits at -20 dBFS RMS while it speaks before the mix is mastered, and gain_db is on top of that
         on = speech if speech.any() else np.ones(n, bool)
-        vrms = float(np.sqrt(np.mean(vt[on] ** 2))) + 1e-9
-        scale = np.float32(10 ** (-20 / 20) / vrms)
-        vt *= scale
+        vt, level = voice_at_reference(voice, on, float((A.get("voice") or {}).get("gain_db", 0.0)))
         bed_rms = float(np.sqrt(np.mean(buf[on] ** 2))) + 1e-9
         bed_rms_raw = bed_rms
-        if (A.get("voice") or {}).get("bed_db") is not None:    # pin everything else this far under the voice
-            target = 10 ** ((-20 + float(A["voice"]["bed_db"])) / 20)
+        if (A.get("voice") or {}).get("bed_db") is not None:    # pin everything else this far under the reference
+            target = 10 ** ((VOICE_REFERENCE_DB + float(A["voice"]["bed_db"])) / 20)
             buf *= np.float32(target / bed_rms)
             bed_rms = target
         buf += np.stack([vt, vt], 1)
-        over = 20 * math.log10(10 ** (-20 / 20) / bed_rms)
+        over = 20 * math.log10(10 ** (level / 20) / bed_rms)
         (ep_dir / "build" / "mix.json").write_text(json.dumps({"voice_over_rest_db": round(over, 1),
                                                                "rest_before_db": round(20 * math.log10(bed_rms_raw), 1)}),
                                                    encoding="utf-8")

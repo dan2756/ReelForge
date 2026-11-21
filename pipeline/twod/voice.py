@@ -149,6 +149,31 @@ def spread(show: str, start: float, end: float) -> list[dict]:
     return out
 
 
+def resample(raw: Path, final: Path) -> None:
+    """The narration as the mixers take it: high-passed at 40 Hz and at 48 kHz, resampled with soxr where this ffmpeg
+    has it. An ffmpeg built without soxr (the one setup downloads on Windows is) stops at the resampler with the file
+    already made, empty. So whether to go again without soxr is read from the command's own answer and from what is
+    in the file, not from the file being there: the mix stopped on an empty voice.wav, and no 2D video got made."""
+    ffmpeg = config.require_ffmpeg()
+
+    def run(how: str) -> subprocess.CompletedProcess:
+        return subprocess.run([ffmpeg, "-y", "-v", "error", "-i", str(raw), "-af",
+                               f"highpass=f=40,aresample={config.SAMPLE_RATE}{how}", "-ac", "1", "-c:a", "pcm_s16le",
+                               str(final)], capture_output=True, text=True, encoding="utf-8", errors="replace")
+
+    def written() -> bool:
+        return final.is_file() and final.stat().st_size > 44        # more than a WAV file's header
+
+    done = run(":resampler=soxr")
+    if done.returncode != 0 or not written():
+        done = run("")
+    if done.returncode != 0 or not written():
+        final.unlink(missing_ok=True)
+        why = (done.stderr or "").strip().splitlines()[-1:] or ["it gave no reason"]
+        raise SystemExit(f"2D: ffmpeg couldn't write the voiceover ({why[0]}). Run python -m studio doctor to check "
+                         "ffmpeg, then --steps build again.")
+
+
 def build(ep: Path) -> dict:
     spec = json.loads((ep / "episode.json").read_text(encoding="utf-8"))
     script = spec.get("script") or []
@@ -216,13 +241,7 @@ def build(ep: Path) -> dict:
         w.setframerate(KOKORO_SR)
         w.writeframes((np.clip(track, -1, 1) * 32767).astype("<i2").tobytes())
     final = out / "voice.wav"
-    subprocess.run([config.require_ffmpeg(), "-y", "-v", "error", "-i", str(raw), "-af",
-                    f"highpass=f=40,aresample={config.SAMPLE_RATE}:resampler=soxr", "-ac", "1", "-c:a", "pcm_s16le",
-                    str(final)], check=False)
-    if not final.exists() or final.stat().st_mtime < raw.stat().st_mtime:   # an ffmpeg without soxr
-        subprocess.run([config.FFMPEG, "-y", "-v", "error", "-i", str(raw), "-af",
-                        f"highpass=f=40,aresample={config.SAMPLE_RATE}", "-ac", "1", "-c:a", "pcm_s16le", str(final)],
-                       check=True)
+    resample(raw, final)
 
     timeline = {"script_hash": script_hash(spec), "voice": v, "duration": dur, "spoken_end": round(spoken_end, 3),
                 "beats": beats, "words": words}

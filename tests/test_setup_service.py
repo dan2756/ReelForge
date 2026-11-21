@@ -151,6 +151,35 @@ class OnboardTest(unittest.TestCase):
         self.assertTrue(self.fields(changed)["custom_format"]["visible"])  # a custom format asks you to describe it
         self.assertIsNone(self.svc.onboard_change("format", "custom"))  # not a change
 
+    def test_the_kind_of_video_brings_its_loudness_unless_you_picked_one(self):
+        # 3D videos have sound effects alone and are mastered quiet. Picking 3D left the voiceover's loudness of a
+        # 2D video preselected, 9.5 LU louder, and Next wrote it into the channel's settings.
+        self.assertEqual(self.svc.answers["loudness"], "voice")         # a new channel makes 2D videos
+        self.svc.onboard_step(2)
+        self.svc.onboard_change("video_type", "blender")
+        self.assertEqual(self.svc.answers["loudness"], "quiet")
+        self.svc.onboard_change("video_type", "2d")
+        self.assertEqual(self.svc.answers["loudness"], "voice")
+        self.svc.onboard_change("loudness", "medium")                   # yours from here on
+        self.svc.onboard_change("video_type", "blender")
+        self.assertEqual(self.svc.answers["loudness"], "medium")
+
+    def test_a_channel_changed_to_the_other_kind_of_video_gets_that_kinds_loudness(self):
+        # Change your answers starts from the saved ones, and a saved loudness counted as picked: a 3D channel
+        # changed to 2D kept the quiet -25.5 LUFS under its voiceover, and a 2D one changed to 3D kept -16.
+        saved = {"channel_name": "Night Physics", "about": "What-ifs.", "assistant": ["claude"],
+                 "_created": "2026-10-24", "style": "cinematic", "loudness": "quiet"}       # as 2.x saved them
+        for start, kind, follows in ((saved, "2d", "voice"),
+                                     ({**saved, "video_type": "2d", "loudness": "voice"}, "blender", "quiet"),
+                                     ({**saved, "loudness": "loud"}, "2d", "loud")):        # one that was picked
+            with self.subTest(start=start.get("loudness"), kind=kind):
+                svc, _ = setup(start="onboard")
+                with mock.patch("studio.setup_service.saved_answers", lambda: dict(start)):
+                    svc.onboard_start()
+                svc.onboard_step(2)
+                svc.onboard_change("video_type", kind)
+                self.assertEqual(svc.answers["loudness"], follows)
+
     def test_a_custom_length_needs_min_and_max(self):
         self.svc.onboard_step([k for k, _ in self.start["steps"]].index("look"))
         self.svc.onboard_change("length", "custom")

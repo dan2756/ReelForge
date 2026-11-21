@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from . import KIT_NAME, profiles, signup
-from .questions import QUESTIONS, STEPS, coerce, defaults_for, validate
+from .questions import BY_KEY, QUESTIONS, STEPS, coerce, defaults_for, validate
 
 
 def _show_default(q, d) -> str:
@@ -25,6 +25,11 @@ def _show_default(q, d) -> str:
 
 def ask(answers: dict | None = None, inp=input, out=print) -> dict:
     a = defaults_for(dict(answers or {}))
+    # what follows the format, and the kind of video, picked a moment ago: an answer not given before, and a saved
+    # loudness that is just the one its kind of video starts from (so 3D's doesn't stay on a channel changed to 2D)
+    follows = {k for k in ("series", "twist", "default_tags", "hud", "loudness") if k not in (answers or {})}
+    if a.get("loudness") == BY_KEY["loudness"].default_for(a):
+        follows.add("loudness")
     out(f"\n{KIT_NAME}: set up your channel. Press Enter to keep the answer in [brackets].\n")
     for step, label in STEPS:
         out(f"\n== {label} ==")
@@ -36,8 +41,8 @@ def ask(answers: dict | None = None, inp=input, out=print) -> dict:
         for q in QUESTIONS:
             if q.step != step or not q.visible(a):
                 continue
-            if q.key in ("series", "twist", "default_tags", "hud") and q.key not in (answers or {}):
-                a.pop(q.key, None)             # follow the format picked a moment ago
+            if q.key in follows:
+                a.pop(q.key, None)
                 a = defaults_for(a)
             d = a.get(q.key, q.default_for(a))
             out(f"\n{'Your ' + q.prompt + ' handle' if q.kind == 'handle' else q.prompt}" +

@@ -320,14 +320,26 @@ def engine(s: dict) -> str:
 
 
 def engines_in_use() -> set[str]:
-    """The video types the channels in this folder make. Before any channel is set up: 2D, the default for new ones."""
+    """The video types the channels in this folder make. Before any channel is set up: 2D, the default for new ones.
+    A channel whose studio.toml has a mistake in it counts by its answers, as its notes are written meanwhile; if
+    those can't be read either its type isn't known, and it asks for neither the voice nor Blender. (It was left out,
+    so a folder whose one channel makes 3D videos counted as 2D: every start opened setup, asking for the voice.)"""
     from . import profiles
 
-    out = set()
+    out, unknown = set(), False
     for p in profiles.every():
         if p.onboarded:
             try:
                 out.add(engine(load(p.settings)))
             except (OSError, ValueError):
-                continue
-    return out or {"2d"}
+                from . import generate      # (it imports this module)
+
+                try:
+                    answered = generate._answered(p)
+                except Exception:           # answers that read as JSON and are no answers: its type isn't known
+                    answered = None
+                if answered:
+                    out.add(engine(answered))
+                else:
+                    unknown = True
+    return out or (set() if unknown else {"2d"})

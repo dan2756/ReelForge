@@ -65,6 +65,64 @@ class Commands(Scratch):
         self.assertEqual(code, 0, out)
         self.assertIn(f'make_episode.py {Path("episodes") / "ep01_snowball"} --steps build,stills', out)
 
+    def test_new_episode_starts_a_3d_channel_from_a_3d_example_whatever_its_format(self):
+        # "custom" and "disappear" have no starter of their own, and took the first example there is. Since 3.0 that
+        # is the 2D demo: a channel that makes 3D videos got a script, a voice and a scene.js, and a build that asks
+        # for the voice.
+        import json
+
+        for n, answers in enumerate(({"format": "disappear"},
+                                     {"format": "custom", "series": "Snowballs",
+                                      "custom_format": "Each video: a question at the top, a 3D scene that escalates."}),
+                                    start=1):
+            with self.subTest(format=answers["format"]):
+                self.onboard_main(video_type="blender", **answers)
+                code, out = self.run_main("new-episode", "snowball")
+                self.assertEqual(code, 0, out)
+                ep = self.root / "episodes" / f"ep{n:02d}_snowball"
+                spec = json.loads((ep / "episode.json").read_text(encoding="utf-8"))
+                self.assertNotEqual(spec.get("engine"), "2d")
+                self.assertNotIn("script", spec)
+                self.assertFalse((ep / "scene.js").exists())
+                self.assertIn("demo_disaster_pov", out.splitlines()[0])  # the one it took before there was a 2D demo
+                self.assertIn("Next: write the title, lines, HUD, sound cues", out)
+
+    def test_answers_written_out_fresh_keep_the_kind_of_video_the_channel_makes(self):
+        # An AI that redoes the interview writes what it asked over my-studio/answers.json, as the guides tell it,
+        # and runs channel --answers on that file: no date in it, and nothing about the kind of video. A channel that
+        # makes 3D videos became a 2D one, its notes with it, and nothing was said.
+        import json
+        import tomllib
+
+        self.onboard_main(video_type="blender")
+        answers = self.root / "my-studio" / "answers.json"
+        settings = self.root / "my-studio" / "studio.toml"
+        for argv in (["channel", "--answers", str(answers)], ["channel", "--regenerate"]):
+            with self.subTest(argv=argv[1]):
+                answers.write_text(json.dumps({**ANSWERS, "about": "What-ifs, told faster."}), encoding="utf-8")
+                code, out = self.run_main(*argv)
+                self.assertEqual(code, 0, out)
+                self.assertEqual(tomllib.loads(settings.read_text(encoding="utf-8"))["video"]["engine"], "blender")
+                self.assertEqual(json.loads(answers.read_text(encoding="utf-8"))["video_type"], "blender")
+                self.assertIn("Blender builds and renders each scene", (self.root / "CLAUDE.md").read_text("utf-8"))
+        # ... and the kind is still theirs to change, by saying so
+        answers.write_text(json.dumps({**ANSWERS, "video_type": "2d"}), encoding="utf-8")
+        code, out = self.run_main("channel", "--answers", str(answers))
+        self.assertEqual(code, 0, out)
+        self.assertEqual(tomllib.loads(settings.read_text(encoding="utf-8"))["video"]["engine"], "2d")
+
+    def test_new_episode_starts_a_2d_channel_from_the_2d_demo(self):
+        import json
+
+        self.onboard_main(format="custom", series="Pennies",
+                          custom_format="Each video: a money question, answered day by day.")
+        code, out = self.run_main("new-episode", "penny")
+        self.assertEqual(code, 0, out)
+        ep = self.root / "episodes" / "ep01_penny"
+        self.assertEqual(json.loads((ep / "episode.json").read_text(encoding="utf-8"))["engine"], "2d")
+        self.assertTrue((ep / "scene.js").is_file())
+        self.assertIn(f'make_episode.py {Path("episodes") / "ep01_penny"} --steps build,stills', out)
+
     def test_publish_check_on_an_episode_json_with_a_typo_is_one_fail_line(self):
         self.onboard_main()
         ep = self.root / "episodes" / "ep01_snowball"

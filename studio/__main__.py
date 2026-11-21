@@ -429,6 +429,18 @@ def take_profile(argv: list[str]) -> tuple[list[str], str | None]:
     return rest, word
 
 
+def _example_kind(folder: Path) -> str | None:
+    """The kind of video an example in examples/ is, "2d" or "blender" (as settings.engine says it for a channel);
+    None for a folder with no episode.json that reads."""
+    try:
+        spec = json.loads((folder / "episode.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(spec, dict):
+        return None
+    return "2d" if str(spec.get("engine", "blender")).lower() in ("2d", "twod", "canvas") else "blender"
+
+
 def new_episode(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="reelforge new-episode",
                                  description="Start episodes/epNN_<slug>/ from an example or an earlier episode.")
@@ -450,7 +462,10 @@ def new_episode(argv: list[str]) -> int:
     twod = S.engine(s) == "2d"
     source = args.source or ("demo_2d_penny" if twod else starters.get(s["format"]["template"], ""))
     if not args.source and not (P.EXAMPLES / source / "episode.json").exists():
-        source = next((d.name for d in sorted(P.EXAMPLES.iterdir()) if (d / "episode.json").exists()), "")
+        # A format with no starter of its own (custom, disappear): the first example of this channel's kind of video.
+        # The first example of all is the 2D demo since 3.0, which gave a channel that makes 3D videos a script, a
+        # voice and a scene.js its notes say nothing about.
+        source = next((d.name for d in sorted(P.EXAMPLES.iterdir()) if _example_kind(d) == S.engine(s)), "")
     src = next((p / "episode.json" for p in (P.EXAMPLES / source, P.EPISODES / source)
                 if source and (p / "episode.json").exists()), None)
     if src is None:

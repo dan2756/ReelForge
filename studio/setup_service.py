@@ -211,6 +211,10 @@ class Setup(Service):
             start = {k: v for k, v in (start or {}).items() if k in CARRIED}
         self.answers = defaults_for(dict(start or {}))
         self.touched = set(start or {})
+        # A saved loudness that is just the one its kind of video starts from was never picked: it goes on following
+        # the kind (onboard_change), so a channel changed from 3D to 2D, or back, isn't left with the other's.
+        if (start or {}).get("loudness") == BY_KEY["loudness"].default_for(self.answers):
+            self.touched.discard("loudness")
         if self.new:
             side = "Set up a new channel"
             self.create_label = "Create the profile"
@@ -314,6 +318,11 @@ class Setup(Service):
             for dep in ("series", "twist", "hud", "default_tags"):
                 if dep not in self.touched:
                     self.answers.pop(dep, None)
+            self.answers = defaults_for(self.answers)
+        if key == "video_type" and "loudness" not in self.touched:
+            # the loudness that suits the kind of video: a voiceover's for 2D, the quiet one for 3D videos, which
+            # have sound effects alone (picking 3D left the voiceover's preselected, 9.5 LU louder than that)
+            self.answers.pop("loudness", None)
             self.answers = defaults_for(self.answers)
         step = self.steps[self.index][0]
         return {"fields": [self.field(q) for q in self.step_questions(step)]}

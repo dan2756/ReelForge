@@ -218,6 +218,33 @@ def _say_once(say, lines: list[str]) -> None:
             say(line)
 
 
+def _same_kind(answers: dict, w) -> dict:
+    """Answers that don't say what kind of videos, for a channel that is set up: the kind it makes. Answers written
+    out fresh by an AI that redid the interview hold only what it asked, and took a new channel's default: a channel
+    that makes 3D videos became a 2D one without a word. Its settings say what it makes (a studio.toml from before
+    3.0 names no kind: 3D). The fresh answers are often written over my-studio/answers.json itself, so the saved
+    answers only count where the settings can't be read: their kind, or their date from before 3.0, which
+    questions.defaults_for keeps 3D."""
+    if not isinstance(answers, dict) or answers.get("video_type"):
+        return answers
+    if w.settings.is_file():
+        try:
+            return {**answers, "video_type": S.engine(S.load(w.settings))}
+        except (OSError, ValueError):
+            pass
+    try:
+        was = json.loads(w.answers.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return answers
+    if not isinstance(was, dict):
+        return answers
+    if was.get("video_type"):
+        return {**answers, "video_type": was["video_type"]}
+    if was.get("_created") and not answers.get("_created"):
+        return {**answers, "_created": was["_created"]}
+    return answers
+
+
 def _answered(p) -> dict | None:
     """A channel's settings as its saved answers make them, or None when they can't be used either."""
     try:
@@ -628,6 +655,7 @@ def write_all(answers: dict, profile=None, *, account: str = "", again: bool = F
     w = _where(profile)
     notes = w.notes
     first = not w.settings.exists()                     # first-time setup: the channel isn't set up yet
+    answers = _same_kind(answers, w)
     a, problems = validate(answers)
     if problems:
         raise ValueError("some answers need fixing:\n  " + "\n  ".join(problems))

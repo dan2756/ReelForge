@@ -9,6 +9,7 @@ rendered yet, or flat grey when there is neither, and writes labelled contact sh
 sheet_N.jpg, 12 to a sheet). So the lines can be checked against their shots before the render.
 """
 import argparse
+import errno
 import json
 import math
 import os
@@ -174,7 +175,19 @@ class Episode:
     def need_frames(self, step, numbers):
         """Stop, before anything is written, unless these frames (numbered from 1) are on disk, whole, and rendered
         from the scene build/scene.blend holds now. Frames of an older scene look like any others, and a video made
-        from them would carry the new counter and sound over the old picture."""
+        from them would carry the new counter and sound over the old picture. A 2D episode's frames carry their own
+        record of what they were drawn from (pipeline/twod/render.py): after the script is voiced again or scene.js
+        changes, frames drawn before would go under the new voice and captions."""
+        if config.engine(self.spec) == "2d" and framecache.present(self.frames_dir):
+            sys.path.insert(0, str(config.PIPELINE / "twod"))
+            import render as render_2d
+            try:
+                drawn_from = (self.frames_dir / render_2d.FRAMES_STAMP).read_text(encoding="utf-8").strip()
+            except OSError:
+                drawn_from = ""
+            if drawn_from != render_2d.frames_stamp(self.dir, self.spec):
+                raise SystemExit(f"{step}: the frames in build/frames were drawn before the scene, the script or the "
+                                 "spec changed.\n  Run --steps render first: it draws them again by itself.")
         state, what = framecache.frames_state(self.dir / "build")
         if state == "unbuilt":
             raise SystemExit(f"{step}: the last build did not finish, so the frames and build/series.json may not "
@@ -348,12 +361,23 @@ def make_video(ep):
         proc.wait()
         part.unlink(missing_ok=True)
 
+    def to_ffmpeg(send, *data):
+        """Write to ffmpeg, or close its input. An ffmpeg that has stopped reading is a BrokenPipeError, which
+        Windows gives as OSError 22 (Invalid argument): there it ended the step in a traceback."""
+        try:
+            send(*data)
+        except OSError as exc:
+            if isinstance(exc, BrokenPipeError) or exc.errno == errno.EINVAL:
+                raise BrokenPipeError(str(exc)) from None
+            raise
+
     try:
         for idx in range(ep.total):
-            proc.stdin.write(ep.frame(idx).tobytes())
+            frame = ep.frame(idx).tobytes()         # drawn first: a fault in drawing it is not ffmpeg's
+            to_ffmpeg(proc.stdin.write, frame)
             if idx % 300 == 0:
                 print(f"  frame {idx}/{ep.total}", flush=True)
-        proc.stdin.close()
+        to_ffmpeg(proc.stdin.close)
         encoded = proc.wait() == 0
     except BrokenPipeError:         # ffmpeg stopped reading: its own message is just above this one
         encoded = False

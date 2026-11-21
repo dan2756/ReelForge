@@ -8,8 +8,8 @@
 
 A 2D episode ("engine": "2d": a scene.js drawn in a browser, a voiceover and word-by-word captions; docs/2D.md) has
 the same steps: build voices the script (Kokoro) and times every word, stills and render draw the scene. Its render
-draws every frame again by itself when the scene, the script or the spec changed, so --rerender, --keep-frames and
---as-built are for 3D scenes only.
+draws every frame again by itself when the scene, the script or the spec changed, so --keep-frames and --as-built are
+for 3D scenes only, and --rerender all | SECONDS is for a change it can't see (a picture the scene loads).
 
 Steps: build (Blender scene from episode.json, then a lint of the spec) -> stills (preview frames, and the same
        seconds with the text on in build/preview) -> render (all frames; frames of an older scene are never reused
@@ -112,7 +112,13 @@ def main():
     ep = args.episode.resolve()
     if not (ep / "episode.json").exists():
         raise SystemExit(f"{ep / 'episode.json'} not found")
-    spec = config.load_spec(ep)
+    steps = []
+    for s in args.steps.split(","):
+        s = s.strip()
+        if s not in ALIASES and s not in ALL_STEPS:
+            raise SystemExit(f"unknown step {s!r}; steps: {', '.join(ALL_STEPS)} (or post, ship, all)")
+        steps += ALIASES.get(s, [s])
+    spec = read_spec(ep, steps, args.status)
     twod = config.engine(spec) == "2d"
     build = ep / "build"
     final = ep / "final"
@@ -123,24 +129,17 @@ def main():
         print(status(ep, spec))
         return
 
-    steps = []
-    for s in args.steps.split(","):
-        s = s.strip()
-        if s not in ALIASES and s not in ALL_STEPS:
-            raise SystemExit(f"unknown step {s!r}; steps: {', '.join(ALL_STEPS)} (or post, ship, all)")
-        steps += ALIASES.get(s, [s])
     if NEEDS_BLENDER & set(steps) and not twod:
         config.require_blender()
     if (NEEDS_FFMPEG | ({"build"} if twod else set())) & set(steps):
         config.require_ffmpeg()
 
     if twod:
-        for flag, given in (("--rerender", args.rerender), ("--keep-frames", args.keep_frames),
-                            ("--as-built", args.as_built)):
+        for flag, given in (("--keep-frames", args.keep_frames), ("--as-built", args.as_built)):
             if given and {"stills", "render"} & set(steps):
                 print(f"  note: {flag} is for 3D scenes and changes nothing here: a 2D render draws every frame again "
                       "by itself when the scene, the script or the spec changed", flush=True)
-        steps_2d(ep, spec, steps, args.stills)
+        steps_2d(ep, spec, steps, args.stills, args.rerender)
         steps = [s for s in steps if s not in ("build", "stills", "render", "cover")]
         spec = config.load_spec(ep)
 
@@ -192,7 +191,28 @@ def main():
         check_publish(ep)
 
 
-def steps_2d(ep, spec, steps, stills_arg):
+def read_spec(ep, steps=(), status=False):
+    """The episode's spec, as the steps about to run can take it. A 2D episode's times (its length, a cue on a beat,
+    the cover's second) are read off its voiceover (config.load_spec), and until the voice step has run again that
+    is the voiceover of the script as it was. A cue on a beat written since stopped build itself, the one step that
+    voices it. So with build among the steps a 2D spec is taken as episode.json has it (steps_2d reads it again once
+    it is voiced), any other step is told to build first when that is what is wrong, and --status never stops on
+    it: its "voiced" row says so."""
+    raw = json.loads((ep / "episode.json").read_text(encoding="utf-8"))
+    if config.engine(raw) != "2d":
+        return config.load_spec(ep)
+    if "build" in steps and not status:
+        return raw
+    try:
+        return config.load_spec(ep)
+    except (SystemExit, Exception):
+        if status:
+            return raw
+        stale_voice(ep)     # the script changed since it was voiced, or isn't voiced: run --steps build (again)
+        raise
+
+
+def steps_2d(ep, spec, steps, stills_arg, rerender=""):
     """build (the voiceover and its timeline), stills, render and the cover of a 2D episode. The audio, video,
     caption, qa and ship steps are the same for every episode."""
     twod = config.PIPELINE / "twod"
@@ -209,20 +229,44 @@ def steps_2d(ep, spec, steps, stills_arg):
             [round(spec["duration"] * k / 10, 1) for k in range(10)]
         run([sys.executable, twod / "render.py", ep, "--stills", ",".join(f"{s:g}" for s in secs)])
     if "render" in steps:
+        if rerender:
+            redraw_2d(ep, spec, rerender)
         run([sys.executable, twod / "render.py", ep, "--frames"])
     if "cover" in steps:
         run([sys.executable, twod / "render.py", ep, "--cover-base"])
         run([sys.executable, config.PIPELINE / "post" / "compose.py", ep, "--cover"])
 
 
+def redraw_2d(ep, spec, rerender):
+    """--rerender for a 2D episode: the frames asked for go, and the render draws what is missing. It draws every
+    frame again by itself when the scene, the script or the spec changed, but it can't see a change to a picture
+    the scene loads (those aren't in the frames' stamp): this is the way to say so."""
+    frames = ep / "build" / "frames"
+    fps = spec["fps"]
+    total = int(round(spec.get("render_until", spec["duration"]) * fps))
+    try:
+        spans = [(1, float("inf"))] if rerender == "all" else framecache.frames_for(rerender, fps, total)
+    except ValueError as exc:
+        raise SystemExit(f"render: --rerender {exc}") from None
+    gone = framecache.delete(frames, spans) if frames.is_dir() else 0
+    print(f"  deleted {gone} frames: drawing every frame again" if rerender == "all" else
+          f"  drawing {framecache.describe(spans, fps)} again; the other frames are kept", flush=True)
+
+
 def voice_state(ep):
     """Where a 2D episode's voiceover stands: "none" (not voiced yet), "stale" (the script or the voice changed
-    since the voice step) or "fresh"."""
+    since the voice step, or the step left no voice: 3.0 wrote the timeline beside an empty voice.wav where ffmpeg
+    has no soxr) or "fresh"."""
     sys.path.insert(0, str(config.PIPELINE / "twod"))
     import voice
     tl = ep / "build" / "voice" / "timeline.json"
     if not tl.exists():
         return "none"
+    try:
+        if tl.with_name("voice.wav").stat().st_size <= 44:      # no more than a WAV file's header
+            return "stale"
+    except OSError:
+        return "stale"
     spec = json.loads((ep / "episode.json").read_text(encoding="utf-8"))
     try:
         voiced = json.loads(tl.read_text(encoding="utf-8")).get("script_hash")
