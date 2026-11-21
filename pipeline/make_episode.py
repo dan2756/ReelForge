@@ -206,11 +206,16 @@ def read_spec(ep, steps=(), status=False):
         return raw
     try:
         return config.load_spec(ep)
-    except (SystemExit, Exception):
+    except SystemExit:          # in the spec's own words: a cue on a beat the script doesn't have
         if status and voice_state(ep) != "fresh":
             return raw
         if not status:
             stale_voice(ep)     # the script changed since it was voiced, or isn't voiced: run --steps build (again)
+        raise
+    except Exception:           # a time that is no time ("cover": {"time": null}): --status still says where it stands
+        if status:
+            return raw
+        stale_voice(ep)
         raise
 
 

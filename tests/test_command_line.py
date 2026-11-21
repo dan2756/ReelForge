@@ -134,6 +134,11 @@ class Commands(Scratch):
         self.assertEqual(code, 1, out)
         self.assertIn("examples/ has no 3D video to start from", out)       # it said: no example or episode called ''
         self.assertFalse((self.root / "episodes" / "ep01_snowball").exists())
+        with mock.patch.object(P, "EXAMPLES", self.root / "gone"):          # no examples/ at all: that was a traceback
+            for argv in (["new-episode", "snowball"], ["new-episode", "snowball", "--from", "nope"]):
+                code, out = self.run_main(*argv)
+                self.assertEqual(code, 1, out)
+        self.assertIn("no example or episode called 'nope' (examples: none)", out)
 
     def test_answers_that_are_not_a_set_of_answers_get_one_line(self):
         # A list, a line of text and a number are JSON too: each went on into a traceback ('list' object has no

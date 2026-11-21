@@ -354,6 +354,7 @@ class RenderGuard(Steps):
                              ({"rerender": "soon"}, "isn't a range of seconds"),
                              ({"rerender": "inf"}, "isn't a range of seconds"),      # (numbers to float(): each of
                              ({"rerender": "0-1e400"}, "isn't a range of seconds"),  # them ended in a traceback)
+                             ({"rerender": "1e308"}, "isn't a range of seconds"),
                              ({"rerender": "nan"}, "isn't a range of seconds"),
                              ({"rerender": "all", "keep": True}, "don't go together")):
             with self.assertRaisesRegex(SystemExit, why):

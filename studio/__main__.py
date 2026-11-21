@@ -463,12 +463,13 @@ def new_episode(argv: list[str]) -> int:
     starters = {"doubling": "demo_doubling_duck", "disaster_pov": "demo_disaster_pov",
                 "everyone": "demo_everyone_jumps", "reality_bug": "demo_disaster_pov"}
     twod = S.engine(s) == "2d"
+    examples = sorted(d for d in P.EXAMPLES.iterdir() if d.is_dir()) if P.EXAMPLES.is_dir() else []
     source = args.source or ("demo_2d_penny" if twod else starters.get(s["format"]["template"], ""))
     if not args.source and not (P.EXAMPLES / source / "episode.json").exists():
         # A format with no starter of its own (custom, disappear): the first example of this channel's kind of video.
         # The first example of all is the 2D demo since 3.0, which gave a channel that makes 3D videos a script, a
         # voice and a scene.js its notes say nothing about.
-        source = next((d.name for d in sorted(P.EXAMPLES.iterdir()) if _example_kind(d) == S.engine(s)), "")
+        source = next((d.name for d in examples if _example_kind(d) == S.engine(s)), "")
     src = next((p / "episode.json" for p in (P.EXAMPLES / source, P.EPISODES / source)
                 if source and (p / "episode.json").exists()), None)
     if src is None and not source:      # (the kit's own examples were taken out of examples/)
@@ -476,8 +477,7 @@ def new_episode(argv: list[str]) -> int:
               "--from")
         return 1
     if src is None:
-        print(f"no example or episode called {source!r} (examples: "
-              f"{', '.join(d.name for d in P.EXAMPLES.iterdir() if d.is_dir())})")
+        print(f"no example or episode called {source!r} (examples: {', '.join(d.name for d in examples) or 'none'})")
         return 1
     spec = json.loads(src.read_text(encoding="utf-8"))
     spec["id"] = ep_id

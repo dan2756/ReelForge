@@ -88,6 +88,9 @@ class Notes(unittest.TestCase):
         self.assertIn("Michael", notes)
         self.assertNotIn("No voiceover", notes)
         self.assertNotIn("keyframe_insert", notes)
+        # the one change a 2D render can't see by itself, and what to run after it
+        self.assertIn("a picture the scene loads", " ".join(notes.split()))
+        self.assertIn("run `--steps render --rerender all`", " ".join(notes.split()))
         self.assertIn("voiceover", (P.BIBLE).read_text(encoding="utf-8"))
 
     def test_fresh_answers_keep_the_kind_of_video_a_channel_makes(self):
@@ -116,6 +119,7 @@ class Notes(unittest.TestCase):
         self.assertIn("No voiceover", notes)
         self.assertIn("Blender builds and renders each scene", notes)
         self.assertNotIn("docs/2D.md", notes)
+        self.assertNotIn("a picture the scene loads", " ".join(notes.split()))
         self.assertEqual(tomllib.loads(P.SETTINGS.read_text(encoding="utf-8"))["video"]["engine"], "blender")
 
 
@@ -390,6 +394,14 @@ class WithTheRestOfThePipeline(unittest.TestCase):
                 with self.assertRaises(SystemExit) as stop:
                     self.main(ep, *argv)
                 self.assertIn('audio.cue_hits: no beat with "id": "hok" in the script', str(stop.exception))
+        # A mistake the spec's reader has no sentence for (a time that is no time) is a traceback in every step, as it
+        # was. --status still says where the episode stands.
+        spec["audio"]["cue_hits"].pop()
+        spec["cover"] = {"time": None}
+        (ep / "episode.json").write_text(json.dumps(spec), encoding="utf-8")
+        with self.assertRaises(TypeError):
+            config.load_spec(ep)
+        self.assertIn("voiced     yes\n", self.main(ep, "--status")[1])
 
     def test_rerender_draws_a_2d_episodes_frames_again_for_a_change_the_render_cant_see(self):
         # a picture the scene loads isn't in the frames' stamp: --rerender only said it changes nothing here
